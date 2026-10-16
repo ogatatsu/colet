@@ -839,3 +839,67 @@ fn acts_from_the_menu_on_the_row_right_clicked_leaving_the_selection(cx: &mut Te
     ui.click(cx, "menu-windows");
     assert_eq!(*fake.menus.lock().unwrap(), [(vec![], r"D:\work".to_owned())]);
 }
+
+#[gpui_kit::test]
+fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "shift-f10");
+    assert!(ui.read(cx, |v| v.menu.is_some()));
+    // From the keys, the first line is lit; ↓ passes over those that are off.
+    assert_eq!(ui.read(cx, |v| v.menu_cursor), Some(0));
+    ui.press(cx, "down");
+    ui.press(cx, "down");
+    ui.press(cx, "enter");
+    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\a.txt"]);
+    assert!(ui.read(cx, |v| v.menu.is_none()));
+    assert!(ui.columns_focused(cx));
+    ui.press(cx, "shift-f10");
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.menu.is_none()));
+    assert!(ui.columns_focused(cx));
+    // ↑ goes round to the last line that is on.
+    ui.press(cx, "shift-f10");
+    ui.press(cx, "up");
+    let last = ui.read(cx, |v| v.menu_lines().iter().rposition(|l| l.off.is_none()));
+    assert_eq!(ui.read(cx, |v| v.menu_cursor), last);
+}
+
+#[gpui_kit::test]
+fn picks_the_sort_order_by_keys(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.click(cx, "sort");
+    ui.press(cx, "down");
+    ui.press(cx, "down");
+    ui.press(cx, "enter");
+    assert_eq!(ui.read(cx, |v| v.sort), Sort::Size);
+    assert!(!ui.read(cx, |v| v.sort_open));
+    assert!(ui.columns_focused(cx));
+    // From the button itself, the sort in use is lit.
+    let sort = ui.read(cx, |v| v.sort_focus.clone());
+    ui.act(cx, |window, cx| sort.focus(window, cx));
+    ui.press(cx, "enter");
+    assert_eq!(ui.read(cx, |v| v.menu_cursor), Some(1));
+    ui.press(cx, "escape");
+    assert!(!ui.read(cx, |v| v.sort_open));
+}
+
+#[gpui_kit::test]
+fn marks_under_the_crumbs_what_is_on_screen_while_some_are_folded(cx: &mut TestAppContext) {
+    let deep = file(r"D:\a\b\zeta.txt");
+    let fake = Arc::new(
+        Fake::default()
+            .with_results(vec![deep.clone()])
+            .with_folders(&[(r"D:\", vec![folder(r"D:\a")]), (r"D:\a", vec![folder(r"D:\a\b")]), (r"D:\a\b", vec![deep.clone()])]),
+    );
+    let ui = open(cx, fake);
+    ui.input(cx, "zeta");
+    assert!(ui.act(cx, |window, _| window.try_find("crumb-bar").is_none()));
+    ui.click(cx, row(&deep.path));
+    ui.act(cx, |_, _| ());
+    assert!(ui.act(cx, |window, _| window.try_find("crumb-bar").is_some()));
+    // Out for good, the bar stays only while some column is out of sight past an edge.
+    ui.click(cx, "unfold");
+    ui.act(cx, |_, _| ());
+    let hidden = ui.read(cx, |v| v.on_screen().hidden_left() || v.on_screen().hidden_right());
+    assert_eq!(ui.act(cx, |window, _| window.try_find("crumb-bar").is_some()), hidden);
+}

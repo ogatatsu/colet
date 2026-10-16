@@ -63,8 +63,18 @@ actions!(
         ExtendUp,
         ExtendDown,
         OpenMenu,
+        MenuUp,
+        MenuDown,
+        MenuConfirm,
+        CloseMenu,
+        OpenSort,
     ]
 );
+
+/// Where an open menu takes the keys.
+pub const MENU: &str = "Menu";
+/// The sort order's button, which opens its menu from the keys.
+pub const SORT: &str = "Sort";
 
 /// Where the dialogs take the keys.
 pub const DIALOG: &str = "Dialog";
@@ -103,6 +113,14 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-d", SaveCurrent, None),
         KeyBinding::new("escape", CloseDialog, Some(DIALOG)),
         KeyBinding::new("enter", ConfirmDialog, Some(DIALOG)),
+        KeyBinding::new("up", MenuUp, Some(MENU)),
+        KeyBinding::new("down", MenuDown, Some(MENU)),
+        KeyBinding::new("enter", MenuConfirm, Some(MENU)),
+        KeyBinding::new("space", MenuConfirm, Some(MENU)),
+        KeyBinding::new("escape", CloseMenu, Some(MENU)),
+        KeyBinding::new("enter", OpenSort, Some(SORT)),
+        KeyBinding::new("space", OpenSort, Some(SORT)),
+        KeyBinding::new("down", OpenSort, Some(SORT)),
     ]);
 }
 
@@ -217,6 +235,16 @@ pub struct Colet {
     /// Takes the keys in a dialog with no field, as the Recycle Bin's question.
     pub dialog_focus: FocusHandle,
     pub menu: Option<Menu>,
+    /// Takes the keys while a menu is open.
+    pub menu_focus: FocusHandle,
+    /// The sort order's button, a stop for Tab.
+    pub sort_focus: FocusHandle,
+    /// The line of the open menu the keys are on.
+    pub menu_cursor: Option<usize>,
+    /// Where each crumb was drawn, by its column, and the row they stand in: the bar under them follows
+    /// the columns on screen.
+    pub crumb_bounds: std::rc::Rc<std::cell::RefCell<HashMap<usize, Bounds<Pixels>>>>,
+    pub crumbs_row: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     /// Where the focused row of the active column was drawn, for the menu key.
     pub focused_row: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     /// A file operation is running; they go one at a time.
@@ -343,7 +371,12 @@ impl Colet {
             dialog_subscriptions: Vec::new(),
             dialog_focus: cx.focus_handle(),
             menu: None,
+            menu_focus: cx.focus_handle(),
+            sort_focus: cx.focus_handle().tab_stop(true),
+            menu_cursor: None,
             focused_row: Default::default(),
+            crumb_bounds: Default::default(),
+            crumbs_row: Default::default(),
             running: false,
             next_operation: 0,
             history: Vec::new(),

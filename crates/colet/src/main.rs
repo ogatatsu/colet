@@ -4,6 +4,7 @@ mod app;
 mod backend;
 mod dialogs;
 mod icons;
+mod menus;
 mod ops;
 mod places;
 mod reveal;

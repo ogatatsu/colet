@@ -11,7 +11,6 @@ use crate::{
     app::{CloseDialog, Colet, ConfirmDialog, DIALOG},
     ops::{ItemStatus, Menu, Status},
     places::Dialog,
-    state::saved_query,
     theme::Palette,
 };
 
@@ -47,30 +46,6 @@ fn clock(unix_ms: u64) -> String {
     colet_core::time::local(unix_ms).map_or_else(String::new, |t| format!("{:02}:{:02}", t.wHour, t.wMinute))
 }
 
-/// A line of a menu: an icon, the label, and the key or why it is off.
-fn menu_item(p: Palette, id: &'static str, glyph: &'static str, text: &'static str, hint: Option<&'static str>, off: Option<&'static str>) -> Stateful<Div> {
-    div()
-        .id(id)
-        .h(px(28.))
-        .px(px(10.))
-        .flex()
-        .items_center()
-        .gap_2()
-        .rounded(px(4.))
-        .text_size(px(12.))
-        .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(p.text_muted))
-        .child(div().flex_1().child(text))
-        .when_some(off, |d, why| d.opacity(0.45).child(div().text_color(p.text_faint).child(why)))
-        .when(off.is_none(), |d| {
-            d.cursor_pointer()
-                .hover(|d| d.bg(p.accent_fill).text_color(p.on_accent))
-                .when_some(hint, |d, key| d.child(div().text_color(p.text_faint).child(key)))
-        })
-}
-
-fn separator(p: Palette) -> Div {
-    div().my_1().h(px(1.)).bg(p.border)
-}
 
 fn field(p: Palette, input: &Entity<gpui_kit::base::input::InputState>, focused: bool) -> Div {
     div()
@@ -342,73 +317,27 @@ impl Colet {
             windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point)
         };
         self.menu = Some(Menu { index, paths, at, screen: (point.x, point.y) });
+        self.sort_open = false;
+        self.menu_cursor = None;
+        self.menu_focus.focus(window, cx);
         cx.notify();
     }
 
     pub fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = self.palette;
         let at = self.menu.as_ref()?.at;
-        let reasons = self.reasons();
-        let picked = self.picked();
-        let entries = self.picked_entries();
-        let one = entries.len() == 1;
-        let open_off = (!one).then_some(reasons.open.unwrap_or("1項目を選択したときに使えます"));
-        // From empty space nothing is picked, and the actions on items need no word.
-        let some = !picked.is_empty();
-        let quiet = |reason: Option<&'static str>| if some { reason } else { reason.map(|_| "") };
-        let saved = match picked.as_slice() {
-            [path] => saved_query(path).map(str::to_owned),
-            _ => None,
-        };
-        let mut items: Vec<AnyElement> = Vec::new();
-        if let Some(query) = saved {
-            let edit = query.clone();
-            items.push(menu_item(p, "menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None).on_click(cx.listener(|this, _, _, cx| this.copy_paths(cx))).test_support().into_any_element());
-            items.push(separator(p).into_any_element());
-            items.push(menu_item(p, "menu-edit-search", "pencil-line", "編集", Some("F2"), None).on_click(cx.listener(move |this, _, window, cx| this.open_edit(&edit, window, cx))).test_support().into_any_element());
-            items.push(
-                menu_item(p, "menu-unsave", "star", "保存した検索を解除", None, None)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.menu = None;
-                        this.toggle_saved(&query, cx);
-                    }))
-                    .test_support()
-                    .into_any_element(),
-            );
-        } else {
-            items.push(menu_item(p, "menu-open", "external-link", "開く", Some("Enter"), open_off).on_click(cx.listener(|this, _, _, cx| this.open_picked(cx))).test_support().into_any_element());
-            items.push(menu_item(p, "menu-explorer", "folder-open", "Explorerで表示", None, open_off).on_click(cx.listener(|this, _, _, cx| this.reveal_in_explorer(cx))).test_support().into_any_element());
-            items.push(separator(p).into_any_element());
-            items.push(menu_item(p, "menu-copy", "copy", "コピー", Some("Ctrl+C"), quiet(reasons.copy)).on_click(cx.listener(|this, _, _, cx| this.copy(false, cx))).test_support().into_any_element());
-            items.push(menu_item(p, "menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut)).on_click(cx.listener(|this, _, _, cx| this.copy(true, cx))).test_support().into_any_element());
-            items.push(menu_item(p, "menu-paste", "clipboard-paste", "貼り付け", Some("Ctrl+V"), reasons.paste).on_click(cx.listener(|this, _, _, cx| this.paste(cx))).test_support().into_any_element());
-            items.push(menu_item(p, "menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), quiet(reasons.copy_path)).on_click(cx.listener(|this, _, _, cx| this.copy_paths(cx))).test_support().into_any_element());
-            items.push(separator(p).into_any_element());
-            items.push(menu_item(p, "menu-rename", "pencil-line", "名前を変更", Some("F2"), quiet(reasons.rename)).on_click(cx.listener(|this, _, window, cx| this.ask_rename(window, cx))).test_support().into_any_element());
-            items.push(menu_item(p, "menu-new-folder", "folder-plus", "新規フォルダー", Some("Ctrl+Shift+N"), reasons.paste).on_click(cx.listener(|this, _, window, cx| this.ask_new_folder(window, cx))).test_support().into_any_element());
-            items.push(menu_item(p, "menu-recycle", "trash", "ごみ箱へ移動", Some("Delete"), quiet(reasons.delete)).on_click(cx.listener(|this, _, window, cx| this.ask_recycle(false, window, cx))).test_support().into_any_element());
-            if one && entries[0].directory {
-                let path = entries[0].path.clone();
-                let favorite = self.settings.is_favorite(&path);
-                items.push(separator(p).into_any_element());
-                items.push(
-                    menu_item(p, "menu-favorite", if favorite { "star-fill" } else { "star" }, if favorite { "お気に入りを解除" } else { "お気に入りに追加" }, Some("Ctrl+D"), None)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.menu = None;
-                            this.toggle_favorite(&path, cx);
-                        }))
-                        .test_support()
-                        .into_any_element(),
-                );
-            }
-            items.push(separator(p).into_any_element());
-            items.push(menu_item(p, "menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell).on_click(cx.listener(|this, _, _, cx| this.show_shell_menu(cx))).test_support().into_any_element());
-        }
+        let lines = self.render_lines(cx);
         Some(
             deferred(
                 anchored().position(at).snap_to_window_with_margin(px(8.)).child(
                     div()
                         .id("menu")
+                        .track_focus(&self.menu_focus)
+                        .key_context(crate::app::MENU)
+                        .on_action(cx.listener(|this, _: &crate::app::MenuUp, _, cx| this.move_cursor(-1, cx)))
+                        .on_action(cx.listener(|this, _: &crate::app::MenuDown, _, cx| this.move_cursor(1, cx)))
+                        .on_action(cx.listener(|this, _: &crate::app::MenuConfirm, window, cx| this.confirm_cursor(window, cx)))
+                        .on_action(cx.listener(|this, _: &crate::app::CloseMenu, window, cx| this.close_menus(true, window, cx)))
                         .min_w(px(240.))
                         .p_1()
                         .bg(p.raised)
@@ -417,11 +346,8 @@ impl Colet {
                         .rounded(px(8.))
                         .shadow_lg()
                         .occlude()
-                        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                            this.menu = None;
-                            cx.notify();
-                        }))
-                        .children(items),
+                        .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menus(true, window, cx)))
+                        .children(lines),
                 ),
             )
             .with_priority(2)
@@ -484,7 +410,11 @@ impl Colet {
             .cursor_pointer()
             .hover(|d| d.bg(p.hover))
             .tooltip(move |_, cx| cx.new(|_| crate::view::Tip { text: label.clone().into(), palette: p }).into())
-            .child(svg().path(if self.running { "icons/loader-circle.svg" } else { "icons/clock.svg" }).size(px(14.)).text_color(p.text_muted))
+            .child(if self.running {
+                crate::view::spinner("history-running", 14., p.text_muted).into_any_element()
+            } else {
+                svg().path("icons/clock.svg").size(px(14.)).text_color(p.text_muted).into_any_element()
+            })
             .when(unseen > 0, |d| {
                 d.child(
                     div()

@@ -47,6 +47,15 @@ impl TipExt for Stateful<Div> {
     }
 }
 
+/// The loading icon, turning once a second.
+pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> AnimationElement<Svg> {
+    icon("loader-circle", size, color).with_animation(
+        id,
+        Animation::new(std::time::Duration::from_secs(1)).repeat(),
+        |svg, delta| svg.with_transformation(Transformation::rotate(percentage(delta))),
+    )
+}
+
 fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
 }
@@ -56,7 +65,69 @@ fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
 }
 
+/// What of the scrolling columns is on screen.
+pub struct OnScreen {
+    /// The column index the first scrolling column has.
+    pub first: usize,
+    pub count: usize,
+    /// In columns, as [`on_screen`] measures it.
+    pub span: Option<(f32, f32)>,
+}
+
+impl OnScreen {
+    pub fn hidden_left(&self) -> bool {
+        self.span.is_some_and(|s| s.0 > 0.)
+    }
+
+    pub fn hidden_right(&self) -> bool {
+        self.span.is_some_and(|s| s.1 < self.count as f32)
+    }
+}
+
 impl Colet {
+    pub fn on_screen(&self) -> OnScreen {
+        let first = if self.state.pinned() { 2 } else { 1 } + self.state.folded_away();
+        let count = self.state.columns.len().saturating_sub(first);
+        let view = f32::from(self.columns_scroll.bounds().size.width);
+        let from = -f32::from(self.columns_scroll.offset().x);
+        let cells: Vec<Cell> = (0..count).map(|i| Cell { start: i as f32 * self.widths.column, width: self.widths.column }).collect();
+        OnScreen { first, count, span: on_screen(from, view, &cells) }
+    }
+
+    /// The bar under the crumbs of the columns on screen, cut where the edges cut the columns; only while
+    /// some are out of sight, folded away too. Placed from where the crumbs were last drawn.
+    fn crumb_bar(&self) -> Option<AnyElement> {
+        let screen = self.on_screen();
+        let (s0, s1) = screen.span?;
+        if !(screen.hidden_left() || screen.hidden_right() || self.state.folded_away() > 0) {
+            return None;
+        }
+        let row = self.crumbs_row.get()?;
+        let bounds = self.crumb_bounds.borrow();
+        let head = screen.first + s0.floor() as usize;
+        let tail = screen.first + (s1.ceil() as usize).saturating_sub(1);
+        // Crumbs folded into the menu have no place to mark: start at the first one shown.
+        let from = (head..=tail).find(|i| bounds.contains_key(i))?;
+        let (first, last) = (bounds.get(&from)?, bounds.get(&tail)?);
+        let into = if from == head { s0 - s0.floor() } else { 0. };
+        let start = f32::from(first.left()) + f32::from(first.size.width) * into;
+        let reach = s1 - (tail - screen.first) as f32;
+        let end = f32::from(last.left()) + f32::from(last.size.width) * reach.clamp(0., 1.);
+        Some(
+            div()
+                .id("crumb-bar")
+                .absolute()
+                .left(px(start - f32::from(row.left())))
+                .bottom_0()
+                .w(px((end - start).max(0.)))
+                .h(px(2.))
+                .rounded(px(1.))
+                .bg(self.palette.border_strong)
+                .test_support()
+                .into_any_element(),
+        )
+    }
+
     fn icon_button(&self, id: &'static str, name: &'static str, enabled: bool) -> Stateful<Div> {
         let p = self.palette;
         div()
@@ -112,6 +183,8 @@ impl Colet {
                     None => point(px(this.widths.sidebar) + px(24.), px(140.)),
                 };
                 this.open_menu(this.state.active, None, at, window, cx);
+                // From the keys, the first line is lit.
+                this.move_cursor(1, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenItem, _, cx| {
                 let index = this.state.active;
@@ -284,7 +357,7 @@ impl Colet {
             .py_3()
             .text_size(px(12.))
             .text_color(p.text_muted)
-            .child(icon("loader-circle", 15., p.text_muted))
+            .child(spinner("loading", 15., p.text_muted))
             .child("読み込み中…")
     }
 
@@ -572,11 +645,12 @@ impl Colet {
             .into_any_element()
     }
 
-    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let focused = self.search_focused;
         let has_query = !self.state.query.is_empty();
         let sort = self.sort;
+        let sort_lines = if self.sort_open { self.render_lines(cx) } else { Vec::new() };
         div()
             .h(px(48.))
             .flex_none()
@@ -637,6 +711,10 @@ impl Colet {
                     .child(
                         div()
                             .id("sort")
+                            .track_focus(&self.sort_focus)
+                            .key_context(SORT)
+                            .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(true, window, cx)))
+                            .when(self.sort_focus.is_focused(window), |d| d.border_color(p.accent))
                             .h(px(32.))
                             .pl(px(10.))
                             .pr_2()
@@ -653,9 +731,12 @@ impl Colet {
                             .hover(|d| d.bg(p.hover))
                             .child(sort.label())
                             .child(icon("chevron-down", 14., p.text_faint))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.sort_open = !this.sort_open;
-                                cx.notify();
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                if this.sort_open {
+                                    this.close_menus(true, window, cx);
+                                } else {
+                                    this.open_sort(false, window, cx);
+                                }
                             }))
                             .test_support(),
                     )
@@ -664,6 +745,12 @@ impl Colet {
                             deferred(
                                 div()
                                     .id("sort-menu")
+                                    .track_focus(&self.menu_focus)
+                                    .key_context(MENU)
+                                    .on_action(cx.listener(|this, _: &MenuUp, _, cx| this.move_cursor(-1, cx)))
+                                    .on_action(cx.listener(|this, _: &MenuDown, _, cx| this.move_cursor(1, cx)))
+                                    .on_action(cx.listener(|this, _: &MenuConfirm, window, cx| this.confirm_cursor(window, cx)))
+                                    .on_action(cx.listener(|this, _: &CloseMenu, window, cx| this.close_menus(true, window, cx)))
                                     .absolute()
                                     .top(px(36.))
                                     .right_0()
@@ -675,28 +762,8 @@ impl Colet {
                                     .rounded(px(8.))
                                     .shadow_lg()
                                     .occlude()
-                                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                        this.sort_open = false;
-                                        cx.notify();
-                                    }))
-                                    .children(Sort::ALL.map(|option| {
-                                        let chosen = option == sort;
-                                        div()
-                                            .id(option.label())
-                                            .h(px(28.))
-                                            .px(px(10.))
-                                            .flex()
-                                            .items_center()
-                                            .rounded(px(4.))
-                                            .text_size(px(12.))
-                                            .cursor_pointer()
-                                            .when(chosen, |d| d.text_color(p.accent))
-                                            .hover(|d| d.bg(p.accent_fill).text_color(p.on_accent))
-                                            .child(div().flex_1().child(option.label()))
-                                            .when(chosen, |d| d.child(icon("check", 14., p.accent)))
-                                            .on_click(cx.listener(move |this, _, _, cx| this.set_sort(option, cx)))
-                                            .test_support()
-                                    })),
+                                    .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menus(false, window, cx)))
+                                    .children(sort_lines),
                             )
                             .with_priority(1),
                         )
@@ -750,6 +817,7 @@ impl Colet {
                 left -= widths[folded];
             }
         }
+        self.crumb_bounds.borrow_mut().retain(|index, _| crumbs[folded..].iter().any(|c| c.0 == *index));
         let menu: Vec<(usize, String, String)> = crumbs[..folded].to_vec();
         let shown: Vec<(usize, String, String)> = crumbs[folded..].to_vec();
         let menu_current = menu.iter().any(|(index, ..)| *index == active);
@@ -770,10 +838,17 @@ impl Colet {
                 div()
                     .flex()
                     .flex_1()
+                    .h_full()
+                    .relative()
                     .items_center()
                     .gap(px(2.))
                     .min_w_0()
                     .overflow_hidden()
+                    .child({
+                        let row = self.crumbs_row.clone();
+                        canvas(move |bounds, _, _| row.set(Some(bounds)), |_, _, _, _| {}).absolute().size_full()
+                    })
+                    .children(self.crumb_bar())
                     .when(folded > 0, |d| {
                         d.child(
                             div()
@@ -854,6 +929,15 @@ impl Colet {
                             .child(
                                 div()
                                     .id(("crumb", index))
+                                    .relative()
+                                    .child({
+                                        let crumbs = self.crumb_bounds.clone();
+                                        canvas(move |bounds, _, _| {
+                                            crumbs.borrow_mut().insert(index, bounds);
+                                        }, |_, _, _, _| {})
+                                        .absolute()
+                                        .size_full()
+                                    })
                                     .h(px(24.))
                                     .px(px(6.))
                                     .flex()
@@ -884,11 +968,8 @@ impl Colet {
         let count = self.state.columns.len().saturating_sub(first);
         let content = count as f32 * self.widths.column;
         let view = f32::from(self.columns_scroll.bounds().size.width);
-        let from = -f32::from(self.columns_scroll.offset().x);
-        let cells: Vec<Cell> = (0..count).map(|i| Cell { start: i as f32 * self.widths.column, width: self.widths.column }).collect();
-        let span = on_screen(from, view, &cells);
-        let hidden_left = span.is_some_and(|s| s.0 > 0.);
-        let hidden_right = span.is_some_and(|s| s.1 < count as f32);
+        let screen = self.on_screen();
+        let (hidden_left, hidden_right) = (screen.hidden_left(), screen.hidden_right());
         // Room past the last column, so the scroll width cannot shrink under where the columns were brought.
         let hold = (self.hold + view - content).max(0.);
         let pinned_column = pinned.then(|| self.render_column(1, cx));
@@ -938,6 +1019,8 @@ impl Colet {
                             .size_full()
                             .overflow_x_scroll()
                             .track_scroll(&self.columns_scroll)
+                            // The crumbs' bar and the edges' shades follow the columns as they scroll.
+                            .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
                             .child(div().h_full().w(px(content + hold)).flex().children(columns)),
                     )
                     .when(hidden_left, |d| {
@@ -1196,7 +1279,7 @@ impl Render for Colet {
         self.reveal(window);
         let p = self.palette;
         let sidebar = self.render_sidebar(cx);
-        let toolbar = self.render_toolbar(cx);
+        let toolbar = self.render_toolbar(window, cx);
         let pathbar = self.render_pathbar(window, cx);
         let main = self.render_main(window, cx);
         div()
