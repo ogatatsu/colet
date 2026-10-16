@@ -12,12 +12,18 @@ windows = { workspace = true, features = [
     "Win32_System_Com",
     "Win32_System_LibraryLoader",
     "Win32_System_Ole",
+    "Win32_System_Registry",
+    "Win32_System_Time",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core.workspace = true
+notify = "8"
 
 [dev-dependencies]
 tempfile = "3"
+
+[build-dependencies]
+cc = "1"

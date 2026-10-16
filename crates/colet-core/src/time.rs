@@ -1,0 +1,61 @@
+//! Times as the user's clock reads them.
+use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
+
+/// Milliseconds since the Unix epoch, in local time; `None` for a time Windows cannot place.
+pub fn local(unix_ms: u64) -> Option<SYSTEMTIME> {
+    let ticks = unix_ms.checked_mul(10_000)?.checked_add(116_444_736_000_000_000)?;
+    let file = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
+    let mut utc = SYSTEMTIME::default();
+    let mut local = SYSTEMTIME::default();
+    unsafe {
+        FileTimeToSystemTime(&file, &mut utc).ok()?;
+        SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).ok()?;
+    }
+    Some(local)
+}
+
+/// `2026/10/16`, as `toLocaleDateString("ja-JP")` writes it.
+pub fn date(unix_ms: u64) -> Option<String> {
+    let t = local(unix_ms)?;
+    Some(format!("{}/{}/{}", t.wYear, t.wMonth, t.wDay))
+}
+
+/// `2026/10/16 9:05:03`, as `toLocaleString("ja-JP")` writes it.
+pub fn date_time(unix_ms: u64) -> Option<String> {
+    let t = local(unix_ms)?;
+    Some(format!("{}/{}/{} {}:{:02}:{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond))
+}
+
+/// `1.5 MB`: bytes below a kilobyte, kilobytes whole, the rest to one place.
+pub fn size(bytes: Option<u64>) -> String {
+    let Some(bytes) = bytes else { return "—".into() };
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let i = ((bytes as f64).ln() / 1024f64.ln()).floor().min(4.) as i32;
+    let value = bytes as f64 / 1024f64.powi(i);
+    let unit = ["B", "KB", "MB", "GB", "TB"][i as usize];
+    if i == 1 { format!("{value:.0} {unit}") } else { format!("{value:.1} {unit}") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_sizes_as_the_old_columns_did() {
+        assert_eq!(size(None), "—");
+        assert_eq!(size(Some(512)), "512 B");
+        assert_eq!(size(Some(1536)), "2 KB");
+        assert_eq!(size(Some(1024 * 1024 * 3 / 2)), "1.5 MB");
+        assert_eq!(size(Some(1024u64.pow(4) * 2)), "2.0 TB");
+    }
+
+    #[test]
+    fn writes_dates_in_local_time() {
+        let text = date_time(1_700_000_000_000).unwrap();
+        assert!(text.starts_with("2023/11/1"), "{text}");
+        assert!(date(1_700_000_000_000).unwrap().starts_with("2023/11/1"));
+    }
+}

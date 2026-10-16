@@ -1,10 +1,12 @@
 //! The Windows shell: icons, the Explorer context menu and file operations with the shell's own dialogs.
 mod icon;
 mod menu;
+mod open;
 mod operation;
 
 pub use icon::{Icon, IconSource, icon};
 pub use menu::{MenuThread, ShowMenu};
+pub use open::{open, reveal};
 pub use operation::{Item, Operation, operate};
 
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};

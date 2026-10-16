@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/colet-core", "spike"]
+members = ["crates/colet-core", "crates/colet"]
 
 [workspace.package]
 edition = "2024"

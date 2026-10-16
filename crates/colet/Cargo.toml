@@ -1,13 +1,16 @@
 [package]
-name = "spike"
+name = "colet"
 edition.workspace = true
 version.workspace = true
 publish.workspace = true
 
 [dependencies]
-colet-core = { path = "../crates/colet-core" }
+colet-core = { path = "../colet-core" }
 gpui-kit.workspace = true
 image = { version = "0.25", default-features = false }
 raw-window-handle = "0.6"
 smallvec = "1"
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+tempfile = "3"
