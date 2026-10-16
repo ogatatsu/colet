@@ -97,6 +97,19 @@ pub struct Folded {
     pub open: bool,
 }
 
+/// Home keys a saved search by its query behind this; no path starts this way, a drive letter being one
+/// character.
+const SEARCH_KEY: &str = "search:";
+
+pub fn search_key(query: &str) -> String {
+    format!("{SEARCH_KEY}{query}")
+}
+
+/// The query a home row runs, when it is a saved search.
+pub fn saved_query(path: &str) -> Option<&str> {
+    path.strip_prefix(SEARCH_KEY)
+}
+
 /// How far back it goes.
 const HISTORY: usize = 50;
 
@@ -317,9 +330,42 @@ impl State {
         self.restore(target);
     }
 
+    /// Makes the search afresh, as after connecting to another Everything; home is left be.
+    pub fn reset_search(&mut self) {
+        if let Some(index) = self.columns.iter().position(|c| c.kind == Kind::Search) {
+            let selected = std::mem::take(&mut self.columns[index].selected);
+            let mut fresh = self.column(Kind::Search, "", None);
+            fresh.selected = selected;
+            self.columns[index] = fresh;
+        }
+    }
+
     pub fn select(&mut self, index: usize, paths: Vec<String>) {
         let Some(c) = self.columns.get(index) else { return };
         let here = self.snapshot();
+        // A saved search in home runs its query beside it. Home keeps the pick and the focus, so the next
+        // one is a keystroke away.
+        if c.kind == Kind::Home
+            && let [path] = paths.as_slice()
+            && let Some(query) = saved_query(path)
+        {
+            if self.query == query && self.columns.len() == 2 && c.selected == paths {
+                self.active = index;
+                return;
+            }
+            let path = path.clone();
+            let query = query.to_owned();
+            let mut home = self.columns.swap_remove(0);
+            home.selected = vec![path.clone()];
+            home.focused = Some(path);
+            let search = self.column(Kind::Search, "", None);
+            self.columns = vec![home, search];
+            self.query = query;
+            self.active = index;
+            self.fold = None;
+            self.remember(here);
+            return;
+        }
         // Picking a place in home while searching leaves the search, as a sidebar does in Finder; one
         // step back returns to the results.
         if c.kind == Kind::Home
@@ -887,6 +933,38 @@ mod tests {
         with_entries(&mut s, 1, vec![file(r"D:\x.txt")]);
         s.enter();
         assert_eq!(s.columns[1].selected, one(r"D:\x.txt"));
+    }
+
+    #[test]
+    fn runs_a_saved_search_picked_in_home_keeping_homes_pick() {
+        let mut s = State::new();
+        let pdf = search_key("ext:pdf");
+        with_entries(&mut s, 0, vec![Entry::folder(&pdf, "PDF"), folder(r"D:\")]);
+        s.select(0, one(&pdf));
+        assert_eq!(s.query, "ext:pdf");
+        assert_eq!(s.columns.iter().map(|c| c.kind).collect::<Vec<_>>(), [Kind::Home, Kind::Search]);
+        assert_eq!(s.columns[0].selected, one(&pdf));
+        assert_eq!(s.active, 0);
+        // Picked again, nothing changes; a place picked leaves the search, one step back.
+        let search = s.columns[1].id;
+        s.select(0, one(&pdf));
+        assert_eq!(s.columns[1].id, search);
+        s.select(0, one(r"D:\"));
+        assert_eq!(s.query, "");
+        s.back();
+        assert_eq!(s.query, "ext:pdf");
+    }
+
+    #[test]
+    fn makes_the_search_afresh_on_reset_and_leaves_home_be() {
+        let mut s = State::new();
+        s.set_query("x");
+        s.columns[1].selected = one(r"D:\x");
+        let (home, search) = (s.columns[0].id, s.columns[1].id);
+        s.reset_search();
+        assert_eq!(s.columns[0].id, home);
+        assert_ne!(s.columns[1].id, search);
+        assert_eq!(s.columns[1].selected, one(r"D:\x"));
     }
 
     #[test]

@@ -1,9 +1,11 @@
-//! Where listings come from: Everything, the file system and the drives. Tests hand the view their own.
+//! Where listings come from (Everything, the file system and the drives) and where the settings are kept.
+//! Tests hand the view their own.
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
+use crate::settings::{self, Settings};
 use colet_core::{
     entry::{Entry, Sort},
     everything::{Page, SearchSession},
@@ -17,6 +19,8 @@ pub struct Search {
     pub offset: usize,
     pub count: usize,
     pub refresh: bool,
+    /// The Everything instance to ask; empty tries the default, then `1.5a`.
+    pub instance: String,
     /// The search's request; one superseded before it runs is not sent.
     pub request: u64,
 }
@@ -28,6 +32,10 @@ pub trait Backend: Send + Sync + 'static {
     fn search(&self, search: Search) -> Result<(Page, String), String>;
     /// Whether the last search's results changed since asked.
     fn search_changed(&self) -> Result<bool, String>;
+    /// Lets go of Everything, so the next search connects afresh.
+    fn reconnect(&self);
+    fn load_settings(&self) -> Result<Settings, String>;
+    fn save_settings(&self, settings: &Settings) -> Result<(), String>;
 }
 
 /// Everything 1.5 and the real disks.
@@ -52,12 +60,27 @@ impl Backend for Live {
         if self.latest.load(Ordering::Relaxed) != search.request {
             return Err("古い検索要求です".into());
         }
-        let page = session.search(&search.query, search.sort, "", search.offset, search.count, search.refresh)?;
+        let page =
+            session.search(&search.query, search.sort, &search.instance, search.offset, search.count, search.refresh)?;
         Ok((page, session.connection.clone()))
     }
 
     fn search_changed(&self) -> Result<bool, String> {
         self.session.lock().map_err(|e| e.to_string())?.changed()
+    }
+
+    fn reconnect(&self) {
+        if let Ok(mut session) = self.session.lock() {
+            session.disconnect();
+        }
+    }
+
+    fn load_settings(&self) -> Result<Settings, String> {
+        settings::load()
+    }
+
+    fn save_settings(&self, settings: &Settings) -> Result<(), String> {
+        settings::save(settings)
     }
 }
 

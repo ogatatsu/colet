@@ -2,8 +2,11 @@
 
 mod app;
 mod backend;
+mod dialogs;
 mod icons;
+mod places;
 mod reveal;
+mod settings;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -14,7 +17,7 @@ use std::borrow::Cow;
 
 use gpui_kit::*;
 
-gpui_kit::assets::icon_assets!(ExtraIcons, [X, ChevronsLeft, Check]);
+gpui_kit::assets::icon_assets!(ExtraIcons, [X, ChevronsLeft, Check, SlidersHorizontal, StarFill]);
 
 /// GPUI Kit's icons, and the few more Colet draws.
 struct AppAssets;
@@ -40,15 +43,24 @@ fn main() {
     application().with_assets(AppAssets).run(|cx| {
         init(cx);
         app::bind_keys(cx);
-        let bounds = Bounds::centered(None, size(px(1200.), px(780.)), cx);
+        let live: backend::Shared = std::sync::Arc::new(backend::Live::default());
+        let settings = live.load_settings();
+        // Where it was left, or centered on the screen the first time.
+        let window_bounds = match settings.as_ref().ok().and_then(|s| s.window) {
+            Some(w) => {
+                let bounds = Bounds::new(point(px(w.x), px(w.y)), size(px(w.width), px(w.height)));
+                if w.maximized { WindowBounds::Maximized(bounds) } else { WindowBounds::Windowed(bounds) }
+            }
+            None => WindowBounds::Windowed(Bounds::centered(None, size(px(1200.), px(780.)), cx)),
+        };
         open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_bounds: Some(window_bounds),
                 titlebar: Some(TitlebarOptions { title: Some("Colet".into()), ..Default::default() }),
                 ..Default::default()
             },
             cx,
-            |window, cx| cx.new(|cx| app::Colet::new(std::sync::Arc::new(backend::Live::default()), window, cx)),
+            |window, cx| cx.new(|cx| app::Colet::new(live, settings, window, cx)),
         )
         .expect("failed to open window");
         cx.activate(true);

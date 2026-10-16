@@ -3,7 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -22,7 +22,8 @@ use gpui_kit::{
 use crate::{
     app::{Colet, Engine},
     backend::{Backend, Search},
-    state::Kind,
+    settings::{SavedSearch, Settings},
+    state::{Kind, search_key},
 };
 
 #[derive(Default)]
@@ -36,6 +37,10 @@ struct Fake {
     lists: Mutex<Vec<String>>,
     failing: Mutex<Option<String>>,
     changed: AtomicBool,
+    /// The settings as last written, starting from those it is made with.
+    settings: Mutex<Settings>,
+    saves: AtomicUsize,
+    reconnects: AtomicUsize,
 }
 
 impl Backend for Fake {
@@ -61,6 +66,20 @@ impl Backend for Fake {
 
     fn search_changed(&self) -> Result<bool, String> {
         Ok(self.changed.swap(false, Ordering::Relaxed))
+    }
+
+    fn reconnect(&self) {
+        self.reconnects.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn load_settings(&self) -> Result<Settings, String> {
+        Ok(self.settings.lock().unwrap().clone())
+    }
+
+    fn save_settings(&self, settings: &Settings) -> Result<(), String> {
+        self.saves.fetch_add(1, Ordering::Relaxed);
+        *self.settings.lock().unwrap() = settings.clone();
+        Ok(())
     }
 }
 
@@ -122,7 +141,10 @@ fn open(cx: &mut TestAppContext, fake: Arc<Fake>) -> Ui {
                     ..Default::default()
                 },
                 cx,
-                |window, cx| cx.new(|cx| Colet::new(fake, window, cx)),
+                |window, cx| {
+                    let settings = fake.load_settings();
+                    cx.new(|cx| Colet::new(fake, settings, window, cx))
+                },
             )
         })
         .expect("open the window");
@@ -180,6 +202,20 @@ impl Ui {
 
     fn active(&self, cx: &mut TestAppContext) -> usize {
         self.read(cx, |v| v.state.active)
+    }
+
+    fn home_focused(&self, cx: &mut TestAppContext) -> bool {
+        let view = self.view.clone();
+        self.act(cx, |window, cx| view.read(cx).home_focus.is_focused(window))
+    }
+
+    fn field(&self, cx: &mut TestAppContext) -> String {
+        let field = self.view.read_with(cx, |v, _| v.search.clone());
+        field.read_with(cx, |input, _| input.value().to_string())
+    }
+
+    fn toasts(&self, cx: &mut TestAppContext) -> Vec<String> {
+        self.read(cx, |v| v.toasts.iter().map(|t| t.text.to_string()).collect())
     }
 
     fn columns_focused(&self, cx: &mut TestAppContext) -> bool {
@@ -387,4 +423,146 @@ fn widens_home_by_its_edge_within_its_bounds(cx: &mut TestAppContext) {
     settle(cx);
     assert_eq!(ui.read(cx, |v| v.widths.sidebar), 160.);
     assert_eq!(ui.read(cx, |v| v.state.columns[0].kind), Kind::Home);
+}
+
+fn drive_d() -> Fake {
+    Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\work")]), (r"D:\work", vec![])])
+    }
+}
+
+#[gpui_kit::test]
+fn makes_a_folder_a_favorite_with_its_star_and_ctrl_d_and_lists_it_at_home(cx: &mut TestAppContext) {
+    let fake = Arc::new(drive_d());
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.click(cx, ("star", work));
+    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\work"]);
+    // Home lists it first, under its own heading.
+    assert_eq!(ui.read(cx, |v| v.state.columns[0].entries[0].path.clone()), r"D:\work");
+    ui.press(cx, "ctrl-d");
+    assert!(fake.settings.lock().unwrap().favorites.is_empty());
+    ui.press(cx, "ctrl-d");
+    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\work"]);
+    // Taken off from its menu in home.
+    ui.act(cx, |window, cx| window.within("home").right_click(row(r"D:\work"), cx));
+    settle(cx);
+    ui.click(cx, "unfavorite");
+    assert!(fake.settings.lock().unwrap().favorites.is_empty());
+    assert!(ui.read(cx, |v| v.home_menu.is_none()));
+}
+
+#[gpui_kit::test]
+fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake { roots: vec![Entry::folder(r"D:\", "D:")], ..Fake::default() }.with_results(vec![file(r"D:\a.pdf")]));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "ext:pdf");
+    let results = ui.read(cx, |v| v.state.columns[1].id);
+    ui.click(cx, ("star", results));
+    assert_eq!(fake.settings.lock().unwrap().saved_searches, [SavedSearch { name: String::new(), query: "ext:pdf".into() }]);
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "escape");
+    assert_eq!(ui.field(cx), "");
+    ui.click(cx, row(&search_key("ext:pdf")));
+    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
+    assert_eq!(ui.field(cx), "ext:pdf");
+    assert!(ui.home_focused(cx));
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 1);
+    // ↓ in home moves on to the next place, leaving the search.
+    ui.press(cx, "down");
+    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "");
+    assert_eq!(ui.field(cx), "");
+}
+
+#[gpui_kit::test]
+fn unsaves_a_search_with_ctrl_d_and_says_so(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
+    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into() }];
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "ext:pdf");
+    ui.press(cx, "ctrl-d");
+    assert!(fake.settings.lock().unwrap().saved_searches.is_empty());
+    assert!(ui.toasts(cx).iter().any(|t| t.contains("「PDF」を保存した検索から外しました")), "{:?}", ui.toasts(cx));
+    // Nothing typed: nothing to save, and it says why.
+    ui.press(cx, "escape");
+    ui.press(cx, "ctrl-d");
+    assert!(ui.toasts(cx).iter().any(|t| t.contains("検索語を入力すると保存できます")));
+}
+
+#[gpui_kit::test]
+fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
+    fake.settings.lock().unwrap().saved_searches = vec![
+        SavedSearch { name: String::new(), query: "ext:pdf".into() },
+        SavedSearch { name: String::new(), query: "dm:today".into() },
+    ];
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(&search_key("ext:pdf")));
+    ui.press(cx, "f2");
+    let (name, query) = ui.read(cx, |v| match &v.dialog {
+        Some(crate::places::Dialog::EditSearch { name, query, .. }) => (name.clone(), query.clone()),
+        _ => panic!("no dialog"),
+    });
+    // A query already saved cannot be taken.
+    ui.act(cx, |window, cx| query.update(cx, |input, cx| input.set_value("dm:today", window, cx)));
+    ui.click(cx, "save-search");
+    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    ui.act(cx, |window, cx| {
+        name.update(cx, |input, cx| input.set_value("PDF", window, cx));
+        query.update(cx, |input, cx| input.set_value("ext:pdf dm:thisweek", window, cx));
+    });
+    ui.click(cx, "save-search");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert_eq!(
+        fake.settings.lock().unwrap().saved_searches[0],
+        SavedSearch { name: "PDF".into(), query: "ext:pdf dm:thisweek".into() }
+    );
+    // The search showing follows its new query.
+    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf dm:thisweek");
+    assert_eq!(ui.field(cx), "ext:pdf dm:thisweek");
+    // Escape closes the dialog without a change.
+    ui.click(cx, row(&search_key("ext:pdf dm:thisweek")));
+    ui.press(cx, "f2");
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+}
+
+#[gpui_kit::test]
+fn keeps_the_widths_it_is_left_with_and_starts_with_them(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    fake.settings.lock().unwrap().sidebar_width = 300.;
+    let ui = open(cx, fake.clone());
+    assert_eq!(ui.read(cx, |v| v.widths.sidebar), 300.);
+    let edge = ui.act(cx, |window, _| window.find("sidebar-resizer").bounds().center());
+    ui.act(cx, |window, cx| window.drag(edge, point(edge.x + px(20.), edge.y), cx));
+    settle(cx);
+    assert_eq!(fake.settings.lock().unwrap().sidebar_width, 320.);
+}
+
+#[gpui_kit::test]
+fn reconnects_from_the_preferences_making_the_search_afresh(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "x");
+    let before = ui.read(cx, |v| v.state.columns[1].id);
+    let searches = fake.queries().len();
+    ui.click(cx, "preferences");
+    let instance = ui.read(cx, |v| match &v.dialog {
+        Some(crate::places::Dialog::Preferences { instance }) => instance.clone(),
+        _ => panic!("no dialog"),
+    });
+    ui.act(cx, |window, cx| instance.update(cx, |input, cx| input.set_value("1.5a", window, cx)));
+    ui.input(cx, " ");
+    settle(cx);
+    ui.click(cx, "reconnect");
+    assert_eq!(fake.reconnects.load(Ordering::Relaxed), 1);
+    assert_ne!(ui.read(cx, |v| v.state.columns[1].id), before);
+    assert_eq!(fake.queries().len(), searches + 1);
+    assert!(matches!(ui.read(cx, |v| v.engine.clone()), Engine::Connected(_)));
+    ui.click(cx, "close-preferences");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
 }

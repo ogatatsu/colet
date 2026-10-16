@@ -9,6 +9,8 @@ use gpui_kit::*;
 
 use crate::{
     app::*,
+    places::HomeMenu,
+    state::saved_query,
     reveal::{Cell, on_screen, reveal_target},
     state::{Column, Kind},
 };
@@ -74,23 +76,24 @@ impl Colet {
     /// The keys that move through a column and between them, for home's pane and the columns alike.
     fn column_keys(&self, el: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
         el.key_context(COLUMNS)
-            .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.step(-1, cx)))
-            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.step(1, cx)))
-            .on_action(cx.listener(|this, _: &SelectPageUp, _, cx| this.step(-10, cx)))
-            .on_action(cx.listener(|this, _: &SelectPageDown, _, cx| this.step(10, cx)))
-            .on_action(cx.listener(|this, _: &SelectFirst, _, cx| this.step(-isize::MAX / 2, cx)))
-            .on_action(cx.listener(|this, _: &SelectLast, _, cx| this.step(isize::MAX / 2, cx)))
+            .on_action(cx.listener(|this, _: &SelectPrevious, window, cx| this.step(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectNext, window, cx| this.step(1, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectPageUp, window, cx| this.step(-10, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectPageDown, window, cx| this.step(10, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectFirst, window, cx| this.step(-isize::MAX / 2, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectLast, window, cx| this.step(isize::MAX / 2, window, cx)))
             .on_action(cx.listener(|this, _: &ColumnLeft, window, cx| this.move_column(false, window, cx)))
             .on_action(cx.listener(|this, _: &ColumnRight, window, cx| this.move_column(true, window, cx)))
             .on_action(cx.listener(|this, _: &GoBack, window, cx| this.back(window, cx)))
             .on_action(cx.listener(|this, _: &GoForward, window, cx| this.forward(window, cx)))
+            .on_action(cx.listener(|this, _: &EditItem, window, cx| this.edit_item(window, cx)))
             .on_action(cx.listener(|this, _: &OpenItem, _, cx| {
                 let index = this.state.active;
                 if let Some(path) = this.state.columns[index].focused.clone() {
                     this.open(index, &path, cx);
                 }
             }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let keystroke = &event.keystroke;
                 let m = keystroke.modifiers;
                 if m.control || m.alt || m.platform {
@@ -100,7 +103,7 @@ impl Colet {
                     && !text.trim().is_empty()
                     && text.chars().count() == 1
                 {
-                    this.type_ahead(text, cx);
+                    this.type_ahead(text, window, cx);
                     cx.stop_propagation();
                 }
             }))
@@ -111,18 +114,34 @@ impl Colet {
         let c = &self.state.columns[index];
         let kind = c.kind;
         let selected = c.selected.contains(&entry.path);
-        let highlighted = c.highlight.as_ref() == Some(&entry.path);
+        let saved = saved_query(&entry.path);
+        // Home lights the saved search that is running.
+        let highlighted = c.highlight.as_ref() == Some(&entry.path)
+            || saved.is_some_and(|q| !self.state.query.is_empty() && q == self.state.query);
+        let kept = kind == Kind::Home && (saved.is_some() || self.settings.is_favorite(&entry.path));
         let focused = marked && c.focused.as_ref() == Some(&entry.path) && !selected;
         let lit = selected && marked;
         let image = self.icons.get(entry, cx, |this: &mut Colet| &mut this.icons);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
         let path = entry.path.clone();
-        let picture = match image {
-            Some(image) => img(image).size(px(16.)).flex_none().into_any_element(),
-            None => div().size(px(16.)).flex_none().into_any_element(),
+        let picture = match (saved, image) {
+            (Some(_), _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
+            (None, Some(image)) => img(image).size(px(16.)).flex_none().into_any_element(),
+            (None, None) => div().size(px(16.)).flex_none().into_any_element(),
         };
+        let menu_path = entry.path.clone();
         div()
             .id(SharedString::from(entry.path.clone()))
+            // A favorite or saved search in home is taken off from its menu.
+            .when(kept, |r| {
+                r.on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        this.home_menu = Some(HomeMenu { path: menu_path.clone(), at: event.position });
+                        cx.notify();
+                    }),
+                )
+            })
             .h(px(row_height(kind)))
             .w_full()
             .px_2()
@@ -242,6 +261,27 @@ impl Colet {
                         .on_click(cx.listener(move |this, _, _, cx| this.load(id, 0, false, cx)))
                         .test_support(),
                 )
+                .when(kind == Kind::Search, |d| {
+                    d.child(
+                        div()
+                            .id("search-settings")
+                            .h(px(30.))
+                            .px_3()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .rounded(px(6.))
+                            .border_1()
+                            .border_color(p.border_strong)
+                            .bg(p.raised)
+                            .cursor_pointer()
+                            .hover(|b| b.bg(p.hover))
+                            .child(icon("sliders-horizontal", 14., p.text_muted))
+                            .child("設定")
+                            .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
+                            .test_support(),
+                    )
+                })
                 .into_any_element();
         }
         if c.unread() {
@@ -250,19 +290,30 @@ impl Colet {
         if c.entries.is_empty() {
             let (name, text) = match kind {
                 Kind::Search => ("search", "一致する項目はありません"),
-                Kind::Home => ("hard-drive", "ドライブはありません"),
+                Kind::Home => ("hard-drive", "ドライブもお気に入りもありません"),
                 Kind::Folder => ("folder", "このフォルダーは空です"),
             };
             return self.message(name, text.into()).into_any_element();
         }
         if kind == Kind::Home {
-            // A handful of drives: no need to virtualize.
+            // A handful of places: no need to virtualize. The kinds stand under headings, so they don't
+            // read as one list.
             let entries = c.entries.clone();
-            return div()
-                .id("home-rows")
-                .flex_1()
-                .overflow_y_scroll()
-                .child(
+            let favorite = |e: &&Entry| self.settings.is_favorite(&e.path);
+            let groups: Vec<(&str, Vec<Entry>)> = [
+                ("お気に入り", entries.iter().filter(favorite).cloned().collect::<Vec<_>>()),
+                ("保存した検索", entries.iter().filter(|e| saved_query(&e.path).is_some()).cloned().collect()),
+                (
+                    "ドライブ",
+                    entries.iter().filter(|e| saved_query(&e.path).is_none() && !favorite(e)).cloned().collect(),
+                ),
+            ]
+            .into_iter()
+            .filter(|(_, items)| !items.is_empty())
+            .collect();
+            let mut rows = div().id("home-rows").flex_1().overflow_y_scroll();
+            for (title, items) in groups {
+                rows = rows.child(
                     div()
                         .h(px(28.))
                         .px_3()
@@ -272,10 +323,13 @@ impl Colet {
                         .text_size(px(12.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(p.text_muted)
-                        .child("ドライブ"),
-                )
-                .children(entries.iter().map(|entry| div().px_1().child(self.row(0, entry, marked, cx))))
-                .into_any_element();
+                        .child(title),
+                );
+                for entry in &items {
+                    rows = rows.child(div().px_1().child(self.row(0, entry, marked, cx)));
+                }
+            }
+            return rows.into_any_element();
         }
         let count = c.entries.len();
         let view = cx.entity();
@@ -334,6 +388,7 @@ impl Colet {
         let title = c.title().to_owned();
         let count = if c.error.is_some() || c.unread() { String::new() } else { c.total.to_string() };
         let path = c.path.clone();
+        let star_path = c.path.clone();
         let body = self.column_body(index, marked, cx);
         div()
             .id(("column", id))
@@ -369,7 +424,40 @@ impl Colet {
                             .when(!path.is_empty(), |d| d.tip(p, path))
                             .child(title),
                     )
-                    .child(div().text_size(px(12.)).text_color(p.text_faint).child(count)),
+                    .child(div().text_size(px(12.)).text_color(p.text_faint).child(count))
+                    .child({
+                        let kept = match kind {
+                            Kind::Search => self.settings.saved(&self.state.query).is_some(),
+                            _ => self.settings.is_favorite(&star_path),
+                        };
+                        let label = match (kind, kept) {
+                            (Kind::Search, true) => "保存した検索を解除（Ctrl+D）",
+                            (Kind::Search, false) => "検索を保存（Ctrl+D）",
+                            (_, true) => "お気に入りを解除（Ctrl+D）",
+                            (_, false) => "お気に入りに追加（Ctrl+D）",
+                        };
+                        div()
+                            .id(("star", id))
+                            .size(px(24.))
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(4.))
+                            .cursor_pointer()
+                            .hover(|d| d.bg(p.hover))
+                            .tip(p, label)
+                            .child(icon(if kept { "star-fill" } else { "star" }, 14., if kept { p.accent } else { p.text_muted }))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if kind == Kind::Search {
+                                    let query = this.state.query.clone();
+                                    this.toggle_saved(&query, cx);
+                                } else {
+                                    this.toggle_favorite(&star_path, cx);
+                                }
+                            }))
+                            .test_support()
+                    }),
             )
             .child(body)
             .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
@@ -550,6 +638,12 @@ impl Colet {
                             .with_priority(1),
                         )
                     }),
+            )
+            .child(
+                self.icon_button("preferences", "sliders-horizontal", true)
+                    .tip(p, "設定")
+                    .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
+                    .test_support(),
             )
             .child(
                 self.icon_button("refresh", "refresh-cw", true)
@@ -1032,6 +1126,11 @@ impl Render for Colet {
                 });
             }))
             .on_action(cx.listener(|this, _: &RefreshAll, _, cx| this.refresh(cx)))
+            .on_action(cx.listener(|this, _: &SaveCurrent, _, cx| {
+                if this.dialog.is_none() {
+                    this.save_current(cx);
+                }
+            }))
             // The mouse's back and forward buttons, as Alt+← and Alt+→.
             .on_mouse_down(
                 MouseButton::Navigate(NavigationDirection::Back),
@@ -1058,7 +1157,7 @@ impl Render for Colet {
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(|this, _, _, cx| {
-                            this.resizing = None;
+                            this.end_resize(cx);
                             cx.notify();
                         }),
                     )
@@ -1076,6 +1175,8 @@ impl Render for Colet {
                     .child(main)
                     .child(self.render_statusbar()),
             )
+            .children(self.render_home_menu(cx))
+            .children(self.render_dialog(window, cx))
             .child(self.render_toasts(cx))
     }
 }

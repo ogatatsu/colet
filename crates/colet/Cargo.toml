@@ -9,6 +9,8 @@ colet-core = { path = "../colet-core" }
 gpui-kit.workspace = true
 image = { version = "0.25", default-features = false }
 raw-window-handle = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 smallvec = "1"
 
 [dev-dependencies]

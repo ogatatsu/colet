@@ -23,6 +23,8 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use crate::{
     backend::{self, Search},
     icons::Icons,
+    places::{Dialog, HomeMenu, home_entries},
+    settings::Settings,
     state::{ColumnId, Kind, State},
     theme::Palette,
 };
@@ -43,8 +45,14 @@ actions!(
         GoForward,
         FocusSearch,
         RefreshAll,
+        SaveCurrent,
+        EditItem,
+        CloseDialog,
     ]
 );
+
+/// Where the dialogs take the keys.
+pub const DIALOG: &str = "Dialog";
 
 /// Where the column keys apply: home and the columns beside it.
 pub const COLUMNS: &str = "Columns";
@@ -64,7 +72,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-right", GoForward, Some(COLUMNS)),
         KeyBinding::new("ctrl-f", FocusSearch, None),
         KeyBinding::new("ctrl-l", FocusSearch, None),
+        KeyBinding::new("f2", EditItem, Some(COLUMNS)),
         KeyBinding::new("f5", RefreshAll, None),
+        KeyBinding::new("ctrl-d", SaveCurrent, None),
+        KeyBinding::new("escape", CloseDialog, Some(DIALOG)),
     ]);
 }
 
@@ -152,7 +163,7 @@ pub struct Colet {
     /// beside them close.
     pub hold: f32,
     owner: shell::Owner,
-    backend: backend::Shared,
+    pub(crate) backend: backend::Shared,
     request: u64,
     requested: HashSet<ColumnId>,
     pending: HashMap<ColumnId, u64>,
@@ -167,11 +178,22 @@ pub struct Colet {
     search_refresh: bool,
     /// What type-ahead has typed so far, when, and in which column.
     typed: (String, Instant, ColumnId),
+    pub settings: Settings,
+    pub(crate) save_generation: u64,
+    pub dialog: Option<Dialog>,
+    pub(crate) dialog_subscriptions: Vec<Subscription>,
+    pub home_menu: Option<HomeMenu>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl Colet {
-    pub fn new(backend: backend::Shared, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// `settings` as read at start; an error is said once the window is up, and the defaults used.
+    pub fn new(
+        backend: backend::Shared,
+        settings: Result<Settings, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Everythingで検索（Ctrl+F）"));
         let subscriptions = vec![
             cx.subscribe_in(&search, window, |this: &mut Self, input, event, window, cx| match event {
@@ -194,7 +216,20 @@ impl Colet {
                 this.palette = Palette::for_window(window);
                 cx.notify();
             }),
+            cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
         ];
+        // Written at once as the window closes, rather than a moment after the last change.
+        let view = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |_, cx| {
+            if let Some(view) = view.upgrade() {
+                let _ = view.update(cx, |this, _| this.flush_settings());
+            }
+            true
+        });
+        let (settings, problem) = match settings {
+            Ok(settings) => (settings, None),
+            Err(error) => (Settings::default(), Some(error)),
+        };
         let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
             Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
             _ => 0,
@@ -202,7 +237,11 @@ impl Colet {
         let mut this = Self {
             state: State::new(),
             sort: Sort::Name,
-            widths: Widths { sidebar: 240., search: 288., column: 288. },
+            widths: Widths {
+                sidebar: settings.sidebar_width,
+                search: settings.search_width,
+                column: settings.column_width,
+            },
             palette: Palette::for_window(window),
             search,
             search_focused: false,
@@ -234,8 +273,16 @@ impl Colet {
             searched_at: None,
             search_refresh: false,
             typed: (String::new(), Instant::now(), 0),
+            settings,
+            save_generation: 0,
+            dialog: None,
+            dialog_subscriptions: Vec::new(),
+            home_menu: None,
             _subscriptions: subscriptions,
         };
+        if let Some(problem) = problem {
+            this.notify(problem, Tone::Error, cx);
+        }
         this.search.update(cx, |input, cx| input.focus(window, cx));
         this.sync(cx);
         this.poll(cx);
@@ -327,16 +374,20 @@ impl Colet {
         let sort = self.sort;
         let backend = self.backend.clone();
         let task: Task<Listing> = match c.kind {
-            Kind::Home => cx.background_executor().spawn(async move {
-                let drives = backend.roots();
-                let total = drives.len();
-                Ok((drives, total, None))
-            }),
+            Kind::Home => {
+                let settings = self.settings.clone();
+                cx.background_executor().spawn(async move {
+                    let entries = home_entries(&settings, backend.roots());
+                    let total = entries.len();
+                    Ok((entries, total, None))
+                })
+            }
             Kind::Search => {
                 let query = self.state.query.clone();
                 // A refresh reloads all it has loaded, so later selections stay.
                 let count = if offset > 0 { PAGE } else { PAGE.max(c.entries.len()) };
-                let search = Search { query, sort, offset, count, refresh: offset == 0, request };
+                let instance = self.settings.instance.clone();
+                let search = Search { query, sort, offset, count, refresh: offset == 0, instance, request };
                 cx.background_executor().spawn(async move {
                     let (page, connection) = backend.search(search)?;
                     Ok((page.entries, page.total, Some(connection)))
@@ -621,9 +672,10 @@ impl Colet {
         self.focus_active(window, cx);
     }
 
-    pub fn step(&mut self, by: isize, cx: &mut Context<Self>) {
+    pub fn step(&mut self, by: isize, window: &mut Window, cx: &mut Context<Self>) {
         self.state.step(by);
-        self.changed(cx);
+        // Moving in home can run a saved search, which the field shows.
+        self.sync_search_field(window, cx);
     }
 
     pub fn move_column(&mut self, right: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -635,7 +687,7 @@ impl Colet {
 
     /// Typing a name's start picks the first row from the focused one on that starts with it; the typed
     /// text runs on while keys come within a second of each other in one column.
-    pub fn type_ahead(&mut self, text: &str, cx: &mut Context<Self>) {
+    pub fn type_ahead(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         let index = self.state.active;
         let column = self.state.columns[index].id;
         if self.typed.1.elapsed() > Duration::from_secs(1) || self.typed.2 != column {
@@ -660,7 +712,7 @@ impl Colet {
                 self.state.columns[0].focused = Some(path.clone());
             }
             self.state.select(index, vec![path]);
-            self.changed(cx);
+            self.sync_search_field(window, cx);
         }
     }
 
@@ -675,7 +727,7 @@ impl Colet {
     }
 
     /// Going back or forward can bring another query; the field shows it.
-    fn sync_search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn sync_search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.state.query.clone();
         if self.search.read(cx).value().as_ref() != query {
             self.search.update(cx, |input, cx| input.set_value(query, window, cx));
