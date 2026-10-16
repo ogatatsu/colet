@@ -770,15 +770,22 @@ impl Colet {
                     }),
             )
             .child(
-                self.icon_button("preferences", "sliders-horizontal", true)
-                    .tip(p, "設定")
-                    .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
-                    .test_support(),
-            )
-            .child(
-                self.icon_button("refresh", "refresh-cw", true)
-                    .tip(p, "更新（F5）")
-                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                div()
+                    .flex()
+                    .flex_none()
+                    .gap(px(2.))
+                    .child(
+                        self.icon_button("refresh", "refresh-cw", true)
+                            .tip(p, "更新（F5）")
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
+                            .test_support(),
+                    )
+                    .child(
+                        self.icon_button("preferences", "sliders-horizontal", true)
+                            .tip(p, "設定")
+                            .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
+                            .test_support(),
+                    ),
             )
             .into_any_element()
     }
@@ -833,7 +840,6 @@ impl Colet {
             .border_b_1()
             .border_color(p.border)
             .text_size(px(12.))
-            .child(file_actions.1)
             .child(
                 div()
                     .flex()
@@ -956,6 +962,7 @@ impl Colet {
                             )
                     })),
             )
+            .child(file_actions.1)
             .into_any_element()
     }
 
