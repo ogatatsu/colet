@@ -2,6 +2,7 @@
 
 mod app;
 mod backend;
+mod crumbs;
 mod dialogs;
 mod icons;
 mod menus;

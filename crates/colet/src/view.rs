@@ -804,26 +804,29 @@ impl Colet {
             crumbs.push((index, folder_name(&c.path).to_owned(), c.path.clone()));
         }
         let active = self.state.active;
-        // Measured as drawn: 12px text, its padding, and the separator before it.
+        // Each crumb's whole width as drawn: its 12px name, padding, the search icon on the results' own,
+        // the chevron before it and the gap after.
         let font = font("Segoe UI");
         let widths: Vec<f32> = crumbs
             .iter()
-            .map(|(_, label, _)| {
+            .enumerate()
+            .map(|(k, (_, label, _))| {
                 let run = TextRun { len: label.len(), font: font.clone(), color: p.text, background_color: None, underline: None, strikethrough: None };
                 let shaped = window.text_system().shape_line(label.clone().into(), px(12.), &[run], None);
-                f32::from(shaped.width) + 12. + 16.
+                let icon = if results && k == 0 { 12. + 4. } else { 0. };
+                // The first stands at the bar's start, with no chevron or gap before it.
+                let before = if k == 0 { 0. } else { crate::crumbs::SEPARATOR + crate::crumbs::GAP };
+                f32::from(shaped.width).ceil() + 12. + icon + before
             })
             .collect();
-        let room = f32::from(window.viewport_size().width) - self.widths.sidebar - 26. - file_actions.0;
-        let mut folded = 0;
-        if widths.iter().sum::<f32>() > room && !widths.is_empty() {
-            let mut left = room - 30. - widths.last().unwrap().min(room / 2.);
-            folded = widths.len() - 1;
-            while folded > 0 && widths[folded - 1] <= left {
-                folded -= 1;
-                left -= widths[folded];
-            }
-        }
+        // The room the bar was last drawn with; before the first frame, what the window leaves it.
+        let room = match self.crumbs_row.get() {
+            Some(row) => f32::from(row.size.width),
+            None => f32::from(window.viewport_size().width) - self.widths.sidebar - 26. - 16. - file_actions.0,
+        };
+        self.crumbs_room.set(room);
+        let folded = crate::crumbs::folded(&widths, room);
+        let last = crumbs.len().saturating_sub(1);
         self.crumb_bounds.borrow_mut().retain(|index, _| crumbs[folded..].iter().any(|c| c.0 == *index));
         let menu: Vec<(usize, String, String)> = crumbs[..folded].to_vec();
         let shown: Vec<(usize, String, String)> = crumbs[folded..].to_vec();
@@ -851,8 +854,18 @@ impl Colet {
                     .min_w_0()
                     .overflow_hidden()
                     .child({
-                        let row = self.crumbs_row.clone();
-                        canvas(move |bounds, _, _| row.set(Some(bounds)), |_, _, _, _| {}).absolute().size_full()
+                        let (row, room) = (self.crumbs_row.clone(), self.crumbs_room.clone());
+                        canvas(
+                            move |bounds, window, _| {
+                                row.set(Some(bounds));
+                                if (f32::from(bounds.size.width) - room.get()).abs() > 0.5 {
+                                    window.request_animation_frame();
+                                }
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full()
                     })
                     .children(self.crumb_bar())
                     .when(folded > 0, |d| {
@@ -926,11 +939,13 @@ impl Colet {
                     .children(shown.into_iter().enumerate().map(|(k, (index, label, path))| {
                         let current = index == active;
                         let query = results && index == 1;
+                        let is_last = folded + k == last;
                         div()
                             .flex()
                             .items_center()
                             .gap(px(2.))
-                            .min_w_0()
+                            .when(is_last, |d| d.min_w_0().max_w(px(room / 2.)))
+                            .when(!is_last, |d| d.flex_none())
                             .when(k > 0 || folded > 0, |d| d.child(icon("chevron-right", 12., p.text_faint)))
                             .child(
                                 div()

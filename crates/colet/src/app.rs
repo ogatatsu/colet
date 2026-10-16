@@ -245,6 +245,8 @@ pub struct Colet {
     /// the columns on screen.
     pub crumb_bounds: std::rc::Rc<std::cell::RefCell<HashMap<usize, Bounds<Pixels>>>>,
     pub crumbs_row: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// The width the crumbs were last folded for.
+    pub crumbs_room: std::rc::Rc<std::cell::Cell<f32>>,
     /// Where the focused row of the active column was drawn, for the menu key.
     pub focused_row: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     /// A file operation is running; they go one at a time.
@@ -377,6 +379,7 @@ impl Colet {
             focused_row: Default::default(),
             crumb_bounds: Default::default(),
             crumbs_row: Default::default(),
+            crumbs_room: Default::default(),
             running: false,
             next_operation: 0,
             history: Vec::new(),
