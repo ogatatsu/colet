@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/colet-core", "spike"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+publish = false
+
+[workspace.dependencies]
+gpui-kit = "=0.7.3"
+# Kept on the version gpui's Windows backend uses, so one copy is built.
+windows = "0.62"
+windows-core = "0.62"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
