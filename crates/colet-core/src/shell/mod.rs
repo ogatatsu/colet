@@ -1,4 +1,5 @@
 //! The Windows shell: icons, the Explorer context menu and file operations with the shell's own dialogs.
+pub mod clipboard;
 mod icon;
 mod menu;
 mod open;

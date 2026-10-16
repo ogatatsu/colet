@@ -4,6 +4,7 @@ mod app;
 mod backend;
 mod dialogs;
 mod icons;
+mod ops;
 mod places;
 mod reveal;
 mod settings;
@@ -17,7 +18,20 @@ use std::borrow::Cow;
 
 use gpui_kit::*;
 
-gpui_kit::assets::icon_assets!(ExtraIcons, [X, ChevronsLeft, Check, SlidersHorizontal, StarFill]);
+gpui_kit::assets::icon_assets!(ExtraIcons, [
+        X,
+        ChevronsLeft,
+        Check,
+        SlidersHorizontal,
+        StarFill,
+        Scissors,
+        ClipboardPaste,
+        Link,
+        PencilLine,
+        FolderPlus,
+        Trash,
+        Clock
+    ]);
 
 /// GPUI Kit's icons, and the few more Colet draws.
 struct AppAssets;

@@ -9,16 +9,15 @@ use gpui_kit::*;
 
 use crate::{
     app::*,
-    places::HomeMenu,
     state::saved_query,
     reveal::{Cell, on_screen, reveal_target},
     state::{Column, Kind},
 };
 
 /// A line of text shown while the pointer rests on an element.
-struct Tip {
-    text: SharedString,
-    palette: crate::theme::Palette,
+pub struct Tip {
+    pub text: SharedString,
+    pub palette: crate::theme::Palette,
 }
 
 impl Render for Tip {
@@ -86,7 +85,34 @@ impl Colet {
             .on_action(cx.listener(|this, _: &ColumnRight, window, cx| this.move_column(true, window, cx)))
             .on_action(cx.listener(|this, _: &GoBack, window, cx| this.back(window, cx)))
             .on_action(cx.listener(|this, _: &GoForward, window, cx| this.forward(window, cx)))
-            .on_action(cx.listener(|this, _: &EditItem, window, cx| this.edit_item(window, cx)))
+            .on_action(cx.listener(|this, _: &RenameItem, window, cx| this.ask_rename(window, cx)))
+            .on_action(cx.listener(|this, _: &CopyItems, _, cx| this.copy(false, cx)))
+            .on_action(cx.listener(|this, _: &CutItems, _, cx| this.copy(true, cx)))
+            .on_action(cx.listener(|this, _: &PasteItems, _, cx| this.paste(cx)))
+            .on_action(cx.listener(|this, _: &CopyPaths, _, cx| this.copy_paths(cx)))
+            .on_action(cx.listener(|this, _: &NewFolder, window, cx| this.ask_new_folder(window, cx)))
+            .on_action(cx.listener(|this, _: &RecycleItems, window, cx| this.ask_recycle(false, window, cx)))
+            .on_action(cx.listener(|this, _: &RecycleItemsForGood, window, cx| this.ask_recycle(true, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectAll, _, cx| {
+                this.state.select_all(this.state.active);
+                this.changed(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ExtendUp, _, cx| {
+                this.state.extend_step(-1);
+                this.changed(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ExtendDown, _, cx| {
+                this.state.extend_step(1);
+                this.changed(cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenMenu, window, cx| {
+                // Under the focused row, as from the keyboard; or the column's top.
+                let at = match this.focused_row.get() {
+                    Some(row) => point(row.left() + px(16.), row.bottom()),
+                    None => point(px(this.widths.sidebar) + px(24.), px(140.)),
+                };
+                this.open_menu(this.state.active, None, at, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &OpenItem, _, cx| {
                 let index = this.state.active;
                 if let Some(path) = this.state.columns[index].focused.clone() {
@@ -118,7 +144,10 @@ impl Colet {
         // Home lights the saved search that is running.
         let highlighted = c.highlight.as_ref() == Some(&entry.path)
             || saved.is_some_and(|q| !self.state.query.is_empty() && q == self.state.query);
-        let kept = kind == Kind::Home && (saved.is_some() || self.settings.is_favorite(&entry.path));
+        // On the clipboard, cut or copied, whoever put it there.
+        let held = self.clipboard.paths.contains(&entry.path);
+        let cut = held && self.clipboard.cut;
+        let faded = (entry.hidden || cut) && !selected;
         let focused = marked && c.focused.as_ref() == Some(&entry.path) && !selected;
         let lit = selected && marked;
         let image = self.icons.get(entry, cx, |this: &mut Colet| &mut this.icons);
@@ -130,17 +159,23 @@ impl Colet {
             (None, None) => div().size(px(16.)).flex_none().into_any_element(),
         };
         let menu_path = entry.path.clone();
+        let focused_row = (marked && c.focused.as_ref() == Some(&entry.path)).then(|| self.focused_row.clone());
         div()
             .id(SharedString::from(entry.path.clone()))
-            // A favorite or saved search in home is taken off from its menu.
-            .when(kept, |r| {
-                r.on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                        this.home_menu = Some(HomeMenu { path: menu_path.clone(), at: event.position });
-                        cx.notify();
-                    }),
-                )
+            // Like Finder, the selection stays: the menu acts on the row clicked, or the whole selection if
+            // that is part of it.
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    let selected = this.state.columns.get(index).is_some_and(|c| c.selected.contains(&menu_path));
+                    let paths = (!selected).then(|| vec![menu_path.clone()]);
+                    this.open_menu(index, paths, event.position, window, cx);
+                }),
+            )
+            .relative()
+            .when_some(focused_row, |r, cell| {
+                r.child(canvas(move |bounds, _, _| cell.set(Some(bounds)), |_, _, _, _| {}).absolute().size_full())
             })
             .h(px(row_height(kind)))
             .w_full()
@@ -156,10 +191,10 @@ impl Colet {
             .when(lit, |r| r.text_color(p.on_accent))
             .when(!selected && highlighted, |r| r.bg(p.highlight))
             .when(!selected && !highlighted, |r| r.hover(|r| r.bg(p.hover)))
-            .when(entry.hidden && !selected, |r| r.text_color(p.text_muted))
+            .when(faded, |r| r.text_color(p.text_muted))
             // The selection in home while the columns are worked in: marked at its edge, as in a sidebar.
             .when(kind == Kind::Home && selected && !marked, |r| r.bg(p.highlight).border_l_2().border_color(p.accent))
-            .child(div().when(entry.hidden && !selected, |d| d.opacity(0.6)).child(picture))
+            .child(div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture))
             .child(
                 div()
                     .flex_1()
@@ -178,6 +213,16 @@ impl Colet {
                         d.child(div().w_full().truncate().text_size(px(12.)).text_color(muted).child(entry.parent.clone()))
                     }),
             )
+            // Out of the name, so type-ahead stays the file's own: a fade alone would read as hidden.
+            .when(held, |r| {
+                r.child(
+                    div()
+                        .id(SharedString::from(format!("held:{}", entry.path)))
+                        .tip(p, if cut { "切り取り中" } else { "コピー中" })
+                        .child(icon(if cut { "scissors" } else { "copy" }, 12., if lit { p.on_accent_muted } else if cut { p.text_faint } else { p.accent }))
+                        .test_support(),
+                )
+            })
             // A folder has no size of its own; like Explorer, leave it blank.
             .when(self.sort != Sort::Name && kind != Kind::Home && !(self.sort == Sort::Size && entry.directory), |r| {
                 let meta = match self.sort {
@@ -195,8 +240,17 @@ impl Colet {
                 })
             })
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                let modifiers = event.modifiers();
                 if event.click_count() >= 2 {
                     this.open(index, &path, cx);
+                } else if modifiers.control {
+                    this.state.toggle(index, &path);
+                    this.state.set_active(index);
+                    this.changed(cx);
+                } else if modifiers.shift {
+                    this.state.extend(index, &path);
+                    this.state.set_active(index);
+                    this.changed(cx);
                 } else {
                     this.pick(index, path.clone(), window, cx);
                 }
@@ -392,6 +446,14 @@ impl Colet {
         let body = self.column_body(index, marked, cx);
         div()
             .id(("column", id))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    if let Some(index) = this.state.index_of(id) {
+                        this.open_menu(index, Some(Vec::new()), event.position, window, cx);
+                    }
+                }),
+            )
             .w(px(width))
             .flex_none()
             .h_full()
@@ -461,6 +523,7 @@ impl Colet {
             )
             .child(body)
             .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
+            .test_support()
             .into_any_element()
     }
 
@@ -656,6 +719,7 @@ impl Colet {
     /// The trail from the search or the drive down to the deepest folder; when it outgrows the bar, the
     /// crumbs furthest from the deepest fold into a menu so the nearest stay readable.
     fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let file_actions = self.render_actions(cx);
         let p = self.palette;
         let results = self.state.pinned();
         let mut crumbs: Vec<(usize, String, String)> = Vec::new();
@@ -676,7 +740,7 @@ impl Colet {
                 f32::from(shaped.width) + 12. + 16.
             })
             .collect();
-        let room = f32::from(window.viewport_size().width) - self.widths.sidebar - 26.;
+        let room = f32::from(window.viewport_size().width) - self.widths.sidebar - 26. - file_actions.0;
         let mut folded = 0;
         if widths.iter().sum::<f32>() > room && !widths.is_empty() {
             let mut left = room - 30. - widths.last().unwrap().min(room / 2.);
@@ -697,12 +761,15 @@ impl Colet {
             .pr_3()
             .flex()
             .items_center()
+            .gap_4()
             .border_b_1()
             .border_color(p.border)
             .text_size(px(12.))
+            .child(file_actions.1)
             .child(
                 div()
                     .flex()
+                    .flex_1()
                     .items_center()
                     .gap(px(2.))
                     .min_w_0()
@@ -939,8 +1006,9 @@ impl Colet {
             .into_any_element()
     }
 
-    fn render_statusbar(&self) -> AnyElement {
+    fn render_statusbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
+        let history = self.history_button(cx);
         let active = &self.state.columns[self.state.active];
         let place = match active.kind {
             Kind::Folder => active.path.clone(),
@@ -999,6 +1067,7 @@ impl Colet {
                     )
                     .child(div().truncate().child(name)),
             )
+            .child(history)
             .into_any_element()
     }
 
@@ -1032,6 +1101,26 @@ impl Colet {
                     .occlude()
                     .when(error, |d| d.child(icon("circle-alert", 14., p.danger)))
                     .child(div().flex_1().py_1().child(toast.text.clone()))
+                    .when_some(toast.entry, |d, entry| {
+                        d.child(
+                            div()
+                                .id(("toast-details", id))
+                                .px_2()
+                                .h(px(24.))
+                                .flex()
+                                .items_center()
+                                .rounded(px(4.))
+                                .text_color(p.accent)
+                                .cursor_pointer()
+                                .hover(|d| d.bg(p.hover))
+                                .child("詳細")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.dismiss(id, cx);
+                                    this.show_history(true, Some(entry), window, cx);
+                                }))
+                                .test_support(),
+                        )
+                    })
                     .child(
                         div()
                             .id(("close-toast", id))
@@ -1173,9 +1262,10 @@ impl Render for Colet {
                     .child(toolbar)
                     .child(pathbar)
                     .child(main)
-                    .child(self.render_statusbar()),
+                    .child(self.render_statusbar(cx)),
             )
-            .children(self.render_home_menu(cx))
+            .children(self.render_menu(cx))
+            .children(self.render_history(cx))
             .children(self.render_dialog(window, cx))
             .child(self.render_toasts(cx))
     }

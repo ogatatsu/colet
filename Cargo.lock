@@ -960,6 +960,8 @@ dependencies = [
  "serde_json",
  "smallvec",
  "tempfile",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]

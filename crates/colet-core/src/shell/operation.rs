@@ -15,6 +15,7 @@ use windows::core::{AsImpl, Error, HRESULT, PCWSTR, Ref, Result, implement};
 
 use super::{Apartment, Owner, Wide};
 
+#[derive(Clone, Debug)]
 pub enum Operation {
     Copy { destination: String },
     Move { destination: String },

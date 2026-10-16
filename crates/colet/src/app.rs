@@ -20,10 +20,13 @@ use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
+use colet_core::shell::clipboard::ClipboardFiles;
+
 use crate::{
     backend::{self, Search},
     icons::Icons,
-    places::{Dialog, HomeMenu, home_entries},
+    ops::{HistoryEntry, Menu, OperationEvents},
+    places::{Dialog, home_entries},
     settings::Settings,
     state::{ColumnId, Kind, State},
     theme::Palette,
@@ -46,8 +49,20 @@ actions!(
         FocusSearch,
         RefreshAll,
         SaveCurrent,
-        EditItem,
+        RenameItem,
         CloseDialog,
+        ConfirmDialog,
+        CopyItems,
+        CutItems,
+        PasteItems,
+        CopyPaths,
+        NewFolder,
+        RecycleItems,
+        RecycleItemsForGood,
+        SelectAll,
+        ExtendUp,
+        ExtendDown,
+        OpenMenu,
     ]
 );
 
@@ -72,10 +87,22 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-right", GoForward, Some(COLUMNS)),
         KeyBinding::new("ctrl-f", FocusSearch, None),
         KeyBinding::new("ctrl-l", FocusSearch, None),
-        KeyBinding::new("f2", EditItem, Some(COLUMNS)),
+        KeyBinding::new("f2", RenameItem, Some(COLUMNS)),
+        KeyBinding::new("ctrl-c", CopyItems, Some(COLUMNS)),
+        KeyBinding::new("ctrl-x", CutItems, Some(COLUMNS)),
+        KeyBinding::new("ctrl-v", PasteItems, Some(COLUMNS)),
+        KeyBinding::new("ctrl-shift-c", CopyPaths, Some(COLUMNS)),
+        KeyBinding::new("ctrl-shift-n", NewFolder, Some(COLUMNS)),
+        KeyBinding::new("delete", RecycleItems, Some(COLUMNS)),
+        KeyBinding::new("shift-delete", RecycleItemsForGood, Some(COLUMNS)),
+        KeyBinding::new("ctrl-a", SelectAll, Some(COLUMNS)),
+        KeyBinding::new("shift-up", ExtendUp, Some(COLUMNS)),
+        KeyBinding::new("shift-down", ExtendDown, Some(COLUMNS)),
+        KeyBinding::new("shift-f10", OpenMenu, Some(COLUMNS)),
         KeyBinding::new("f5", RefreshAll, None),
         KeyBinding::new("ctrl-d", SaveCurrent, None),
         KeyBinding::new("escape", CloseDialog, Some(DIALOG)),
+        KeyBinding::new("enter", ConfirmDialog, Some(DIALOG)),
     ]);
 }
 
@@ -123,6 +150,8 @@ pub struct Toast {
     pub id: u64,
     pub text: SharedString,
     pub tone: Tone,
+    /// The operation in the history it tells of, which 詳細 opens.
+    pub entry: Option<u64>,
 }
 
 /// The columns sliding to where they should rest; see [`Colet::reveal`].
@@ -162,7 +191,7 @@ pub struct Colet {
     /// The scroll offset the columns were last brought to, which holds their scroll width while columns
     /// beside them close.
     pub hold: f32,
-    owner: shell::Owner,
+    pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
     request: u64,
     requested: HashSet<ColumnId>,
@@ -180,9 +209,34 @@ pub struct Colet {
     typed: (String, Instant, ColumnId),
     pub settings: Settings,
     pub(crate) save_generation: u64,
+    /// What the latest operation sent away, by path key: a listing that finds it gone takes it as
+    /// Colet's own doing.
+    pub(crate) departed: HashSet<String>,
     pub dialog: Option<Dialog>,
     pub(crate) dialog_subscriptions: Vec<Subscription>,
-    pub home_menu: Option<HomeMenu>,
+    /// Takes the keys in a dialog with no field, as the Recycle Bin's question.
+    pub dialog_focus: FocusHandle,
+    pub menu: Option<Menu>,
+    /// Where the focused row of the active column was drawn, for the menu key.
+    pub focused_row: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// A file operation is running; they go one at a time.
+    pub running: bool,
+    pub(crate) next_operation: u64,
+    /// The file operations run since Colet opened, newest first.
+    pub history: Vec<HistoryEntry>,
+    /// Operations with problems since the history was last opened.
+    pub unseen: usize,
+    pub history_open: bool,
+    /// The operations the history shows opened.
+    pub expanded: HashSet<u64>,
+    pub(crate) operation_events: OperationEvents,
+    /// Where each running operation's last item ended, as a new folder's.
+    pub(crate) made: HashMap<u64, String>,
+    /// Where each running operation's copied or moved items went.
+    pub(crate) placed: HashMap<u64, Vec<String>>,
+    /// The files on the clipboard, marked in their rows until it changes.
+    pub clipboard: ClipboardFiles,
+    clipboard_changed: Arc<AtomicBool>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -221,10 +275,19 @@ impl Colet {
         // Written at once as the window closes, rather than a moment after the last change.
         let view = cx.entity().downgrade();
         window.on_window_should_close(cx, move |_, cx| {
-            if let Some(view) = view.upgrade() {
-                let _ = view.update(cx, |this, _| this.flush_settings());
-            }
-            true
+            let Some(view) = view.upgrade() else { return true };
+            view.update(cx, |this, cx| {
+                if this.running {
+                    this.notify(
+                        "ファイル操作中です。完了を待つか、進捗ダイアログでキャンセルしてから閉じてください。",
+                        Tone::Info,
+                        cx,
+                    );
+                    return false;
+                }
+                let _ = this.flush_settings();
+                true
+            })
         });
         let (settings, problem) = match settings {
             Ok(settings) => (settings, None),
@@ -275,14 +338,30 @@ impl Colet {
             typed: (String::new(), Instant::now(), 0),
             settings,
             save_generation: 0,
+            departed: HashSet::new(),
             dialog: None,
             dialog_subscriptions: Vec::new(),
-            home_menu: None,
+            dialog_focus: cx.focus_handle(),
+            menu: None,
+            focused_row: Default::default(),
+            running: false,
+            next_operation: 0,
+            history: Vec::new(),
+            unseen: 0,
+            history_open: false,
+            expanded: HashSet::new(),
+            operation_events: Arc::default(),
+            made: HashMap::new(),
+            placed: HashMap::new(),
+            clipboard: ClipboardFiles::default(),
+            clipboard_changed: Arc::new(AtomicBool::new(true)),
             _subscriptions: subscriptions,
         };
         if let Some(problem) = problem {
             this.notify(problem, Tone::Error, cx);
         }
+        let changed = this.clipboard_changed.clone();
+        this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
         this.search.update(cx, |input, cx| input.focus(window, cx));
         this.sync(cx);
         this.poll(cx);
@@ -335,10 +414,18 @@ impl Colet {
         }
     }
 
+    /// An error that tells of an operation in the history, with a button to open it there.
+    pub fn notify_entry(&mut self, text: impl Into<SharedString>, entry: u64, cx: &mut Context<Self>) {
+        self.notify(text, Tone::Error, cx);
+        if let Some(toast) = self.toasts.last_mut() {
+            toast.entry = Some(entry);
+        }
+    }
+
     pub fn notify(&mut self, text: impl Into<SharedString>, tone: Tone, cx: &mut Context<Self>) {
         self.next_toast += 1;
         let id = self.next_toast;
-        self.toasts.push(Toast { id, text: text.into(), tone });
+        self.toasts.push(Toast { id, text: text.into(), tone, entry: None });
         if self.toasts.len() > 3 {
             self.toasts.remove(0);
         }
@@ -421,7 +508,7 @@ impl Colet {
         }
         match result {
             Ok((entries, total, connection)) => {
-                self.state.page(id, request, entries, total, offset);
+                self.state.page(id, request, entries, total, offset, &self.departed);
                 if let Some(name) = connection.filter(|_| current) {
                     self.engine = Engine::Connected(name);
                 }
@@ -515,6 +602,9 @@ impl Colet {
             loop {
                 cx.background_executor().timer(Duration::from_millis(200)).await;
                 tick += 1;
+                if this.update(cx, |this, cx| this.take_changes(cx)).is_err() {
+                    return;
+                }
                 let batch = changed.lock().unwrap().take();
                 if let Some(batch) = batch
                     && this.update(cx, |this, cx| this.files_changed(batch, cx)).is_err()
@@ -542,6 +632,29 @@ impl Colet {
             }
         })
         .detach();
+    }
+
+    /// How the running operation's items ended so far, and what the clipboard now holds.
+    fn take_changes(&mut self, cx: &mut Context<Self>) {
+        if self.take_operation_events() {
+            cx.notify();
+        }
+        if self.clipboard_changed.swap(false, Ordering::Relaxed) {
+            let backend = self.backend.clone();
+            let read = cx.background_executor().spawn(async move { backend.clipboard_files() });
+            cx.spawn(async move |this, cx| {
+                // None while another app holds it: try again next time.
+                match read.await {
+                    Some(files) => this.update(cx, |this, cx| {
+                        this.clipboard = files;
+                        cx.notify();
+                    }),
+                    None => this.update(cx, |this, _| this.clipboard_changed.store(true, Ordering::Relaxed)),
+                }
+                .ok();
+            })
+            .detach();
+        }
     }
 
     /// The folder columns a changed item shows in: the folder holding it, and its own when it is one.
@@ -653,14 +766,11 @@ impl Colet {
             self.changed(cx);
             return;
         }
-        let owner = self.owner;
-        let task = cx.background_executor().spawn(async move { shell::open(&entry.path, owner) });
+        let (backend, owner) = (self.backend.clone(), self.owner);
+        let task = cx.background_executor().spawn(async move { backend.open(&entry.path, owner) });
         cx.spawn(async move |this, cx| {
             if let Err(error) = task.await {
-                this.update(cx, |this, cx| {
-                    this.notify(format!("開けません: {}", error.message()), Tone::Error, cx)
-                })
-                .ok();
+                this.update(cx, |this, cx| this.notify(format!("開けません: {error}"), Tone::Error, cx)).ok();
             }
         })
         .detach();

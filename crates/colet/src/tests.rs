@@ -11,11 +11,13 @@ use std::{
 use colet_core::{
     entry::{Entry, Sort},
     everything::Page,
-    paths::ancestors,
+    operations::{Event, Kind as Operation, Request},
+    paths::{ancestors, child, folder_name},
+    shell::{Owner, clipboard::ClipboardFiles},
 };
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, Entity, ScrollStrategy, TestAppContext, Window,
+    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, SharedString, Entity, ScrollStrategy, TestAppContext, Window,
     WindowBounds, WindowOptions, point, px, size,
 };
 
@@ -41,6 +43,29 @@ struct Fake {
     settings: Mutex<Settings>,
     saves: AtomicUsize,
     reconnects: AtomicUsize,
+    clipboard: Mutex<ClipboardFiles>,
+    text: Mutex<String>,
+    /// What each operation was asked, and the paths that refuse to go.
+    operations: Mutex<Vec<Request>>,
+    stuck: Mutex<Vec<String>>,
+    opened: Mutex<Vec<String>>,
+    menus: Mutex<Vec<(Vec<String>, String)>>,
+    /// Told of every clipboard change, as the real watcher is.
+    watcher: Mutex<Option<Box<dyn Fn() + Send>>>,
+}
+
+impl Fake {
+    fn remove(&self, path: &str) -> Option<Entry> {
+        let parent = ancestors(path).into_iter().rev().nth(1)?;
+        let mut folders = self.folders.lock().unwrap();
+        let list = folders.get_mut(&parent)?;
+        let at = list.iter().position(|e| e.path == path)?;
+        Some(list.remove(at))
+    }
+
+    fn add(&self, parent: &str, entry: Entry) {
+        self.folders.lock().unwrap().entry(parent.into()).or_default().push(entry);
+    }
 }
 
 impl Backend for Fake {
@@ -79,6 +104,97 @@ impl Backend for Fake {
     fn save_settings(&self, settings: &Settings) -> Result<(), String> {
         self.saves.fetch_add(1, Ordering::Relaxed);
         *self.settings.lock().unwrap() = settings.clone();
+        Ok(())
+    }
+
+    /// Acts on the listings as the shell would on the disk.
+    fn operate(&self, request: Request, _: Owner, mut report: Box<dyn FnMut(Event) + Send>) -> Result<(), String> {
+        self.operations.lock().unwrap().push(request.clone());
+        let stuck = self.stuck.lock().unwrap().clone();
+        let mut failed = false;
+        match request.kind {
+            Operation::Recycle => {
+                for path in &request.paths {
+                    if stuck.contains(path) {
+                        failed = true;
+                        report(Event::Failed { path: path.clone(), error: "アクセスが拒否されました。".into() });
+                    } else {
+                        self.remove(path);
+                        report(Event::Done { path: path.clone() });
+                    }
+                }
+            }
+            Operation::Rename => {
+                let from = &request.paths[0];
+                let mut entry = self.remove(from).unwrap();
+                entry.path = child(&entry.parent, &request.name);
+                entry.name = request.name.clone();
+                let parent = entry.parent.clone();
+                self.add(&parent, entry);
+                report(Event::Done { path: from.clone() });
+            }
+            Operation::NewFolder => {
+                let path = child(&request.destination, &request.name);
+                self.add(&request.destination, Entry { parent: request.destination.clone(), ..folder(&path) });
+                self.folders.lock().unwrap().insert(path.clone(), vec![]);
+                report(Event::Done { path });
+            }
+            Operation::Paste => {
+                let files = self.clipboard.lock().unwrap().clone();
+                for path in files.paths {
+                    let name = folder_name(&path).to_owned();
+                    let parent = ancestors(&path).into_iter().rev().nth(1).unwrap();
+                    let name = if parent == request.destination { format!("{name} - コピー") } else { name };
+                    let made = child(&request.destination, &name);
+                    if files.cut {
+                        self.remove(&path);
+                    }
+                    self.add(&request.destination, file(&made));
+                    report(Event::Done { path: path.clone() });
+                    report(Event::Placed { path: made });
+                }
+            }
+        }
+        if failed { Err("一部の項目を操作できませんでした。結果を確認してください。".into()) } else { Ok(()) }
+    }
+
+    fn clipboard_files(&self) -> Option<ClipboardFiles> {
+        Some(self.clipboard.lock().unwrap().clone())
+    }
+
+    fn copy_files(&self, paths: &[String], cut: bool, _: Owner) -> Result<(), String> {
+        *self.clipboard.lock().unwrap() = ClipboardFiles { paths: paths.to_vec(), cut, sequence: 1 };
+        if let Some(changed) = &*self.watcher.lock().unwrap() {
+            changed();
+        }
+        Ok(())
+    }
+
+    fn copy_text(&self, text: &str, _: Owner) -> Result<(), String> {
+        *self.text.lock().unwrap() = text.into();
+        Ok(())
+    }
+
+    fn watch_clipboard(&self, changed: Box<dyn Fn() + Send>) {
+        *self.watcher.lock().unwrap() = Some(changed);
+    }
+
+    fn open(&self, path: &str, _: Owner) -> Result<(), String> {
+        self.opened.lock().unwrap().push(path.into());
+        Ok(())
+    }
+
+    fn reveal(&self, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn path_kind(&self, path: &str) -> Option<bool> {
+        let folders = self.folders.lock().unwrap();
+        folders.values().flatten().find(|e| e.path == path).map(|e| e.directory)
+    }
+
+    fn shell_menu(&self, paths: Vec<String>, background: String, _: (i32, i32), _: Owner) -> Result<(), String> {
+        self.menus.lock().unwrap().push((paths, background));
         Ok(())
     }
 }
@@ -451,9 +567,9 @@ fn makes_a_folder_a_favorite_with_its_star_and_ctrl_d_and_lists_it_at_home(cx: &
     // Taken off from its menu in home.
     ui.act(cx, |window, cx| window.within("home").right_click(row(r"D:\work"), cx));
     settle(cx);
-    ui.click(cx, "unfavorite");
+    ui.click(cx, "menu-favorite");
     assert!(fake.settings.lock().unwrap().favorites.is_empty());
-    assert!(ui.read(cx, |v| v.home_menu.is_none()));
+    assert!(ui.read(cx, |v| v.menu.is_none()));
 }
 
 #[gpui_kit::test]
@@ -565,4 +681,161 @@ fn reconnects_from_the_preferences_making_the_search_afresh(cx: &mut TestAppCont
     assert!(matches!(ui.read(cx, |v| v.engine.clone()), Engine::Connected(_)));
     ui.click(cx, "close-preferences");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
+}
+
+/// D:\work open in its column, listing a.txt, b.txt and c.txt, worked in.
+fn in_work(cx: &mut TestAppContext) -> (Arc<Fake>, Ui) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\other"), folder(r"D:\work")]),
+            (r"D:\work", vec![file(r"D:\work\a.txt"), file(r"D:\work\b.txt"), file(r"D:\work\c.txt")]),
+            (r"D:\other", vec![]),
+        ])
+    });
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "down");
+    ui.press(cx, "right");
+    assert_eq!(ui.read(cx, |v| v.state.columns[2].path.clone()), r"D:\work");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
+    (fake, ui)
+}
+
+#[gpui_kit::test]
+fn picks_several_rows_with_ctrl_shift_and_ctrl_a(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "shift-down");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt", r"D:\work\b.txt"]);
+    ui.press(cx, "ctrl-a");
+    assert_eq!(ui.selected(cx, 2).len(), 3);
+    ui.click(cx, row(r"D:\work\b.txt"));
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\b.txt"]);
+    // Shift+↑ runs from the row last picked on its own.
+    ui.press(cx, "shift-up");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt", r"D:\work\b.txt"]);
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
+}
+
+#[gpui_kit::test]
+fn copies_and_pastes_picking_what_was_pasted(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "ctrl-c");
+    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\a.txt"]);
+    assert!(ui.toasts(cx).iter().any(|t| t == "1 項目をコピーしました"));
+    ui.press(cx, "ctrl-v");
+    // Into its own folder: a copy named as Explorer names it, picked once listed.
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt - コピー"]);
+    let entry = ui.read(cx, |v| v.history[0].clone());
+    assert_eq!(entry.items[0].path, r"D:\work\a.txt - コピー");
+    assert_eq!(entry.items[0].from.as_deref(), Some(r"D:\work\a.txt"));
+    // Paths as text, one a line.
+    ui.press(cx, "ctrl-shift-c");
+    assert_eq!(*fake.text.lock().unwrap(), r"D:\work\a.txt - コピー");
+}
+
+#[gpui_kit::test]
+fn marks_the_rows_the_clipboard_holds(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "ctrl-x");
+    settle(cx);
+    assert!(ui.read(cx, |v| v.clipboard.cut && v.clipboard.paths == [r"D:\work\a.txt"]));
+    assert!(ui.act(cx, |window, _| window.try_find(SharedString::from(r"held:D:\work\a.txt")).is_some()));
+}
+
+#[gpui_kit::test]
+fn renames_from_f2_refusing_a_name_windows_would_reject(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "f2");
+    let input = ui.read(cx, |v| match &v.dialog {
+        Some(crate::places::Dialog::Name { input, .. }) => input.clone(),
+        _ => panic!("no dialog"),
+    });
+    ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("a:b", window, cx)));
+    assert!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)).is_some());
+    ui.click(cx, "submit-name");
+    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    assert!(fake.operations.lock().unwrap().is_empty());
+    ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("renamed.txt", window, cx)));
+    ui.click(cx, "submit-name");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert_eq!(fake.operations.lock().unwrap()[0].name, "renamed.txt");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\renamed.txt"]);
+}
+
+#[gpui_kit::test]
+fn makes_a_folder_and_picks_it(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "ctrl-shift-n");
+    ui.click(cx, "submit-name");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\新しいフォルダー"]);
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().path.clone()), r"D:\work\新しいフォルダー");
+}
+
+#[gpui_kit::test]
+fn sends_to_the_bin_after_asking_and_picks_the_next_row(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "down");
+    ui.press(cx, "delete");
+    assert!(ui.read(cx, |v| matches!(v.dialog, Some(crate::places::Dialog::Recycle { .. }))));
+    ui.press(cx, "enter");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert_eq!(fake.operations.lock().unwrap()[0].paths, [r"D:\work\b.txt"]);
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\c.txt"]);
+    assert!(ui.read(cx, |v| v.history[0].items[0].gone));
+    // Escape leaves it be.
+    ui.press(cx, "delete");
+    ui.press(cx, "escape");
+    assert_eq!(fake.operations.lock().unwrap().len(), 1);
+}
+
+#[gpui_kit::test]
+fn never_sends_a_drive_at_home_to_the_bin(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake { roots: vec![Entry::folder(r"D:\", "D:")], ..Fake::default().with_folders(&[(r"D:\", vec![])]) });
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "delete");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.toasts(cx).iter().any(|t| t.starts_with("「ごみ箱へ移動」はホームでは使えません")), "{:?}", ui.toasts(cx));
+    ui.press(cx, "ctrl-c");
+    assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はドライブはコピーできません"), "{:?}", ui.toasts(cx));
+}
+
+#[gpui_kit::test]
+fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    fake.stuck.lock().unwrap().push(r"D:\work\a.txt".into());
+    ui.press(cx, "delete");
+    ui.click(cx, "confirm-recycle");
+    assert!(ui.toasts(cx).iter().any(|t| t == "「ごみ箱へ移動」: 1 件失敗"), "{:?}", ui.toasts(cx));
+    assert_eq!(ui.read(cx, |v| v.unseen), 1);
+    let toast = ui.read(cx, |v| v.toasts.iter().find(|t| t.entry.is_some()).unwrap().id);
+    ui.click(cx, ("toast-details", toast));
+    assert!(ui.read(cx, |v| v.history_open && v.unseen == 0));
+    let entry = ui.read(cx, |v| v.history[0].clone());
+    assert!(ui.read(cx, |v| v.expanded.contains(&entry.id)));
+    assert_eq!(entry.items[0].error.as_deref(), Some("アクセスが拒否されました。"));
+    // Still there: its name opens it in the columns.
+    ui.click(cx, ("history-item", entry.id << 16));
+    assert!(ui.read(cx, |v| !v.history_open));
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().highlight.clone()).as_deref(), Some(r"D:\work\a.txt"));
+}
+
+#[gpui_kit::test]
+fn acts_from_the_menu_on_the_row_right_clicked_leaving_the_selection(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.act(cx, |window, cx| window.right_click(row(r"D:\work\c.txt"), cx));
+    settle(cx);
+    assert!(ui.read(cx, |v| v.menu.is_some()));
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
+    ui.click(cx, "menu-copy");
+    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\c.txt"]);
+    assert!(ui.read(cx, |v| v.menu.is_none()));
+    // The Windows menu for the folder itself, from its empty space.
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.act(cx, |window, cx| window.right_click(("column", work), cx));
+    settle(cx);
+    ui.click(cx, "menu-windows");
+    assert_eq!(*fake.menus.lock().unwrap(), [(vec![], r"D:\work".to_owned())]);
 }

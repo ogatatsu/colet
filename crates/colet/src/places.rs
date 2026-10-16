@@ -9,20 +9,18 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, Engine, Tone, WidthOf},
     settings::{Placement, SavedSearch, Settings},
-    state::{Kind, saved_query, search_key},
+    state::{Kind, search_key},
 };
 
 pub enum Dialog {
+    /// A rename's new name, or a new folder's.
+    Name { kind: colet_core::operations::Kind, paths: Vec<String>, destination: String, input: Entity<InputState>, tried: bool },
+    /// Whether to send these to the Recycle Bin; `permanent` when asked with Shift+Delete.
+    Recycle { paths: Vec<String>, permanent: bool },
     /// A saved search's name and query, found by the query it had as the dialog opened.
     EditSearch { original: String, name: Entity<InputState>, query: Entity<InputState> },
     /// Which Everything to ask, and the keys.
     Preferences { instance: Entity<InputState> },
-}
-
-/// What a right-click on a favorite or saved search in home offers, and where.
-pub struct HomeMenu {
-    pub path: String,
-    pub at: Point<Pixels>,
 }
 
 /// Home's rows: the favorites, the saved searches, then the drives, each place once.
@@ -153,20 +151,9 @@ impl Colet {
         }
     }
 
-    /// F2 on a saved search in home edits its name and query.
-    pub fn edit_item(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let c = &self.state.columns[self.state.active];
-        if c.kind != Kind::Home {
-            return;
-        }
-        if let Some(query) = c.focused.as_deref().and_then(saved_query).map(str::to_owned) {
-            self.open_edit(&query, window, cx);
-        }
-    }
-
     pub fn open_edit(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(found) = self.settings.saved(query).cloned() else { return };
-        self.home_menu = None;
+        self.menu = None;
         let name = cx.new(|cx| InputState::new(window, cx).placeholder(found.query.clone()).default_value(found.name.clone()));
         let query = cx.new(|cx| InputState::new(window, cx).default_value(found.query.clone()));
         for input in [&name, &query] {

@@ -1,8 +1,10 @@
 //! Where the user is: the columns on screen, what each lists and has picked, and the way back and forward.
 //! Knows nothing of drawing or of where listings come from.
+use std::collections::HashSet;
+
 use colet_core::{
     entry::Entry,
-    paths::{ancestors, folder_name},
+    paths::{ancestors, folder_name, path_key},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +36,11 @@ pub struct Column {
     pub request: u64,
     /// The search result or favorite it points at, apart from the selection.
     pub highlight: Option<String>,
+    /// Where a Shift range starts: the row last picked on its own.
+    pub anchor: Option<String>,
+    /// What to pick once listed, by path key: the items just pasted here, which the listing that shows
+    /// them may come after the paste is done.
+    pub pick: Option<Vec<String>>,
 }
 
 impl Column {
@@ -50,6 +57,8 @@ impl Column {
             error: None,
             request: 0,
             highlight,
+            anchor: None,
+            pick: None,
         }
     }
 
@@ -391,8 +400,10 @@ impl State {
         {
             let c = &mut self.columns[index];
             c.focused = paths.last().cloned();
+            c.anchor = paths.last().cloned();
             c.selected = paths;
             c.highlight = None;
+            c.pick = None;
         }
         let specs = match &entry {
             None => Vec::new(),
@@ -517,6 +528,176 @@ impl State {
         self.select(index, vec![path]);
     }
 
+    /// Ctrl+click: adds the row to the selection, or takes it out.
+    pub fn toggle(&mut self, index: usize, path: &str) {
+        let Some(c) = self.columns.get(index) else { return };
+        let mut selected = c.selected.clone();
+        if let Some(at) = selected.iter().position(|p| p == path) {
+            selected.remove(at);
+        } else {
+            selected.push(path.to_owned());
+        }
+        self.select(index, selected);
+        let c = &mut self.columns[index];
+        c.focused = Some(path.to_owned());
+        c.anchor = Some(path.to_owned());
+    }
+
+    /// Shift+click: picks the rows from the anchor to `path`, in their order.
+    pub fn extend(&mut self, index: usize, path: &str) {
+        let Some(c) = self.columns.get(index) else { return };
+        let position = |p: &String| c.entries.iter().position(|e| &e.path == p);
+        let Some(to) = c.entries.iter().position(|e| e.path == path) else { return };
+        let anchor = c.anchor.clone().or_else(|| c.focused.clone()).filter(|a| position(a).is_some());
+        let from = anchor.as_ref().and_then(position).unwrap_or(to);
+        let range: Vec<String> = c.entries[from.min(to)..=from.max(to)].iter().map(|e| e.path.clone()).collect();
+        self.select(index, range);
+        let c = &mut self.columns[index];
+        c.focused = Some(path.to_owned());
+        c.anchor = anchor.or_else(|| Some(path.to_owned()));
+    }
+
+    /// Shift+↑↓: moves the keys `by` rows, picking the rows from the anchor to there.
+    pub fn extend_step(&mut self, by: isize) {
+        let index = self.active;
+        let c = &self.columns[index];
+        if c.entries.is_empty() {
+            return;
+        }
+        let from = c.focused.as_ref().and_then(|f| c.entries.iter().position(|e| &e.path == f));
+        let to = match from {
+            Some(from) => (from as isize + by).clamp(0, c.entries.len() as isize - 1) as usize,
+            None => 0,
+        };
+        let path = c.entries[to].path.clone();
+        self.extend(index, &path);
+    }
+
+    /// Ctrl+A: picks every row listed so far.
+    pub fn select_all(&mut self, index: usize) {
+        let Some(c) = self.columns.get(index) else { return };
+        let focused = c.focused.clone();
+        let all: Vec<String> = c.entries.iter().map(|e| e.path.clone()).collect();
+        self.select(index, all);
+        if focused.is_some() {
+            self.columns[index].focused = focused;
+        }
+    }
+
+    /// Shows an item where it lives, as from the history, leaving the search; the column pointing at
+    /// it takes the keys.
+    pub fn reveal(&mut self, path: &str, directory: bool) {
+        let chain = ancestors(path);
+        let entry = Entry {
+            path: path.into(),
+            name: folder_name(path).into(),
+            parent: chain.len().checked_sub(2).map(|i| chain[i].clone()).unwrap_or_default(),
+            directory,
+            size: None,
+            modified: None,
+            hidden: false,
+        };
+        let here = self.snapshot();
+        let mut home = self.columns.swap_remove(0);
+        home.selected.clear();
+        home.focused = None;
+        let mut columns = vec![home];
+        for spec in reveal_chain(&entry) {
+            let mut c = self.column(Kind::Folder, &spec.path, spec.highlight.clone());
+            c.selected = spec.selected.unwrap_or_default();
+            c.focused = spec.highlight.or_else(|| c.selected.last().cloned());
+            columns.push(c);
+        }
+        let at = columns.iter().position(|c| c.highlight.as_deref() == Some(path));
+        self.active = at.unwrap_or(columns.len() - 1);
+        self.columns = columns;
+        self.query.clear();
+        self.fold = None;
+        self.remember(here);
+    }
+
+    /// Ahead of the listing that shows it, the renamed item keeps its selection and an open folder its
+    /// columns, rather than reading as gone.
+    pub fn renamed(&mut self, from: &str, to: &str) {
+        let moved = |path: &str| -> String {
+            if path == from {
+                to.to_owned()
+            } else if let Some(rest) = path.strip_prefix(from).filter(|rest| rest.starts_with('\\')) {
+                format!("{to}{rest}")
+            } else {
+                path.to_owned()
+            }
+        };
+        let name = folder_name(to).to_owned();
+        for c in &mut self.columns {
+            c.path = moved(&c.path);
+            for e in &mut c.entries {
+                if e.path == from {
+                    e.name = name.clone();
+                }
+                e.path = moved(&e.path);
+                e.parent = moved(&e.parent);
+            }
+            for p in &mut c.selected {
+                *p = moved(p);
+            }
+            for p in [&mut c.focused, &mut c.highlight, &mut c.anchor].into_iter().flatten() {
+                *p = moved(p);
+            }
+        }
+        for location in self.past.iter_mut().chain(self.future.iter_mut()) {
+            for (path, highlight) in &mut location.folders {
+                *path = moved(path);
+                if let Some(h) = highlight {
+                    *h = moved(h);
+                }
+            }
+            for selection in &mut location.selections {
+                for p in selection {
+                    *p = moved(p);
+                }
+            }
+        }
+    }
+
+    /// Like Explorer, a new folder is picked once made: listed ahead of the listing that sorts it in.
+    pub fn created(&mut self, parent: &str, path: &str) {
+        let Some(index) = self.columns.iter().position(|c| c.kind == Kind::Folder && c.path == parent) else {
+            return;
+        };
+        let c = &mut self.columns[index];
+        if c.entry(path).is_none() {
+            c.entries.push(Entry { parent: parent.into(), ..Entry::folder(path, folder_name(path)) });
+            c.total += 1;
+        }
+        self.select(index, vec![path.to_owned()]);
+    }
+
+    /// Picked in the folder they went to once it lists them, while it is the column worked in.
+    pub fn pasted(&mut self, parent: &str, paths: &[String]) {
+        let Some(index) = self.columns.iter().position(|c| c.kind == Kind::Folder && c.path == parent) else {
+            return;
+        };
+        if index != self.active {
+            return;
+        }
+        self.columns[index].pick = Some(paths.iter().map(|p| path_key(p)).collect());
+        self.pick_listed(index);
+    }
+
+    /// Picks what the column waits to pick, once it lists any of it.
+    fn pick_listed(&mut self, index: usize) -> bool {
+        let c = &self.columns[index];
+        let Some(keys) = &c.pick else { return false };
+        let keys: HashSet<&String> = keys.iter().collect();
+        let paths: Vec<String> = c.entries.iter().filter(|e| keys.contains(&path_key(&e.path))).map(|e| e.path.clone()).collect();
+        if paths.is_empty() {
+            return false;
+        }
+        self.select(index, paths);
+        true
+    }
+
     /// The column with `id` starts loading `request`; `quiet` keeps what it shows meanwhile.
     pub fn load(&mut self, id: ColumnId, request: u64, quiet: bool) {
         let Some(index) = self.index_of(id) else { return };
@@ -537,20 +718,48 @@ impl State {
     }
 
     /// A listing arrived: `entries` from `offset` on, of `total`. A page after the first adds to what is
-    /// listed; the first replaces it.
-    pub fn page(&mut self, id: ColumnId, request: u64, entries: Vec<Entry>, total: usize, offset: usize) {
+    /// listed; the first replaces it. `departed` holds the path keys of what Colet's own operations sent
+    /// away, which is expected to go.
+    pub fn page(
+        &mut self,
+        id: ColumnId,
+        request: u64,
+        entries: Vec<Entry>,
+        total: usize,
+        offset: usize,
+        departed: &HashSet<String>,
+    ) {
         let Some(index) = self.index_of(id) else { return };
         let c = &mut self.columns[index];
         if c.request != request {
             return;
         }
+        let old = std::mem::take(&mut c.entries);
         if offset > 0 {
-            let known: std::collections::HashSet<String> = c.entries.iter().map(|e| e.path.clone()).collect();
-            c.entries.extend(entries.into_iter().filter(|e| !known.contains(&e.path)));
+            let known: HashSet<&String> = old.iter().map(|e| &e.path).collect();
+            let fresh: Vec<Entry> = entries.into_iter().filter(|e| !known.contains(&e.path)).collect();
+            c.entries = old.iter().cloned().chain(fresh).collect();
         } else {
             c.entries = entries;
         }
-        let paths: std::collections::HashSet<&str> = c.entries.iter().map(|e| e.path.as_str()).collect();
+        let paths: HashSet<&str> = c.entries.iter().map(|e| e.path.as_str()).collect();
+        // The rows the keys were on that are gone; the row now in the topmost one's place takes over, or
+        // at the end, the last before it.
+        let lost: Vec<usize> = (0..old.len())
+            .filter(|&i| {
+                let path = &old[i].path;
+                !paths.contains(path.as_str()) && (c.selected.contains(path) || c.focused.as_ref() == Some(path))
+            })
+            .collect();
+        let heir = lost.first().and_then(|&at| {
+            old[at..]
+                .iter()
+                .find(|e| paths.contains(e.path.as_str()))
+                .or_else(|| old[..at].iter().rev().find(|e| paths.contains(e.path.as_str())))
+                .map(|e| e.path.clone())
+        });
+        let departed_path = |path: &str| ancestors(path).iter().any(|a| departed.contains(&path_key(a)));
+        let all_departed = !lost.is_empty() && lost.iter().all(|&i| departed_path(&old[i].path));
         c.selected.retain(|p| paths.contains(p.as_str()));
         let focused = match (&c.focused, &c.highlight) {
             (Some(f), _) if paths.contains(f.as_str()) => Some(f.clone()),
@@ -562,15 +771,32 @@ impl State {
         c.loading = false;
         c.error = None;
         let kind = c.kind;
-        // The folder it had open beside it is gone: close it and what it opened.
+        // The folder it had open beside it is gone: close it and what it opened. Said only of a folder
+        // gone some other way: one Colet sent away is expected to go.
         let vanished = kind == Kind::Folder
             && self.columns.get(index + 1).is_some_and(|child| {
                 !self.columns[index].entries.iter().any(|e| e.path == child.path && e.directory)
             });
         if vanished {
+            let child = self.columns[index + 1].path.clone();
             self.columns.truncate(index + 1);
             self.active = self.active.min(index);
-            self.notice = Some("選択していたフォルダーがなくなったため、右側のカラムを閉じました。".into());
+            if !departed_path(&child) {
+                self.notice = Some("選択していたフォルダーがなくなったため、右側のカラムを閉じました。".into());
+            }
+        }
+        // A column left while it waits to pick lets go of it.
+        if self.columns[index].pick.is_some() {
+            if index != self.active {
+                self.columns[index].pick = None;
+            } else if self.pick_listed(index) {
+                return;
+            }
+        }
+        // Like Explorer, what Colet itself sent away in the column worked in leaves its place picked, so
+        // the next key acts on that. Gone some other way, no folder opens unasked.
+        if index == self.active && all_departed {
+            self.select(index, heir.into_iter().collect());
         }
     }
 }
@@ -634,10 +860,10 @@ mod tests {
             c.request = 2;
             let id = c.id;
             s.columns = vec![c];
-            s.page(id, 2, vec![kept.clone()], 1, 0);
+            s.page(id, 2, vec![kept.clone()], 1, 0, &HashSet::new());
             assert_eq!(s.columns[0].selected, std::slice::from_ref(&kept.path));
             assert_eq!(s.columns[0].focused, None);
-            s.page(id, 2, vec![], 0, 0);
+            s.page(id, 2, vec![], 0, 0, &HashSet::new());
             assert!(s.columns[0].selected.is_empty());
         }
     }
@@ -650,18 +876,18 @@ mod tests {
         s.set_query("file");
         let id = s.columns[1].id;
         s.load(id, 2, false);
-        s.page(id, 2, entries[..500].to_vec(), 501, 0);
+        s.page(id, 2, entries[..500].to_vec(), 501, 0, &HashSet::new());
         s.columns[1].selected = one(&first);
         s.columns[1].focused = Some(first.clone());
-        s.page(id, 2, entries[500..].to_vec(), 501, 500);
+        s.page(id, 2, entries[500..].to_vec(), 501, 500, &HashSet::new());
         assert_eq!(s.columns[1].entries.len(), 501);
         assert_eq!(s.columns[1].selected, one(&first));
         assert_eq!(s.columns[1].focused.as_deref(), Some(first.as_str()));
         s.select(1, vec![first.clone(), last.clone()]);
         // A stale listing changes nothing.
-        s.page(id, 1, entries[..500].to_vec(), 501, 0);
+        s.page(id, 1, entries[..500].to_vec(), 501, 0, &HashSet::new());
         assert_eq!(s.columns[1].selected, [first.clone(), last.clone()]);
-        s.page(id, 2, entries[..500].to_vec(), 501, 0);
+        s.page(id, 2, entries[..500].to_vec(), 501, 0, &HashSet::new());
         assert_eq!(s.columns[1].selected, one(&first));
         assert_eq!(s.columns[1].focused, None);
     }
@@ -671,7 +897,7 @@ mod tests {
         let mut s = State::new();
         let home = s.columns[0].id;
         s.load(home, 2, false);
-        s.page(home, 1, vec![folder("old")], 1, 0);
+        s.page(home, 1, vec![folder("old")], 1, 0, &HashSet::new());
         assert!(s.columns[0].entries.is_empty());
         s.set_query("old");
         let search = s.columns[1].id;
@@ -867,10 +1093,10 @@ mod tests {
         s.select(0, one(r"D:\a"));
         let parent = s.columns[1].id;
         s.load(parent, 4, false);
-        s.page(parent, 4, vec![folder(r"D:\a\b")], 1, 0);
+        s.page(parent, 4, vec![folder(r"D:\a\b")], 1, 0, &HashSet::new());
         s.select(1, one(r"D:\a\b"));
         s.set_active(2);
-        s.page(parent, 4, vec![], 0, 0);
+        s.page(parent, 4, vec![], 0, 0, &HashSet::new());
         assert_eq!(s.columns.len(), 2);
         assert_eq!(s.active, 1);
         assert!(s.notice.is_some());
@@ -965,6 +1191,114 @@ mod tests {
         assert_eq!(s.columns[0].id, home);
         assert_ne!(s.columns[1].id, search);
         assert_eq!(s.columns[1].selected, one(r"D:\x"));
+    }
+
+    /// D:\ listed in its column, beside home.
+    fn drive(entries: Vec<Entry>) -> State {
+        let mut s = State::new();
+        with_entries(&mut s, 0, vec![folder(r"D:\")]);
+        s.select(0, one(r"D:\"));
+        with_entries(&mut s, 1, entries);
+        s.set_active(1);
+        s
+    }
+
+    #[test]
+    fn picks_ranges_and_single_rows_by_ctrl_and_shift() {
+        let mut s = drive(vec![file(r"D:\a"), file(r"D:\b"), file(r"D:\c"), file(r"D:\d")]);
+        s.select(1, one(r"D:\b"));
+        s.extend(1, r"D:\d");
+        assert_eq!(s.columns[1].selected, [r"D:\b", r"D:\c", r"D:\d"]);
+        s.extend(1, r"D:\a");
+        assert_eq!(s.columns[1].selected, [r"D:\a", r"D:\b"]);
+        s.toggle(1, r"D:\d");
+        assert_eq!(s.columns[1].selected, [r"D:\a", r"D:\b", r"D:\d"]);
+        s.toggle(1, r"D:\a");
+        assert_eq!(s.columns[1].selected, [r"D:\b", r"D:\d"]);
+        s.extend_step(-1);
+        assert_eq!(s.columns[1].selected, [r"D:\a"]);
+        s.select_all(1);
+        assert_eq!(s.columns[1].selected.len(), 4);
+    }
+
+    #[test]
+    fn carries_a_renamed_folders_selection_and_open_columns_to_its_new_name() {
+        let mut s = drive(vec![folder(r"D:\work"), file(r"D:\notes.txt")]);
+        s.select(1, one(r"D:\work"));
+        with_entries(&mut s, 2, vec![file(r"D:\work\a.txt")]);
+        s.select(2, one(r"D:\work\a.txt"));
+        s.set_active(1);
+        s.renamed(r"D:\work", r"D:\projects");
+        assert_eq!(s.columns[1].selected, one(r"D:\projects"));
+        assert_eq!(s.columns[1].entries[0].name, "projects");
+        assert_eq!(s.columns[2].path, r"D:\projects");
+        assert_eq!(s.columns[2].selected, one(r"D:\projects\a.txt"));
+        assert_eq!(s.columns[2].entries[0].parent, r"D:\projects");
+        assert_eq!(s.past.last().unwrap().folders.iter().map(|f| f.0.as_str()).collect::<Vec<_>>(), [r"D:\", r"D:\projects"]);
+        // The listing finds it under its new name, so nothing closes.
+        let parent = s.columns[1].id;
+        s.load(parent, 3, true);
+        s.page(parent, 3, vec![folder(r"D:\projects"), file(r"D:\notes.txt")], 2, 0, &HashSet::new());
+        assert_eq!(s.columns.len(), 3);
+        assert!(s.notice.is_none());
+    }
+
+    #[test]
+    fn picks_a_new_folder_and_opens_it() {
+        let mut s = drive(vec![file(r"D:\notes.txt")]);
+        s.created(r"D:\", r"D:\新しいフォルダー (2)");
+        let made = s.columns[1].entries.last().unwrap();
+        assert_eq!((made.name.as_str(), made.directory), ("新しいフォルダー (2)", true));
+        assert_eq!(s.columns[1].selected, one(r"D:\新しいフォルダー (2)"));
+        assert_eq!(s.columns[2].path, r"D:\新しいフォルダー (2)");
+        assert_eq!(s.active, 1);
+    }
+
+    #[test]
+    fn picks_what_was_pasted_once_listed() {
+        let mut s = drive(vec![file(r"D:\a")]);
+        let id = s.columns[1].id;
+        s.pasted(r"D:\", &[r"D:\a - コピー".into(), r"D:\b".into()]);
+        assert!(s.columns[1].selected.is_empty());
+        s.load(id, 5, true);
+        s.page(id, 5, vec![file(r"D:\a"), file(r"D:\a - コピー"), file(r"D:\b")], 3, 0, &HashSet::new());
+        assert_eq!(s.columns[1].selected, [r"D:\a - コピー", r"D:\b"]);
+        assert!(s.columns[1].pick.is_none());
+    }
+
+    #[test]
+    fn picks_the_item_that_takes_a_deleted_ones_place_saying_nothing() {
+        let mut s = drive(vec![folder(r"D:\a"), folder(r"D:\b"), file(r"D:\c")]);
+        s.select(1, one(r"D:\b"));
+        s.set_active(1);
+        let id = s.columns[1].id;
+        s.load(id, 6, true);
+        let departed = HashSet::from([path_key(r"D:\b")]);
+        s.page(id, 6, vec![folder(r"D:\a"), file(r"D:\c")], 2, 0, &departed);
+        assert_eq!(s.columns[1].selected, one(r"D:\c"));
+        assert!(s.notice.is_none());
+        // Gone some other way, its column closes with a word, and nothing is picked unasked.
+        let mut s = drive(vec![folder(r"D:\a"), folder(r"D:\b")]);
+        s.select(1, one(r"D:\b"));
+        s.set_active(1);
+        let id = s.columns[1].id;
+        s.load(id, 7, true);
+        s.page(id, 7, vec![folder(r"D:\a")], 1, 0, &HashSet::new());
+        assert!(s.columns[1].selected.is_empty());
+        assert_eq!(s.columns.len(), 2);
+        assert!(s.notice.is_some());
+    }
+
+    #[test]
+    fn reveals_an_item_where_it_lives_leaving_the_search() {
+        let mut s = State::new();
+        s.set_query("x");
+        s.reveal(r"D:\a\b.txt", false);
+        assert_eq!(s.query, "");
+        assert_eq!(chain(&s), [link(r"D:\", &[r"D:\a"], None), link(r"D:\a", &[], Some(r"D:\a\b.txt"))]);
+        assert_eq!(s.active, 2);
+        s.back();
+        assert_eq!(s.query, "x");
     }
 
     #[test]
