@@ -953,6 +953,7 @@ name = "colet"
 version = "0.1.0"
 dependencies = [
  "colet-core",
+ "embed-resource",
  "gpui-kit",
  "image",
  "raw-window-handle",

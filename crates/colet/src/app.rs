@@ -236,6 +236,11 @@ pub struct Colet {
     pub dialog_focus: FocusHandle,
     /// Home's list, for its scrollbar.
     pub home_scroll: ScrollHandle,
+    /// The buttons Tab stops at, each with the focus it keeps across frames.
+    pub(crate) stops: HashMap<String, FocusHandle>,
+    pub history_focus: FocusHandle,
+    /// The keys are in the column worked in: its focused row is ringed.
+    pub keys_in_column: bool,
     pub menu: Option<Menu>,
     /// Takes the keys while a menu is open.
     pub menu_focus: FocusHandle,
@@ -341,8 +346,8 @@ impl Colet {
             palette: Palette::for_window(window),
             search,
             search_focused: false,
-            home_focus: cx.focus_handle(),
-            columns_focus: cx.focus_handle(),
+            home_focus: cx.focus_handle().tab_stop(true),
+            columns_focus: cx.focus_handle().tab_stop(true),
             icons: Icons::default(),
             engine: Engine::Unknown,
             toasts: Vec::new(),
@@ -376,6 +381,9 @@ impl Colet {
             dialog_subscriptions: Vec::new(),
             dialog_focus: cx.focus_handle(),
             home_scroll: ScrollHandle::new(),
+            stops: HashMap::new(),
+            history_focus: cx.focus_handle().tab_stop(true),
+            keys_in_column: false,
             menu: None,
             menu_focus: cx.focus_handle(),
             sort_focus: cx.focus_handle().tab_stop(true),
@@ -407,6 +415,24 @@ impl Colet {
         this.sync(cx);
         this.poll(cx);
         this
+    }
+
+    /// The focus a button keeps, a stop for Tab; Enter or Space presses it.
+    pub fn stop(&mut self, id: impl Into<String>, cx: &mut Context<Self>) -> FocusHandle {
+        self.stops.entry(id.into()).or_insert_with(|| cx.focus_handle().tab_stop(true)).clone()
+    }
+
+    /// Tab moves the keys between home's pane and the columns: the column worked in follows them.
+    pub fn follow_focus(&mut self, window: &Window) {
+        let (home, columns) = (self.home_focus.is_focused(window), self.columns_focus.is_focused(window));
+        if home && self.state.active != 0 {
+            self.state.set_active(0);
+            self.state.enter();
+        } else if columns && self.state.active == 0 && self.state.columns.len() > 1 {
+            self.state.set_active(1);
+            self.state.enter();
+        }
+        self.keys_in_column = home || columns;
     }
 
     // ---- What happens after the state changes ----

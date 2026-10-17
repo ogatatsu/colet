@@ -1,0 +1,2 @@
+// The window and taskbar icon: GPUI loads icon resource 1 from the exe.
+1 ICON "colet.ico"

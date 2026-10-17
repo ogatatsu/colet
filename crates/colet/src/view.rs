@@ -66,6 +66,11 @@ pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette) -> gp
     })
 }
 
+/// The focus ring of what Tab reached: two pixels in the focus color, kept clear until then.
+pub fn ring(el: Stateful<Div>, p: crate::theme::Palette) -> Stateful<Div> {
+    el.border_2().border_color(transparent_black()).focus_visible(|s| s.border_color(p.focus))
+}
+
 fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
 }
@@ -138,10 +143,12 @@ impl Colet {
         )
     }
 
-    fn icon_button(&self, id: &'static str, name: &'static str, enabled: bool) -> Stateful<Div> {
+    fn icon_button(&mut self, id: &'static str, name: &'static str, label: &'static str, enabled: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let p = self.palette;
-        div()
-            .id(id)
+        let focus = self.stop(id, cx);
+        ring(div().id(id).track_focus(&focus), p)
+            .role(Role::Button)
+            .aria_label(label)
             .size(px(30.))
             .flex()
             .flex_none()
@@ -231,7 +238,11 @@ impl Colet {
         let held = self.clipboard.paths.contains(&entry.path);
         let cut = held && self.clipboard.cut;
         let faded = (entry.hidden || cut) && !selected;
-        let focused = marked && c.focused.as_ref() == Some(&entry.path) && !selected;
+        // The keys are on it: ringed, selected or not, while they are in this column.
+        let focused = marked && self.keys_in_column && c.focused.as_ref() == Some(&entry.path);
+        // The item a search result or favorite points at: a bar, which wins over the selection but not
+        // over the one in the column worked in. Home marks its pick so while the columns are worked in.
+        let barred = (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked);
         let lit = selected && marked;
         let image = self.icons.get(entry, cx, |this: &mut Colet| &mut this.icons);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
@@ -267,16 +278,21 @@ impl Colet {
             .items_center()
             .gap_2()
             .rounded(px(4.))
-            .border_1()
+            .role(Role::ListBoxOption)
+            .aria_label(entry.name.clone())
+            .aria_selected(selected)
+            .border_2()
             .border_color(transparent_black())
-            .when(focused, |r| r.border_color(p.accent))
+            .when(focused, |r| r.border_color(p.focus))
+            .when(barred, |r| {
+                r.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).rounded_l(px(4.)).bg(p.accent))
+            })
             .when(selected, |r| r.bg(if marked { p.accent_fill } else { p.selected_inactive }))
             .when(lit, |r| r.text_color(p.on_accent))
-            .when(!selected && highlighted, |r| r.bg(p.highlight))
+            .when(barred, |r| r.bg(p.highlight))
             .when(!selected && !highlighted, |r| r.hover(|r| r.bg(p.hover)))
             .when(faded, |r| r.text_color(p.text_muted))
             // The selection in home while the columns are worked in: marked at its edge, as in a sidebar.
-            .when(kind == Kind::Home && selected && !marked, |r| r.bg(p.highlight).border_l_2().border_color(p.accent))
             .child(div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture))
             .child(
                 div()
@@ -289,7 +305,7 @@ impl Colet {
                         div()
                             .w_full()
                             .truncate()
-                            .when(highlighted && !selected, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
+                            .when(barred && highlighted, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
                             .child(entry.name.clone()),
                     )
                     .when(kind == Kind::Search, |d| {
@@ -448,7 +464,13 @@ impl Colet {
             .into_iter()
             .filter(|(_, items)| !items.is_empty())
             .collect();
-            let mut rows = div().id("home-rows").size_full().overflow_y_scroll().track_scroll(&self.home_scroll);
+            let mut rows = div()
+                .id("home-rows")
+                .role(Role::ListBox)
+                .aria_label("ホーム")
+                .size_full()
+                .overflow_y_scroll()
+                .track_scroll(&self.home_scroll);
             for (title, items) in groups {
                 rows = rows.child(
                     div()
@@ -493,7 +515,11 @@ impl Colet {
         .track_scroll(&handle)
         .size_full()
         .p_1();
+        let title = self.state.columns[index].title().to_owned();
         div()
+            .id(("rows", id))
+            .role(Role::ListBox)
+            .aria_label(title)
             .flex_1()
             .min_h_0()
             .relative()
@@ -535,12 +561,16 @@ impl Colet {
             _ => (self.widths.column, WidthOf::Column),
         };
         let title = c.title().to_owned();
+        let header_title = title.clone();
         let count = if c.error.is_some() || c.unread() { String::new() } else { c.total.to_string() };
         let path = c.path.clone();
         let star_path = c.path.clone();
+        let star_focus = self.stop(format!("star:{id}"), cx);
         let body = self.column_body(index, marked, cx);
         div()
             .id(("column", id))
+            .role(Role::Group)
+            .aria_label(format!("{title} カラム"))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -580,7 +610,7 @@ impl Colet {
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
                             .when(!path.is_empty(), |d| d.tip(p, path))
-                            .child(title),
+                            .child(header_title),
                     )
                     .child(div().text_size(px(12.)).text_color(p.text_faint).child(count))
                     .child({
@@ -594,8 +624,9 @@ impl Colet {
                             (_, true) => "お気に入りを解除（Ctrl+D）",
                             (_, false) => "お気に入りに追加（Ctrl+D）",
                         };
-                        div()
-                            .id(("star", id))
+                        ring(div().id(("star", id)).track_focus(&star_focus), p)
+                            .role(Role::Button)
+                            .aria_label(label)
                             .size(px(24.))
                             .flex()
                             .flex_none()
@@ -651,13 +682,13 @@ impl Colet {
                     .items_center()
                     .gap(px(2.))
                     .child(
-                        self.icon_button("back", "arrow-left", back)
+                        self.icon_button("back", "arrow-left", "戻る", back, cx)
                             .tip(p, "戻る（Alt+←）")
                             .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)))
                             .test_support(),
                     )
                     .child(
-                        self.icon_button("forward", "arrow-right", forward)
+                        self.icon_button("forward", "arrow-right", "進む", forward, cx)
                             .tip(p, "進む（Alt+→）")
                             .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx)))
                             .test_support(),
@@ -668,11 +699,12 @@ impl Colet {
             .into_any_element()
     }
 
-    fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let focused = self.search_focused;
         let has_query = !self.state.query.is_empty();
         let sort = self.sort;
+        let clear_focus = self.stop("clear-search", cx);
         let sort_lines = if self.sort_open { self.render_lines(cx) } else { Vec::new() };
         div()
             .h(px(48.))
@@ -710,8 +742,9 @@ impl Colet {
                     }))
                     .when(has_query, |b| {
                         b.child(
-                            div()
-                                .id("clear-search")
+                            ring(div().id("clear-search").track_focus(&clear_focus), p)
+                                .role(Role::Button)
+                                .aria_label("検索をクリア")
                                 .size(px(24.))
                                 .flex()
                                 .items_center()
@@ -737,7 +770,7 @@ impl Colet {
                             .track_focus(&self.sort_focus)
                             .key_context(SORT)
                             .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(true, window, cx)))
-                            .when(self.sort_focus.is_focused(window), |d| d.border_color(p.accent))
+                            .focus_visible(|s| s.border_color(p.focus))
                             .h(px(32.))
                             .pl(px(10.))
                             .pr_2()
@@ -798,13 +831,13 @@ impl Colet {
                     .flex_none()
                     .gap(px(2.))
                     .child(
-                        self.icon_button("refresh", "refresh-cw", true)
+                        self.icon_button("refresh", "refresh-cw", "更新", true, cx)
                             .tip(p, "更新（F5）")
                             .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
                             .test_support(),
                     )
                     .child(
-                        self.icon_button("preferences", "sliders-horizontal", true)
+                        self.icon_button("preferences", "sliders-horizontal", "設定", true, cx)
                             .tip(p, "設定")
                             .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
                             .test_support(),
@@ -851,6 +884,9 @@ impl Colet {
         let folded = crate::crumbs::folded(&widths, room);
         let last = crumbs.len().saturating_sub(1);
         self.crumb_bounds.borrow_mut().retain(|index, _| crumbs[folded..].iter().any(|c| c.0 == *index));
+        for (index, ..) in &crumbs[folded..] {
+            self.stop(format!("crumb:{index}"), cx);
+        }
         let menu: Vec<(usize, String, String)> = crumbs[..folded].to_vec();
         let shown: Vec<(usize, String, String)> = crumbs[folded..].to_vec();
         let menu_current = menu.iter().any(|(index, ..)| *index == active);
@@ -962,6 +998,7 @@ impl Colet {
                     .children(shown.into_iter().enumerate().map(|(k, (index, label, path))| {
                         let current = index == active;
                         let query = results && index == 1;
+                        let crumb_focus = self.stops.get(&format!("crumb:{index}")).cloned().unwrap_or_else(|| self.columns_focus.clone());
                         let is_last = folded + k == last;
                         div()
                             .flex()
@@ -971,8 +1008,9 @@ impl Colet {
                             .when(!is_last, |d| d.flex_none())
                             .when(k > 0 || folded > 0, |d| d.child(icon("chevron-right", 12., p.text_faint)))
                             .child(
-                                div()
-                                    .id(("crumb", index))
+                                ring(div().id(("crumb", index)).track_focus(&crumb_focus), p)
+                                    .role(Role::Button)
+                                    .aria_label(label.clone())
                                     .relative()
                                     .child({
                                         let crumbs = self.crumb_bounds.clone();
@@ -1010,6 +1048,7 @@ impl Colet {
         let away = self.state.folded_away();
         let first = if pinned { 2 } else { 1 } + away;
         let only_home = self.state.columns.len() == 1;
+        let unfold_focus = self.stop("unfold", cx);
         let count = self.state.columns.len().saturating_sub(first);
         let content = count as f32 * self.widths.column;
         let view = f32::from(self.columns_scroll.bounds().size.width);
@@ -1030,8 +1069,9 @@ impl Colet {
             .children(pinned_column)
             .when(away > 0, |d| {
                 d.child(
-                    div()
-                        .id("unfold")
+                    ring(div().id("unfold").track_focus(&unfold_focus), p)
+                        .role(Role::Button)
+                        .aria_label(format!("上の階層を表示（{away}階層）"))
                         .w(px(FOLD_WIDTH))
                         .h_full()
                         .flex_none()
@@ -1179,7 +1219,7 @@ impl Colet {
             .text_color(p.text_muted)
             .border_t_1()
             .border_color(p.border)
-            .child(div().id("place").flex_1().min_w_0().truncate().child(place))
+            .child(div().id("place").role(Role::Status).aria_label(place.clone()).flex_1().min_w_0().truncate().child(place))
             .child(div().flex_none().child(detail))
             .child(
                 div()
@@ -1219,6 +1259,8 @@ impl Colet {
                 let error = toast.tone == Tone::Error;
                 div()
                     .id(("toast", id))
+                    .role(if error { Role::Alert } else { Role::Status })
+                    .aria_label(toast.text.clone())
                     .max_w(px(420.))
                     .pl_3()
                     .pr_1()
@@ -1326,11 +1368,12 @@ impl Colet {
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.search_focused = self.search.read(cx).focus_handle(cx).is_focused(window);
+        self.follow_focus(window);
         self.scroll_rows();
         self.reveal(window);
         let p = self.palette;
         let sidebar = self.render_sidebar(cx);
-        let toolbar = self.render_toolbar(window, cx);
+        let toolbar = self.render_toolbar(cx);
         let pathbar = self.render_pathbar(window, cx);
         let main = self.render_main(window, cx);
         div()

@@ -92,6 +92,13 @@ fn button(p: Palette, id: &'static str, text: &'static str, primary: bool, enabl
 impl Colet {
     pub fn render_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = self.palette;
+        let title = match self.dialog.as_ref()? {
+            Dialog::Name { kind: Operation::NewFolder, .. } => "新規フォルダー",
+            Dialog::Name { .. } => "名前を変更",
+            Dialog::Recycle { .. } => "ごみ箱へ移動しますか？",
+            Dialog::EditSearch { .. } => "保存した検索を編集",
+            Dialog::Preferences { .. } => "設定",
+        };
         let body = match self.dialog.as_ref()? {
             Dialog::Name { kind, paths, destination, input, .. } => {
                 let problem = self.name_problem(cx);
@@ -297,6 +304,8 @@ impl Colet {
                 .child(
                     div()
                         .id("dialog")
+                        .role(Role::Dialog)
+                        .aria_label(title)
                         .track_focus(&self.dialog_focus)
                         .w(px(440.))
                         .p_5()
@@ -344,6 +353,8 @@ impl Colet {
                 anchored().position(at).snap_to_window_with_margin(px(8.)).child(
                     div()
                         .id("menu")
+                        .role(Role::Menu)
+                        .aria_label("ファイル操作")
                         .track_focus(&self.menu_focus)
                         .key_context(crate::app::MENU)
                         .on_action(cx.listener(|this, _: &crate::app::MenuUp, _, cx| this.move_cursor(-1, cx)))
@@ -371,13 +382,18 @@ impl Colet {
     pub fn render_actions(&mut self, cx: &mut Context<Self>) -> (f32, AnyElement) {
         let p = self.palette;
         let reasons = self.reasons();
+        let stops: std::collections::HashMap<&'static str, FocusHandle> = ["copy", "cut", "paste", "copy-path", "rename", "new-folder", "recycle"]
+            .into_iter()
+            .map(|id| (id, self.stop(id, cx)))
+            .collect();
         let action = |id: &'static str, glyph: &'static str, label: &'static str, key: &'static str, off: Option<&'static str>| {
             let tip = match off {
                 Some(why) => format!("{label}（{why}）"),
                 None => format!("{label}（{key}）"),
             };
-            div()
-                .id(id)
+            crate::view::ring(div().id(id).track_focus(&stops[id]), p)
+                .role(Role::Button)
+                .aria_label(label)
                 .size(px(28.))
                 .flex()
                 .flex_none()
@@ -411,8 +427,10 @@ impl Colet {
         let p = self.palette;
         let unseen = self.unseen;
         let label = if unseen > 0 { format!("操作履歴（問題のある操作 {unseen} 件）") } else { "操作履歴".to_owned() };
-        div()
-            .id("history-button")
+        let focus = self.history_focus.clone();
+        crate::view::ring(div().id("history-button").track_focus(&focus), p)
+            .role(Role::Button)
+            .aria_label(label.clone())
             .h(px(22.))
             .px_1()
             .flex()

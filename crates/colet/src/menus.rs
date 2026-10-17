@@ -201,6 +201,8 @@ impl Colet {
             out.push(
                 div()
                     .id(line.id)
+                    .role(Role::MenuItem)
+                    .aria_label(line.text)
                     .h(px(28.))
                     .px(px(10.))
                     .flex()
