@@ -39,9 +39,31 @@ pub fn size(bytes: Option<u64>) -> String {
     if i == 1 { format!("{value:.0} {unit}") } else { format!("{value:.1} {unit}") }
 }
 
+/// `19,770`, as `toLocaleString("ja-JP")` writes a count.
+pub fn count(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_counts_in_threes() {
+        assert_eq!(count(0), "0");
+        assert_eq!(count(999), "999");
+        assert_eq!(count(1000), "1,000");
+        assert_eq!(count(19_770), "19,770");
+        assert_eq!(count(1_234_567), "1,234,567");
+    }
 
     #[test]
     fn writes_sizes_as_the_old_columns_did() {

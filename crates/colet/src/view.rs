@@ -568,7 +568,7 @@ impl Colet {
         };
         let title = c.title().to_owned();
         let header_title = title.clone();
-        let count = if c.error.is_some() || c.unread() { String::new() } else { c.total.to_string() };
+        let count = if c.error.is_some() || c.unread() { String::new() } else { time::count(c.total as u64) };
         let path = c.path.clone();
         let star_path = c.path.clone();
         let star_focus = self.stop(format!("star:{id}"), cx);
