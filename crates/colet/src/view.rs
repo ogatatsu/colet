@@ -20,9 +20,24 @@ pub struct Tip {
     pub palette: crate::theme::Palette,
 }
 
+/// When tips keep away. GPUI keeps a tooltip up through a press, and over the dialog, menu or panel
+/// the press opened; Windows takes it down until the pointer moves on.
+#[derive(Default)]
+pub struct Tips {
+    /// Where a button was pressed: no tip until the pointer moves from there.
+    pressed_at: Option<Point<Pixels>>,
+    /// A dialog, menu or panel is open over the window.
+    pub covered: bool,
+}
+
+impl Global for Tips {}
+
 impl Render for Tip {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
+        if cx.try_global::<Tips>().is_some_and(|t| t.covered || t.pressed_at.is_some()) {
+            return div();
+        }
         div()
             .px_2()
             .py_1()
@@ -36,14 +51,18 @@ impl Render for Tip {
     }
 }
 
-trait TipExt {
+pub trait TipExt {
     fn tip(self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self;
 }
 
 impl TipExt for Stateful<Div> {
     fn tip(self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self {
         let text = text.into();
-        self.tooltip(move |_, cx| cx.new(|_| Tip { text: text.clone(), palette }).into())
+        self.on_mouse_down(MouseButton::Left, |event, window, cx| {
+            cx.default_global::<Tips>().pressed_at = Some(event.position);
+            window.refresh();
+        })
+        .tooltip(move |_, cx| cx.new(|_| Tip { text: text.clone(), palette }).into())
     }
 }
 
@@ -288,7 +307,7 @@ impl Colet {
             .aria_selected(selected)
             .border_2()
             .border_color(transparent_black())
-            .when(focused, |r| r.border_color(p.focus))
+            .when(focused, |r| r.border_color(if lit { p.focus_on_fill } else { p.focus }))
             .when(target, |r| r.border_color(p.accent))
             .when(barred, |r| {
                 r.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).rounded_l(px(4.)).bg(p.accent))
@@ -1376,6 +1395,7 @@ impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.search_focused = self.search.read(cx).focus_handle(cx).is_focused(window);
         self.follow_focus(window);
+        cx.default_global::<Tips>().covered = self.dialog.is_some() || self.menu.is_some() || self.sort_open || self.history_open;
         self.scroll_rows();
         self.reveal(window);
         let p = self.palette;
@@ -1404,6 +1424,13 @@ impl Render for Colet {
                     this.save_current(cx);
                 }
             }))
+            // Moved on from where a button was pressed: tips show again.
+            .on_mouse_move(|event: &MouseMoveEvent, _, cx| {
+                let tips = cx.default_global::<Tips>();
+                if tips.pressed_at.is_some_and(|at| at != event.position) {
+                    tips.pressed_at = None;
+                }
+            })
             // The mouse's back and forward buttons, as Alt+← and Alt+→.
             .on_mouse_down(
                 MouseButton::Navigate(NavigationDirection::Back),

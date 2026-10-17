@@ -30,6 +30,8 @@ pub struct Palette {
     pub danger_fill: Hsla,
     /// The ring around what has the keys.
     pub focus: Hsla,
+    /// The ring around a selected row with the keys, set off from the selection's fill.
+    pub focus_on_fill: Hsla,
     /// The thumb of a scrollbar.
     pub scrollbar: Hsla,
     /// Behind the selected text of a field.
@@ -61,6 +63,7 @@ impl Palette {
             danger: hsl(0., 75., 70.),
             danger_fill: hsl(0., 55., 40.),
             focus: hsl(178., 50., 68.),
+            focus_on_fill: hsl(178., 50., 68.),
             scrollbar: hsla(210. / 360., 0.09, 0.40, 0.8),
             selection: hsl(184., 42., 28.),
             on_accent: hsl(0., 0., 100.),
@@ -88,6 +91,7 @@ impl Palette {
             danger: hsl(0., 65., 45.),
             danger_fill: hsl(0., 65., 42.),
             focus: hsl(184., 60., 35.),
+            focus_on_fill: hsl(184., 70., 78.),
             scrollbar: hsla(210. / 360., 0.10, 0.55, 0.7),
             selection: hsl(184., 50., 80.),
             on_accent: hsl(0., 0., 100.),

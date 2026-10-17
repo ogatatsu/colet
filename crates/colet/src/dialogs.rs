@@ -7,6 +7,8 @@ use gpui_kit::base::input::Input;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::view::TipExt;
+
 use crate::{
     app::{CloseDialog, Colet, ConfirmDialog, DIALOG},
     ops::{ItemStatus, Menu, Status},
@@ -401,7 +403,7 @@ impl Colet {
                 .justify_center()
                 .rounded(px(6.))
                 .child(svg().path(format!("icons/{glyph}.svg")).size(px(15.)).text_color(p.text_muted))
-                .tooltip(move |_, cx| cx.new(|_| crate::view::Tip { text: tip.clone().into(), palette: p }).into())
+                .tip(p, tip)
                 .when(off.is_none(), |d| d.cursor_pointer().hover(|d| d.bg(p.hover)))
                 .when(off.is_some(), |d| d.opacity(0.35))
         };
@@ -439,7 +441,7 @@ impl Colet {
             .rounded(px(4.))
             .cursor_pointer()
             .hover(|d| d.bg(p.hover))
-            .tooltip(move |_, cx| cx.new(|_| crate::view::Tip { text: label.clone().into(), palette: p }).into())
+            .tip(p, label.clone())
             .child(if self.running {
                 crate::view::spinner("history-running", 14., p.text_muted).into_any_element()
             } else {
