@@ -7,13 +7,12 @@ use gpui_kit::base::input::Input;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-use crate::view::TipExt;
-
 use crate::{
     app::{CloseDialog, Colet, ConfirmDialog, DIALOG},
     ops::{ItemStatus, Menu, Status},
     places::Dialog,
     theme::Palette,
+    view::TipExt,
 };
 
 /// The keys the preferences list, as the old app's did.
@@ -403,7 +402,7 @@ impl Colet {
                 .justify_center()
                 .rounded(px(6.))
                 .child(svg().path(format!("icons/{glyph}.svg")).size(px(15.)).text_color(p.text_muted))
-                .tip(p, tip)
+                .map(|d| if off.is_some() { d.steady_tip(p, tip) } else { d.tip(p, tip) })
                 .when(off.is_none(), |d| d.cursor_pointer().hover(|d| d.bg(p.hover)))
                 .when(off.is_some(), |d| d.opacity(0.35))
         };

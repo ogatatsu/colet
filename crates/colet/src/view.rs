@@ -18,24 +18,43 @@ use crate::{
 pub struct Tip {
     pub text: SharedString,
     pub palette: crate::theme::Palette,
+    /// The element it is on, when a press takes it down.
+    owner: Option<ElementId>,
+    /// [`Tips::epoch`] when it came up.
+    epoch: u64,
 }
 
 /// When tips keep away. GPUI keeps a tooltip up through a press, and over the dialog, menu or panel
-/// the press opened; Windows takes it down until the pointer moves on.
+/// that opens; Windows takes it down until the pointer leaves what was pressed.
 #[derive(Default)]
 pub struct Tips {
-    /// Where a button was pressed: no tip until the pointer moves from there.
-    pressed_at: Option<Point<Pixels>>,
-    /// A dialog, menu or panel is open over the window.
-    pub covered: bool,
+    /// What was pressed: no tip on it until the pointer leaves it.
+    pressed: Option<ElementId>,
+    /// The press is still down: GPUI reads a pressed element as not hovered while the pointer moves.
+    held: bool,
+    /// Which of the dialog, menus and panels are open.
+    open: u8,
+    /// Counts their opening and closing: a tip up from before goes.
+    epoch: u64,
 }
 
 impl Global for Tips {}
 
+impl Tips {
+    /// Notes which of the dialog, menus and panels are open, taking down the tips up when that changes.
+    pub fn set_open(open: u8, cx: &mut App) {
+        if cx.try_global::<Tips>().map_or(0, |t| t.open) != open {
+            let tips = cx.default_global::<Tips>();
+            tips.open = open;
+            tips.epoch += 1;
+        }
+    }
+}
+
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
-        if cx.try_global::<Tips>().is_some_and(|t| t.covered || t.pressed_at.is_some()) {
+        if cx.try_global::<Tips>().is_some_and(|t| t.epoch != self.epoch || (t.pressed.is_some() && t.pressed == self.owner)) {
             return div();
         }
         div()
@@ -52,18 +71,53 @@ impl Render for Tip {
 }
 
 pub trait TipExt {
+    /// A tip a press takes down, until the pointer leaves.
     fn tip(self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self;
+    /// A tip that stays through a press, on what a press does nothing to, such as a button that is off.
+    fn steady_tip(self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self;
 }
 
 impl TipExt for Stateful<Div> {
-    fn tip(self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self {
+    fn tip(mut self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self {
+        let Some(owner) = self.interactivity().element_id.clone() else {
+            return self.steady_tip(palette, text);
+        };
         let text = text.into();
-        self.on_mouse_down(MouseButton::Left, |event, window, cx| {
-            cx.default_global::<Tips>().pressed_at = Some(event.position);
-            window.refresh();
+        let released = |_: &MouseUpEvent, _: &mut Window, cx: &mut App| cx.default_global::<Tips>().held = false;
+        self.on_mouse_down(MouseButton::Left, {
+            let owner = owner.clone();
+            move |_, window, cx| {
+                let tips = cx.default_global::<Tips>();
+                tips.pressed = Some(owner.clone());
+                tips.held = true;
+                window.refresh();
+            }
         })
-        .tooltip(move |_, cx| cx.new(|_| Tip { text: text.clone(), palette }).into())
+        .on_mouse_up(MouseButton::Left, released)
+        .on_mouse_up_out(MouseButton::Left, released)
+        // A key press leaves nothing.
+        .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+        .on_hover({
+            let owner = owner.clone();
+            move |hovered, _, cx| {
+                let tips = cx.default_global::<Tips>();
+                if !hovered && !tips.held && tips.pressed.as_ref() == Some(&owner) {
+                    tips.pressed = None;
+                }
+            }
+        })
+        .tooltip(move |_, cx| new_tip(text.clone(), palette, Some(owner.clone()), cx))
     }
+
+    fn steady_tip(self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self {
+        let text = text.into();
+        self.tooltip(move |_, cx| new_tip(text.clone(), palette, None, cx))
+    }
+}
+
+fn new_tip(text: SharedString, palette: crate::theme::Palette, owner: Option<ElementId>, cx: &mut App) -> AnyView {
+    let epoch = cx.try_global::<Tips>().map_or(0, |t| t.epoch);
+    cx.new(|_| Tip { text, palette, owner, epoch }).into()
 }
 
 /// The loading icon, turning once a second.
@@ -1395,7 +1449,8 @@ impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.search_focused = self.search.read(cx).focus_handle(cx).is_focused(window);
         self.follow_focus(window);
-        cx.default_global::<Tips>().covered = self.dialog.is_some() || self.menu.is_some() || self.sort_open || self.history_open;
+        let open = [self.dialog.is_some(), self.menu.is_some(), self.sort_open, self.history_open, self.crumb_menu_open];
+        Tips::set_open(open.iter().enumerate().fold(0, |bits, (i, &o)| bits | u8::from(o) << i), cx);
         self.scroll_rows();
         self.reveal(window);
         let p = self.palette;
@@ -1424,13 +1479,6 @@ impl Render for Colet {
                     this.save_current(cx);
                 }
             }))
-            // Moved on from where a button was pressed: tips show again.
-            .on_mouse_move(|event: &MouseMoveEvent, _, cx| {
-                let tips = cx.default_global::<Tips>();
-                if tips.pressed_at.is_some_and(|at| at != event.position) {
-                    tips.pressed_at = None;
-                }
-            })
             // The mouse's back and forward buttons, as Alt+← and Alt+→.
             .on_mouse_down(
                 MouseButton::Navigate(NavigationDirection::Back),
