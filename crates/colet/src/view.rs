@@ -240,6 +240,11 @@ impl Colet {
         let faded = (entry.hidden || cut) && !selected;
         // The keys are on it: ringed, selected or not, while they are in this column.
         let focused = marked && self.keys_in_column && c.focused.as_ref() == Some(&entry.path);
+        // What a right-click opened the menu on, which it leaves unselected: ringed, as in Finder, until it closes.
+        let target = self
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.index == index && m.paths.as_deref() == Some(std::slice::from_ref(&entry.path)));
         // The item a search result or favorite points at: a bar, which wins over the selection but not
         // over the one in the column worked in. Home marks its pick so while the columns are worked in.
         let barred = (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked);
@@ -284,6 +289,7 @@ impl Colet {
             .border_2()
             .border_color(transparent_black())
             .when(focused, |r| r.border_color(p.focus))
+            .when(target, |r| r.border_color(p.accent))
             .when(barred, |r| {
                 r.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).rounded_l(px(4.)).bg(p.accent))
             })
@@ -309,7 +315,7 @@ impl Colet {
                             .child(entry.name.clone()),
                     )
                     .when(kind == Kind::Search, |d| {
-                        d.child(div().w_full().truncate().text_size(px(12.)).text_color(muted).child(entry.parent.clone()))
+                        d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(entry.parent.clone()))
                     }),
             )
             // Out of the name, so type-ahead stays the file's own: a fade alone would read as hidden.
@@ -677,6 +683,7 @@ impl Colet {
                 div()
                     .h(px(48.))
                     .flex_none()
+                    .when(marked, |d| d.border_b_2().border_color(p.accent))
                     .px_3()
                     .flex()
                     .items_center()
@@ -1219,7 +1226,7 @@ impl Colet {
             .text_color(p.text_muted)
             .border_t_1()
             .border_color(p.border)
-            .child(div().id("place").role(Role::Status).aria_label(place.clone()).flex_1().min_w_0().truncate().child(place))
+            .child(div().id("place").role(Role::Status).aria_label(place.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis_start().child(place))
             .child(div().flex_none().child(detail))
             .child(
                 div()
