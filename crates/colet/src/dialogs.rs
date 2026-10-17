@@ -47,17 +47,26 @@ fn clock(unix_ms: u64) -> String {
 }
 
 
-fn field(p: Palette, input: &Entity<gpui_kit::base::input::InputState>, focused: bool) -> Div {
+fn field(p: Palette, input: &Entity<gpui_kit::base::input::InputState>, window: &Window, cx: &App) -> Div {
+    // The ring, two pixels in the focus color a pixel off the field, as the old app's outline.
+    let focused = input.read(cx).focus_handle(cx).is_focused(window);
     div()
-        .h(px(32.))
-        .px(px(10.))
-        .flex()
-        .items_center()
-        .bg(p.surface)
-        .border_1()
-        .border_color(if focused { p.accent } else { p.border_strong })
-        .rounded(px(6.))
-        .child(div().flex_1().min_w_0().child(Input::new(input)))
+        .p(px(1.))
+        .rounded(px(8.))
+        .border_2()
+        .border_color(if focused { p.focus } else { transparent_black() })
+        .child(
+            div()
+                .h(px(32.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .bg(p.surface)
+                .border_1()
+                .border_color(p.border_strong)
+                .rounded(px(6.))
+                .child(div().flex_1().min_w_0().child(Input::new(input))),
+        )
 }
 
 fn label(p: Palette, text: &'static str) -> Div {
@@ -86,7 +95,6 @@ impl Colet {
         let body = match self.dialog.as_ref()? {
             Dialog::Name { kind, paths, destination, input, .. } => {
                 let problem = self.name_problem(cx);
-                let focused = input.read(cx).focus_handle(cx).is_focused(window);
                 let empty = input.read(cx).value().trim().is_empty();
                 // Where the name goes: a rename may come from the results, far from its folder.
                 let (title, place, submit) = match kind {
@@ -109,7 +117,7 @@ impl Colet {
                             .flex_col()
                             .gap_1()
                             .child(label(p, "名前"))
-                            .child(field(p, input, focused))
+                            .child(field(p, input, window, cx))
                             .when_some(problem, |d, problem| d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))),
                     )
                     .child(
@@ -162,27 +170,32 @@ impl Colet {
                                 .test_support(),
                         )
                         .child(
-                            // Delete → Enter confirms, as in Explorer.
+                            // Delete → Enter confirms, as in Explorer: ringed as the one the keys are on.
                             div()
-                                .id("confirm-recycle")
-                                .h(px(30.))
-                                .px_3()
-                                .flex()
-                                .items_center()
-                                .rounded(px(6.))
-                                .bg(p.danger)
-                                .text_color(p.on_accent)
-                                .cursor_pointer()
-                                .hover(|b| b.opacity(0.9))
-                                .child("ごみ箱へ移動")
-                                .on_click(cx.listener(|this, _, window, cx| this.confirm_recycle(window, cx)))
-                                .test_support(),
+                                .p(px(1.))
+                                .rounded(px(8.))
+                                .border_2()
+                                .border_color(if self.dialog_focus.is_focused(window) { p.focus } else { transparent_black() })
+                                .child(
+                                    div()
+                                        .id("confirm-recycle")
+                                        .h(px(30.))
+                                        .px_3()
+                                        .flex()
+                                        .items_center()
+                                        .rounded(px(6.))
+                                        .bg(p.danger_fill)
+                                        .text_color(p.on_accent)
+                                        .cursor_pointer()
+                                        .hover(|b| b.opacity(0.9))
+                                        .child("ごみ箱へ移動")
+                                        .on_click(cx.listener(|this, _, window, cx| this.confirm_recycle(window, cx)))
+                                        .test_support(),
+                                ),
                         ),
                 ),
             Dialog::EditSearch { name, query, .. } => {
                 let problem = self.edit_problem(cx);
-                let (name_focused, query_focused) =
-                    (name.read(cx).focus_handle(cx).is_focused(window), query.read(cx).focus_handle(cx).is_focused(window));
                 div()
                     .flex()
                     .flex_col()
@@ -194,7 +207,7 @@ impl Colet {
                             .flex_col()
                             .gap_1()
                             .child(label(p, "名前"))
-                            .child(field(p, name, name_focused))
+                            .child(field(p, name, window, cx))
                             .child(div().text_size(px(12.)).text_color(p.text_faint).child("空欄なら検索文字列をそのまま表示します")),
                     )
                     .child(
@@ -203,7 +216,7 @@ impl Colet {
                             .flex_col()
                             .gap_1()
                             .child(label(p, "検索文字列"))
-                            .child(field(p, query, query_focused))
+                            .child(field(p, query, window, cx))
                             .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                                 d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
                             }),
@@ -226,7 +239,6 @@ impl Colet {
                     )
             }
             Dialog::Preferences { instance } => {
-                let focused = instance.read(cx).focus_handle(cx).is_focused(window);
                 div()
                     .flex()
                     .flex_col()
@@ -237,7 +249,7 @@ impl Colet {
                             div()
                                 .flex()
                                 .gap_2()
-                                .child(div().flex_1().child(field(p, instance, focused)))
+                                .child(div().flex_1().child(field(p, instance, window, cx)))
                                 .child(
                                     button(p, "reconnect", "再接続", false, true)
                                         .on_click(cx.listener(|this, _, _, cx| this.reconnect(cx)))

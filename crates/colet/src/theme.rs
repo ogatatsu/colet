@@ -1,6 +1,7 @@
 //! Colet's colors by role, for the dark and light settings of Windows. The dark ones are the old app's;
 //! the light ones keep the same roles, hues and contrasts on a light ground.
-use gpui_kit::{Hsla, Window, WindowAppearance, hsla};
+use gpui_kit::base::input::{InputEditorStyle, InputState};
+use gpui_kit::{App, Entity, Hsla, Window, WindowAppearance, hsla};
 
 fn hsl(h: f32, s: f32, l: f32) -> Hsla {
     hsla(h / 360., s / 100., l / 100., 1.)
@@ -25,6 +26,14 @@ pub struct Palette {
     /// Kept well below `accent_fill`, so a pointed-at file never reads as the selection.
     pub highlight: Hsla,
     pub danger: Hsla,
+    /// Behind the text of a button that sends to the Recycle Bin.
+    pub danger_fill: Hsla,
+    /// The ring around what has the keys.
+    pub focus: Hsla,
+    /// The thumb of a scrollbar.
+    pub scrollbar: Hsla,
+    /// Behind the selected text of a field.
+    pub selection: Hsla,
     pub on_accent: Hsla,
     /// Secondary text on the accent fill.
     pub on_accent_muted: Hsla,
@@ -50,6 +59,10 @@ impl Palette {
             selected_inactive: hsl(210., 10., 21.),
             highlight: hsl(184., 20., 16.),
             danger: hsl(0., 75., 70.),
+            danger_fill: hsl(0., 55., 40.),
+            focus: hsl(178., 50., 68.),
+            scrollbar: hsla(210. / 360., 0.09, 0.40, 0.8),
+            selection: hsl(184., 42., 28.),
             on_accent: hsl(0., 0., 100.),
             on_accent_muted: hsla(0., 0., 1., 0.85),
             shade: hsla(210. / 360., 0.3, 0.03, 0.55),
@@ -73,10 +86,20 @@ impl Palette {
             selected_inactive: hsl(210., 14., 88.),
             highlight: hsl(184., 35., 92.),
             danger: hsl(0., 65., 45.),
+            danger_fill: hsl(0., 65., 42.),
+            focus: hsl(184., 60., 35.),
+            scrollbar: hsla(210. / 360., 0.10, 0.55, 0.7),
+            selection: hsl(184., 50., 80.),
             on_accent: hsl(0., 0., 100.),
             on_accent_muted: hsla(0., 0., 1., 0.85),
             shade: hsla(210. / 360., 0.3, 0.2, 0.18),
         }
+    }
+
+    /// Gives a field Colet's colors: its selected text on the selection fill, as the old app's.
+    pub fn style_input(self, input: &Entity<InputState>, cx: &mut App) {
+        let style = InputEditorStyle { selection: self.selection, ..Default::default() };
+        input.update(cx, |input, _| input.set_editor_style(style));
     }
 
     pub fn for_window(window: &Window) -> Self {

@@ -361,8 +361,9 @@ impl Colet {
                 }
                 cx.notify();
             }
-            _ => {}
+            InputEvent::Focus | InputEvent::Blur => cx.notify(),
         });
+        self.palette.style_input(&input, cx);
         self.dialog_subscriptions.push(subscription);
         input.update(cx, |input, cx| {
             input.focus(window, cx);

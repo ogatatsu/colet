@@ -159,10 +159,10 @@ impl Colet {
         for input in [&name, &query] {
             let subscription = cx.subscribe_in(input, window, |this: &mut Self, _, event, window, cx| match event {
                 InputEvent::PressEnter { .. } => this.submit_edit(window, cx),
-                InputEvent::Change => cx.notify(),
-                _ => {}
+                InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
             });
             self.dialog_subscriptions.push(subscription);
+            self.palette.style_input(input, cx);
         }
         name.update(cx, |input, cx| input.focus(window, cx));
         self.dialog = Some(Dialog::EditSearch { original: found.query, name, query });
@@ -209,13 +209,16 @@ impl Colet {
     pub fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let instance =
             cx.new(|cx| InputState::new(window, cx).placeholder("自動（既定 → 1.5a）").default_value(self.settings.instance.clone()));
-        let subscription = cx.subscribe_in(&instance, window, |this: &mut Self, input, event, _, cx| {
-            if let InputEvent::Change = event {
+        let subscription = cx.subscribe_in(&instance, window, |this: &mut Self, input, event, _, cx| match event {
+            InputEvent::Change => {
                 let instance = input.read(cx).value().trim().to_owned();
                 this.update_settings(|s| s.instance = instance, cx);
             }
+            InputEvent::Focus | InputEvent::Blur => cx.notify(),
+            _ => {}
         });
         self.dialog_subscriptions.push(subscription);
+        self.palette.style_input(&instance, cx);
         instance.update(cx, |input, cx| input.focus(window, cx));
         self.dialog = Some(Dialog::Preferences { instance });
         cx.notify();

@@ -234,6 +234,8 @@ pub struct Colet {
     pub(crate) dialog_subscriptions: Vec<Subscription>,
     /// Takes the keys in a dialog with no field, as the Recycle Bin's question.
     pub dialog_focus: FocusHandle,
+    /// Home's list, for its scrollbar.
+    pub home_scroll: ScrollHandle,
     pub menu: Option<Menu>,
     /// Takes the keys while a menu is open.
     pub menu_focus: FocusHandle,
@@ -298,6 +300,7 @@ impl Colet {
             }),
             cx.observe_window_appearance(window, |this, window, cx| {
                 this.palette = Palette::for_window(window);
+                this.palette.style_input(&this.search, cx);
                 cx.notify();
             }),
             cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
@@ -372,6 +375,7 @@ impl Colet {
             dialog: None,
             dialog_subscriptions: Vec::new(),
             dialog_focus: cx.focus_handle(),
+            home_scroll: ScrollHandle::new(),
             menu: None,
             menu_focus: cx.focus_handle(),
             sort_focus: cx.focus_handle().tab_stop(true),
@@ -396,6 +400,7 @@ impl Colet {
         if let Some(problem) = problem {
             this.notify(problem, Tone::Error, cx);
         }
+        this.palette.style_input(&this.search, cx);
         let changed = this.clipboard_changed.clone();
         this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
         this.search.update(cx, |input, cx| input.focus(window, cx));

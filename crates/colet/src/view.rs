@@ -56,6 +56,16 @@ pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> AnimationEle
     )
 }
 
+/// A thin scrollbar laid over a list, as the old app's; its thumb is Colet's color.
+pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette) -> gpui_kit::base::Scrollbar {
+    bar.mode(gpui_kit::base::ScrollbarMode::Always).styles(|s| {
+        s.track(|t| t.bg(transparent_black()).border_color(transparent_black()).width(px(8.)))
+            .thumb(|t| t.bg(p.scrollbar).width(px(6.)).inset(px(1.)).radius(px(3.)))
+            .thumb_hover(|t| t.bg(p.text_muted))
+            .thumb_active(|t| t.bg(p.text_muted))
+    })
+}
+
 fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
 }
@@ -438,7 +448,7 @@ impl Colet {
             .into_iter()
             .filter(|(_, items)| !items.is_empty())
             .collect();
-            let mut rows = div().id("home-rows").flex_1().overflow_y_scroll();
+            let mut rows = div().id("home-rows").size_full().overflow_y_scroll().track_scroll(&self.home_scroll);
             for (title, items) in groups {
                 rows = rows.child(
                     div()
@@ -456,12 +466,18 @@ impl Colet {
                     rows = rows.child(div().px_1().child(self.row(0, entry, marked, cx)));
                 }
             }
-            return rows.into_any_element();
+            return div()
+                .flex_1()
+                .min_h_0()
+                .relative()
+                .child(rows)
+                .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&self.home_scroll), p)))
+                .into_any_element();
         }
         let count = c.entries.len();
         let view = cx.entity();
         let handle = self.list_handle(id);
-        uniform_list(("list", id), count, move |range, _, cx| {
+        let list = uniform_list(("list", id), count, move |range, _, cx| {
             view.update(cx, |this, cx| {
                 let Some(index) = this.state.index_of(id) else { return Vec::new() };
                 let c = &this.state.columns[index];
@@ -475,9 +491,15 @@ impl Colet {
             })
         })
         .track_scroll(&handle)
-        .flex_1()
-        .p_1()
-        .into_any_element()
+        .size_full()
+        .p_1();
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .child(list)
+            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&handle), p)))
+            .into_any_element()
     }
 
     /// The edge a drag widens a column from.
@@ -547,6 +569,7 @@ impl Colet {
                     .gap_2()
                     .border_b_1()
                     .border_color(p.border)
+                    .when(marked, |d| d.border_b_2().border_color(p.accent))
                     .child(
                         div()
                             .id(("title", id))
@@ -1044,6 +1067,12 @@ impl Colet {
                             // The crumbs' bar and the edges' shades follow the columns as they scroll.
                             .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
                             .child(div().h_full().w(px(content + hold)).flex().children(columns)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .child(scrollbar(gpui_kit::base::Scrollbar::horizontal(&self.columns_scroll), p)),
                     )
                     .when(hidden_left, |d| {
                         d.child(
