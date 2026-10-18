@@ -2,14 +2,17 @@
 //! which Everything to ask; and the dialogs that edit them.
 use std::time::Duration;
 
-use colet_core::{entry::Entry, paths::folder_name};
+use colet_core::{
+    entry::Entry,
+    paths::{folder_name, path_key},
+};
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 
 use crate::{
     app::{Colet, Engine, Tone, WidthOf},
     settings::{Placement, SavedSearch, Settings},
-    state::{Kind, search_key},
+    state::{Kind, saved_query, search_key},
 };
 
 pub enum Dialog {
@@ -31,7 +34,9 @@ pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
         ..Entry::folder(&search_key(&s.query), s.label())
     });
     let mut seen = std::collections::HashSet::new();
-    favorites.chain(searches).chain(drives).filter(|e| seen.insert(e.path.clone())).collect()
+    // A place is one whatever its case; a saved search is its query exactly.
+    let key = |e: &Entry| if saved_query(&e.path).is_some() { e.path.clone() } else { path_key(&e.path) };
+    favorites.chain(searches).chain(drives).filter(|e| seen.insert(key(e))).collect()
 }
 
 /// Where the window opens again: on the display holding the middle of where it was left, which the window
@@ -141,7 +146,8 @@ impl Colet {
         self.update_settings(
             |s| {
                 if s.is_favorite(&path) {
-                    s.favorites.retain(|f| *f != path);
+                    let key = path_key(&path);
+                    s.favorites.retain(|f| path_key(f) != key);
                 } else {
                     s.favorites.push(path);
                 }
@@ -324,5 +330,19 @@ mod tests {
         let rows: Vec<(&str, &str)> = entries.iter().map(|e| (e.path.as_str(), e.name.as_str())).collect();
         assert_eq!(rows, [(r"D:\Work", "Work"), (r"C:\", "C:"), ("search:ext:pdf", "PDF"), (r"D:\", "D:")]);
         assert!(!entries[2].directory);
+    }
+
+    #[test]
+    fn takes_a_place_in_another_case_as_the_same_but_not_a_query() {
+        let search = |query: &str| SavedSearch { name: String::new(), query: query.into() };
+        let settings = Settings {
+            favorites: vec![r"c:\".into()],
+            saved_searches: vec![search("ext:PDF"), search("ext:pdf")],
+            ..Settings::default()
+        };
+        assert!(settings.is_favorite(r"C:\") && settings.is_favorite(r"C:"));
+        let entries = home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)")]);
+        let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, [r"c:\", "search:ext:PDF", "search:ext:pdf"]);
     }
 }

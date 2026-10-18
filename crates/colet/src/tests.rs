@@ -899,6 +899,15 @@ fn marks_the_rows_the_clipboard_holds(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn marks_a_row_another_app_put_on_the_clipboard_in_another_case(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    *fake.clipboard.lock().unwrap() = ClipboardFiles { paths: vec![r"d:\WORK\A.TXT".into()], cut: false, sequence: 2 };
+    (fake.watcher.lock().unwrap().as_ref().unwrap())();
+    settle(cx);
+    assert!(ui.act(cx, |window, _| window.try_find(SharedString::from(r"held:D:\work\a.txt")).is_some()));
+}
+
+#[gpui_kit::test]
 fn renames_from_f2_refusing_a_name_windows_would_reject(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "f2");

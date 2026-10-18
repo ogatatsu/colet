@@ -277,6 +277,8 @@ pub struct Colet {
     pub(crate) placed: HashMap<u64, Vec<String>>,
     /// The files on the clipboard, marked in their rows until it changes.
     pub clipboard: ClipboardFiles,
+    /// The clipboard's paths by path key: another app may write them in another case.
+    pub held: HashSet<String>,
     clipboard_changed: Arc<AtomicBool>,
     _subscriptions: Vec<Subscription>,
 }
@@ -409,6 +411,7 @@ impl Colet {
             made: HashMap::new(),
             placed: HashMap::new(),
             clipboard: ClipboardFiles::default(),
+            held: HashSet::new(),
             clipboard_changed: Arc::new(AtomicBool::new(true)),
             _subscriptions: subscriptions,
         };
@@ -735,6 +738,7 @@ impl Colet {
                 // None while another app holds it: try again next time.
                 match read.await {
                     Some(files) => this.update(cx, |this, cx| {
+                        this.held = files.paths.iter().map(|p| path_key(p)).collect();
                         this.clipboard = files;
                         cx.notify();
                     }),

@@ -2,7 +2,7 @@
 //! and the status bar beside it.
 use std::time::Instant;
 
-use colet_core::{entry::{Entry, Sort}, paths::folder_name, time};
+use colet_core::{entry::{Entry, Sort}, paths::{folder_name, path_key}, time};
 use gpui_kit::base::input::{self, Input};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -311,7 +311,7 @@ impl Colet {
         let highlighted = c.highlight.as_ref() == Some(&entry.path)
             || saved.is_some_and(|q| !self.state.query.is_empty() && q == self.state.query);
         // On the clipboard, cut or copied, whoever put it there.
-        let held = self.clipboard.paths.contains(&entry.path);
+        let held = !self.held.is_empty() && self.held.contains(&path_key(&entry.path));
         let cut = held && self.clipboard.cut;
         let faded = (entry.hidden || cut) && !selected;
         // The keys are on it: ringed, selected or not, while they are in this column.

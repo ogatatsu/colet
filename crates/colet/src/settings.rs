@@ -85,7 +85,8 @@ impl Settings {
     }
 
     pub fn is_favorite(&self, path: &str) -> bool {
-        self.favorites.iter().any(|f| f == path)
+        let key = colet_core::paths::path_key(path);
+        self.favorites.iter().any(|f| colet_core::paths::path_key(f) == key)
     }
 }
 
