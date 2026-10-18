@@ -1,6 +1,7 @@
 //! Where the scrolling columns should rest so the one being worked in, and what it opened, are on screen.
-//! They move only as far as that takes, and only to a column's start, where they snap; picking along a
-//! column, which opens and closes the one beside it, leaves them where they are.
+//! When they must move, the last column ends flush with the right edge, so no room is left empty past it,
+//! unless that would hide the column worked in. Picking along a column, which opens and closes the one
+//! beside it, leaves them where they are.
 
 /// A scrolling column's place: where it starts and how wide it is.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -16,16 +17,17 @@ pub fn reveal_target(from: f32, view: f32, cells: &[Cell], active: Option<usize>
     let first = active.unwrap_or(0).min(last);
     let start = cells[first].start;
     let end = cells[last].start + cells[last].width;
-    // The nearest snap point that brings `end` in from the right.
-    let snap_right = || cells.iter().find(|c| c.start >= end - view - 1.).map_or(cells[last].start, |c| c.start);
+    // The last column flush with the right edge.
+    let flush = (end - view).max(0.);
     // A pixel either way, for widths rounded under display scaling.
     if start >= from - 1. && end <= from + view + 1. {
         return from;
     }
     if end - start > view + 1. {
-        return if active.is_none() { snap_right() } else { start };
+        return if active.is_none() { flush } else { start };
     }
-    if start < from { start } else { snap_right() }
+    // From the active one to the last fit: brought in from either side, the last ends at the right edge.
+    flush
 }
 
 /// What is on screen, in columns: 1.5 is halfway across the second. Above 0, some are hidden on the
@@ -76,13 +78,18 @@ mod tests {
     }
 
     #[test]
-    fn snaps_to_a_columns_start_past_one_clipped_on_the_right() {
-        assert_eq!(reveal_target(0., 600., &cells(3), Some(1)), 240.);
+    fn brings_the_last_column_flush_with_the_right_edge_leaving_no_room_past_it() {
+        assert_eq!(reveal_target(0., 600., &cells(3), Some(1)), 120.);
     }
 
     #[test]
     fn brings_a_column_clipped_on_the_left_back_whole() {
         assert_eq!(reveal_target(360., 480., &cells(3), Some(1)), 240.);
+    }
+
+    #[test]
+    fn brings_a_column_clipped_on_the_left_back_without_room_past_the_last() {
+        assert_eq!(reveal_target(600., 600., &cells(4), Some(2)), 360.);
     }
 
     #[test]
