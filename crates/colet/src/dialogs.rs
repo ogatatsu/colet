@@ -55,23 +55,18 @@ const MARGIN: f32 = 14.;
 fn field(p: Palette, input: &Entity<gpui_kit::base::input::InputState>, window: &Window, cx: &App) -> Div {
     // The ring, two pixels in the focus color a pixel off the field, as the old app's outline.
     let focused = input.read(cx).focus_handle(cx).is_focused(window);
-    div()
-        .p(px(1.))
-        .rounded(px(8.))
-        .border_2()
-        .border_color(if focused { p.focus } else { transparent_black() })
-        .child(
-            div()
-                .h(px(32.))
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .bg(p.surface)
-                .border_1()
-                .border_color(p.border_strong)
-                .rounded(px(6.))
-                .child(div().flex_1().min_w_0().child(Input::new(input))),
-        )
+    crate::view::frame(p, focused).child(
+        div()
+            .h(px(32.))
+            .px(px(10.))
+            .flex()
+            .items_center()
+            .bg(p.surface)
+            .border_1()
+            .border_color(p.border_strong)
+            .rounded(px(6.))
+            .child(div().flex_1().min_w_0().child(Input::new(input))),
+    )
 }
 
 fn label(p: Palette, text: &'static str) -> Div {
@@ -175,11 +170,7 @@ impl Colet {
                         .test_support()
                         .into_any_element(),
                     // Delete → Enter confirms, as in Explorer: ringed as the one the keys are on.
-                    div()
-                        .p(px(1.))
-                        .rounded(px(8.))
-                        .border_2()
-                        .border_color(if self.dialog_focus.is_focused(window) { p.focus } else { transparent_black() })
+                    crate::view::frame(p, self.dialog_focus.is_focused(window))
                         .child(
                             div()
                                 .id("confirm-recycle")
@@ -246,17 +237,19 @@ impl Colet {
                     // Taken at once as one is picked, and kept.
                     .child(
                         div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(
-                            div().id("themes").flex().gap_2().role(Role::RadioGroup).aria_label("テーマ").children(themes.into_iter().map(
+                            // Ringed as the fields are; the rings' room makes up most of the gaps.
+                            div().id("themes").flex().gap(px(2.)).role(Role::RadioGroup).aria_label("テーマ").children(themes.into_iter().map(
                                 |(theme, focus)| {
                                     let chosen = self.settings.theme == theme;
-                                    button(p, ("theme", theme as usize), theme.label(), chosen, true)
-                                        .track_focus(&focus)
-                                        .focus_visible(|s| s.border_color(p.focus))
-                                        .role(Role::RadioButton)
-                                        .aria_label(theme.label())
-                                        .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
-                                        .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
-                                        .test_support()
+                                    crate::view::frame(p, crate::view::keyed(&focus, window)).child(
+                                        button(p, ("theme", theme as usize), theme.label(), chosen, true)
+                                            .track_focus(&focus)
+                                            .role(Role::RadioButton)
+                                            .aria_label(theme.label())
+                                            .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
+                                            .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
+                                            .test_support(),
+                                    )
                                 },
                             )),
                         ),
@@ -382,6 +375,7 @@ impl Colet {
             windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point)
         };
         self.menu = Some(Menu { column, paths, at, screen: (point.x, point.y) });
+        self.crumb_menu_open = false;
         self.sort_open = false;
         self.menu_cursor = None;
         self.menu_focus.focus(window, cx);
@@ -522,6 +516,16 @@ impl Colet {
             return None;
         }
         let p = self.palette;
+        // Each row, each item that opens and the clear button a stop for Tab; the mouse leaves the keys
+        // where they are, as before.
+        let mut keys = vec!["clear-history".to_owned()];
+        for entry in &self.history {
+            keys.push(format!("history-entry:{}", entry.id));
+            if self.expanded.contains(&entry.id) {
+                keys.extend(entry.items.iter().enumerate().filter(|(_, item)| !item.gone).map(|(k, _)| format!("history-item:{}:{k}", entry.id)));
+            }
+        }
+        let stops: std::collections::HashMap<String, FocusHandle> = keys.into_iter().map(|key| (key.clone(), self.stop(key, cx))).collect();
         let entries: Vec<AnyElement> = self
             .history
             .iter()
@@ -535,8 +539,10 @@ impl Colet {
                     .border_b_1()
                     .border_color(p.border)
                     .child(
-                        div()
-                            .id(("history-entry", id))
+                        crate::view::keep_focus(crate::view::ring(div().id(("history-entry", id)).track_focus(&stops[&format!("history-entry:{id}")]), p))
+                            .role(Role::Button)
+                            .aria_label(format!("{} {}", entry.kind.title(), entry.target()))
+                            .aria_expanded(open)
                             .px_3()
                             .py_2()
                             .flex()
@@ -584,8 +590,13 @@ impl Colet {
                                                 // Gone to the Recycle Bin, it has no place to open.
                                                 div().child(name).into_any_element()
                                             } else {
-                                                div()
-                                                    .id(("history-item", (id << 16) | k as u64))
+                                                crate::view::keep_focus(crate::view::ring(
+                                                    div().id(("history-item", (id << 16) | k as u64)).track_focus(&stops[&format!("history-item:{id}:{k}")]),
+                                                    p,
+                                                ))
+                                                    .role(Role::Link)
+                                                    .aria_label(name.clone())
+                                                    .rounded(px(4.))
                                                     .text_color(p.accent)
                                                     .cursor_pointer()
                                                     .hover(|d| d.underline())
@@ -637,8 +648,9 @@ impl Colet {
                             .border_color(p.border)
                             .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child("操作履歴"))
                             .child(
-                                div()
-                                    .id("clear-history")
+                                crate::view::keep_focus(crate::view::ring(div().id("clear-history").track_focus(&stops["clear-history"]), p))
+                                    .role(Role::Button)
+                                    .aria_label("履歴を消去")
                                     .px_2()
                                     .h(px(26.))
                                     .flex()
@@ -650,6 +662,8 @@ impl Colet {
                                     .child("履歴を消去")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.history.retain(|e| e.status == Status::Running);
+                                        // The rows' stops go with them; a running one's comes back as it is drawn.
+                                        this.stops.retain(|key, _| !key.starts_with("history-"));
                                         cx.notify();
                                     }))
                                     .test_support(),

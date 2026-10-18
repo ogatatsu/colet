@@ -162,9 +162,43 @@ impl Colet {
         cx.notify();
     }
 
+    /// Opens the menu of the folders folded off the trail; from the keys, with its first line lit.
+    pub fn open_crumb_menu(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.menu = None;
+        self.sort_open = false;
+        self.crumb_menu_open = true;
+        self.crumb_cursor = keyboard.then_some(0);
+        self.menu_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Closes the trail's menu; `to_button` hands the keys back to the button that opened it.
+    pub fn close_crumb_menu(&mut self, to_button: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.crumb_menu_open = false;
+        self.crumb_cursor = None;
+        if to_button {
+            self.stop("crumb-fold", cx).focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// ↑ or ↓ in the trail's menu of `count` lines, round the ends.
+    pub fn move_crumb_cursor(&mut self, by: isize, count: usize, cx: &mut Context<Self>) {
+        if count == 0 {
+            return;
+        }
+        self.crumb_cursor = Some(match self.crumb_cursor {
+            Some(at) => (at as isize + by).rem_euclid(count as isize) as usize,
+            None if by > 0 => 0,
+            None => count - 1,
+        });
+        cx.notify();
+    }
+
     /// Opens the sort order's menu; from the keys, with the sort in use lit.
     pub fn open_sort(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
+        self.crumb_menu_open = false;
         self.sort_open = true;
         self.menu_cursor = keyboard.then(|| Sort::ALL.iter().position(|s| *s == self.sort.by).unwrap_or(0));
         self.menu_focus.focus(window, cx);

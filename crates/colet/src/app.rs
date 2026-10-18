@@ -201,6 +201,8 @@ pub struct Colet {
     next_toast: u64,
     pub sort_open: bool,
     pub crumb_menu_open: bool,
+    /// The line of the trail's menu ↑↓ have lit; none when the mouse opened it.
+    pub crumb_cursor: Option<usize>,
     pub resizing: Option<Resize>,
     pub lists: HashMap<ColumnId, UniformListScrollHandle>,
     scrolled_to: HashMap<ColumnId, String>,
@@ -364,6 +366,7 @@ impl Colet {
             next_toast: 0,
             sort_open: false,
             crumb_menu_open: false,
+            crumb_cursor: None,
             resizing: None,
             lists: HashMap::new(),
             scrolled_to: HashMap::new(),
@@ -543,7 +546,8 @@ impl Colet {
         let id = self.next_toast;
         self.toasts.push(Toast { id, text: text.into(), tone, entry: None });
         if self.toasts.len() > 3 {
-            self.toasts.remove(0);
+            let oldest = self.toasts[0].id;
+            self.dismiss(oldest, cx);
         }
         // Errors stay until dismissed; the rest fade on their own.
         if tone == Tone::Info {
@@ -558,6 +562,9 @@ impl Colet {
 
     pub fn dismiss(&mut self, id: u64, cx: &mut Context<Self>) {
         self.toasts.retain(|t| t.id != id);
+        // Its buttons' stops go with it.
+        self.stops.remove(&format!("toast-details:{id}"));
+        self.stops.remove(&format!("close-toast:{id}"));
         cx.notify();
     }
 

@@ -230,6 +230,17 @@ pub fn ring(el: Stateful<Div>, p: crate::theme::Palette) -> Stateful<Div> {
     el.border_2().border_color(transparent_black()).focus_visible(|s| s.border_color(p.focus))
 }
 
+/// The ring of a field, or of a button with a border of its own: two pixels in the focus color a pixel
+/// off it, laid round it and kept clear until `shown`.
+pub fn frame(p: crate::theme::Palette, shown: bool) -> Div {
+    div().p(px(1.)).rounded(px(8.)).border_2().border_color(if shown { p.focus } else { transparent_black() })
+}
+
+/// Tab, not the mouse, brought the keys to `focus`: when [`ring`] shows.
+pub fn keyed(focus: &FocusHandle, window: &Window) -> bool {
+    focus.is_focused(window) && window.last_input_was_keyboard()
+}
+
 /// A button the mouse presses without taking the keys from where they are; Tab still reaches it.
 pub fn keep_focus(el: Stateful<Div>) -> Stateful<Div> {
     el.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
@@ -564,16 +575,20 @@ impl Colet {
     }
 
     /// What a column lists, or why it lists nothing.
-    fn column_body(&mut self, index: usize, marked: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn column_body(&mut self, index: usize, marked: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let c = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
-        if let Some(error) = &c.error {
+        if let Some(error) = c.error.clone() {
+            let retry = self.stop(format!("retry:{id}"), cx);
+            let settings = self.stop("search-settings", cx);
+            // Ringed as a field is; the ring lies over the gaps around.
             return self
-                .message("circle-alert", error.clone())
-                .child(
-                    div()
-                        .id(("retry", id))
+                .message("circle-alert", error)
+                .child(frame(p, keyed(&retry, window)).m(px(-3.)).child(
+                    keep_focus(div().id(("retry", id)).track_focus(&retry))
+                        .role(Role::Button)
+                        .aria_label("再試行")
                         .h(px(30.))
                         .px_3()
                         .flex()
@@ -587,13 +602,22 @@ impl Colet {
                         .hover(|b| b.bg(p.raised_hover))
                         .child(icon("refresh-cw", 14., p.text_muted))
                         .child("再試行")
-                        .on_click(cx.listener(move |this, _, _, cx| this.load(id, 0, false, cx)))
+                        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                            // The button goes as the column loads: the keys go back to the columns.
+                            if event.is_keyboard() {
+                                this.focus_active(window, cx);
+                            }
+                            this.load(id, 0, false, cx);
+                        }))
                         .test_support(),
-                )
+                ))
                 .when(kind == Kind::Search, |d| {
-                    d.child(
+                    d.child(frame(p, keyed(&settings, window)).m(px(-3.)).child(
                         div()
                             .id("search-settings")
+                            .track_focus(&settings)
+                            .role(Role::Button)
+                            .aria_label("設定")
                             .h(px(30.))
                             .px_3()
                             .flex()
@@ -609,7 +633,7 @@ impl Colet {
                             .child("設定")
                             .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
                             .test_support(),
-                    )
+                    ))
                 })
                 .into_any_element();
         }
@@ -731,7 +755,7 @@ impl Colet {
         on_top(handle).into_any_element()
     }
 
-    fn render_column(&mut self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn render_column(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let marked = index == self.state.active && !self.search_focused;
         let c: &Column = &self.state.columns[index];
@@ -746,7 +770,7 @@ impl Colet {
         let path = c.path.clone();
         let star_path = c.path.clone();
         let star_focus = self.stop(format!("star:{id}"), cx);
-        let body = self.column_body(index, marked, cx);
+        let body = self.column_body(index, marked, window, cx);
         div()
             .id(("column", id))
             .role(Role::Group)
@@ -847,11 +871,11 @@ impl Colet {
             .into_any_element()
     }
 
-    fn render_sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());
         let marked = self.state.active == 0 && !self.search_focused;
-        let body = self.column_body(0, marked, cx);
+        let body = self.column_body(0, marked, window, cx);
         let width = self.widths.sidebar;
         let keys = div().id("home").track_focus(&self.home_focus).flex_1().min_h_0().flex().flex_col().child(body);
         let keys = self.column_keys(keys, cx);
@@ -893,13 +917,14 @@ impl Colet {
             .into_any_element()
     }
 
-    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let focused = self.search_focused;
         let has_query = !self.state.query.is_empty();
         let sort = self.sort;
         let clear_focus = self.stop("clear-search", cx);
         let sort_lines = if self.sort_open { self.render_lines(cx) } else { Vec::new() };
+        let sort_keyed = keyed(&self.sort_focus, window);
         div()
             .h(px(48.))
             .flex_none()
@@ -908,87 +933,93 @@ impl Colet {
             .items_center()
             .gap_2()
             .child(
-                div()
-                    .id("search-box")
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(32.))
-                    .pl(px(10.))
-                    .pr(px(4.))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .bg(p.surface)
-                    .border_1()
-                    .border_color(if focused { p.accent } else { p.border_strong })
-                    .rounded(px(6.))
-                    .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
-                    .child(div().flex_1().min_w_0().child(Input::new(&self.search)))
-                    // ↓ goes into the results, as from a search field in Explorer; Esc clears the search.
-                    .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {
-                        cx.stop_propagation();
-                        this.leave_search(window, cx);
-                    }))
-                    .on_action(cx.listener(|this, _: &input::Escape, window, cx| {
-                        if !this.state.query.is_empty() {
-                            this.clear_search(window, cx);
-                        }
-                    }))
-                    .when(has_query, |b| {
-                        b.child(
-                            ring(div().id("clear-search").track_focus(&clear_focus), p)
-                                .role(Role::Button)
-                                .aria_label("検索をクリア")
-                                .size(px(24.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(4.))
-                                .cursor_pointer()
-                                .hover(|d| d.bg(p.hover))
-                                .tip(p, "検索をクリア（Esc）")
-                                .child(icon("x", 14., p.text_muted))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.clear_search(window, cx);
-                                    this.search.update(cx, |input, cx| input.focus(window, cx));
-                                })),
-                        )
-                    }),
+                // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row.
+                frame(p, focused).flex_1().min_w_0().m(px(-3.)).child(
+                    div()
+                        .id("search-box")
+                        .w_full()
+                        .h(px(32.))
+                        .pl(px(10.))
+                        .pr(px(4.))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .bg(p.surface)
+                        .border_1()
+                        .border_color(p.border_strong)
+                        .rounded(px(6.))
+                        .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
+                        .child(div().flex_1().min_w_0().child(Input::new(&self.search)))
+                        // ↓ goes into the results, as from a search field in Explorer; Esc clears the search.
+                        .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {
+                            cx.stop_propagation();
+                            this.leave_search(window, cx);
+                        }))
+                        .on_action(cx.listener(|this, _: &input::Escape, window, cx| {
+                            if !this.state.query.is_empty() {
+                                this.clear_search(window, cx);
+                            }
+                        }))
+                        .when(has_query, |b| {
+                            b.child(
+                                ring(div().id("clear-search").track_focus(&clear_focus), p)
+                                    .role(Role::Button)
+                                    .aria_label("検索をクリア")
+                                    .size(px(24.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(4.))
+                                    .cursor_pointer()
+                                    .hover(|d| d.bg(p.hover))
+                                    .tip(p, "検索をクリア（Esc）")
+                                    .child(icon("x", 14., p.text_muted))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.clear_search(window, cx);
+                                        this.search.update(cx, |input, cx| input.focus(window, cx));
+                                    })),
+                            )
+                        }),
+                ),
             )
             .child(
                 div()
                     .relative()
                     .child(
-                        div()
-                            .id("sort")
-                            .track_focus(&self.sort_focus)
-                            .key_context(SORT)
-                            .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(true, window, cx)))
-                            .focus_visible(|s| s.border_color(p.focus))
-                            .h(px(32.))
-                            .pl(px(10.))
-                            .pr_2()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.))
-                            .text_size(px(12.))
-                            .text_color(p.text_muted)
-                            .bg(p.surface)
-                            .border_1()
-                            .border_color(p.border_strong)
-                            .rounded(px(6.))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(p.hover))
-                            .child(sort.label())
-                            .child(icon("chevron-down", 14., p.text_faint))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if this.sort_open {
-                                    this.close_menus(true, window, cx);
-                                } else {
-                                    this.open_sort(false, window, cx);
-                                }
-                            }))
-                            .test_support(),
+                        frame(p, sort_keyed).m(px(-3.)).child(
+                            div()
+                                .id("sort")
+                                .track_focus(&self.sort_focus)
+                                .key_context(SORT)
+                                .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(true, window, cx)))
+                                .role(Role::Button)
+                                .aria_label(format!("並び順: {}", sort.label()))
+                                .aria_expanded(self.sort_open)
+                                .h(px(32.))
+                                .pl(px(10.))
+                                .pr_2()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.))
+                                .text_size(px(12.))
+                                .text_color(p.text_muted)
+                                .bg(p.surface)
+                                .border_1()
+                                .border_color(p.border_strong)
+                                .rounded(px(6.))
+                                .cursor_pointer()
+                                .hover(|d| d.bg(p.hover))
+                                .child(sort.label())
+                                .child(icon("chevron-down", 14., p.text_faint))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if this.sort_open {
+                                        this.close_menus(true, window, cx);
+                                    } else {
+                                        this.open_sort(false, window, cx);
+                                    }
+                                }))
+                                .test_support(),
+                        ),
                     )
                     .when(self.sort_open, |d| {
                         d.child(
@@ -1085,6 +1116,10 @@ impl Colet {
         let shown: Vec<(usize, String, String)> = crumbs[folded..].to_vec();
         let menu_current = menu.iter().any(|(index, ..)| *index == active);
         let crumb_menu_open = self.crumb_menu_open;
+        let crumb_cursor = self.crumb_cursor;
+        let fold_focus = self.stop("crumb-fold", cx);
+        // Where ↑↓ and Enter take the menu: the columns its lines go to.
+        let menu_targets: Vec<usize> = menu.iter().map(|(index, ..)| *index).collect();
         div()
             .h(px(36.))
             .flex_none()
@@ -1126,8 +1161,10 @@ impl Colet {
                             div()
                                 .relative()
                                 .child(
-                                    div()
-                                        .id("crumb-fold")
+                                    ring(div().id("crumb-fold").track_focus(&fold_focus), p)
+                                        .role(Role::Button)
+                                        .aria_label("上の階層")
+                                        .aria_expanded(crumb_menu_open)
                                         .size(px(24.))
                                         .flex()
                                         .items_center()
@@ -1137,9 +1174,12 @@ impl Colet {
                                         .hover(|d| d.bg(p.hover))
                                         .tip(p, "上の階層")
                                         .child(icon("ellipsis", 14., if menu_current { p.text } else { p.text_muted }))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.crumb_menu_open = !this.crumb_menu_open;
-                                            cx.notify();
+                                        .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                                            if this.crumb_menu_open {
+                                                this.close_crumb_menu(event.is_keyboard(), window, cx);
+                                            } else {
+                                                this.open_crumb_menu(event.is_keyboard(), window, cx);
+                                            }
                                         })),
                                 )
                                 .when(crumb_menu_open, |d| {
@@ -1147,6 +1187,26 @@ impl Colet {
                                         deferred(
                                             div()
                                                 .id("crumb-menu")
+                                                .role(Role::Menu)
+                                                .aria_label("上の階層")
+                                                // ↑↓ move, Enter goes, Esc closes, as in the other menus.
+                                                .track_focus(&self.menu_focus)
+                                                .key_context(MENU)
+                                                .on_action({
+                                                    let count = menu_targets.len();
+                                                    cx.listener(move |this, _: &MenuUp, _, cx| this.move_crumb_cursor(-1, count, cx))
+                                                })
+                                                .on_action({
+                                                    let count = menu_targets.len();
+                                                    cx.listener(move |this, _: &MenuDown, _, cx| this.move_crumb_cursor(1, count, cx))
+                                                })
+                                                .on_action(cx.listener(move |this, _: &MenuConfirm, window, cx| {
+                                                    if let Some(&index) = this.crumb_cursor.and_then(|c| menu_targets.get(c)) {
+                                                        this.close_crumb_menu(false, window, cx);
+                                                        this.go_to(index, window, cx);
+                                                    }
+                                                }))
+                                                .on_action(cx.listener(|this, _: &CloseMenu, window, cx| this.close_crumb_menu(true, window, cx)))
                                                 .absolute()
                                                 .top(px(28.))
                                                 .left_0()
@@ -1158,14 +1218,14 @@ impl Colet {
                                                 .rounded(px(8.))
                                                 .shadow_lg()
                                                 .occlude()
-                                                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                                    this.crumb_menu_open = false;
-                                                    cx.notify();
-                                                }))
-                                                .children(menu.iter().map(|(index, label, path)| {
+                                                .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_crumb_menu(false, window, cx)))
+                                                .children(menu.iter().enumerate().map(|(line, (index, label, path))| {
                                                     let index = *index;
+                                                    let lit = crumb_cursor == Some(line);
                                                     div()
                                                         .id(("crumb-item", index))
+                                                        .role(Role::MenuItem)
+                                                        .aria_label(label.clone())
                                                         .h(px(28.))
                                                         .px(px(10.))
                                                         .flex()
@@ -1175,11 +1235,12 @@ impl Colet {
                                                         .cursor_pointer()
                                                         .text_color(if index == active { p.text } else { p.text_muted })
                                                         .hover(|d| d.bg(p.accent_fill).text_color(p.on_accent))
+                                                        .when(lit, |d| d.bg(p.accent_fill).text_color(p.on_accent))
                                                         .tip(p, path.clone())
                                                         .child(icon(if index == 1 && results { "search" } else { "folder" }, 14., p.text_faint))
                                                         .child(label.clone())
                                                         .on_click(cx.listener(move |this, _, window, cx| {
-                                                            this.crumb_menu_open = false;
+                                                            this.close_crumb_menu(false, window, cx);
                                                             this.go_to(index, window, cx);
                                                         }))
                                                 })),
@@ -1249,8 +1310,8 @@ impl Colet {
         let (hidden_left, hidden_right) = (screen.hidden_left(), screen.hidden_right());
         let hold = self.hold;
         let fit = cx.entity().downgrade();
-        let pinned_column = pinned.then(|| self.render_column(1, cx));
-        let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, cx)).collect();
+        let pinned_column = pinned.then(|| self.render_column(1, window, cx));
+        let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, window, cx)).collect();
         let main = div()
             .id("main")
             .track_focus(&self.columns_focus)
@@ -1379,12 +1440,12 @@ impl Colet {
                     }),
             )
             // Nothing searched or opened leaves this side dark; show where to start.
-            .when(only_home, |d| d.child(self.home_hint(cx)));
+            .when(only_home, |d| d.child(self.home_hint(window, cx)));
         let _ = window;
         self.column_keys(main, cx).into_any_element()
     }
 
-    fn home_hint(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn home_hint(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         div()
             .absolute()
@@ -1399,26 +1460,33 @@ impl Colet {
             .text_color(p.text_muted)
             .child(icon("search", 28., p.text_faint))
             .child("名前やEverythingの検索式で探せます")
-            .child(div().flex().gap_2().children(
+            // Ringed as a field is; the rings' room makes up most of the gaps.
+            .child(div().flex().gap(px(2.)).children(
                 [("ext:pdf", "PDFファイル"), ("dm:today", "今日更新した項目"), ("size:>1gb", "1 GBを超えるファイル")].map(
                     |(query, label)| {
-                        div()
-                            .id(query)
-                            .h(px(28.))
-                            .px(px(10.))
-                            .flex()
-                            .items_center()
-                            .gap(px(6.))
-                            .bg(p.surface)
-                            .border_1()
-                            .border_color(p.border)
-                            .rounded(px(6.))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(p.hover))
-                            .child(div().text_color(p.accent).font_family("Consolas").child(query))
-                            .child(label)
-                            .on_click(cx.listener(move |this, _, window, cx| this.search_for(query, window, cx)))
-                            .test_support()
+                        let focus = self.stop(format!("hint:{query}"), cx);
+                        frame(p, keyed(&focus, window)).child(
+                            div()
+                                .id(query)
+                                .track_focus(&focus)
+                                .role(Role::Button)
+                                .aria_label(format!("{query} {label}"))
+                                .h(px(28.))
+                                .px(px(10.))
+                                .flex()
+                                .items_center()
+                                .gap(px(6.))
+                                .bg(p.surface)
+                                .border_1()
+                                .border_color(p.border)
+                                .rounded(px(6.))
+                                .cursor_pointer()
+                                .hover(|d| d.bg(p.hover))
+                                .child(div().text_color(p.accent).font_family("Consolas").child(query))
+                                .child(label)
+                                .on_click(cx.listener(move |this, _, window, cx| this.search_for(query, window, cx)))
+                                .test_support(),
+                        )
                     },
                 ),
             ))
@@ -1490,8 +1558,11 @@ impl Colet {
             .into_any_element()
     }
 
-    fn render_toasts(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_toasts(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
+        let ids: Vec<u64> = self.toasts.iter().map(|t| t.id).collect();
+        let stops: Vec<(FocusHandle, FocusHandle)> =
+            ids.into_iter().map(|id| (self.stop(format!("toast-details:{id}"), cx), self.stop(format!("close-toast:{id}"), cx))).collect();
         // Over the columns' edges, which are drawn over all laid out after them.
         deferred(div()
             .absolute()
@@ -1500,7 +1571,7 @@ impl Colet {
             .flex()
             .flex_col()
             .gap_2()
-            .children(self.toasts.iter().map(|toast| {
+            .children(self.toasts.iter().zip(stops).map(|(toast, (details, close))| {
                 let id = toast.id;
                 let error = toast.tone == Tone::Error;
                 div()
@@ -1524,9 +1595,11 @@ impl Colet {
                     .when(error, |d| d.child(icon("circle-alert", 14., p.danger)))
                     .child(div().flex_1().py_1().child(toast.text.clone()))
                     .when_some(toast.entry, |d, entry| {
+                        // The mouse leaves the keys where they are; from the keys, they go on into the history.
                         d.child(
-                            div()
-                                .id(("toast-details", id))
+                            keep_focus(ring(div().id(("toast-details", id)).track_focus(&details), p))
+                                .role(Role::Button)
+                                .aria_label("詳細")
                                 .px_2()
                                 .h(px(24.))
                                 .flex()
@@ -1536,16 +1609,20 @@ impl Colet {
                                 .cursor_pointer()
                                 .hover(|d| d.bg(p.raised_hover))
                                 .child("詳細")
-                                .on_click(cx.listener(move |this, _, window, cx| {
+                                .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                                     this.dismiss(id, cx);
                                     this.show_history(true, Some(entry), window, cx);
+                                    if event.is_keyboard() {
+                                        this.stop(format!("history-entry:{entry}"), cx).focus(window, cx);
+                                    }
                                 }))
                                 .test_support(),
                         )
                     })
                     .child(
-                        div()
-                            .id(("close-toast", id))
+                        keep_focus(ring(div().id(("close-toast", id)).track_focus(&close), p))
+                            .role(Role::Button)
+                            .aria_label("閉じる")
                             .size(px(24.))
                             .flex()
                             .flex_none()
@@ -1555,7 +1632,13 @@ impl Colet {
                             .cursor_pointer()
                             .hover(|d| d.bg(p.raised_hover))
                             .child(icon("x", 14., p.text_muted))
-                            .on_click(cx.listener(move |this, _, _, cx| this.dismiss(id, cx)))
+                            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                                // The button goes with the toast: the keys go back to the columns.
+                                if event.is_keyboard() {
+                                    this.focus_active(window, cx);
+                                }
+                                this.dismiss(id, cx);
+                            }))
                             .test_support(),
                     )
             })))
@@ -1665,8 +1748,8 @@ impl Render for Colet {
         self.scroll_rows();
         self.reveal(window);
         let p = self.palette;
-        let sidebar = self.render_sidebar(cx);
-        let toolbar = self.render_toolbar(cx);
+        let sidebar = self.render_sidebar(window, cx);
+        let toolbar = self.render_toolbar(window, cx);
         let pathbar = self.render_pathbar(window, cx);
         let main = self.render_main(window, cx);
         div()

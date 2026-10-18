@@ -1585,3 +1585,48 @@ fn scrolls_a_column_s_last_row_clear_of_the_columns_scrollbar(cx: &mut TestAppCo
     assert!(ui.read(cx, |v| v.columns_scroll.max_offset().x) > px(0.));
     assert!(bottom <= view.bottom() - px(crate::view::SCROLLBAR_WIDTH), "{bottom:?} against {view:?}");
 }
+
+#[gpui_kit::test]
+fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    cx.simulate_window_resize(ui.window, size(px(800.), px(800.)));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    let fold = ui.read(cx, |v| v.stops["crumb-fold"].clone());
+    ui.act(cx, |window, cx| fold.focus(window, cx));
+    // Enter opens it with its first line lit; ↓ moves on, Esc hands the keys back to the button.
+    ui.press(cx, "enter");
+    assert!(ui.read(cx, |v| v.crumb_menu_open));
+    assert_eq!(ui.read(cx, |v| v.crumb_cursor), Some(0));
+    ui.press(cx, "down");
+    assert_eq!(ui.read(cx, |v| v.crumb_cursor), Some(1));
+    ui.press(cx, "escape");
+    assert!(!ui.read(cx, |v| v.crumb_menu_open));
+    assert!(ui.act(cx, |window, _| fold.is_focused(window)));
+    // Space opens it too; the second line lit, Enter goes to its column, the keys with it.
+    ui.press(cx, "space");
+    ui.press(cx, "down");
+    // The trail starts at the drive: its second line is the first folder.
+    let target = ui.read(cx, |v| v.state.columns.iter().position(|c| c.path == chain[0]).unwrap());
+    ui.press(cx, "enter");
+    assert!(!ui.read(cx, |v| v.crumb_menu_open));
+    assert_eq!(ui.active(cx), target);
+    assert!(ui.columns_focused(cx));
+}
+
+#[gpui_kit::test]
+fn closes_a_toast_from_the_keys_handing_them_back_to_where_they_were(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(drive_d()));
+    ui.click(cx, row(r"D:\"));
+    ui.view.update(cx, |v, cx| v.notify("失敗しました", crate::app::Tone::Error, cx));
+    ui.act(cx, |_, _| ());
+    let close = ui.read(cx, |v| v.stops["close-toast:1"].clone());
+    ui.act(cx, |window, cx| close.focus(window, cx));
+    ui.press(cx, "enter");
+    assert!(ui.toasts(cx).is_empty());
+    assert!(ui.home_focused(cx));
+    assert!(ui.read(cx, |v| !v.stops.contains_key("close-toast:1")));
+}
