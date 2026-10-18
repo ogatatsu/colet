@@ -270,17 +270,8 @@ impl Colet {
             return;
         }
         let (backend, owner) = (self.backend.clone(), self.owner);
-        let count = picked.len();
-        let task = cx.background_executor().spawn(async move { backend.copy_files(&picked, cut, owner) });
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            this.update(cx, |this, cx| match result {
-                Ok(()) => this.notify(format!("{count} 項目を{}しました", if cut { "切り取り" } else { "コピー" }), Tone::Info, cx),
-                Err(error) => this.notify(error, Tone::Error, cx),
-            })
-            .ok();
-        })
-        .detach();
+        let done = format!("{} 項目を{}しました", picked.len(), if cut { "切り取り" } else { "コピー" });
+        self.in_background(move || backend.copy_files(&picked, cut, owner), Some(done), cx);
     }
 
     /// The paths as text, one a line; a saved search's is the query it runs.
@@ -292,17 +283,8 @@ impl Colet {
         }
         let text = picked.iter().map(|p| saved_query(p).unwrap_or(p)).collect::<Vec<_>>().join("\r\n");
         let (backend, owner) = (self.backend.clone(), self.owner);
-        let count = picked.len();
-        let task = cx.background_executor().spawn(async move { backend.copy_text(&text, owner) });
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            this.update(cx, |this, cx| match result {
-                Ok(()) => this.notify(format!("{count} 項目のパスをコピーしました"), Tone::Info, cx),
-                Err(error) => this.notify(error, Tone::Error, cx),
-            })
-            .ok();
-        })
-        .detach();
+        let done = format!("{} 項目のパスをコピーしました", picked.len());
+        self.in_background(move || backend.copy_text(&text, owner), Some(done), cx);
     }
 
     pub fn paste(&mut self, cx: &mut Context<Self>) {
@@ -449,18 +431,14 @@ impl Colet {
         self.menu = None;
         let [entry] = picked.as_slice() else { return };
         let (backend, path) = (self.backend.clone(), entry.path.clone());
-        let task = cx.background_executor().spawn(async move { backend.reveal(&path) });
-        cx.spawn(async move |this, cx| {
-            if let Err(error) = task.await {
-                this.update(cx, |this, cx| this.notify(error, Tone::Error, cx)).ok();
-            }
-        })
-        .detach();
+        self.in_background(move || backend.reveal(&path), None, cx);
     }
 
     /// The Windows (Explorer) menu, where this one was opened. Dismisses Colet's menu and returns its
     /// keys even when the column it belonged to has gone.
     pub fn show_shell_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Read while the menu is open: its column and paths are what the reasons are for.
+        let refused = self.reasons().shell;
         let Some(menu) = self.menu.take() else { return };
         let index = self.state.index_of(menu.column);
         if let Some(index) = index {
@@ -469,7 +447,7 @@ impl Colet {
         let to_column = self.dialog.is_none() && self.menu_focus.is_focused(window);
         self.close_menus(to_column, window, cx);
         let Some(index) = index else { return };
-        if let Some(reason) = self.reasons_for(&menu).shell {
+        if let Some(reason) = refused {
             self.notify(reason, Tone::Info, cx);
             return;
         }
@@ -488,14 +466,6 @@ impl Colet {
             this.update(cx, |this, cx| this.refresh(cx)).ok();
         })
         .detach();
-    }
-
-    fn reasons_for(&mut self, menu: &Menu) -> Reasons {
-        let paths = menu.paths.clone();
-        let saved = self.menu.replace(Menu { column: menu.column, paths, at: menu.at, screen: menu.screen });
-        let reasons = self.reasons();
-        self.menu = saved;
-        reasons
     }
 
     /// Runs one file operation and keeps it in the history; a second waits for none, it is refused.

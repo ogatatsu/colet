@@ -5,14 +5,11 @@ use std::{collections::HashMap, sync::Arc};
 use colet_core::{entry::Entry, shell::{self, IconSource}};
 use gpui_kit::{Context, RenderImage};
 
-enum Slot {
-    Pending,
-    Ready(Arc<RenderImage>),
-    Missing,
-}
+use crate::app::Colet;
 
+/// Each icon asked for: `None` while it is on its way, or when the shell has none.
 #[derive(Default)]
-pub struct Icons(HashMap<IconSource, Slot>);
+pub struct Icons(HashMap<IconSource, Option<Arc<RenderImage>>>);
 
 /// How many it keeps before starting over.
 const LIMIT: usize = 4096;
@@ -34,19 +31,17 @@ pub fn source(entry: &Entry) -> IconSource {
 }
 
 impl Icons {
-    /// The icon for `entry`, or `None` while it is being asked for or when the shell has none; `view`
+    /// The icon for `entry`, or `None` while it is being asked for or when the shell has none; the view
     /// redraws once it arrives.
-    pub fn get<V: 'static>(&mut self, entry: &Entry, cx: &mut Context<V>, take: fn(&mut V) -> &mut Icons) -> Option<Arc<RenderImage>> {
+    pub fn get(&mut self, entry: &Entry, cx: &mut Context<Colet>) -> Option<Arc<RenderImage>> {
         let source = source(entry);
-        match self.0.get(&source) {
-            Some(Slot::Ready(image)) => return Some(image.clone()),
-            Some(_) => return None,
-            None => {}
+        if let Some(image) = self.0.get(&source) {
+            return image.clone();
         }
         if self.0.len() >= LIMIT {
             self.0.clear();
         }
-        self.0.insert(source.clone(), Slot::Pending);
+        self.0.insert(source.clone(), None);
         let key = source.clone();
         let task = cx.background_executor().spawn(async move {
             let icon = shell::icon(&source)?;
@@ -56,7 +51,7 @@ impl Icons {
         cx.spawn(async move |view, cx| {
             let image = task.await;
             view.update(cx, |view, cx| {
-                take(view).0.insert(key, image.map_or(Slot::Missing, Slot::Ready));
+                view.icons.0.insert(key, image);
                 cx.notify();
             })
         })

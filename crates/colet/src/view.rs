@@ -430,7 +430,7 @@ impl Colet {
         // only what the menu acts on stands out.
         let aside = self.menu.as_ref().is_some_and(|m| m.column == c.id && m.paths.is_some());
         let lit = selected && marked && !aside;
-        let image = self.icons.get(entry, cx, |this: &mut Colet| &mut this.icons);
+        let image = self.icons.get(entry, cx);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
         let path = entry.path.clone();
         let picture = match (saved, image) {

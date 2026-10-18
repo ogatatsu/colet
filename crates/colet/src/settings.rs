@@ -2,7 +2,7 @@
 //! the theme, and where the window was. Searches typed, history and the columns open are not kept.
 use std::{
     path::{Path, PathBuf},
-    sync::{Mutex, atomic::{AtomicU64, Ordering}},
+    sync::mpsc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -130,27 +130,35 @@ pub struct LoadError {
     pub kept: bool,
 }
 
-/// Serializes saves, including the final one on close. A delayed task checks its generation again
-/// after taking the lock, so it can never overwrite a newer save.
-#[derive(Default)]
-pub struct Writer {
-    generation: AtomicU64,
-    writing: Mutex<()>,
+type Done = mpsc::Sender<Result<(), String>>;
+
+/// Writes the settings on a thread of its own, one save after another in the order they were sent, so
+/// an older save never lands over a newer one: the final save on close waits for those before it.
+pub struct Saver(mpsc::Sender<(Settings, Done)>);
+
+impl Saver {
+    pub fn new(write: impl Fn(&Settings) -> Result<(), String> + Send + 'static) -> Self {
+        let (saves, queued) = mpsc::channel::<(Settings, Done)>();
+        // Ends once the saver is dropped and the saves sent before are written.
+        std::thread::spawn(move || {
+            for (settings, done) in queued {
+                let _ = done.send(write(&settings));
+            }
+        });
+        Self(saves)
+    }
+
+    /// Queues `settings` behind the saves before it; the receiver hears how its write went.
+    pub fn save(&self, settings: Settings) -> mpsc::Receiver<Result<(), String>> {
+        let (done, result) = mpsc::channel();
+        let _ = self.0.send((settings, done));
+        result
+    }
 }
 
-impl Writer {
-    pub fn request(&self) -> u64 {
-        self.generation.fetch_add(1, Ordering::AcqRel) + 1
-    }
-
-    pub fn current(&self, generation: u64) -> bool {
-        self.generation.load(Ordering::Acquire) == generation
-    }
-
-    pub fn save(&self, generation: u64, write: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
-        let _writing = self.writing.lock().map_err(|e| format!("設定を保存できません: {e}"))?;
-        if self.current(generation) { write() } else { Ok(()) }
-    }
+/// How a save went, once it is written; a saver that stopped never says.
+pub fn written(result: mpsc::Receiver<Result<(), String>>) -> Result<(), String> {
+    result.recv().unwrap_or_else(|_| Err("設定を保存できません".into()))
 }
 
 /// The settings kept, or the defaults when there are none yet.
@@ -212,38 +220,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn finishes_an_in_flight_save_before_the_final_one_and_discards_delayed_older_saves() {
-        use std::sync::{Arc, mpsc};
+    fn finishes_an_in_flight_save_before_the_final_one() {
+        use std::sync::Mutex;
         use std::time::Duration;
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        let writer = Arc::new(Writer::default());
-        let old = writer.request();
         let (started, entered) = mpsc::channel();
-        let (release, released) = mpsc::channel();
-        let first_writer = writer.clone();
-        let first_path = path.clone();
-        let first = std::thread::spawn(move || first_writer.save(old, || {
-            started.send(()).unwrap();
-            released.recv().unwrap();
-            save_to(&Settings { instance: "older".into(), ..Settings::default() }, &first_path)
-        }));
+        let (release, released) = mpsc::channel::<()>();
+        let gate = Mutex::new((started, released));
+        let target = path.clone();
+        let saver = Saver::new(move |settings| {
+            if settings.instance == "older" {
+                let gate = gate.lock().unwrap();
+                gate.0.send(()).unwrap();
+                gate.1.recv().unwrap();
+            }
+            save_to(settings, &target)
+        });
+        let older = saver.save(Settings { instance: "older".into(), ..Settings::default() });
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
-        // The first save is inside its write callback and cannot finish until released. Check the
-        // mutex itself here: a timeout on the second thread could just mean it was not scheduled.
-        let locked = matches!(writer.writing.try_lock(), Err(std::sync::TryLockError::WouldBlock));
-        let newest = writer.request();
-        let last_writer = writer.clone();
-        let last_path = path.clone();
-        let last = std::thread::spawn(move || last_writer.save(newest, || {
-            save_to(&Settings { instance: "latest".into(), ..Settings::default() }, &last_path)
-        }));
+        // The older save is in the middle of its write; the final one waits behind it.
+        let latest = saver.save(Settings { instance: "latest".into(), ..Settings::default() });
+        assert!(latest.try_recv().is_err());
         release.send(()).unwrap();
-        first.join().unwrap().unwrap();
-        last.join().unwrap().unwrap();
-        assert!(locked, "the write callback must run while holding the save lock");
-        writer.save(old, || panic!("a delayed old save must be discarded")).unwrap();
+        written(older).unwrap();
+        written(latest).unwrap();
         assert_eq!(load_from(&path).unwrap().instance, "latest");
     }
 

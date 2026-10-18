@@ -11,7 +11,7 @@ use gpui_kit::*;
 
 use crate::{
     app::{Colet, Engine, Tone, WidthOf},
-    settings::{Placement, SavedSearch, Settings, Theme},
+    settings::{Placement, SavedSearch, Settings, Theme, written},
     state::{Kind, saved_query, search_key},
 };
 
@@ -90,40 +90,39 @@ impl Colet {
             let home = self.state.columns[0].id;
             self.load(home, 0, true, cx);
         }
-        let generation = self.settings_writer.request();
-        if self.keep_file {
-            cx.notify();
+        self.settings_changes += 1;
+        let change = self.settings_changes;
+        cx.notify();
+        if self.settings_saver.is_none() {
             return;
         }
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(250)).await;
-            let Some((writer, backend, settings)) = this
-                .update(cx, |this, _| this.settings_writer.current(generation).then(|| {
-                    (this.settings_writer.clone(), this.backend.clone(), this.settings.clone())
-                }))
+            // A later change has its own save coming.
+            let queued = this
+                .update(cx, |this, _| {
+                    let saver = this.settings_saver.as_ref().filter(|_| this.settings_changes == change)?;
+                    Some(saver.save(this.settings.clone()))
+                })
                 .ok()
-                .flatten()
-            else {
-                return;
-            };
-            let saved = cx.background_executor().spawn(async move {
-                writer.save(generation, || backend.save_settings(&settings))
-            }).await;
+                .flatten();
+            let Some(queued) = queued else { return };
+            let saved = cx.background_executor().spawn(async move { written(queued) }).await;
             if let Err(error) = saved {
                 this.update(cx, |this, cx| this.notify(error, Tone::Error, cx)).ok();
             }
         })
         .detach();
-        cx.notify();
     }
 
-    /// Writes the settings now, as the window closes.
+    /// Writes the settings now, as the window closes, once the saves before are written; the saves still
+    /// waiting out a burst are dropped.
     pub fn flush_settings(&mut self) -> Result<(), String> {
-        let generation = self.settings_writer.request();
-        if self.keep_file {
-            return Ok(());
+        self.settings_changes += 1;
+        match &self.settings_saver {
+            Some(saver) => written(saver.save(self.settings.clone())),
+            None => Ok(()),
         }
-        self.settings_writer.save(generation, || self.backend.save_settings(&self.settings))
     }
 
     pub fn remember_window(&mut self, window: &Window, cx: &mut Context<Self>) {

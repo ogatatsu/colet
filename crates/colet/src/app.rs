@@ -27,7 +27,7 @@ use crate::{
     icons::Icons,
     ops::{HistoryEntry, Menu, Running},
     places::{Dialog, home_entries, home_groups},
-    settings::{LoadError, Settings, Writer},
+    settings::{LoadError, Saver, Settings},
     state::{ColumnId, Kind, State},
     theme::Palette,
 };
@@ -234,9 +234,11 @@ pub struct Colet {
     /// What type-ahead has typed so far, when, and in which column.
     typed: (String, Instant, ColumnId),
     pub settings: Settings,
-    /// The file read at start could not be read and is still there: never written over this session.
-    pub(crate) keep_file: bool,
-    pub(crate) settings_writer: Arc<Writer>,
+    /// Writes the settings; none when the file read at start could not be read and is still there, so
+    /// it is never written over this session.
+    pub(crate) settings_saver: Option<Saver>,
+    /// Counts the changes to the settings: a save waiting out a burst goes only for the last.
+    pub(crate) settings_changes: u64,
     /// What the latest operation sent away, by path key: a listing that finds it gone takes it as
     /// Colet's own doing.
     pub(crate) departed: HashSet<String>,
@@ -338,6 +340,10 @@ impl Colet {
             Ok(settings) => (settings, None, false),
             Err(error) => (Settings::default(), Some(error.message), error.kept),
         };
+        let settings_saver = (!keep_file).then(|| {
+            let backend = backend.clone();
+            Saver::new(move |settings| backend.save_settings(settings))
+        });
         let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
             Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
             _ => 0,
@@ -385,8 +391,8 @@ impl Colet {
             search_refresh: false,
             typed: (String::new(), Instant::now(), 0),
             settings,
-            keep_file,
-            settings_writer: Arc::default(),
+            settings_saver,
+            settings_changes: 0,
             departed: HashSet::new(),
             dialog: None,
             dialog_subscriptions: Vec::new(),
@@ -553,6 +559,26 @@ impl Colet {
             .detach();
         }
         cx.notify();
+    }
+
+    /// Runs `work` off the UI thread, then says `done` once it succeeds, or why it failed.
+    pub(crate) fn in_background(
+        &mut self,
+        work: impl FnOnce() -> Result<(), String> + Send + 'static,
+        done: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let task = cx.background_executor().spawn(async move { work() });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| match (result, done) {
+                (Ok(()), Some(done)) => this.notify(done, Tone::Info, cx),
+                (Ok(()), None) => {}
+                (Err(error), _) => this.notify(error, Tone::Error, cx),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn dismiss(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -904,13 +930,7 @@ impl Colet {
             return;
         }
         let (backend, owner) = (self.backend.clone(), self.owner);
-        let task = cx.background_executor().spawn(async move { backend.open(&entry.path, owner) });
-        cx.spawn(async move |this, cx| {
-            if let Err(error) = task.await {
-                this.update(cx, |this, cx| this.notify(format!("開けません: {error}"), Tone::Error, cx)).ok();
-            }
-        })
-        .detach();
+        self.in_background(move || backend.open(&entry.path, owner).map_err(|error| format!("開けません: {error}")), None, cx);
     }
 
     /// A crumb takes the keys to its column, bringing it on screen even when it is already active.
