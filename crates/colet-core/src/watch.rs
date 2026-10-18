@@ -4,7 +4,6 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, mpsc},
     thread,
-    time::Duration,
 };
 
 use notify::{RecursiveMode, Watcher as _};
@@ -25,42 +24,38 @@ fn repair_paths(paths: &[String], folders: &[String]) -> Vec<String> {
     paths.iter().filter(|path| folders.iter().any(|folder| inside(folder, path))).cloned().collect()
 }
 
-fn record(changes: &Mutex<Changes>, wake: &mpsc::Sender<()>, paths: Vec<String>) {
-    if changes.lock().unwrap().add(paths) {
-        let _ = wake.send(());
-    }
-}
-
-/// The paths changed since the last batch was taken; none named means anything may have.
-#[derive(Default)]
-pub struct Changes {
-    all: bool,
-    paths: HashSet<String>,
+/// What changed since the batch was last taken.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Changes {
+    #[default]
+    Nothing,
+    Paths(HashSet<String>),
+    /// Anything may have: an unnamed change, which outweighs the named ones around it.
+    All,
 }
 
 impl Changes {
-    /// Only the first change in a batch schedules it to be sent: true then. An empty `paths` stands for
-    /// any change, even after named ones.
-    pub fn add(&mut self, paths: Vec<String>) -> bool {
-        let schedule = !self.all && self.paths.is_empty();
+    /// An empty `paths` stands for any change.
+    pub fn add(&mut self, paths: Vec<String>) {
         if paths.is_empty() {
-            self.all = true;
-            self.paths.clear();
-        } else if !self.all {
-            self.paths.extend(paths);
+            *self = Changes::All;
+            return;
         }
-        schedule
+        match self {
+            Changes::Nothing => *self = Changes::Paths(paths.into_iter().collect()),
+            Changes::Paths(batch) => batch.extend(paths),
+            Changes::All => {}
+        }
     }
 
-    /// The batch, empty when any change may have happened.
-    pub fn take(&mut self) -> Vec<String> {
-        self.all = false;
-        self.paths.drain().collect()
+    /// The batch, leaving nothing behind.
+    pub fn take(&mut self) -> Changes {
+        std::mem::take(self)
     }
 }
 
-/// Watches folders, one level deep each, and hands `changed` each batch of changed paths a little after
-/// the first in it. Dropped, it stops.
+/// Watches folders, one level deep each, adding what changes in them to a batch the caller takes when it
+/// likes. Dropped, it stops.
 ///
 /// Starting to watch a folder opens it, which a share that answers slowly can keep waiting for seconds:
 /// that happens on a thread of its own, never the caller's.
@@ -81,29 +76,18 @@ impl Drop for FolderWatcher {
 }
 
 impl FolderWatcher {
-    /// Watches nothing until [`set`](Self::set). `unwatched` hears of the folders it could list but not
-    /// watch, as for a share that sends no change notifications; one it cannot read is left out, as its
-    /// column says so. Both are called on the watcher's threads.
+    /// Watches nothing until [`set`](Self::set), adding what changes to `changes`. `unwatched` hears of
+    /// the folders it could list but not watch, as for a share that sends no change notifications; one it
+    /// cannot read is left out, as its column says so. It is called on the watcher's thread.
     pub fn new(
-        changed: impl Fn(Vec<String>) + Send + 'static,
+        changes: Arc<Mutex<Changes>>,
         unwatched: impl Fn(Vec<String>) + Send + 'static,
     ) -> Result<Self, String> {
-        let changes = Arc::new(Mutex::new(Changes::default()));
-        let (wake, batches) = mpsc::channel::<()>();
         let desired = Arc::new(Mutex::new(Vec::<String>::new()));
         let requested = desired.clone();
         let (wanted, sets) = mpsc::channel::<WatchCommand>();
         let repair = wanted.clone();
-        let (repaired, repaired_wake) = (changes.clone(), wake.clone());
-        let queued = changes.clone();
-        // Asleep when idle; dropping the watcher closes the channel once any batch is delivered.
-        thread::spawn(move || {
-            for () in batches {
-                thread::sleep(Duration::from_millis(100));
-                let paths = queued.lock().unwrap().take();
-                changed(paths);
-            }
-        });
+        let repaired = changes.clone();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             let (paths, reset, error) = match event {
                 Ok(event) => {
@@ -128,7 +112,7 @@ impl FolderWatcher {
             if reset && (paths.is_empty() || !repairs.is_empty()) {
                 let _ = repair.send(WatchCommand::Repair(repairs));
             }
-            record(&changes, &wake, if error { Vec::new() } else { paths });
+            changes.lock().unwrap().add(if error { Vec::new() } else { paths });
         })
         .map_err(|e| e.to_string())?;
         // Dropping the handle sends Stop: the callback also has a sender, so disconnection alone
@@ -209,7 +193,7 @@ impl FolderWatcher {
                     }).collect();
                     if !refreshed.is_empty() {
                         // List again after the new handle is installed, covering the gap before it.
-                        record(&repaired, &repaired_wake, refreshed);
+                        repaired.lock().unwrap().add(refreshed);
                     }
                     if !failed.is_empty() {
                         unwatched(failed);
@@ -230,6 +214,7 @@ impl FolderWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn file_changes_reach_the_listing_without_repairing_directory_handles() {
@@ -250,16 +235,16 @@ mod tests {
     }
 
     #[test]
-    fn a_burst_keeps_both_rename_paths_and_schedules_one_batch() {
+    fn a_burst_keeps_both_rename_paths_in_one_batch() {
         let mut changes = Changes::default();
-        assert!(changes.add(vec!["old".into(), "new".into()]));
+        changes.add(vec!["old".into(), "new".into()]);
         for _ in 0..1000 {
-            assert!(!changes.add(vec!["new".into()]));
+            changes.add(vec!["new".into()]);
         }
-        let paths: HashSet<_> = changes.take().into_iter().collect();
-        assert_eq!(paths, HashSet::from(["old".into(), "new".into()]));
-        assert!(changes.add(vec!["later".into()]));
-        assert_eq!(changes.take(), ["later"]);
+        assert_eq!(changes.take(), Changes::Paths(HashSet::from(["old".into(), "new".into()])));
+        assert_eq!(changes.take(), Changes::Nothing);
+        changes.add(vec!["later".into()]);
+        assert_eq!(changes.take(), Changes::Paths(HashSet::from(["later".into()])));
     }
 
     #[test]
@@ -268,21 +253,41 @@ mod tests {
         changes.add(vec!["before".into()]);
         changes.add(vec![]);
         changes.add(vec!["after".into()]);
-        assert!(changes.take().is_empty());
-        assert!(changes.add(vec!["next".into()]));
-        assert_eq!(changes.take(), ["next"]);
+        assert_eq!(changes.take(), Changes::All);
+        changes.add(vec!["next".into()]);
+        assert_eq!(changes.take(), Changes::Paths(HashSet::from(["next".into()])));
+    }
+
+    /// The paths of the next batch to arrive within `wait`, taken as the window takes them; none named
+    /// for any change.
+    fn next(changes: &Mutex<Changes>, wait: Duration) -> Option<Vec<String>> {
+        let deadline = std::time::Instant::now() + wait;
+        while std::time::Instant::now() < deadline {
+            match changes.lock().unwrap().take() {
+                Changes::Nothing => {}
+                Changes::Paths(paths) => return Some(paths.into_iter().collect()),
+                Changes::All => return Some(Vec::new()),
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        None
+    }
+
+    /// Waits out the batches still arriving.
+    fn drain(changes: &Mutex<Changes>, quiet: Duration) {
+        while next(changes, quiet).is_some() {}
     }
 
     /// Writes a file into `dir` until the watcher reports one there: it starts watching a moment after it
     /// is asked to.
-    fn reported(dir: &Path, received: &mpsc::Receiver<Vec<String>>) -> bool {
+    fn reported(dir: &Path, changes: &Mutex<Changes>) -> bool {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let prefix = dir.display().to_string();
         let mut i = 0;
         while std::time::Instant::now() < deadline {
             i += 1;
             std::fs::write(dir.join(format!("new{i}.txt")), "x").unwrap();
-            if received.recv_timeout(Duration::from_millis(300)).is_ok_and(|paths| paths.iter().any(|p| p.starts_with(&prefix))) {
+            if next(changes, Duration::from_millis(300)).is_some_and(|paths| paths.iter().any(|p| p.starts_with(&prefix))) {
                 return true;
             }
         }
@@ -292,22 +297,18 @@ mod tests {
     #[test]
     fn watches_the_folders_set_and_lets_go_of_those_dropped() {
         let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (sent, received) = mpsc::channel();
+        let changes = Arc::new(Mutex::new(Changes::default()));
         let (missed, unwatched) = mpsc::channel();
-        let watcher = FolderWatcher::new(
-            move |paths| sent.send(paths).unwrap(),
-            move |paths| missed.send(paths).unwrap(),
-        )
-        .unwrap();
+        let watcher = FolderWatcher::new(changes.clone(), move |paths| missed.send(paths).unwrap()).unwrap();
         let path = |dir: &tempfile::TempDir| dir.path().display().to_string();
         watcher.set(vec![path(&a)]);
-        assert!(reported(a.path(), &received));
+        assert!(reported(a.path(), &changes));
         watcher.set(vec![path(&b)]);
-        assert!(reported(b.path(), &received));
+        assert!(reported(b.path(), &changes));
         // Let go of, `a` reports nothing more.
-        while received.recv_timeout(Duration::from_millis(300)).is_ok() {}
+        drain(&changes, Duration::from_millis(300));
         std::fs::write(a.path().join("later.txt"), "x").unwrap();
-        assert!(received.recv_timeout(Duration::from_millis(500)).is_err());
+        assert!(next(&changes, Duration::from_millis(500)).is_none());
         assert!(unwatched.try_recv().is_err());
     }
 
@@ -316,19 +317,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("watched");
         std::fs::create_dir(&path).unwrap();
-        let (sent, received) = mpsc::channel();
-        let watcher = FolderWatcher::new(move |paths| { let _ = sent.send(paths); }, |_| {}).unwrap();
+        let changes = Arc::new(Mutex::new(Changes::default()));
+        let watcher = FolderWatcher::new(changes.clone(), |_| {}).unwrap();
         watcher.set(vec![path.display().to_string()]);
-        assert!(reported(&path, &received));
+        assert!(reported(&path, &changes));
         std::fs::rename(&path, dir.path().join("old")).unwrap();
         std::fs::create_dir(&path).unwrap();
-        assert!(reported(&path, &received));
+        assert!(reported(&path, &changes));
         // A replacement's own notification must not stand in for notifications from its new handle.
-        while received.recv_timeout(Duration::from_millis(200)).is_ok() {}
-        assert!(reported(&path, &received));
-        while received.recv_timeout(Duration::from_millis(200)).is_ok() {}
+        drain(&changes, Duration::from_millis(200));
+        assert!(reported(&path, &changes));
+        drain(&changes, Duration::from_millis(200));
         std::fs::write(dir.path().join("unrelated.txt"), b"outside").unwrap();
         std::fs::write(dir.path().join("old").join("after-rename.txt"), b"old handle").unwrap();
-        assert!(received.recv_timeout(Duration::from_millis(300)).is_err());
+        assert!(next(&changes, Duration::from_millis(300)).is_none());
     }
 }

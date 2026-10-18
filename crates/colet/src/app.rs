@@ -14,7 +14,7 @@ use colet_core::{
     everything::PAGE,
     paths::path_key,
     shell,
-    watch::FolderWatcher,
+    watch::{Changes, FolderWatcher},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -25,7 +25,7 @@ use colet_core::shell::clipboard::ClipboardFiles;
 use crate::{
     backend::{self, Search},
     icons::Icons,
-    ops::{HistoryEntry, Menu, OperationEvents},
+    ops::{HistoryEntry, Menu, Running},
     places::{Dialog, home_entries, home_groups},
     settings::{LoadError, Settings, Writer},
     state::{ColumnId, Kind, State},
@@ -225,8 +225,8 @@ pub struct Colet {
     watched: Vec<String>,
     /// Folders already said to go unwatched, each said once.
     unwatched: HashSet<String>,
-    /// What the watcher saw change, collected until the UI takes it: `None` inside for any change.
-    pub(crate) changed: Arc<Mutex<Option<Option<HashSet<String>>>>>,
+    /// What the watcher saw change, collected until the UI takes it.
+    pub(crate) changed: Arc<Mutex<Changes>>,
     /// Folders the watcher could list but not watch, until the UI says so.
     missed: Arc<Mutex<Vec<String>>>,
     searched_at: Option<Instant>,
@@ -268,8 +268,8 @@ pub struct Colet {
     pub crumbs_room: std::rc::Rc<std::cell::Cell<f32>>,
     /// Where the focused row of the active column was drawn, for the menu key.
     pub focused_row: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
-    /// A file operation is running; they go one at a time.
-    pub running: bool,
+    /// The file operation under way; they go one at a time.
+    pub running: Option<Running>,
     pub(crate) next_operation: u64,
     /// The file operations run since Colet opened, newest first.
     pub history: Vec<HistoryEntry>,
@@ -278,11 +278,6 @@ pub struct Colet {
     pub history_open: bool,
     /// The operations the history shows opened.
     pub expanded: HashSet<u64>,
-    pub(crate) operation_events: OperationEvents,
-    /// Where each running operation's last item ended, as a new folder's.
-    pub(crate) made: HashMap<u64, String>,
-    /// Where each running operation's copied or moved items went.
-    pub(crate) placed: HashMap<u64, Vec<String>>,
     /// The files on the clipboard, marked in their rows until it changes.
     pub clipboard: ClipboardFiles,
     /// The clipboard's paths by path key: another app may write them in another case.
@@ -327,7 +322,7 @@ impl Colet {
         window.on_window_should_close(cx, move |_, cx| {
             let Some(view) = view.upgrade() else { return true };
             view.update(cx, |this, cx| {
-                if this.running {
+                if this.running.is_some() {
                     this.notify(
                         "ファイル操作中です。完了を待つか、進捗ダイアログでキャンセルしてから閉じてください。",
                         Tone::Info,
@@ -409,15 +404,12 @@ impl Colet {
             crumb_bounds: Default::default(),
             crumbs_row: Default::default(),
             crumbs_room: Default::default(),
-            running: false,
+            running: None,
             next_operation: 0,
             history: Vec::new(),
             unseen: 0,
             history_open: false,
             expanded: HashSet::new(),
-            operation_events: Arc::default(),
-            made: HashMap::new(),
-            placed: HashMap::new(),
             clipboard: ClipboardFiles::default(),
             held: HashSet::new(),
             clipboard_changed: Arc::new(AtomicBool::new(true)),
@@ -703,19 +695,8 @@ impl Colet {
         }
         self.watched = paths.clone();
         if self.watcher.is_none() {
-            let (changed, missed) = (self.changed.clone(), self.missed.clone());
-            let watcher = FolderWatcher::new(
-                move |paths| {
-                    let mut queue = changed.lock().unwrap();
-                    let batch = queue.get_or_insert_with(|| Some(HashSet::new()));
-                    match (paths.is_empty(), batch.as_mut()) {
-                        (true, _) => *batch = None,
-                        (false, Some(batch)) => batch.extend(paths),
-                        (false, None) => {}
-                    }
-                },
-                move |paths| missed.lock().unwrap().extend(paths),
-            );
+            let missed = self.missed.clone();
+            let watcher = FolderWatcher::new(self.changed.clone(), move |paths| missed.lock().unwrap().extend(paths));
             match watcher {
                 Ok(watcher) => self.watcher = Some(watcher),
                 Err(error) => {
@@ -753,9 +734,7 @@ impl Colet {
                     return;
                 }
                 let batch = changed.lock().unwrap().take();
-                if let Some(batch) = batch
-                    && this.update(cx, |this, cx| this.files_changed(batch, cx)).is_err()
-                {
+                if batch != Changes::Nothing && this.update(cx, |this, cx| this.files_changed(batch, cx)).is_err() {
                     return;
                 }
                 if !tick.is_multiple_of(5) {
@@ -808,10 +787,14 @@ impl Colet {
     }
 
     /// The folder columns a changed item shows in: the folder holding it, and its own when it is one.
-    fn files_changed(&mut self, paths: Option<HashSet<String>>, cx: &mut Context<Self>) {
-        let Some(paths) = paths else {
-            self.refresh(cx);
-            return;
+    fn files_changed(&mut self, changes: Changes, cx: &mut Context<Self>) {
+        let paths = match changes {
+            Changes::Nothing => return,
+            Changes::Paths(paths) => paths,
+            Changes::All => {
+                self.refresh(cx);
+                return;
+            }
         };
         let folders: HashSet<String> = paths
             .iter()

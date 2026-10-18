@@ -14,6 +14,7 @@ use colet_core::{
     operations::{Event, Kind as Operation, Request},
     paths::{ancestors, child, folder_name},
     shell::{Owner, clipboard::ClipboardFiles},
+    watch::Changes,
 };
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -508,12 +509,12 @@ fn reloads_only_the_folders_a_change_names(cx: &mut TestAppContext) {
     fake.lists.lock().unwrap().clear();
     fake.folders.lock().unwrap().get_mut(r"D:\a").unwrap().push(file(r"D:\a\new.txt"));
     let changed = ui.read(cx, |v| v.changed.clone());
-    *changed.lock().unwrap() = Some(Some(HashSet::from([r"D:\a\new.txt".to_owned()])));
+    *changed.lock().unwrap() = Changes::Paths(HashSet::from([r"D:\a\new.txt".to_owned()]));
     settle(cx);
     assert_eq!(*fake.lists.lock().unwrap(), [r"D:\a"]);
     assert_eq!(ui.read(cx, |v| v.state.columns[2].entries.len()), 2);
     // Any change, unnamed, reloads them all.
-    *changed.lock().unwrap() = Some(None);
+    *changed.lock().unwrap() = Changes::All;
     settle(cx);
     let lists: HashSet<String> = fake.lists.lock().unwrap().iter().cloned().collect();
     assert!(lists.contains(r"D:\") && lists.contains(r"D:\a"), "{lists:?}");
@@ -1345,7 +1346,7 @@ fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &m
     let (fake, ui) = in_work(cx);
     let dialog_paths = |ui: &Ui, cx: &mut TestAppContext| {
         ui.read(cx, |v| match &v.dialog {
-            Some(crate::places::Dialog::Name { paths, .. } | crate::places::Dialog::Recycle { paths, .. }) => paths.clone(),
+            Some(crate::places::Dialog::Name { request: Request { paths, .. }, .. } | crate::places::Dialog::Recycle { paths, .. }) => paths.clone(),
             _ => Vec::new(),
         })
     };
@@ -1485,7 +1486,7 @@ fn closes_the_menu_and_returns_the_keys_when_its_column_vanishes(cx: &mut TestAp
     ui.press(cx, "shift-f10");
     fake.remove(r"D:\work");
     let changed = ui.read(cx, |v| v.changed.clone());
-    *changed.lock().unwrap() = Some(Some(HashSet::from([r"D:\work".into()])));
+    *changed.lock().unwrap() = Changes::Paths(HashSet::from([r"D:\work".into()]));
     settle(cx);
     ui.act(cx, |_, _| ());
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);

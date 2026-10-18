@@ -1,6 +1,6 @@
 //! What opens over the window: the dialogs, the file menu, and the history of file operations.
 use colet_core::{
-    operations::Kind as Operation,
+    operations::{Kind as Operation, Request},
     paths::{ancestors, folder_name},
 };
 use gpui_kit::base::input::Input;
@@ -95,7 +95,7 @@ impl Colet {
     pub fn render_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = self.palette;
         let title = match self.dialog.as_ref()? {
-            Dialog::Name { kind: Operation::NewFolder, .. } => "新規フォルダー",
+            Dialog::Name { request: Request { kind: Operation::NewFolder, .. }, .. } => "新規フォルダー",
             Dialog::Name { .. } => "名前を変更",
             Dialog::Recycle { .. } => "ごみ箱へ移動しますか？",
             Dialog::EditSearch { .. } => "保存した検索を編集",
@@ -105,7 +105,7 @@ impl Colet {
         let themes: Vec<(Theme, FocusHandle)> =
             Theme::ALL.into_iter().map(|theme| (theme, self.stop(format!("theme:{theme:?}"), cx))).collect();
         let (content, buttons) = match self.dialog.as_ref()? {
-            Dialog::Name { kind, paths, destination, input, .. } => {
+            Dialog::Name { request: Request { kind, paths, destination, .. }, input, .. } => {
                 let problem = self.name_problem(cx);
                 let empty = input.read(cx).value().trim().is_empty();
                 // Where the name goes: a rename may come from the results, far from its folder.
@@ -479,7 +479,7 @@ impl Colet {
             .cursor_pointer()
             .hover(|d| d.bg(p.hover))
             .tip(p, label.clone())
-            .child(if self.running {
+            .child(if self.running.is_some() {
                 crate::view::spinner("history-running", 14., p.text_muted).into_any_element()
             } else {
                 svg().path("icons/clock.svg").size(px(14.)).text_color(p.text_muted).into_any_element()
@@ -541,7 +541,7 @@ impl Colet {
                     .child(
                         crate::view::keep_focus(crate::view::ring(div().id(("history-entry", id)).track_focus(&stops[&format!("history-entry:{id}")]), p))
                             .role(Role::Button)
-                            .aria_label(format!("{} {}", entry.kind.title(), entry.target()))
+                            .aria_label(format!("{} {}", entry.request.kind.title(), entry.target()))
                             .aria_expanded(open)
                             .px_3()
                             .py_2()
@@ -553,7 +553,7 @@ impl Colet {
                             .hover(|d| d.bg(p.raised_hover))
                             .child(svg().path(if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" }).size(px(12.)).text_color(p.text_faint))
                             .child(div().text_color(p.text_faint).child(clock(entry.started)))
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child(entry.kind.title()))
+                            .child(div().font_weight(FontWeight::SEMIBOLD).child(entry.request.kind.title()))
                             .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(entry.target()))
                             .child(div().text_color(if problems { p.danger } else { p.text_muted }).child(entry.outcome()))
                             .on_click(cx.listener(move |this, _, _, cx| {

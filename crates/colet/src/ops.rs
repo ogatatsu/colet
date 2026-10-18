@@ -68,12 +68,10 @@ pub enum Status {
 #[derive(Clone, Debug)]
 pub struct HistoryEntry {
     pub id: u64,
-    pub kind: Kind,
+    /// What was asked: a paste's paths are left empty, read from the clipboard as it runs.
+    pub request: Request,
     /// Milliseconds since the Unix epoch.
     pub started: u64,
-    pub paths: Vec<String>,
-    pub destination: String,
-    pub name: String,
     pub status: Status,
     /// The operation's own failure, when no item says it.
     pub error: Option<String>,
@@ -101,7 +99,7 @@ impl HistoryEntry {
             Event::Skipped { path } => (path, ItemStatus::Skipped, None),
             Event::Cancelled { path } => (path, ItemStatus::Cancelled, None),
         };
-        let gone = self.kind == Kind::Recycle && status == ItemStatus::Done;
+        let gone = self.request.kind == Kind::Recycle && status == ItemStatus::Done;
         if self.items.len() < MAX_ITEMS {
             self.items.push(HistoryItem { path, from: None, status, error, gone });
         } else {
@@ -115,13 +113,13 @@ impl HistoryEntry {
 
     /// What it acted on, in a few words.
     pub fn target(&self) -> String {
-        let n = self.paths.len();
-        match self.kind {
-            Kind::Paste => format!("{} 項目 → {}", self.items.len() + self.more, folder_name(&self.destination)),
-            Kind::Recycle if n == 1 => folder_name(&self.paths[0]).to_owned(),
-            Kind::Recycle => format!("{n} 項目"),
-            Kind::Rename => format!("{} → {}", folder_name(self.paths.first().map_or("", |p| p)), self.name),
-            Kind::NewFolder => format!("{}（{}）", self.name, folder_name(&self.destination)),
+        let Request { kind, paths, destination, name } = &self.request;
+        match kind {
+            Kind::Paste => format!("{} 項目 → {}", self.items.len() + self.more, folder_name(destination)),
+            Kind::Recycle if paths.len() == 1 => folder_name(&paths[0]).to_owned(),
+            Kind::Recycle => format!("{} 項目", paths.len()),
+            Kind::Rename => format!("{} → {name}", folder_name(paths.first().map_or("", |p| p))),
+            Kind::NewFolder => format!("{name}（{}）", folder_name(destination)),
         }
     }
 
@@ -222,7 +220,7 @@ impl Colet {
         let search = picked.iter().any(|p| saved_query(p).is_some());
         let none = picked.is_empty();
         let item = if none { Some(NEEDS_SELECTION) } else if at_home { Some(NOT_AT_HOME) } else { None };
-        let busy = self.running.then_some(BUSY);
+        let busy = self.running.is_some().then_some(BUSY);
         let folder = busy.or(self.destination().is_none().then_some(NEEDS_FOLDER));
         let saved_pick = picked.len() == 1 && search;
         let parents: HashSet<String> =
@@ -313,7 +311,7 @@ impl Colet {
             Some(reason) => self.refuse("貼り付け", reason, cx),
             None => {
                 let destination = self.destination().unwrap_or_default();
-                self.run(Kind::Paste, Vec::new(), destination, String::new(), cx);
+                self.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
             }
         }
     }
@@ -339,7 +337,8 @@ impl Colet {
         let Some(entry) = entries.into_iter().next() else { return };
         // Like Explorer, the extension stays out of the selection.
         let end = if entry.directory { entry.name.len() } else { entry.name.rfind('.').filter(|&d| d > 0).unwrap_or(entry.name.len()) };
-        self.ask_name(Kind::Rename, vec![entry.path.clone()], String::new(), &entry.name, end, window, cx);
+        let request = Request { kind: Kind::Rename, paths: vec![entry.path], destination: String::new(), name: entry.name };
+        self.ask_name(request, end, window, cx);
     }
 
     pub fn ask_new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -349,22 +348,14 @@ impl Colet {
             return;
         }
         let destination = self.destination().unwrap_or_default();
-        let name = "新しいフォルダー";
-        self.ask_name(Kind::NewFolder, Vec::new(), destination, name, name.len(), window, cx);
+        let name = "新しいフォルダー".to_owned();
+        let end = name.len();
+        self.ask_name(Request { kind: Kind::NewFolder, paths: Vec::new(), destination, name }, end, window, cx);
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn ask_name(
-        &mut self,
-        kind: Kind,
-        paths: Vec<String>,
-        destination: String,
-        name: &str,
-        select_end: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(name.to_owned()));
+    /// The name dialog for `request`, starting from its name with the first `select_end` bytes selected.
+    fn ask_name(&mut self, request: Request, select_end: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(request.name.clone()));
         let subscription = cx.subscribe_in(&input, window, |this: &mut Self, _, event, window, cx| match event {
             InputEvent::PressEnter { .. } => this.submit_name(window, cx),
             InputEvent::Change => {
@@ -381,7 +372,7 @@ impl Colet {
             input.focus(window, cx);
             input.set_selected_range(0..select_end, cx);
         });
-        self.dialog = Some(Dialog::Name { kind, paths, destination, input, tried: false });
+        self.dialog = Some(Dialog::Name { request, input, tried: false });
         cx.notify();
     }
 
@@ -392,13 +383,13 @@ impl Colet {
     }
 
     pub fn submit_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialog::Name { kind, paths, destination, input, tried }) = &mut self.dialog else { return };
+        let Some(Dialog::Name { request, input, tried }) = &mut self.dialog else { return };
         let name = input.read(cx).value().to_string();
         if name.trim().is_empty() {
             return;
         }
         // Like Explorer, an unchanged name just closes the dialog.
-        if *kind == Kind::Rename && paths.first().is_some_and(|p| folder_name(p) == name) {
+        if request.kind == Kind::Rename && request.paths.first().is_some_and(|p| folder_name(p) == name) {
             self.close_dialog(window, cx);
             return;
         }
@@ -408,9 +399,9 @@ impl Colet {
             cx.notify();
             return;
         }
-        let (kind, paths, destination) = (*kind, paths.clone(), destination.clone());
+        let request = Request { name, ..request.clone() };
         self.close_dialog(window, cx);
-        self.run(kind, paths, destination, name, cx);
+        self.run(request, cx);
     }
 
     /// Delete and Shift+Delete ask first; Colet never deletes for good.
@@ -440,7 +431,7 @@ impl Colet {
         let Some(Dialog::Recycle { paths, .. }) = &self.dialog else { return };
         let paths = paths.clone();
         self.close_dialog(window, cx);
-        self.run(Kind::Recycle, paths, String::new(), String::new(), cx);
+        self.run(Request { kind: Kind::Recycle, paths, destination: String::new(), name: String::new() }, cx);
     }
 
     /// Opens the picked item: a folder beside it, a file in its app.
@@ -508,24 +499,22 @@ impl Colet {
     }
 
     /// Runs one file operation and keeps it in the history; a second waits for none, it is refused.
-    pub fn run(&mut self, kind: Kind, paths: Vec<String>, destination: String, name: String, cx: &mut Context<Self>) {
-        if self.running {
-            self.refuse(kind.title(), BUSY, cx);
+    pub fn run(&mut self, request: Request, cx: &mut Context<Self>) {
+        if self.running.is_some() {
+            self.refuse(request.kind.title(), BUSY, cx);
             return;
         }
         self.next_operation += 1;
         let id = self.next_operation;
         self.departed.clear();
-        self.running = true;
+        let events = OperationEvents::default();
+        self.running = Some(Running { id, events: events.clone(), made: None, placed: Vec::new() });
         self.history.insert(
             0,
             HistoryEntry {
                 id,
-                kind,
+                request: request.clone(),
                 started: now(),
-                paths: paths.clone(),
-                destination: destination.clone(),
-                name: name.clone(),
                 status: Status::Running,
                 error: None,
                 items: Vec::new(),
@@ -533,59 +522,47 @@ impl Colet {
             },
         );
         self.history.truncate(MAX_ENTRIES);
-        let events = self.operation_events.clone();
-        let request = Request { kind, paths: paths.clone(), destination: destination.clone(), name: name.clone() };
-        let (backend, owner) = (self.backend.clone(), self.owner);
+        let (backend, owner, asked) = (self.backend.clone(), self.owner, request.clone());
         let task = cx.background_executor().spawn(async move {
-            backend.operate(request, owner, Box::new(move |event| events.lock().unwrap().push((id, event))))
+            backend.operate(asked, owner, Box::new(move |event| events.lock().unwrap().push(event)))
         });
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = task.await;
-            this.update(cx, |this, cx| this.finished(id, kind, paths, destination, name, result, cx)).ok();
+            this.update(cx, |this, cx| this.finished(request, result, cx)).ok();
         })
         .detach();
     }
 
     /// Takes in how the items of the running operation ended so far.
     pub fn take_operation_events(&mut self) -> bool {
-        let events: Vec<(u64, Event)> = std::mem::take(&mut *self.operation_events.lock().unwrap());
+        let Some(running) = &mut self.running else { return false };
+        let events = std::mem::take(&mut *running.events.lock().unwrap());
         if events.is_empty() {
             return false;
         }
-        for (id, event) in events {
-            if let Event::Done { path } = &event {
-                self.made.insert(id, path.clone());
+        let mut entry = self.history.iter_mut().find(|e| e.id == running.id);
+        for event in events {
+            match &event {
+                Event::Done { path } => running.made = Some(path.clone()),
+                // A copy's source stays: only what left is expected to go from its listing.
+                Event::Left { path } => {
+                    self.departed.insert(path_key(path));
+                }
+                Event::Placed { path } => running.placed.push(path.clone()),
+                _ => {}
             }
-            // A copy's source stays: only what left is expected to go from its listing.
-            if let Event::Left { path } = &event {
-                self.departed.insert(path_key(path));
-            }
-            if let Event::Placed { path } = &event {
-                self.placed.entry(id).or_default().push(path.clone());
-            }
-            if let Some(entry) = self.history.iter_mut().find(|e| e.id == id) {
+            if let Some(entry) = &mut entry {
                 entry.record(event);
             }
         }
         true
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn finished(
-        &mut self,
-        id: u64,
-        kind: Kind,
-        paths: Vec<String>,
-        destination: String,
-        name: String,
-        result: Result<(), String>,
-        cx: &mut Context<Self>,
-    ) {
+    fn finished(&mut self, request: Request, result: Result<(), String>, cx: &mut Context<Self>) {
         self.take_operation_events();
-        self.running = false;
-        let made = self.made.remove(&id);
-        let pasted = self.placed.remove(&id).unwrap_or_default();
+        let Some(Running { id, made, placed: pasted, .. }) = self.running.take() else { return };
+        let Request { kind, paths, destination, name } = request;
         let (cancelled, problem) = match &result {
             Ok(()) => (false, None),
             Err(error) if error == CANCELLED => (true, None),
@@ -671,21 +648,28 @@ impl Colet {
     }
 }
 
-/// How the running operation's events reach the window.
-pub type OperationEvents = Arc<Mutex<Vec<(u64, Event)>>>;
+/// How the running operation's events reach the window from the shell's thread.
+type OperationEvents = Arc<Mutex<Vec<Event>>>;
+
+/// The file operation under way; they go one at a time.
+pub struct Running {
+    id: u64,
+    events: OperationEvents,
+    /// Where its last item ended, as a new folder's.
+    made: Option<String>,
+    /// Where its copied or moved items went.
+    placed: Vec<String>,
+}
 
 #[cfg(test)]
 mod tests {
-    use super::{Event, HistoryEntry, ItemStatus, Kind, Status};
+    use super::{Event, HistoryEntry, ItemStatus, Kind, Request, Status};
 
     fn entry(kind: Kind) -> HistoryEntry {
         HistoryEntry {
             id: 1,
-            kind,
+            request: Request { kind, paths: vec![r"D:\a.txt".into()], destination: r"D:\dest".into(), name: String::new() },
             started: 0,
-            paths: vec![r"D:\a.txt".into()],
-            destination: r"D:\dest".into(),
-            name: String::new(),
             status: Status::Running,
             error: None,
             items: Vec::new(),

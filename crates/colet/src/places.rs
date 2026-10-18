@@ -16,8 +16,8 @@ use crate::{
 };
 
 pub enum Dialog {
-    /// A rename's new name, or a new folder's.
-    Name { kind: colet_core::operations::Kind, paths: Vec<String>, destination: String, input: Entity<InputState>, tried: bool },
+    /// A rename's new name, or a new folder's: the request it sends, its name taken from `input`.
+    Name { request: colet_core::operations::Request, input: Entity<InputState>, tried: bool },
     /// Whether to send these to the Recycle Bin; `permanent` when asked with Shift+Delete.
     Recycle { paths: Vec<String>, permanent: bool },
     /// A saved search's name and query, found by the query it had as the dialog opened.
