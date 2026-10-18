@@ -411,6 +411,10 @@ fn opens_a_deep_search_file_on_its_own_folder_and_right_jumps_to_it(cx: &mut Tes
     ui.click(cx, "unfold");
     assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
     assert!(ui.act(cx, |window, _| window.try_find("unfold").is_none()));
+    // Clicked, it leaves the keys in the columns: → still jumps to the file.
+    assert!(ui.columns_focused(cx));
+    ui.press(cx, "right");
+    assert_eq!(ui.active(cx), 4);
     // Picked afresh, folded again: a crumb brings its column out and takes the keys.
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.click_in(cx, ("column", results), row(&deep.path));

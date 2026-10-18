@@ -1204,7 +1204,8 @@ impl Colet {
                         // The button laid over the whole strip: its ring's room would push the heading's line
                         // off the columns'.
                         .child(
-                            ring(div().id("unfold").track_focus(&unfold_focus), p)
+                            // Gone once pressed: the keys stay where they were rather than go with it.
+                            keep_focus(ring(div().id("unfold").track_focus(&unfold_focus), p))
                                 .role(Role::Button)
                                 .aria_label(format!("上の階層を表示（{away}階層）"))
                                 .absolute()
