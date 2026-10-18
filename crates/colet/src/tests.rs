@@ -573,6 +573,42 @@ fn makes_a_folder_a_favorite_with_its_star_and_ctrl_d_and_lists_it_at_home(cx: &
 }
 
 #[gpui_kit::test]
+fn works_in_a_favorite_by_mouse_and_tab_leaving_the_folders_above_it_folded(cx: &mut TestAppContext) {
+    let sub = folder(r"D:\work\sub");
+    let fake = Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\work")]),
+            (r"D:\work", vec![sub.clone(), file(r"D:\work\a.txt")]),
+            (r"D:\work\sub", vec![]),
+        ])
+    };
+    fake.settings.lock().unwrap().favorites = vec![r"D:\work".into()];
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\work"));
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 1);
+    // A row in its own column is picked there; the folder above stays folded.
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.click_in(cx, ("column", work), row(r"D:\work\a.txt"));
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
+    assert_eq!(ui.active(cx), 2);
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 1);
+    // A click off the rows takes the keys to the column clicked, folding nothing out.
+    ui.click_in(cx, "home", row(r"D:\work"));
+    ui.click(cx, ("column", work));
+    assert_eq!(ui.active(cx), 2);
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 1);
+    // The keys tabbed over from home land where → would, past the fold.
+    ui.click_in(cx, "home", row(r"D:\work"));
+    let view = ui.view.clone();
+    ui.act(cx, |window, cx| view.read(cx).columns_focus.clone().focus(window, cx));
+    settle(cx);
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.active(cx), 2);
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 1);
+}
+
+#[gpui_kit::test]
 fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake { roots: vec![Entry::folder(r"D:\", "D:")], ..Fake::default() }.with_results(vec![file(r"D:\a.pdf")]));
     let ui = open(cx, fake.clone());

@@ -650,6 +650,17 @@ impl Colet {
             .id(("column", id))
             .role(Role::Group)
             .aria_label(format!("{title} カラム"))
+            // A press anywhere in it takes the keys there, before the columns' focus would send them to
+            // the first one beside home.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    if let Some(index) = this.state.index_of(id) {
+                        this.state.set_active(index);
+                        cx.notify();
+                    }
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
