@@ -249,12 +249,12 @@ impl Colet {
     }
 
     pub fn copy(&mut self, cut: bool, cx: &mut Context<Self>) {
-        let picked = self.picked();
+        // What the menu was opened on, read before it closes: after, the selection would stand in.
+        let (picked, reasons) = (self.picked(), self.reasons());
         self.menu = None;
         if picked.is_empty() {
             return;
         }
-        let reasons = self.reasons();
         if let Some(reason) = if cut { reasons.cut } else { reasons.copy } {
             self.refuse(if cut { "切り取り" } else { "コピー" }, reason, cx);
             return;
@@ -308,7 +308,7 @@ impl Colet {
 
     /// F2: a rename, or for a saved search in home, its edit.
     pub fn ask_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let picked = self.picked();
+        let (picked, reasons, entries) = (self.picked(), self.reasons(), self.picked_entries());
         self.menu = None;
         if let [path] = picked.as_slice()
             && let Some(query) = saved_query(path)
@@ -320,11 +320,11 @@ impl Colet {
         if picked.is_empty() {
             return;
         }
-        if let Some(reason) = self.reasons().rename {
+        if let Some(reason) = reasons.rename {
             self.refuse("名前を変更", reason, cx);
             return;
         }
-        let Some(entry) = self.picked_entries().into_iter().next() else { return };
+        let Some(entry) = entries.into_iter().next() else { return };
         // Like Explorer, the extension stays out of the selection.
         let end = if entry.directory { entry.name.len() } else { entry.name.rfind('.').filter(|&d| d > 0).unwrap_or(entry.name.len()) };
         self.ask_name(Kind::Rename, vec![entry.path.clone()], String::new(), &entry.name, end, window, cx);
@@ -403,12 +403,12 @@ impl Colet {
 
     /// Delete and Shift+Delete ask first; Colet never deletes for good.
     pub fn ask_recycle(&mut self, permanent: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let picked = self.picked();
+        let (picked, reasons) = (self.picked(), self.reasons());
         self.menu = None;
         if picked.is_empty() {
             return;
         }
-        if let Some(reason) = self.reasons().delete {
+        if let Some(reason) = reasons.delete {
             let hint = if reason != NOT_AT_HOME {
                 ""
             } else if picked.iter().any(|p| saved_query(p).is_some()) {
@@ -433,8 +433,8 @@ impl Colet {
 
     /// Opens the picked item: a folder beside it, a file in its app.
     pub fn open_picked(&mut self, cx: &mut Context<Self>) {
-        self.menu = None;
         let picked = self.picked_entries();
+        self.menu = None;
         if let [entry] = picked.as_slice() {
             let index = self.state.active;
             self.open(index, &entry.path.clone(), cx);
@@ -442,8 +442,8 @@ impl Colet {
     }
 
     pub fn reveal_in_explorer(&mut self, cx: &mut Context<Self>) {
-        self.menu = None;
         let picked = self.picked_entries();
+        self.menu = None;
         let [entry] = picked.as_slice() else { return };
         let (backend, path) = (self.backend.clone(), entry.path.clone());
         let task = cx.background_executor().spawn(async move { backend.reveal(&path) });

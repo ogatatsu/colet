@@ -913,6 +913,38 @@ fn acts_from_the_menu_on_the_row_right_clicked_leaving_the_selection(cx: &mut Te
 }
 
 #[gpui_kit::test]
+fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    let dialog_paths = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.read(cx, |v| match &v.dialog {
+            Some(crate::places::Dialog::Name { paths, .. } | crate::places::Dialog::Recycle { paths, .. }) => paths.clone(),
+            _ => Vec::new(),
+        })
+    };
+    let menu = |ui: &Ui, cx: &mut TestAppContext, path: &str, id: &str| {
+        ui.act(cx, |window, cx| window.right_click(row(path), cx));
+        settle(cx);
+        ui.click(cx, id.to_owned());
+    };
+    // Another row than the selection: the rename is the one right-clicked's.
+    menu(&ui, cx, r"D:\work\c.txt", "menu-rename");
+    assert_eq!(dialog_paths(&ui, cx), [r"D:\work\c.txt"]);
+    ui.press(cx, "escape");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
+    // Nothing selected in the column: the commands are on all the same.
+    ui.view.update(cx, |v, cx| {
+        v.state.columns[2].selected.clear();
+        cx.notify();
+    });
+    settle(cx);
+    assert!(ui.selected(cx, 2).is_empty());
+    menu(&ui, cx, r"D:\work\b.txt", "menu-copy");
+    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\b.txt"]);
+    menu(&ui, cx, r"D:\work\b.txt", "menu-recycle");
+    assert_eq!(dialog_paths(&ui, cx), [r"D:\work\b.txt"]);
+}
+
+#[gpui_kit::test]
 fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "shift-f10");
