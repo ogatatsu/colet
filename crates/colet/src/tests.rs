@@ -24,7 +24,8 @@ use gpui_kit::{
 use crate::{
     app::{Colet, Engine},
     backend::{Backend, Search},
-    settings::{LoadError, SavedSearch, Settings},
+    settings::{LoadError, SavedSearch, Settings, Theme},
+    theme::Palette,
     state::{Kind, search_key},
 };
 
@@ -981,6 +982,43 @@ fn reconnects_from_the_preferences_making_the_search_afresh(cx: &mut TestAppCont
     assert!(matches!(ui.read(cx, |v| v.engine.clone()), Engine::Connected(_)));
     ui.click(cx, "close-preferences");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
+}
+
+#[gpui_kit::test]
+fn fixes_the_theme_from_the_preferences_at_once_and_keeps_it(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    let ui = open(cx, fake.clone());
+    // A test window's appearance is light, as Windows set light.
+    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::light().bg);
+    ui.click(cx, "preferences");
+    ui.click(cx, ("theme", Theme::Dark as usize));
+    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::dark().bg);
+    assert_eq!(fake.settings.lock().unwrap().theme, Theme::Dark);
+    ui.click(cx, ("theme", Theme::Light as usize));
+    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::light().bg);
+    assert_eq!(fake.settings.lock().unwrap().theme, Theme::Light);
+    // Back to following Windows, light here.
+    ui.click(cx, ("theme", Theme::Dark as usize));
+    ui.click(cx, ("theme", Theme::System as usize));
+    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::light().bg);
+    assert_eq!(fake.settings.lock().unwrap().theme, Theme::System);
+    // From the keys, as a stop for Tab.
+    let dark = ui.read(cx, |v| v.stops[&format!("theme:{:?}", Theme::Dark)].clone());
+    ui.act(cx, |window, cx| dark.focus(window, cx));
+    ui.press(cx, "space");
+    assert_eq!(ui.read(cx, |v| v.settings.theme), Theme::Dark);
+    let light = ui.read(cx, |v| v.stops[&format!("theme:{:?}", Theme::Light)].clone());
+    ui.act(cx, |window, cx| light.focus(window, cx));
+    ui.press(cx, "enter");
+    assert_eq!(ui.read(cx, |v| v.settings.theme), Theme::Light);
+}
+
+#[gpui_kit::test]
+fn opens_in_the_theme_kept_whatever_windows_is_set_to(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    fake.settings.lock().unwrap().theme = Theme::Dark;
+    let ui = open(cx, fake);
+    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::dark().bg);
 }
 
 /// D:\work open in its column, listing a.txt, b.txt and c.txt, worked in.

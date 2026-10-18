@@ -11,6 +11,7 @@ use crate::{
     app::{CloseDialog, Colet, ConfirmDialog, DIALOG},
     ops::{ItemStatus, Menu, Status},
     places::Dialog,
+    settings::Theme,
     theme::Palette,
     view::TipExt,
 };
@@ -74,7 +75,7 @@ fn label(p: Palette, text: &'static str) -> Div {
     div().text_size(px(12.)).text_color(p.text_muted).child(text)
 }
 
-fn button(p: Palette, id: &'static str, text: &'static str, primary: bool, enabled: bool) -> Stateful<Div> {
+fn button(p: Palette, id: impl Into<ElementId>, text: &'static str, primary: bool, enabled: bool) -> Stateful<Div> {
     div()
         .id(id)
         .h(px(30.))
@@ -100,6 +101,9 @@ impl Colet {
             Dialog::EditSearch { .. } => "保存した検索を編集",
             Dialog::Preferences { .. } => "設定",
         };
+        // Each theme a stop for Tab, kept across frames.
+        let themes: Vec<(Theme, FocusHandle)> =
+            Theme::ALL.into_iter().map(|theme| (theme, self.stop(format!("theme:{theme:?}"), cx))).collect();
         let body = match self.dialog.as_ref()? {
             Dialog::Name { kind, paths, destination, input, .. } => {
                 let problem = self.name_problem(cx);
@@ -252,6 +256,24 @@ impl Colet {
                     .flex_col()
                     .gap_3()
                     .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("設定"))
+                    // Taken at once as one is picked, and kept.
+                    .child(
+                        div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(
+                            div().id("themes").flex().gap_2().role(Role::RadioGroup).aria_label("テーマ").children(themes.into_iter().map(
+                                |(theme, focus)| {
+                                    let chosen = self.settings.theme == theme;
+                                    button(p, ("theme", theme as usize), theme.label(), chosen, true)
+                                        .track_focus(&focus)
+                                        .focus_visible(|s| s.border_color(p.focus))
+                                        .role(Role::RadioButton)
+                                        .aria_label(theme.label())
+                                        .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
+                                        .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
+                                        .test_support()
+                                },
+                            )),
+                        ),
+                    )
                     .child(
                         div().flex().flex_col().gap_1().child(label(p, "Everything インスタンス名")).child(
                             div()
@@ -293,6 +315,9 @@ impl Colet {
                 .on_action(cx.listener(|this, _: &ConfirmDialog, window, cx| {
                     if matches!(this.dialog, Some(Dialog::Recycle { .. })) {
                         this.confirm_recycle(window, cx);
+                    } else {
+                        // Nothing to confirm: Enter presses the button that has the keys.
+                        cx.propagate();
                     }
                 }))
                 .absolute()

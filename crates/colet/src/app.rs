@@ -314,11 +314,8 @@ impl Colet {
                     cx.notify();
                 }
             }),
-            cx.observe_window_appearance(window, |this, window, cx| {
-                this.palette = Palette::for_window(window);
-                this.palette.style_input(&this.search, cx);
-                cx.notify();
-            }),
+            // Followed only while the theme follows Windows.
+            cx.observe_window_appearance(window, |this, window, cx| this.apply_theme(window, cx)),
             cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
         ];
         // Written at once as the window closes, rather than a moment after the last change.
@@ -354,7 +351,7 @@ impl Colet {
                 search: settings.search_width,
                 column: settings.column_width,
             },
-            palette: Palette::for_window(window),
+            palette: Palette::for_window(window, settings.theme),
             search,
             search_focused: false,
             home_focus: cx.focus_handle().tab_stop(true),
@@ -430,6 +427,22 @@ impl Colet {
         this.sync(cx);
         this.poll(cx);
         this
+    }
+
+    /// Takes the colors the theme now gives, in the fields too, the dialog's among them.
+    pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
+        self.palette = Palette::for_window(window, self.settings.theme);
+        let mut inputs = vec![self.search.clone()];
+        match &self.dialog {
+            Some(Dialog::Name { input, .. }) => inputs.push(input.clone()),
+            Some(Dialog::EditSearch { name, query, .. }) => inputs.extend([name.clone(), query.clone()]),
+            Some(Dialog::Preferences { instance }) => inputs.push(instance.clone()),
+            Some(Dialog::Recycle { .. }) | None => {}
+        }
+        for input in &inputs {
+            self.palette.style_input(input, cx);
+        }
+        cx.notify();
     }
 
     /// The focus a button keeps, a stop for Tab; Enter or Space presses it.

@@ -1,5 +1,5 @@
 //! What Colet keeps between runs: the widths, the favorites, the saved searches, which Everything to ask,
-//! and where the window was. Searches typed, history and the columns open are not kept.
+//! the theme, and where the window was. Searches typed, history and the columns open are not kept.
 use std::{
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -20,6 +20,29 @@ pub struct SavedSearch {
 impl SavedSearch {
     pub fn label(&self) -> &str {
         if self.name.is_empty() { &self.query } else { &self.name }
+    }
+}
+
+/// The colors Colet takes: Windows's setting, or one of its own whatever Windows says.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    /// In the order the settings offer them.
+    pub const ALL: [Theme; 3] = [Theme::System, Theme::Light, Theme::Dark];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Theme::System => "Windowsに合わせる",
+            Theme::Light => "ライト",
+            Theme::Dark => "ダーク",
+        }
     }
 }
 
@@ -46,6 +69,7 @@ pub struct Settings {
     pub saved_searches: Vec<SavedSearch>,
     /// The Everything instance to ask; empty tries the default, then `1.5a`.
     pub instance: String,
+    pub theme: Theme,
     pub window: Option<Placement>,
 }
 
@@ -58,6 +82,7 @@ impl Default for Settings {
             favorites: Vec::new(),
             saved_searches: Vec::new(),
             instance: String::new(),
+            theme: Theme::System,
             window: None,
         }
     }
@@ -165,6 +190,16 @@ mod tests {
         assert_eq!(settings.sidebar_width, 240.);
         assert_eq!(settings.favorites, [r"D:\"]);
         assert!(settings.saved_searches.is_empty());
+        // One written before the theme could be chosen follows Windows.
+        assert_eq!(settings.theme, Theme::System);
+    }
+
+    #[test]
+    fn keeps_the_theme_chosen() {
+        let settings: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(settings.theme, Theme::Dark);
+        let written = serde_json::to_string(&Settings { theme: Theme::Light, ..Settings::default() }).unwrap();
+        assert!(written.contains(r#""theme":"light""#), "{written}");
     }
 
     #[test]

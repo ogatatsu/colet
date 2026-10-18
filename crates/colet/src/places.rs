@@ -11,7 +11,7 @@ use gpui_kit::*;
 
 use crate::{
     app::{Colet, Engine, Tone, WidthOf},
-    settings::{Placement, SavedSearch, Settings},
+    settings::{Placement, SavedSearch, Settings, Theme},
     state::{Kind, saved_query, search_key},
 };
 
@@ -262,6 +262,12 @@ impl Colet {
         instance.update(cx, |input, cx| input.focus(window, cx));
         self.dialog = Some(Dialog::Preferences { instance });
         cx.notify();
+    }
+
+    /// Takes `theme`'s colors at once, and keeps it.
+    pub fn set_theme(&mut self, theme: Theme, window: &mut Window, cx: &mut Context<Self>) {
+        self.update_settings(|s| s.theme = theme, cx);
+        self.apply_theme(window, cx);
     }
 
     /// Lets go of Everything and makes the search afresh, so it connects to the instance now named.

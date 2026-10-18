@@ -1,7 +1,9 @@
-//! Colet's colors by role, for the dark and light settings of Windows. The dark ones are the old app's;
-//! the light ones keep the same roles, hues and contrasts on a light ground.
+//! Colet's colors by role, dark and light, as Windows is set or as the settings fix them. The dark ones
+//! are the old app's; the light ones keep the same roles, hues and contrasts on a light ground.
 use gpui_kit::base::input::{InputEditorStyle, InputState};
 use gpui_kit::{App, Entity, Hsla, Window, WindowAppearance, hsla};
+
+use crate::settings::Theme;
 
 fn hsl(h: f32, s: f32, l: f32) -> Hsla {
     hsla(h / 360., s / 100., l / 100., 1.)
@@ -106,15 +108,13 @@ impl Palette {
         input.update(cx, |input, _| input.set_editor_style(style));
     }
 
-    pub fn for_window(window: &Window) -> Self {
-        // A debug build can show either without touching the Windows setting.
-        #[cfg(debug_assertions)]
-        if let Ok(theme) = std::env::var("COLET_THEME") {
-            return if theme == "light" { Self::light() } else { Self::dark() };
-        }
-        match window.appearance() {
-            WindowAppearance::Dark | WindowAppearance::VibrantDark => Self::dark(),
-            _ => Self::light(),
+    /// The colors `theme` gives: its own, or for following Windows, those of the window's appearance.
+    pub fn for_window(window: &Window, theme: Theme) -> Self {
+        match (theme, window.appearance()) {
+            (Theme::Light, _) => Self::light(),
+            (Theme::Dark, _) => Self::dark(),
+            (Theme::System, WindowAppearance::Dark | WindowAppearance::VibrantDark) => Self::dark(),
+            (Theme::System, _) => Self::light(),
         }
     }
 }
