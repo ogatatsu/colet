@@ -609,6 +609,42 @@ fn works_in_a_favorite_by_mouse_and_tab_leaving_the_folders_above_it_folded(cx: 
 }
 
 #[gpui_kit::test]
+fn leaves_no_room_to_scroll_once_the_columns_slide_back(cx: &mut TestAppContext) {
+    // A chain deep enough to scroll the columns, and a favorite of one column beside it.
+    let chain: Vec<String> = (1..=8).map(|n| format!(r"D:\{}", (1..=n).map(|k| format!("d{k}")).collect::<Vec<_>>().join(r"\"))).collect();
+    let mut folders: Vec<(&str, Vec<Entry>)> = vec![(r"D:\", vec![folder(&chain[0]), folder(r"D:\fav")]), (r"D:\fav", vec![])];
+    for (k, path) in chain.iter().enumerate() {
+        folders.push((path, chain.get(k + 1).map(|next| vec![folder(next)]).unwrap_or_default()));
+    }
+    let fake = Fake { roots: vec![Entry::folder(r"D:\", "データ (D:)")], ..Fake::default().with_folders(&folders) };
+    fake.settings.lock().unwrap().favorites = vec![r"D:\fav".into()];
+    let ui = open(cx, Arc::new(fake));
+    // The slide runs on the clock: frames a screen's refresh apart until it rests.
+    let rest = |ui: &Ui, cx: &mut TestAppContext| {
+        for _ in 0..120 {
+            std::thread::sleep(Duration::from_millis(16));
+            ui.act(cx, |_, _| ());
+            settle(cx);
+            if ui.read(cx, |v| v.slide.is_none()) {
+                break;
+            }
+        }
+    };
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    assert!(ui.read(cx, |v| v.columns_scroll.offset().x) < px(0.), "the chain scrolls the columns");
+    ui.click_in(cx, "home", row(r"D:\fav"));
+    rest(&ui, cx);
+    ui.act(cx, |_, _| ());
+    assert_eq!(ui.read(cx, |v| v.columns_scroll.offset().x), px(0.));
+    assert_eq!(ui.read(cx, |v| v.columns_scroll.max_offset().x), px(0.));
+    assert!(!ui.read(cx, |v| v.on_screen().hidden_left()));
+}
+
+#[gpui_kit::test]
 fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake { roots: vec![Entry::folder(r"D:\", "D:")], ..Fake::default() }.with_results(vec![file(r"D:\a.pdf")]));
     let ui = open(cx, fake.clone());

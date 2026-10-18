@@ -1449,6 +1449,9 @@ impl Colet {
         let position = if done { slide.target } else { slide.position };
         self.columns_scroll.set_offset(point(px(-position), px(0.)));
         if done {
+            // At rest, the room held for the slide goes: left past the last column, it would scroll the
+            // columns off to the left.
+            self.hold = position;
             self.slide = None;
         } else {
             window.request_animation_frame();

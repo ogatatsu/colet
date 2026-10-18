@@ -207,7 +207,7 @@ pub struct Colet {
     /// Asks the next frame to bring the active column on screen, sliding there when true.
     pub reveal_pending: Option<bool>,
     /// The scroll offset the columns were last brought to, which holds their scroll width while columns
-    /// beside them close.
+    /// beside them close and they slide back; once at rest, where they rest.
     pub hold: f32,
     pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
