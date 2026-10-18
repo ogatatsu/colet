@@ -321,7 +321,10 @@ impl Colet {
         // The item a search result or favorite points at: a bar, which wins over the selection but not
         // over the one in the column worked in. Home marks its pick so while the columns are worked in.
         let barred = (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked);
-        let lit = selected && marked;
+        // The menu acts on a row outside the selection, or the folder itself: the selection steps back, so
+        // only what the menu acts on stands out.
+        let aside = self.menu.as_ref().is_some_and(|m| m.index == index && m.paths.is_some());
+        let lit = selected && marked && !aside;
         let image = self.icons.get(entry, cx, |this: &mut Colet| &mut this.icons);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
         let path = entry.path.clone();
@@ -362,11 +365,11 @@ impl Colet {
             .border_2()
             .border_color(transparent_black())
             .when(focused, |r| r.border_color(if lit { p.focus_on_fill } else { p.focus }))
-            .when(target, |r| r.border_color(p.accent))
+            .when(target, |r| r.border_color(p.accent).bg(p.highlight))
             .when(barred, |r| {
                 r.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).rounded_l(px(4.)).bg(p.accent))
             })
-            .when(selected, |r| r.bg(if marked { p.accent_fill } else { p.selected_inactive }))
+            .when(selected, |r| r.bg(if marked && !aside { p.accent_fill } else { p.selected_inactive }))
             .when(lit, |r| r.text_color(p.on_accent))
             .when(barred, |r| r.bg(p.highlight))
             .when(!selected && !highlighted, |r| r.hover(|r| r.bg(p.hover)))
