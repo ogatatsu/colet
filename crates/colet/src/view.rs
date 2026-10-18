@@ -584,7 +584,7 @@ impl Colet {
         let count = c.entries.len();
         let view = cx.entity();
         let handle = self.list_handle(id);
-        let list = uniform_list(("list", id), count, move |range, _, cx| {
+        let mut list = uniform_list(("list", id), count, move |range, _, cx| {
             view.update(cx, |this, cx| {
                 let Some(index) = this.state.index_of(id) else { return Vec::new() };
                 let c = &this.state.columns[index];
@@ -600,6 +600,9 @@ impl Colet {
         .track_scroll(&handle)
         .size_full()
         .p_1();
+        // Shift and the wheel send the columns sideways; the rows under it stay put. A list has no
+        // builder for this, as a div has.
+        list.style().restrict_scroll_to_axis = Some(true);
         let title = self.state.columns[index].title().to_owned();
         div()
             .id(("rows", id))

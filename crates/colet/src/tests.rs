@@ -702,6 +702,50 @@ fn turns_the_wheel_down_a_column_without_moving_the_columns_or_shading_their_edg
 }
 
 #[gpui_kit::test]
+fn turns_the_wheel_with_shift_to_send_the_columns_sideways_leaving_the_rows_under_it(cx: &mut TestAppContext) {
+    let chain: Vec<String> = (1..=8).map(|n| format!(r"D:\{}", (1..=n).map(|k| format!("d{k}")).collect::<Vec<_>>().join(r"\"))).collect();
+    let mut folders: Vec<(&str, Vec<Entry>)> = vec![(r"D:\", vec![folder(&chain[0])])];
+    for (k, path) in chain.iter().enumerate() {
+        folders.push((path, chain.get(k + 1).map(|next| vec![folder(next)]).unwrap_or_default()));
+    }
+    // The deepest folder holds more rows than its column shows.
+    let files: Vec<Entry> = (0..100).map(|i| file(&format!(r"{}\f{i:03}.txt", chain[7]))).collect();
+    folders.last_mut().unwrap().1 = files;
+    let fake = Fake { roots: vec![Entry::folder(r"D:\", "データ (D:)")], ..Fake::default().with_folders(&folders) };
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    for _ in 0..120 {
+        std::thread::sleep(Duration::from_millis(16));
+        ui.act(cx, |_, _| ());
+        settle(cx);
+        if ui.read(cx, |v| v.slide.is_none()) {
+            break;
+        }
+    }
+    let column = ui.read(cx, |v| v.state.columns.iter().find(|c| c.path == chain[7]).unwrap().id);
+    let rows = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.lists[&column].0.borrow().base_handle.offset().y);
+    let columns = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.columns_scroll.offset().x);
+    let wheel = |ui: &Ui, cx: &mut TestAppContext, x: f32, y: f32| {
+        ui.act(cx, |window, cx| window.scroll(("column", column), ScrollDelta::Lines(point(x, y)), cx));
+        settle(cx);
+    };
+    // The wheel alone scrolls the rows, leaving the columns.
+    let (top, at) = (rows(&ui, cx), columns(&ui, cx));
+    assert!(at < px(0.), "the chain scrolls the columns");
+    wheel(&ui, cx, 0., -3.);
+    let down = rows(&ui, cx);
+    assert!(down < top, "the rows scroll");
+    assert_eq!(columns(&ui, cx), at);
+    // With shift, as Windows sends it, the columns go sideways and the rows stay.
+    wheel(&ui, cx, 3., 0.);
+    assert!(columns(&ui, cx) > at, "the columns scroll");
+    assert_eq!(rows(&ui, cx), down);
+}
+
+#[gpui_kit::test]
 fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake { roots: vec![Entry::folder(r"D:\", "D:")], ..Fake::default() }.with_results(vec![file(r"D:\a.pdf")]));
     let ui = open(cx, fake.clone());
