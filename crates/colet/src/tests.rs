@@ -720,6 +720,43 @@ fn works_in_a_favorite_by_mouse_and_tab_leaving_the_folders_above_it_folded(cx: 
 }
 
 #[gpui_kit::test]
+fn leaves_the_keys_in_home_when_the_room_past_the_columns_is_pressed(cx: &mut TestAppContext) {
+    let fake = Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\work")]), (r"D:\work", vec![folder(r"D:\work\sub")])])
+    };
+    fake.settings.lock().unwrap().favorites = vec![r"D:\work".into()];
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\work"));
+    let columns = ui.read(cx, |v| v.state.columns.len());
+    ui.click(cx, "columns-rest");
+    assert!(ui.home_focused(cx));
+    assert_eq!(ui.active(cx), 0);
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), columns);
+    assert!(ui.selected(cx, columns - 1).is_empty());
+}
+
+#[gpui_kit::test]
+fn lists_the_folder_tabbing_into_the_columns_opens(cx: &mut TestAppContext) {
+    let fake = Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\work")]),
+            (r"D:\work", vec![folder(r"D:\work\sub")]),
+            (r"D:\work\sub", vec![file(r"D:\work\sub\a.txt")]),
+        ])
+    };
+    fake.settings.lock().unwrap().favorites = vec![r"D:\work".into()];
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\work"));
+    let view = ui.view.clone();
+    ui.act(cx, |window, cx| view.read(cx).columns_focus.clone().focus(window, cx));
+    settle(cx);
+    let last = ui.read(cx, |v| v.state.columns.last().map(|c| (c.path.clone(), c.loading, c.entries.len())).unwrap());
+    assert_eq!(last, (r"D:\work\sub".to_owned(), false, 1));
+}
+
+#[gpui_kit::test]
 fn leaves_no_room_to_scroll_once_the_columns_slide_back(cx: &mut TestAppContext) {
     // A chain deep enough to scroll the columns, and a favorite of one column beside it.
     let chain: Vec<String> = (1..=8).map(|n| format!(r"D:\{}", (1..=n).map(|k| format!("d{k}")).collect::<Vec<_>>().join(r"\"))).collect();

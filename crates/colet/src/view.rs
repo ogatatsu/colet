@@ -1408,6 +1408,9 @@ impl Colet {
                             // The crumbs' bar and the edges' shades follow the columns as they scroll.
                             .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
                             .child(div().h_full().w(px(content)).flex().children(columns))
+                            // The room past the last column is no column's: a press there leaves the keys where
+                            // they are, rather than the columns' focus sending them beside home.
+                            .child(keep_focus(div().id("columns-rest")).absolute().top_0().bottom_0().left(px(content)).right_0().test_support())
                             // Room up to a view's width past where the columns were brought, so the scroll
                             // width cannot shrink under them while they slide back. A view wide however
                             // wide layout makes it: reckoned here, it would be the last frame's.
@@ -1742,7 +1745,7 @@ impl Colet {
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.search_focused = self.search.read(cx).focus_handle(cx).is_focused(window);
-        self.follow_focus(window);
+        self.follow_focus(window, cx);
         let open = [self.dialog.is_some(), self.menu.is_some(), self.sort_open, self.history_open, self.crumb_menu_open];
         Tips::set_open(open.iter().enumerate().fold(0, |bits, (i, &o)| bits | u8::from(o) << i), cx);
         self.scroll_rows();

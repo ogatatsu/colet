@@ -458,16 +458,19 @@ impl Colet {
 
     /// Tab moves the keys between home's pane and the columns: the column worked in follows them. Into the
     /// columns they land where → would, past the folders folded above a favorite.
-    pub fn follow_focus(&mut self, window: &Window) {
+    /// What landing there opens, a folder picked as → would, is listed as → would list it.
+    pub fn follow_focus(&mut self, window: &Window, cx: &mut Context<Self>) {
         let (home, columns) = (self.home_focus.is_focused(window), self.columns_focus.is_focused(window));
+        self.keys_in_column = home || columns;
         if home && self.state.active != 0 {
             self.state.set_active(0);
-            self.state.enter();
         } else if columns && self.state.active == 0 && self.state.columns.len() > 1 {
             self.state.set_active(self.state.neighbour(0, true).unwrap_or(1));
-            self.state.enter();
+        } else {
+            return;
         }
-        self.keys_in_column = home || columns;
+        self.state.enter();
+        self.changed(cx);
     }
 
     // ---- What happens after the state changes ----
