@@ -683,6 +683,7 @@ impl Colet {
             .border_color(p.border)
             .child(
                 div()
+                    .id(("head", id))
                     .h(px(34.))
                     .flex_none()
                     .pl_3()
@@ -739,7 +740,8 @@ impl Colet {
                                 }
                             }))
                             .test_support()
-                    }),
+                    })
+                    .test_support(),
             )
             .child(body)
             .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
@@ -1163,27 +1165,59 @@ impl Colet {
             .children(pinned_column)
             .when(away > 0, |d| {
                 d.child(
-                    ring(div().id("unfold").track_focus(&unfold_focus), p)
-                        .role(Role::Button)
-                        .aria_label(format!("上の階層を表示（{away}階層）"))
+                    div()
+                        .id("unfold-strip")
                         .w(px(FOLD_WIDTH))
                         .h_full()
                         .flex_none()
+                        .relative()
                         .flex()
+                        .flex_col()
                         .items_center()
-                        .justify_center()
-                        .bg(p.surface)
+                        .bg(p.sidebar)
                         .border_r_1()
                         .border_color(p.border)
-                        .cursor_pointer()
                         .hover(|d| d.bg(p.hover))
-                        .tip(p, format!("上の階層を表示（{away}階層）"))
-                        .child(icon("chevrons-left", 14., p.text_muted))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.state.unfold();
-                            this.changed(cx);
-                        }))
-                        .test_support(),
+                        // In line with the columns' headings, where the eye runs, and how many it holds below.
+                        .child(
+                            div()
+                                .id("unfold-head")
+                                .h(px(34.))
+                                .w_full()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .border_b_1()
+                                .border_color(p.border)
+                                .child(icon("chevrons-left", 14., p.text_muted))
+                                .test_support(),
+                        )
+                        .child(
+                            div()
+                                .id("unfold-count")
+                                .pt_2()
+                                .text_size(px(12.))
+                                .text_color(p.text_muted)
+                                .child(away.to_string())
+                                .test_support(),
+                        )
+                        // The button laid over the whole strip: its ring's room would push the heading's line
+                        // off the columns'.
+                        .child(
+                            ring(div().id("unfold").track_focus(&unfold_focus), p)
+                                .role(Role::Button)
+                                .aria_label(format!("上の階層を表示（{away}階層）"))
+                                .absolute()
+                                .inset_0()
+                                .cursor_pointer()
+                                .tip(p, format!("上の階層を表示（{away}階層）"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.state.unfold();
+                                    this.changed(cx);
+                                }))
+                                .test_support(),
+                        ),
                 )
             })
             .child(

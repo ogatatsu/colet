@@ -133,8 +133,8 @@ pub struct Widths {
 
 pub const COLUMN_WIDTHS: (f32, f32) = (192., 640.);
 pub const SIDEBAR_WIDTHS: (f32, f32) = (160., 480.);
-/// The strip that brings out the folders folded away above a search result.
-pub const FOLD_WIDTH: f32 = 20.;
+/// The strip that brings out the folders folded away above a search result: room for two digits.
+pub const FOLD_WIDTH: f32 = 28.;
 
 /// Which width a drag on a column's edge changes.
 #[derive(Clone, Copy, PartialEq, Eq)]

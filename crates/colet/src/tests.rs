@@ -391,7 +391,12 @@ fn opens_a_deep_search_file_on_its_own_folder_and_right_jumps_to_it(cx: &mut Tes
     // ← passes over them, back to the results.
     ui.press(cx, "left");
     assert_eq!(ui.active(cx), 1);
-    // The strip beside the results brings them out for good, and goes.
+    // The strip beside the results says how many it holds, brings them out for good, and goes.
+    assert!(ui.act(cx, |window, _| window.try_find("unfold-count").is_some()));
+    // Its heading's line runs on from the columns'.
+    let deepest = ui.read(cx, |v| v.state.columns.last().unwrap().id);
+    let (strip, column) = ui.act(cx, |window, _| (window.find("unfold-head").bounds(), window.find(("head", deepest)).bounds()));
+    assert_eq!((strip.top(), strip.bottom()), (column.top(), column.bottom()));
     ui.click(cx, "unfold");
     assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
     assert!(ui.act(cx, |window, _| window.try_find("unfold").is_none()));
