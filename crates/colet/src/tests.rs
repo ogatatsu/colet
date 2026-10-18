@@ -1074,6 +1074,26 @@ fn copies_and_pastes_picking_what_was_pasted(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    assert!(ui.columns_focused(cx));
+    ui.click(cx, "copy");
+    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\a.txt"]);
+    assert!(ui.columns_focused(cx));
+    ui.click(cx, "refresh");
+    assert!(ui.columns_focused(cx));
+    // ↓ still moves in the column the keys stayed in.
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\b.txt"]);
+    // From the search field too.
+    let search = ui.read(cx, |v| v.search.clone());
+    ui.act(cx, |window, cx| search.update(cx, |input, cx| input.focus(window, cx)));
+    ui.click(cx, "cut");
+    assert!(ui.read(cx, |v| v.clipboard.cut && v.clipboard.paths == [r"D:\work\b.txt"]));
+    assert!(ui.act(cx, |window, cx| search.read(cx).focus_handle(cx).is_focused(window)));
+}
+
+#[gpui_kit::test]
 fn marks_the_rows_the_clipboard_holds(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-x");

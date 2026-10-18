@@ -144,6 +144,11 @@ pub fn ring(el: Stateful<Div>, p: crate::theme::Palette) -> Stateful<Div> {
     el.border_2().border_color(transparent_black()).focus_visible(|s| s.border_color(p.focus))
 }
 
+/// A button the mouse presses without taking the keys from where they are; Tab still reaches it.
+pub fn keep_focus(el: Stateful<Div>) -> Stateful<Div> {
+    el.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+}
+
 fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
 }
@@ -922,7 +927,7 @@ impl Colet {
                     .flex_none()
                     .gap(px(2.))
                     .child(
-                        self.icon_button("refresh", "refresh-cw", "更新", true, cx)
+                        keep_focus(self.icon_button("refresh", "refresh-cw", "更新", true, cx))
                             .tip(p, "更新（F5）")
                             .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
                             .test_support(),
