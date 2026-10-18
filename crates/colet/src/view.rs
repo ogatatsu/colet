@@ -1,6 +1,6 @@
 //! How the window looks: home's pane on the left; the search field, the trail of folders, the columns
 //! and the status bar beside it.
-use std::time::Instant;
+use std::{rc::Rc, time::Instant};
 
 use colet_core::{entry::{Entry, Sort}, paths::{folder_name, path_key}, time};
 use gpui_kit::base::input::{self, Input};
@@ -132,11 +132,97 @@ pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> AnimationEle
 /// A thin scrollbar laid over a list, as the old app's; its thumb is Colet's color.
 pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette) -> gpui_kit::base::Scrollbar {
     bar.mode(gpui_kit::base::ScrollbarMode::Always).styles(|s| {
-        s.track(|t| t.bg(transparent_black()).border_color(transparent_black()).width(px(8.)))
+        s.track(|t| t.bg(transparent_black()).border_color(transparent_black()).width(px(SCROLLBAR_WIDTH)))
             .thumb(|t| t.bg(p.scrollbar).width(px(6.)).inset(px(1.)).radius(px(3.)))
             .thumb_hover(|t| t.bg(p.text_muted))
             .thumb_active(|t| t.bg(p.text_muted))
     })
+}
+
+/// How wide the edge a drag widens a column or home's pane from is.
+const RESIZER_WIDTH: f32 = 6.;
+/// How thick a scrollbar's track is.
+const SCROLLBAR_WIDTH: f32 = 8.;
+
+/// Draws its child over everything laid out after it, as `deferred` does, but clipped where it is, for
+/// presses as for paint: a column scrolled under home's pane keeps its edge there.
+fn on_top(child: impl IntoElement) -> OnTop {
+    let clip = Rc::new(std::cell::Cell::new(None));
+    OnTop(Some(Clipped { clip: clip.clone(), child: child.into_any_element() }.into_any_element()), clip)
+}
+
+struct OnTop(Option<AnyElement>, Rc<std::cell::Cell<Option<ContentMask<Pixels>>>>);
+
+impl Element for OnTop {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
+        (self.0.as_mut().unwrap().request_layout(window, cx), ())
+    }
+
+    fn prepaint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), window: &mut Window, _: &mut App) {
+        let (offset, mask) = (window.element_offset(), window.content_mask());
+        self.1.set(Some(mask));
+        window.defer_draw(self.0.take().unwrap(), offset, 0, Some(mask));
+    }
+
+    fn paint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), _: &mut (), _: &mut Window, _: &mut App) {}
+}
+
+impl IntoElement for OnTop {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+/// What [`OnTop`] defers: GPUI clips a deferred draw's paint, but not the hit areas laid out ahead of it.
+struct Clipped {
+    clip: Rc<std::cell::Cell<Option<ContentMask<Pixels>>>>,
+    child: AnyElement,
+}
+
+impl Element for Clipped {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
+        (self.child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), window: &mut Window, cx: &mut App) {
+        window.with_content_mask(self.clip.get(), |window| self.child.prepaint(window, cx));
+    }
+
+    fn paint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), _: &mut (), window: &mut Window, cx: &mut App) {
+        window.with_content_mask(self.clip.get(), |window| self.child.paint(window, cx));
+    }
+}
+
+impl IntoElement for Clipped {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
 }
 
 /// The focus ring of what Tab reached: two pixels in the focus color, kept clear until then.
@@ -606,22 +692,32 @@ impl Colet {
             .min_h_0()
             .relative()
             .child(list)
-            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&handle), p)))
+            // Clear of the half of the edge that falls inside.
+            .child(div().absolute().top_0().bottom_0().left_0().right(px(RESIZER_WIDTH / 2.)).child(scrollbar(gpui_kit::base::Scrollbar::vertical(&handle), p)))
             .into_any_element()
     }
 
-    /// The edge a drag widens a column from.
+    /// The edge a drag widens a column from: astride its border, so its scrollbar stays clear of it.
     fn resizer(&self, id: &'static str, of: WidthOf, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        div()
+        // Over what lies past the border, drawn after it; none over a dialog, which covers it.
+        if self.dialog.is_some() {
+            return div().into_any_element();
+        }
+        let handle = div()
             .id(id)
+            .group(id)
             .absolute()
             .top_0()
-            .bottom_0()
-            .right_0()
-            .w(px(6.))
+            // Off the columns' scrollbar along the bottom, which it would take the presses of.
+            .bottom(px(SCROLLBAR_WIDTH))
+            .right(px(-RESIZER_WIDTH / 2.))
+            .w(px(RESIZER_WIDTH))
+            .flex()
+            .justify_center()
             .cursor_col_resize()
-            .hover(|d| d.bg(p.accent.opacity(0.4)))
+            // A line on the border, not a band over the rows.
+            .child(div().w(px(2.)).h_full().group_hover(id, |d| d.bg(p.accent)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -629,8 +725,8 @@ impl Colet {
                     cx.stop_propagation();
                 }),
             )
-            .test_support()
-            .into_any_element()
+            .test_support();
+        on_top(handle).into_any_element()
     }
 
     fn render_column(&mut self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -1394,7 +1490,8 @@ impl Colet {
 
     fn render_toasts(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        div()
+        // Over the columns' edges, which are drawn over all laid out after them.
+        deferred(div()
             .absolute()
             .bottom(px(36.))
             .right_3()
@@ -1459,7 +1556,8 @@ impl Colet {
                             .on_click(cx.listener(move |this, _, _, cx| this.dismiss(id, cx)))
                             .test_support(),
                     )
-            }))
+            })))
+            .with_priority(1)
             .into_any_element()
     }
 

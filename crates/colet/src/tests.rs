@@ -581,6 +581,77 @@ fn widens_home_by_its_edge_within_its_bounds(cx: &mut TestAppContext) {
     assert_eq!(ui.read(cx, |v| v.state.columns[0].kind), Kind::Home);
 }
 
+#[gpui_kit::test]
+fn widens_a_column_by_an_edge_astride_its_border_even_past_it(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(drive_d()));
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    let drive = ui.read(cx, |v| v.state.columns[1].id);
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3, "a column past the drive's");
+    let before = ui.read(cx, |v| v.widths.column);
+    let (column, edge) = ui.act(cx, |window, _| {
+        (window.find(("column", drive)).bounds(), window.within(("column", drive)).find("column-resizer").bounds())
+    });
+    // Half in the column, clear of its scrollbar; half over the next, which it is drawn above.
+    assert!(edge.left() < column.right() && column.right() < edge.right(), "{edge:?} {column:?}");
+    // Above the columns' scrollbar along the bottom, which keeps its presses.
+    assert!(edge.bottom() <= column.bottom() - px(8.), "{edge:?} {column:?}");
+    let past = point(column.right() + px(1.), edge.center().y);
+    ui.act(cx, |window, cx| window.drag(past, point(past.x + px(40.), past.y), cx));
+    settle(cx);
+    assert_eq!(ui.read(cx, |v| v.widths.column), before + 40.);
+}
+
+#[gpui_kit::test]
+fn closes_a_toast_whose_close_button_lies_over_a_columns_edge(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(drive_d()));
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    ui.view.update(cx, |v, cx| v.notify("失敗しました", crate::app::Tone::Error, cx));
+    let (drive, work) = ui.read(cx, |v| (v.state.columns[1].id, v.state.columns[2].id));
+    // The drive's and the folder's edges brought under the close button.
+    let (left, close) = ui.act(cx, |window, _| (window.find(("column", drive)).bounds().left(), window.find(("close-toast", 1usize)).bounds().center()));
+    ui.view.update(cx, |v, cx| {
+        v.widths.column = (f32::from(close.x - left) / 2.).round();
+        cx.notify();
+    });
+    settle(cx);
+    let (edge, close) = ui.act(cx, |window, _| {
+        (window.within(("column", work)).find("column-resizer").bounds(), window.find(("close-toast", 1usize)).bounds().center())
+    });
+    assert!(edge.contains(&close), "{edge:?} {close:?}");
+    ui.click(cx, ("close-toast", 1usize));
+    assert!(ui.toasts(cx).is_empty(), "{:?}", ui.toasts(cx));
+}
+
+#[gpui_kit::test]
+fn leaves_the_edge_of_a_column_scrolled_out_of_view_unpressable(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    let before = ui.read(cx, |v| v.widths.column);
+    let ids: Vec<_> = ui.read(cx, |v| v.state.columns.iter().map(|c| c.id).collect());
+    // The edge of a column the view has scrolled past, now under what lies left of the columns.
+    let hidden = ui.act(cx, |window, _| {
+        let view = window.find("columns-scroll").bounds();
+        ids.iter().find_map(|&id| {
+            window.try_find(("column", id))?;
+            let edge = window.within(("column", id)).try_find("column-resizer")?.bounds();
+            (edge.right() < view.left() && edge.left() > px(0.)).then(|| edge.center())
+        })
+    });
+    let at = hidden.expect("an edge scrolled out of view");
+    ui.act(cx, |window, cx| window.drag(at, point(at.x + px(40.), at.y), cx));
+    settle(cx);
+    assert_eq!(ui.read(cx, |v| v.widths.column), before);
+}
+
 fn drive_d() -> Fake {
     Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],
