@@ -1,5 +1,7 @@
 //! An item as a column lists it, and the orders they come in.
-use std::{cmp::Reverse, os::windows::fs::MetadataExt, path::Path, time::UNIX_EPOCH};
+use std::{cmp::{Ordering, Reverse}, os::windows::fs::MetadataExt, path::Path, time::UNIX_EPOCH};
+
+use windows::{Win32::UI::Shell::StrCmpLogicalW, core::PCWSTR};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -84,17 +86,46 @@ impl Sort {
     }
 }
 
-/// Folders first, then by the sort, ties broken by path.
+/// A name ordered as Explorer orders it: without case, and numbers by their value.
+struct ExplorerName(Vec<u16>);
+
+impl ExplorerName {
+    fn new(name: &str) -> Self {
+        Self(name.encode_utf16().chain([0]).collect())
+    }
+}
+
+impl Ord for ExplorerName {
+    fn cmp(&self, other: &Self) -> Ordering {
+        unsafe { StrCmpLogicalW(PCWSTR(self.0.as_ptr()), PCWSTR(other.0.as_ptr())) }.cmp(&0)
+    }
+}
+
+impl PartialOrd for ExplorerName {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for ExplorerName {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for ExplorerName {}
+
+/// Folders first, then by the sort, ties broken by name as Explorer orders it and then by path.
 pub fn sort_entries(entries: &mut [Entry], sort: Sort) {
-    // Keyed once per entry: lowering names inside the comparison would allocate on every one of its
+    // Keyed once per entry: converting names inside the comparison would allocate on every one of its
     // n log n calls.
     entries.sort_by_cached_key(|e| {
-        let (rank, name) = match sort {
-            Sort::Name => (None, e.name.to_lowercase()),
-            Sort::Size => (e.size, String::new()),
-            Sort::Modified => (e.modified, String::new()),
+        let rank = match sort {
+            Sort::Name => None,
+            Sort::Size => e.size,
+            Sort::Modified => e.modified,
         };
-        (!e.directory, Reverse(rank), name, e.path.to_lowercase())
+        (!e.directory, Reverse(rank), ExplorerName::new(&e.name), e.path.to_lowercase())
     });
 }
 
@@ -141,6 +172,29 @@ mod tests {
         assert_eq!(order(&entries), ["A", "a2", "b", "c"]);
         sort_entries(&mut entries, Sort::Modified);
         assert_eq!(order(&entries), ["c", "A", "a2", "b"]);
+    }
+
+    #[test]
+    fn names_sort_as_explorer_orders_them_numbers_by_value_and_widths_and_kana_alike() {
+        let entry = |name: &str| Entry {
+            path: format!(r"C:\{name}"),
+            name: name.into(),
+            parent: String::new(),
+            directory: false,
+            size: Some(1),
+            modified: None,
+            hidden: false,
+        };
+        let names = ["file10.txt", "File2.txt", "file1.txt", "あ10", "あ9", "ア1", "a01", "a1", "b", "ｆｉｌｅ３.txt"];
+        let mut entries: Vec<_> = names.iter().map(|n| entry(n)).collect();
+        let order = |entries: &[Entry]| entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>();
+        let expected = ["a01", "a1", "b", "file1.txt", "File2.txt", "ｆｉｌｅ３.txt", "file10.txt", "ア1", "あ9", "あ10"];
+        sort_entries(&mut entries, Sort::Name);
+        assert_eq!(order(&entries), expected);
+        // The sizes all tie, so they fall back to the same order.
+        entries.reverse();
+        sort_entries(&mut entries, Sort::Size);
+        assert_eq!(order(&entries), expected);
     }
 
     #[test]
