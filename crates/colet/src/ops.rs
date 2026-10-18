@@ -86,6 +86,8 @@ impl HistoryEntry {
     /// An item's end, added to its operation. Where a copy or move put it follows its result.
     pub fn record(&mut self, event: Event) {
         let (path, status, error) = match event {
+            // Said by the item's own end.
+            Event::Left { .. } => return,
             Event::Placed { path } => {
                 if self.more == 0
                     && let Some(last) = self.items.last_mut()
@@ -536,8 +538,11 @@ impl Colet {
         }
         for (id, event) in events {
             if let Event::Done { path } = &event {
-                self.departed.insert(path_key(path));
                 self.made.insert(id, path.clone());
+            }
+            // A copy's source stays: only what left is expected to go from its listing.
+            if let Event::Left { path } = &event {
+                self.departed.insert(path_key(path));
             }
             if let Event::Placed { path } = &event {
                 self.placed.entry(id).or_default().push(path.clone());

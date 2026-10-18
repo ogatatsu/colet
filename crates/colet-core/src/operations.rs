@@ -51,6 +51,9 @@ pub enum Event {
     Cancelled { path: String },
     /// Where the last item went, which a name clash may have renamed.
     Placed { path: String },
+    /// The last item done is no longer where it was: moved, renamed or sent to the Recycle Bin. A copy's
+    /// source stays, and a new folder was nowhere before.
+    Left { path: String },
 }
 
 /// What an operation the user stopped fails with.
@@ -227,7 +230,14 @@ pub fn run(request: Request, owner: Owner, mut report: impl FnMut(Event) + Send 
     }
     let failed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let any_failed = failed.clone();
+    let leaves = matches!(prepared.operation, Operation::Move { .. } | Operation::Recycle | Operation::Rename { .. });
     let result = shell::operate(&prepared.operation, &prepared.paths, prepared.rename, owner, move |item| {
+        let left = match &item {
+            Item::Done { path, result } if leaves && result.is_ok() && *result != PENDING && *result != USER_IGNORED => {
+                Some(path.clone())
+            }
+            _ => None,
+        };
         let event = match item {
             Item::Done { result, .. } if result == PENDING => return,
             Item::Done { path, result } if result == USER_CANCELLED => Event::Cancelled { path },
@@ -240,6 +250,9 @@ pub fn run(request: Request, owner: Owner, mut report: impl FnMut(Event) + Send 
             Item::Placed { path } => Event::Placed { path },
         };
         report(event);
+        if let Some(path) = left {
+            report(Event::Left { path });
+        }
     });
     let failed = failed.load(std::sync::atomic::Ordering::Relaxed);
     // Never empty a replaced clipboard, or one whose cut did not all go.
@@ -341,7 +354,10 @@ mod tests {
         run(request(Kind::Recycle, vec![renamed.display().to_string()], dir.path(), ""), 0, record).unwrap();
         assert!(!renamed.exists());
         let events = events.lock().unwrap();
-        assert!(events.iter().all(|e| matches!(e, Event::Done { .. })), "{events:?}");
-        assert_eq!(events.len(), 3);
+        let done = events.iter().filter(|e| matches!(e, Event::Done { .. })).count();
+        let left: Vec<_> = events.iter().filter_map(|e| if let Event::Left { path } = e { Some(path) } else { None }).collect();
+        assert_eq!((done, events.len()), (3, 5), "{events:?}");
+        // The new folder was nowhere before; the renamed one and the one sent to the bin left.
+        assert_eq!(left, [&child.display().to_string(), &renamed.display().to_string()]);
     }
 }

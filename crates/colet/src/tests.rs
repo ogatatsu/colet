@@ -126,6 +126,7 @@ impl Backend for Fake {
                     } else {
                         self.remove(path);
                         report(Event::Done { path: path.clone() });
+                        report(Event::Left { path: path.clone() });
                     }
                 }
             }
@@ -137,6 +138,7 @@ impl Backend for Fake {
                 let parent = entry.parent.clone();
                 self.add(&parent, entry);
                 report(Event::Done { path: from.clone() });
+                report(Event::Left { path: from.clone() });
             }
             Operation::NewFolder => {
                 let path = child(&request.destination, &request.name);
@@ -156,6 +158,9 @@ impl Backend for Fake {
                     }
                     self.add(&request.destination, file(&made));
                     report(Event::Done { path: path.clone() });
+                    if files.cut {
+                        report(Event::Left { path: path.clone() });
+                    }
                     report(Event::Placed { path: made });
                 }
             }
