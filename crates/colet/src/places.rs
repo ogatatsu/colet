@@ -307,6 +307,8 @@ impl Colet {
     pub fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog = None;
         self.dialog_subscriptions.clear();
+        // The next dialog starts at its top.
+        self.dialog_scroll = ScrollHandle::new();
         let handle = if self.state.active == 0 { &self.home_focus } else { &self.columns_focus };
         handle.focus(window, cx);
         cx.notify();

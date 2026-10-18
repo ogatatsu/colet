@@ -1547,3 +1547,17 @@ fn refreshes_every_loaded_search_page_after_a_change_overtaken_by_pagination(cx:
     assert!(paths.contains(&r"D:\0500.txt".into()));
     assert_eq!(ui.selected(cx, 1), [r"D:\0400.txt"]);
 }
+
+#[gpui_kit::test]
+fn keeps_a_dialog_taller_than_the_window_within_it_its_buttons_in_reach(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(Fake::default()));
+    cx.simulate_window_resize(ui.window, size(px(1200.), px(500.)));
+    ui.click(cx, "preferences");
+    let (dialog, close) = ui.act(cx, |window, _| (window.find("dialog").bounds(), window.find("close-preferences").bounds()));
+    assert!(dialog.top() >= px(0.) && dialog.bottom() <= px(500.), "{dialog:?}");
+    assert!(close.bottom() <= dialog.bottom(), "{close:?} in {dialog:?}");
+    // What does not fit scrolls between the heading and the buttons.
+    assert!(ui.read(cx, |v| v.dialog_scroll.max_offset().y) > px(0.));
+    ui.click(cx, "close-preferences");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+}

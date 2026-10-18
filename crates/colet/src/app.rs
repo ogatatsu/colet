@@ -242,6 +242,8 @@ pub struct Colet {
     pub(crate) dialog_subscriptions: Vec<Subscription>,
     /// Takes the keys in a dialog with no field, as the Recycle Bin's question.
     pub dialog_focus: FocusHandle,
+    /// What a dialog holds between its heading and its buttons, scrolled when the window is too low.
+    pub dialog_scroll: ScrollHandle,
     /// Home's list, for its scrollbar.
     pub home_scroll: ScrollHandle,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
@@ -391,6 +393,7 @@ impl Colet {
             dialog: None,
             dialog_subscriptions: Vec::new(),
             dialog_focus: cx.focus_handle(),
+            dialog_scroll: ScrollHandle::new(),
             home_scroll: ScrollHandle::new(),
             stops: HashMap::new(),
             history_focus: cx.focus_handle().tab_stop(true),

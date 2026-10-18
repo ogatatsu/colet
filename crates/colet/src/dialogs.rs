@@ -49,6 +49,9 @@ fn clock(unix_ms: u64) -> String {
 }
 
 
+/// How much of a dialog's right margin is its rows' own: where its scrollbar lies, clear of them.
+const MARGIN: f32 = 14.;
+
 fn field(p: Palette, input: &Entity<gpui_kit::base::input::InputState>, window: &Window, cx: &App) -> Div {
     // The ring, two pixels in the focus color a pixel off the field, as the old app's outline.
     let focused = input.read(cx).focus_handle(cx).is_focused(window);
@@ -106,24 +109,19 @@ impl Colet {
         // Each theme a stop for Tab, kept across frames.
         let themes: Vec<(Theme, FocusHandle)> =
             Theme::ALL.into_iter().map(|theme| (theme, self.stop(format!("theme:{theme:?}"), cx))).collect();
-        let body = match self.dialog.as_ref()? {
+        let (content, buttons) = match self.dialog.as_ref()? {
             Dialog::Name { kind, paths, destination, input, .. } => {
                 let problem = self.name_problem(cx);
                 let empty = input.read(cx).value().trim().is_empty();
                 // Where the name goes: a rename may come from the results, far from its folder.
-                let (title, place, submit) = match kind {
-                    Operation::NewFolder => ("新規フォルダー", format!("作成先：{destination}"), "作成"),
-                    _ => (
-                        "名前を変更",
-                        format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).unwrap_or_default()),
-                        "保存",
-                    ),
+                let (place, submit) = match kind {
+                    Operation::NewFolder => (format!("作成先：{destination}"), "作成"),
+                    _ => (format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).unwrap_or_default()), "保存"),
                 };
-                div()
+                let content = div()
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(title))
                     .child(div().text_size(px(12.)).text_color(p.text_faint).child(place))
                     .child(
                         div()
@@ -133,88 +131,78 @@ impl Colet {
                             .child(label(p, "名前"))
                             .child(field(p, input, window, cx))
                             .when_some(problem, |d, problem| d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap_2()
-                            .child(
-                                button(p, "cancel", "キャンセル", false, true)
-                                    .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                                    .test_support(),
-                            )
-                            .child(
-                                button(p, "submit-name", submit, true, !empty && problem.is_none())
-                                    .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx)))
-                                    .test_support(),
-                            ),
-                    )
+                    );
+                let buttons = vec![
+                    button(p, "cancel", "キャンセル", false, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                    button(p, "submit-name", submit, true, !empty && problem.is_none())
+                        .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                ];
+                (content, buttons)
             }
-            Dialog::Recycle { paths, permanent } => div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("ごみ箱へ移動しますか？"))
-                .when(*permanent, |d| d.child(div().text_size(px(12.)).child("Coletは完全な削除（Shift+Delete）に対応していません。")))
-                .child(div().text_size(px(12.)).child(format!(
-                    "{} 項目をごみ箱へ移動します。ごみ箱を使用できない場所では操作を中止します。",
-                    paths.len()
-                )))
-                .child(
-                    div()
-                        .p_2()
-                        .flex()
-                        .flex_col()
-                        .text_size(px(12.))
-                        .text_color(p.text_muted)
-                        .bg(p.surface)
-                        .rounded(px(6.))
-                        .children(paths.iter().take(8).map(|path| div().truncate().child(path.clone())))
-                        .when(paths.len() > 8, |d| d.child(format!("ほか {} 項目", paths.len() - 8))),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            button(p, "cancel", "キャンセル", false, true)
-                                .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                                .test_support(),
-                        )
-                        .child(
-                            // Delete → Enter confirms, as in Explorer: ringed as the one the keys are on.
-                            div()
-                                .p(px(1.))
-                                .rounded(px(8.))
-                                .border_2()
-                                .border_color(if self.dialog_focus.is_focused(window) { p.focus } else { transparent_black() })
-                                .child(
-                                    div()
-                                        .id("confirm-recycle")
-                                        .h(px(30.))
-                                        .px_3()
-                                        .flex()
-                                        .items_center()
-                                        .rounded(px(6.))
-                                        .bg(p.danger_fill)
-                                        .text_color(p.on_accent)
-                                        .cursor_pointer()
-                                        .hover(|b| b.opacity(0.9))
-                                        .child("ごみ箱へ移動")
-                                        .on_click(cx.listener(|this, _, window, cx| this.confirm_recycle(window, cx)))
-                                        .test_support(),
-                                ),
-                        ),
-                ),
-            Dialog::EditSearch { name, query, .. } => {
-                let problem = self.edit_problem(cx);
-                div()
+            Dialog::Recycle { paths, permanent } => {
+                let content = div()
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("保存した検索を編集"))
+                    .when(*permanent, |d| d.child(div().text_size(px(12.)).child("Coletは完全な削除（Shift+Delete）に対応していません。")))
+                    .child(div().text_size(px(12.)).child(format!(
+                        "{} 項目をごみ箱へ移動します。ごみ箱を使用できない場所では操作を中止します。",
+                        paths.len()
+                    )))
+                    .child(
+                        div()
+                            .p_2()
+                            .flex()
+                            .flex_col()
+                            .text_size(px(12.))
+                            .text_color(p.text_muted)
+                            .bg(p.surface)
+                            .rounded(px(6.))
+                            .children(paths.iter().take(8).map(|path| div().truncate().child(path.clone())))
+                            .when(paths.len() > 8, |d| d.child(format!("ほか {} 項目", paths.len() - 8))),
+                    );
+                let buttons = vec![
+                    button(p, "cancel", "キャンセル", false, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                    // Delete → Enter confirms, as in Explorer: ringed as the one the keys are on.
+                    div()
+                        .p(px(1.))
+                        .rounded(px(8.))
+                        .border_2()
+                        .border_color(if self.dialog_focus.is_focused(window) { p.focus } else { transparent_black() })
+                        .child(
+                            div()
+                                .id("confirm-recycle")
+                                .h(px(30.))
+                                .px_3()
+                                .flex()
+                                .items_center()
+                                .rounded(px(6.))
+                                .bg(p.danger_fill)
+                                .text_color(p.on_accent)
+                                .cursor_pointer()
+                                .hover(|b| b.opacity(0.9))
+                                .child("ごみ箱へ移動")
+                                .on_click(cx.listener(|this, _, window, cx| this.confirm_recycle(window, cx)))
+                                .test_support(),
+                        )
+                        .into_any_element(),
+                ];
+                (content, buttons)
+            }
+            Dialog::EditSearch { name, query, .. } => {
+                let problem = self.edit_problem(cx);
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
                     .child(
                         div()
                             .flex()
@@ -234,30 +222,24 @@ impl Colet {
                             .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                                 d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
                             }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap_2()
-                            .child(
-                                button(p, "cancel", "キャンセル", false, true)
-                                    .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                                    .test_support(),
-                            )
-                            .child(
-                                button(p, "save-search", "保存", true, problem.is_none())
-                                    .on_click(cx.listener(|this, _, window, cx| this.submit_edit(window, cx)))
-                                    .test_support(),
-                            ),
-                    )
+                    );
+                let buttons = vec![
+                    button(p, "cancel", "キャンセル", false, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                    button(p, "save-search", "保存", true, problem.is_none())
+                        .on_click(cx.listener(|this, _, window, cx| this.submit_edit(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                ];
+                (content, buttons)
             }
             Dialog::Preferences { instance } => {
-                div()
+                let content = div()
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("設定"))
                     // Taken at once as one is picked, and kept.
                     .child(
                         div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(
@@ -299,14 +281,14 @@ impl Colet {
                             .gap_3()
                             .child(div().w(px(180.)).flex_none().text_color(p.text).child(key))
                             .child(div().text_color(p.text_muted).child(what))
-                    })))
-                    .child(
-                        div().flex().justify_end().child(
-                            button(p, "close-preferences", "閉じる", true, true)
-                                .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                                .test_support(),
-                        ),
-                    )
+                    })));
+                let buttons = vec![
+                    button(p, "close-preferences", "閉じる", true, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                ];
+                (content, buttons)
             }
         };
         Some(
@@ -327,6 +309,8 @@ impl Colet {
                 .flex()
                 .items_center()
                 .justify_center()
+                // Clear of the window's edges, which a dialog too tall for it stops short of.
+                .p_4()
                 .bg(hsla(0., 0., 0., 0.45))
                 .occlude()
                 .child(
@@ -336,13 +320,41 @@ impl Colet {
                         .aria_label(title)
                         .track_focus(&self.dialog_focus)
                         .w(px(440.))
-                        .p_5()
+                        .max_h_full()
+                        // The right margin is mostly the rows' own, so the scrollbar lies in it.
+                        .py_5()
+                        .pl_5()
+                        .pr(px(20. - MARGIN))
+                        .flex()
+                        .flex_col()
+                        .gap_3()
                         .bg(p.raised)
                         .border_1()
                         .border_color(p.border_strong)
                         .rounded(px(8.))
                         .shadow_lg()
-                        .child(body),
+                        // The heading and the buttons stay; what lies between scrolls when the window is too low.
+                        .child(div().flex_none().pr(px(MARGIN)).text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(title))
+                        .child(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .min_h_0()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .id("dialog-body")
+                                        .flex_1()
+                                        .min_h_0()
+                                        .overflow_y_scroll()
+                                        .track_scroll(&self.dialog_scroll)
+                                        .child(content.pr(px(MARGIN))),
+                                )
+                                .child(div().absolute().inset_0().child(crate::view::scrollbar(gpui_kit::base::Scrollbar::vertical(&self.dialog_scroll), p))),
+                        )
+                        .child(div().flex_none().pr(px(MARGIN)).flex().justify_end().gap_2().children(buttons))
+                        .test_support(),
                 )
                 .into_any_element(),
         )
