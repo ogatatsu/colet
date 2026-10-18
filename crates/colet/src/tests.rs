@@ -17,7 +17,7 @@ use colet_core::{
 };
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, SharedString, Entity, ScrollStrategy, TestAppContext, Window,
+    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, SharedString, Entity, ScrollDelta, ScrollStrategy, TestAppContext, Window,
     WindowBounds, WindowOptions, point, px, size,
 };
 
@@ -646,6 +646,48 @@ fn leaves_no_room_to_scroll_once_the_columns_slide_back(cx: &mut TestAppContext)
     ui.act(cx, |_, _| ());
     assert_eq!(ui.read(cx, |v| v.columns_scroll.offset().x), px(0.));
     assert_eq!(ui.read(cx, |v| v.columns_scroll.max_offset().x), px(0.));
+    assert!(!ui.read(cx, |v| v.on_screen().hidden_left()));
+}
+
+#[gpui_kit::test]
+fn turns_the_wheel_down_a_column_without_moving_the_columns_or_shading_their_edges(cx: &mut TestAppContext) {
+    let chain: Vec<String> = (1..=8).map(|n| format!(r"D:\{}", (1..=n).map(|k| format!("d{k}")).collect::<Vec<_>>().join(r"\"))).collect();
+    let mut folders: Vec<(&str, Vec<Entry>)> = vec![(r"D:\", vec![folder(&chain[0]), folder(r"D:\fav")]), (r"D:\fav", vec![])];
+    for (k, path) in chain.iter().enumerate() {
+        folders.push((path, chain.get(k + 1).map(|next| vec![folder(next)]).unwrap_or_default()));
+    }
+    let fake = Fake { roots: vec![Entry::folder(r"D:\", "データ (D:)")], ..Fake::default().with_folders(&folders) };
+    let ui = open(cx, Arc::new(fake));
+    let rest = |ui: &Ui, cx: &mut TestAppContext| {
+        for _ in 0..120 {
+            std::thread::sleep(Duration::from_millis(16));
+            ui.act(cx, |_, _| ());
+            settle(cx);
+            if ui.read(cx, |v| v.slide.is_none()) {
+                break;
+            }
+        }
+    };
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    let at = ui.read(cx, |v| v.columns_scroll.offset().x);
+    assert!(at < px(0.), "the chain scrolls the columns");
+    // Down and up over a column scroll its rows; the columns stay where they rest.
+    let column = ui.read(cx, |v| v.state.columns[v.state.active].id);
+    for dy in [-120., 120.] {
+        ui.act(cx, |window, cx| window.scroll(("column", column), ScrollDelta::Pixels(point(px(0.), px(dy))), cx));
+        settle(cx);
+        assert_eq!(ui.read(cx, |v| v.columns_scroll.offset().x), at);
+    }
+    // An offset past the bounds, as a wheel leaves it until the next layout, reads as where it will be drawn.
+    ui.click_in(cx, "home", row(r"D:\"));
+    rest(&ui, cx);
+    ui.act(cx, |_, _| ());
+    assert_eq!(ui.read(cx, |v| v.columns_scroll.max_offset().x), px(0.));
+    ui.read(cx, |v| v.columns_scroll.set_offset(point(px(-300.), px(0.))));
     assert!(!ui.read(cx, |v| v.on_screen().hidden_left()));
 }
 

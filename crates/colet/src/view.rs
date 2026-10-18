@@ -177,7 +177,10 @@ impl Colet {
         let first = if self.state.pinned() { 2 } else { 1 } + self.state.folded_away();
         let count = self.state.columns.len().saturating_sub(first);
         let view = f32::from(self.columns_scroll.bounds().size.width);
-        let from = -f32::from(self.columns_scroll.offset().x);
+        // A wheel moves the offset past its bounds until the next layout brings it back: read it as it
+        // will be drawn, so the edges' shades do not flash on.
+        let max = f32::from(self.columns_scroll.max_offset().x).max(self.hold);
+        let from = (-f32::from(self.columns_scroll.offset().x)).clamp(0., max);
         let cells: Vec<Cell> = (0..count).map(|i| Cell { start: i as f32 * self.widths.column, width: self.widths.column }).collect();
         OnScreen { first, count, span: on_screen(from, view, &cells) }
     }
@@ -1231,6 +1234,8 @@ impl Colet {
                             .id("columns-scroll")
                             .size_full()
                             .overflow_x_scroll()
+                            // A wheel turned down scrolls the column under it, not the columns sideways.
+                            .restrict_scroll_to_axis()
                             .track_scroll(&self.columns_scroll)
                             // The crumbs' bar and the edges' shades follow the columns as they scroll.
                             .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
