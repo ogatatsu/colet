@@ -35,9 +35,11 @@ pub fn list(path: &str, sort: Sort, cancelled: &AtomicBool) -> Result<Vec<Entry>
         return Err("絶対パスを指定してください".into());
     }
     let items = std::fs::read_dir(path).map_err(|e| format!("フォルダーを開けません: {e}"))?;
-    let mut entries = collect(
-        items.filter_map(|entry| {
-            let entry = entry.ok()?;
+    let entries = collect(
+        items.map(|entry| {
+            // Not one item unreadable, whose name it would still give, but the listing broken off: a part
+            // of the folder shown as all of it would hide the rest.
+            let entry = entry.map_err(|e| format!("フォルダーを最後まで読めません: {e}"))?;
             let p = entry.path();
             // The listing already holds each item's size, date and attributes; asking the item again
             // opens it, one by one. A link or junction is still asked, for what it points to.
@@ -47,7 +49,7 @@ pub fn list(path: &str, sort: Sort, cancelled: &AtomicBool) -> Result<Vec<Entry>
                 _ => Entry::from_path(&p),
             };
             // Keep an item it cannot read in sight: a failure must not silently hide it.
-            Some(item.unwrap_or_else(|_| Entry {
+            Ok(item.unwrap_or_else(|_| Entry {
                 path: p.display().to_string(),
                 name: entry.file_name().to_string_lossy().into_owned(),
                 parent: path.to_owned(),
@@ -62,6 +64,7 @@ pub fn list(path: &str, sort: Sort, cancelled: &AtomicBool) -> Result<Vec<Entry>
         }),
         cancelled,
     )?;
+    let mut entries = entries.into_iter().collect::<Result<Vec<_>, String>>()?;
     check(cancelled)?;
     sort_entries(&mut entries, sort);
     check(cancelled)?;
