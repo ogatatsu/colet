@@ -701,6 +701,108 @@ fn turns_the_wheel_down_a_column_without_moving_the_columns_or_shading_their_edg
     assert!(!ui.read(cx, |v| v.on_screen().hidden_left()));
 }
 
+/// Eight folders from `D:\` down, each in the one before: enough to scroll the columns.
+fn deep_chain() -> (Fake, Vec<String>) {
+    let chain: Vec<String> = (1..=8).map(|n| format!(r"D:\{}", (1..=n).map(|k| format!("d{k}")).collect::<Vec<_>>().join(r"\"))).collect();
+    let mut folders: Vec<(&str, Vec<Entry>)> = vec![(r"D:\", vec![folder(&chain[0])])];
+    for (k, path) in chain.iter().enumerate() {
+        folders.push((path, chain.get(k + 1).map(|next| vec![folder(next)]).unwrap_or_default()));
+    }
+    let fake = Fake { roots: vec![Entry::folder(r"D:\", "データ (D:)")], ..Fake::default().with_folders(&folders) };
+    (fake, chain)
+}
+
+/// Frames a screen's refresh apart until the columns rest: the slide runs on the clock.
+fn rest(ui: &Ui, cx: &mut TestAppContext) {
+    for _ in 0..120 {
+        std::thread::sleep(Duration::from_millis(16));
+        ui.act(cx, |_, _| ());
+        settle(cx);
+        if ui.read(cx, |v| v.slide.is_none()) {
+            break;
+        }
+    }
+}
+
+/// How far the columns' view reaches past the last column, as the frame drawn now shows it: none when
+/// it is flush with the right edge.
+fn room_past_last(ui: &Ui, cx: &mut TestAppContext) -> f32 {
+    let last = ui.read(cx, |v| v.state.columns.last().unwrap().id);
+    ui.act(cx, |window, _| f32::from(window.find("columns-scroll").bounds().right() - window.find(("column", last)).bounds().right()))
+}
+
+#[gpui_kit::test]
+fn keeps_the_last_column_at_the_right_edge_as_the_window_is_resized(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    assert!(room_past_last(&ui, cx).abs() < 1.);
+    for width in [1500., 1000., 1300.] {
+        cx.simulate_window_resize(ui.window, size(px(width), px(800.)));
+        // Already in the first frame laid out at the new size.
+        let room = room_past_last(&ui, cx);
+        assert!(room.abs() < 1., "{width}: {room}");
+        settle(cx);
+        assert!(room_past_last(&ui, cx).abs() < 1.);
+        assert!(ui.read(cx, |v| v.columns_scroll.offset().x) < px(0.), "{width}: the columns still scroll");
+    }
+    // Brought short of the end by hand, the left edge stays as the window narrows.
+    ui.read(cx, |v| v.columns_scroll.set_offset(point(px(-100.), px(0.))));
+    ui.act(cx, |_, _| ());
+    cx.simulate_window_resize(ui.window, size(px(1100.), px(800.)));
+    ui.act(cx, |_, _| ());
+    assert_eq!(ui.read(cx, |v| v.columns_scroll.offset().x), px(-100.));
+}
+
+#[gpui_kit::test]
+fn keeps_the_last_column_at_the_right_edge_as_a_width_is_dragged(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    let last = ui.read(cx, |v| v.state.columns.last().unwrap().id);
+    // The columns' width, then home's both ways, which changes the columns' view.
+    for (resizer, by) in [("column-resizer", 60.), ("sidebar-resizer", 120.), ("sidebar-resizer", -120.)] {
+        let edge = ui.act(cx, |window, _| {
+            if resizer == "column-resizer" { window.within(("column", last)).find(resizer) } else { window.find(resizer) }.bounds().center()
+        });
+        ui.act(cx, |window, cx| window.drag(edge, point(edge.x + px(by), edge.y), cx));
+        let room = room_past_last(&ui, cx);
+        assert!(room.abs() < 1., "{resizer} {by}: {room}");
+        settle(cx);
+    }
+}
+
+#[gpui_kit::test]
+fn leaves_no_room_past_the_last_column_once_the_folders_folded_away_come_out(cx: &mut TestAppContext) {
+    let deep = file(r"D:\a\b\c\d\zeta.txt");
+    let fake = Arc::new(Fake::default().with_results(vec![deep.clone()]).with_folders(&[
+        (r"D:\", vec![folder(r"D:\a")]),
+        (r"D:\a", vec![folder(r"D:\a\b")]),
+        (r"D:\a\b", vec![folder(r"D:\a\b\c")]),
+        (r"D:\a\b\c", vec![folder(r"D:\a\b\c\d")]),
+        (r"D:\a\b\c\d", vec![deep.clone()]),
+    ]));
+    let ui = open(cx, fake);
+    ui.input(cx, "zeta");
+    ui.click(cx, row(&deep.path));
+    rest(&ui, cx);
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 4);
+    ui.click(cx, "unfold");
+    rest(&ui, cx);
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
+    assert!(ui.read(cx, |v| v.columns_scroll.offset().x) < px(0.), "the folders that came out scroll the columns");
+    let room = room_past_last(&ui, cx);
+    assert!(room.abs() < 1., "{room}");
+}
+
 #[gpui_kit::test]
 fn turns_the_wheel_with_shift_to_send_the_columns_sideways_leaving_the_rows_under_it(cx: &mut TestAppContext) {
     let chain: Vec<String> = (1..=8).map(|n| format!(r"D:\{}", (1..=n).map(|k| format!("d{k}")).collect::<Vec<_>>().join(r"\"))).collect();

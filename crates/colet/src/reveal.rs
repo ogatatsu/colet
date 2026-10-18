@@ -30,6 +30,23 @@ pub fn reveal_target(from: f32, view: f32, cells: &[Cell], active: Option<usize>
     flush
 }
 
+/// Where columns resting at `from` go once the view or their width changes under them, as the window is
+/// resized or a width dragged: `was` and `was_end` are the view and the columns' end they rested over.
+/// The last column in sight before stays flush with the right edge, unless that would push the active
+/// one off on the left; brought there by hand short of it, the left edge stays, with no room left past
+/// the last column.
+pub fn refit(from: f32, was: f32, was_end: f32, view: f32, cells: &[Cell], active: Option<usize>) -> f32 {
+    let Some(last) = cells.len().checked_sub(1) else { return 0. };
+    let end = cells[last].start + cells[last].width;
+    let flush = (end - view).max(0.);
+    // A pixel either way, for widths rounded under display scaling.
+    if from + was >= was_end - 1. {
+        active.map_or(flush, |active| flush.min(cells[active.min(last)].start))
+    } else {
+        from.min(flush)
+    }
+}
+
 /// What is on screen, in columns: 1.5 is halfway across the second. Above 0, some are hidden on the
 /// left; below the count, on the right. `None` when there are none.
 pub fn on_screen(from: f32, view: f32, cells: &[Cell]) -> Option<(f32, f32)> {
@@ -106,6 +123,39 @@ mod tests {
     #[test]
     fn goes_back_to_the_start_once_nothing_scrolls() {
         assert_eq!(reveal_target(480., 480., &[], None), 0.);
+    }
+
+    #[test]
+    fn keeps_the_last_column_at_the_right_edge_as_the_view_widens_or_narrows() {
+        // Four columns end at 960; resting flush in a 480 view, at 480.
+        assert_eq!(refit(480., 480., 960., 600., &cells(4), Some(3)), 360.);
+        assert_eq!(refit(480., 480., 960., 400., &cells(4), Some(3)), 560.);
+        // Wide enough for all of them, they start at the left.
+        assert_eq!(refit(480., 480., 960., 1200., &cells(4), Some(3)), 0.);
+    }
+
+    #[test]
+    fn keeps_the_last_column_flush_once_all_that_fit_no_longer_do() {
+        assert_eq!(refit(0., 960., 960., 480., &cells(4), Some(2)), 480.);
+    }
+
+    #[test]
+    fn stops_at_the_active_column_rather_than_push_it_off_the_left() {
+        assert_eq!(refit(480., 480., 960., 300., &cells(4), Some(2)), 480.);
+        assert_eq!(refit(480., 480., 960., 200., &cells(4), Some(2)), 480.);
+    }
+
+    #[test]
+    fn keeps_where_it_was_brought_by_hand_closing_only_the_room_past_the_last() {
+        assert_eq!(refit(100., 480., 960., 400., &cells(4), Some(3)), 100.);
+        assert_eq!(refit(300., 480., 960., 800., &cells(4), Some(3)), 160.);
+    }
+
+    #[test]
+    fn follows_a_width_dragged_as_it_does_a_view() {
+        // Flush at 240 over three 240 columns in 480; widened to 300 each, they end at 900.
+        let wider: Vec<Cell> = (0..3).map(|i| Cell { start: i as f32 * 300., width: 300. }).collect();
+        assert_eq!(refit(240., 480., 720., 480., &wider, Some(2)), 420.);
     }
 
     #[test]

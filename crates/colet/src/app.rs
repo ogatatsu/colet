@@ -174,6 +174,8 @@ pub struct Toast {
 
 /// The columns sliding to where they should rest; see [`Colet::reveal`].
 pub struct Slide {
+    /// Where the target was reckoned from, to reckon it again should the view change under it.
+    pub origin: f32,
     pub position: f32,
     pub target: f32,
     pub velocity: f32,
@@ -209,6 +211,8 @@ pub struct Colet {
     /// The scroll offset the columns were last brought to, which holds their scroll width while columns
     /// beside them close and they slide back; once at rest, where they rest.
     pub hold: f32,
+    /// The view's width and the columns' that the columns were last brought to rest, or set sliding, for.
+    pub fitted: (f32, f32),
     pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
     request: u64,
@@ -368,6 +372,7 @@ impl Colet {
             slide: None,
             reveal_pending: None,
             hold: 0.,
+            fitted: (0., 0.),
             owner,
             backend,
             request: 0,

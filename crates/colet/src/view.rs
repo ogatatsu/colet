@@ -10,7 +10,7 @@ use gpui_kit::*;
 use crate::{
     app::*,
     state::saved_query,
-    reveal::{Cell, on_screen, reveal_target},
+    reveal::{Cell, on_screen, refit, reveal_target},
     state::{Column, Kind},
 };
 
@@ -1153,11 +1153,10 @@ impl Colet {
         let unfold_focus = self.stop("unfold", cx);
         let count = self.state.columns.len().saturating_sub(first);
         let content = count as f32 * self.widths.column;
-        let view = f32::from(self.columns_scroll.bounds().size.width);
         let screen = self.on_screen();
         let (hidden_left, hidden_right) = (screen.hidden_left(), screen.hidden_right());
-        // Room past the last column, so the scroll width cannot shrink under where the columns were brought.
-        let hold = (self.hold + view - content).max(0.);
+        let hold = self.hold;
+        let fit = cx.entity().downgrade();
         let pinned_column = pinned.then(|| self.render_column(1, cx));
         let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, cx)).collect();
         let main = div()
@@ -1232,6 +1231,18 @@ impl Colet {
                     .min_w_0()
                     .h_full()
                     .relative()
+                    // Laid out with the columns' view and prepainted ahead of it: where the columns rest
+                    // follows a change in its width before they are drawn.
+                    .child(
+                        canvas(
+                            move |bounds, _, cx| {
+                                fit.update(cx, |this, cx| this.fit(f32::from(bounds.size.width), cx)).ok();
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .inset_0(),
+                    )
                     .child(
                         div()
                             .id("columns-scroll")
@@ -1242,7 +1253,12 @@ impl Colet {
                             .track_scroll(&self.columns_scroll)
                             // The crumbs' bar and the edges' shades follow the columns as they scroll.
                             .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
-                            .child(div().h_full().w(px(content + hold)).flex().children(columns)),
+                            .child(div().h_full().w(px(content)).flex().children(columns))
+                            // Room up to a view's width past where the columns were brought, so the scroll
+                            // width cannot shrink under them while they slide back. A view wide however
+                            // wide layout makes it: reckoned here, it would be the last frame's.
+                            .child(div().absolute().top_0().left(px(hold)).w_full().h(px(0.)))
+                            .test_support(),
                     )
                     .child(
                         div()
@@ -1454,8 +1470,6 @@ impl Colet {
 
     /// Slides the columns toward where they should rest, a frame at a time.
     fn reveal(&mut self, window: &mut Window) {
-        let first = if self.state.pinned() { 2 } else { 1 } + self.state.folded_away();
-        let count = self.state.columns.len().saturating_sub(first);
         let view = f32::from(self.columns_scroll.bounds().size.width);
         let from = -f32::from(self.columns_scroll.offset().x);
         if let Some(smooth) = self.reveal_pending.take() {
@@ -1465,16 +1479,20 @@ impl Colet {
                 window.request_animation_frame();
                 return;
             }
-            let cells: Vec<Cell> =
-                (0..count).map(|i| Cell { start: i as f32 * self.widths.column, width: self.widths.column }).collect();
-            let active = self.state.active.checked_sub(first);
+            let (cells, active) = self.scrolling();
             let start = self.slide.as_ref().map_or(from, |s| s.target);
             let target = reveal_target(start, view, &cells, active);
             self.hold = target.max(from);
+            self.fitted = (view, self.widths.column);
             if (target - from).abs() >= 0.5 {
                 match &mut self.slide {
-                    Some(slide) => slide.target = target,
-                    None => self.slide = Some(Slide { position: from, target, velocity: 0., time: None }),
+                    Some(slide) => {
+                        slide.origin = start;
+                        slide.target = target;
+                    }
+                    None => {
+                        self.slide = Some(Slide { origin: start, position: from, target, velocity: 0., time: None })
+                    }
                 }
             }
         }
@@ -1501,6 +1519,45 @@ impl Colet {
         } else {
             window.request_animation_frame();
         }
+    }
+
+    /// The scrolling columns' places, and which of them is active: `None` for home or the pinned results.
+    fn scrolling(&self) -> (Vec<Cell>, Option<usize>) {
+        let first = if self.state.pinned() { 2 } else { 1 } + self.state.folded_away();
+        let count = self.state.columns.len().saturating_sub(first);
+        let width = self.widths.column;
+        let cells = (0..count).map(|i| Cell { start: i as f32 * width, width }).collect();
+        (cells, self.state.active.checked_sub(first))
+    }
+
+    /// Layout has made the columns' view `view` wide, ahead of drawing them: when it or the columns' width
+    /// changed since they were brought to rest, they follow it in this frame. At rest they go straight
+    /// to where [`refit`] puts them, as a window or a width is dragged; sliding, as when the folders
+    /// folded away come out and their strip goes, they slide on to where they would now rest.
+    pub fn fit(&mut self, view: f32, cx: &mut Context<Self>) {
+        let (was, was_width) = self.fitted;
+        if view <= 0. || ((view - was).abs() < 0.5 && was_width == self.widths.column) {
+            return;
+        }
+        self.fitted = (view, self.widths.column);
+        // The first layout: nothing rests anywhere yet.
+        if was <= 0. {
+            return;
+        }
+        let (cells, active) = self.scrolling();
+        match &mut self.slide {
+            Some(slide) => {
+                slide.target = reveal_target(slide.origin, view, &cells, active);
+                self.hold = slide.target.max(slide.position);
+            }
+            None => {
+                let from = -f32::from(self.columns_scroll.offset().x);
+                let target = refit(from, was, cells.len() as f32 * was_width, view, &cells, active);
+                self.columns_scroll.set_offset(point(px(-target), px(0.)));
+                self.hold = target;
+            }
+        }
+        cx.notify();
     }
 }
 
