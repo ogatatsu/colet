@@ -17,7 +17,7 @@ use colet_core::{
 };
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, SharedString, Entity, ScrollDelta, ScrollStrategy, TestAppContext, Window,
+    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, SharedString, Entity, Focusable, ScrollDelta, ScrollStrategy, TestAppContext, Window,
     WindowBounds, WindowOptions, point, px, size,
 };
 
@@ -1185,6 +1185,7 @@ fn acts_from_the_menu_on_the_row_right_clicked_leaving_the_selection(cx: &mut Te
     settle(cx);
     ui.click(cx, "menu-windows");
     assert_eq!(*fake.menus.lock().unwrap(), [(vec![], r"D:\work".to_owned())]);
+    assert!(ui.columns_focused(cx));
 }
 
 #[gpui_kit::test]
@@ -1281,4 +1282,153 @@ fn marks_under_the_crumbs_what_is_on_screen_while_some_are_folded(cx: &mut TestA
     ui.act(cx, |_, _| ());
     let hidden = ui.read(cx, |v| v.on_screen().hidden_left() || v.on_screen().hidden_right());
     assert_eq!(ui.act(cx, |window, _| window.try_find("crumb-bar").is_some()), hidden);
+}
+
+#[gpui_kit::test]
+fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_shell(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
+    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into() }];
+    let ui = open(cx, fake.clone());
+    ui.press(cx, "down");
+    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "");
+    ui.press(cx, "enter");
+    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
+    assert_eq!(ui.field(cx), "ext:pdf");
+    assert!(ui.home_focused(cx));
+    assert!(fake.opened.lock().unwrap().is_empty());
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "escape");
+    ui.act(cx, |window, cx| window.double_click(row(&search_key("ext:pdf")), cx));
+    settle(cx);
+    assert_eq!(ui.field(cx), "ext:pdf");
+    assert!(fake.opened.lock().unwrap().is_empty());
+}
+
+#[gpui_kit::test]
+fn brings_homes_focused_row_into_view_across_all_three_headings(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![folder(r"D:\")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![]), (r"D:\favorite", vec![])])
+    });
+    {
+        let mut settings = fake.settings.lock().unwrap();
+        settings.favorites = vec![r"D:\favorite".into()];
+        settings.saved_searches = (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}") }).collect();
+    }
+    let ui = open(cx, fake);
+    ui.press(cx, "down");
+    ui.press(cx, "end");
+    assert_eq!(ui.selected(cx, 0), [r"D:\"]);
+    assert!(ui.read(cx, |v| v.home_scroll.offset().y < px(0.)));
+    assert!(ui.act(cx, |window, _| window.within("home-rows").find(row(r"D:\")).visible()));
+    ui.press(cx, "home");
+    assert_eq!(ui.selected(cx, 0), [r"D:\favorite"]);
+    assert!(ui.act(cx, |window, _| window.within("home-rows").find(row(r"D:\favorite")).visible()));
+    assert!(ui.home_focused(cx));
+}
+
+#[gpui_kit::test]
+fn closes_the_menu_and_returns_the_keys_when_its_column_vanishes(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "shift-f10");
+    fake.remove(r"D:\work");
+    let changed = ui.read(cx, |v| v.changed.clone());
+    *changed.lock().unwrap() = Some(Some(HashSet::from([r"D:\work".into()])));
+    settle(cx);
+    ui.act(cx, |_, _| ());
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
+    assert!(ui.read(cx, |v| v.menu.is_none()));
+    assert!(ui.columns_focused(cx));
+    assert!(fake.menus.lock().unwrap().is_empty());
+}
+
+#[gpui_kit::test]
+fn dismisses_a_removed_columns_menu_before_another_frame(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "shift-f10");
+    ui.view.update(cx, |v, cx| {
+        v.state.select(1, vec![r"D:\other".into()]);
+        v.changed(cx);
+        assert!(v.menu.is_none());
+        assert!(v.menu_cursor.is_none());
+    });
+    assert!(cx.update_window(ui.window, |_, window, cx| ui.view.read(cx).columns_focus.is_focused(window)).unwrap());
+}
+
+#[gpui_kit::test]
+fn dismissing_a_removed_columns_menu_keeps_focus_given_to_a_field(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "shift-f10");
+    ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| {
+        v.state.select(1, vec![r"D:\other".into()]);
+        v.changed(cx);
+        v.search.update(cx, |input, cx| input.focus(window, cx));
+    }));
+    assert!(cx.update_window(ui.window, |_, window, cx| {
+        ui.view.read(cx).search.read(cx).focus_handle(cx).is_focused(window)
+    }).unwrap());
+    assert!(ui.read(cx, |v| v.menu.is_none()));
+}
+
+#[gpui_kit::test]
+fn refuses_a_stale_menu_even_when_another_column_takes_its_index(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "shift-f10");
+    ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| {
+        let column = v.menu.as_ref().unwrap().column;
+        v.state.select(1, vec![r"D:\other".into()]);
+        assert_ne!(v.state.columns[2].id, column);
+        v.show_shell_menu(window, cx);
+    }));
+    assert!(fake.menus.lock().unwrap().is_empty());
+    assert!(ui.read(cx, |v| v.menu.is_none() && v.menu_cursor.is_none()));
+    assert!(ui.columns_focused(cx));
+}
+
+#[gpui_kit::test]
+fn showing_the_shell_menu_directly_returns_the_keys_to_its_column(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "shift-f10");
+    ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.show_shell_menu(window, cx)));
+    settle(cx);
+    assert_eq!(fake.menus.lock().unwrap().len(), 1);
+    assert!(ui.read(cx, |v| v.menu.is_none() && v.menu_cursor.is_none()));
+    assert!(ui.columns_focused(cx));
+}
+
+#[gpui_kit::test]
+fn the_final_settings_save_supersedes_debounced_saves(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    let ui = open(cx, fake.clone());
+    let before = fake.saves.load(Ordering::Relaxed);
+    ui.view.update(cx, |v, cx| {
+        v.update_settings(|s| s.instance = "older".into(), cx);
+        v.update_settings(|s| s.instance = "latest".into(), cx);
+        v.flush_settings().unwrap();
+    });
+    settle(cx);
+    assert_eq!(fake.settings.lock().unwrap().instance, "latest");
+    assert_eq!(fake.saves.load(Ordering::Relaxed), before + 1);
+}
+
+#[gpui_kit::test]
+fn refreshes_every_loaded_search_page_after_a_change_overtaken_by_pagination(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results((0..511).map(|i| file(&format!(r"D:\{i:04}.txt"))).collect()));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "fixture");
+    let id = ui.read(cx, |v| v.state.columns[1].id);
+    ui.view.update(cx, |v, _| {
+        let c = &mut v.state.columns[1];
+        c.selected = vec![r"D:\0400.txt".into()];
+        c.focused = c.selected.first().cloned();
+    });
+    fake.results.lock().unwrap().remove(0);
+    fake.changed.store(true, Ordering::Relaxed);
+    ui.view.update(cx, |v, cx| v.more(id, cx));
+    for _ in 0..4 { settle(cx); }
+    let paths = ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>());
+    assert_eq!(paths.len(), 510);
+    assert!(!paths.contains(&r"D:\0000.txt".into()));
+    assert!(paths.contains(&r"D:\0500.txt".into()));
+    assert_eq!(ui.selected(cx, 1), [r"D:\0400.txt"]);
 }

@@ -2,6 +2,7 @@
 //! the theme, and where the window was. Searches typed, history and the columns open are not kept.
 use std::{
     path::{Path, PathBuf},
+    sync::{Mutex, atomic::{AtomicU64, Ordering}},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -129,6 +130,29 @@ pub struct LoadError {
     pub kept: bool,
 }
 
+/// Serializes saves, including the final one on close. A delayed task checks its generation again
+/// after taking the lock, so it can never overwrite a newer save.
+#[derive(Default)]
+pub struct Writer {
+    generation: AtomicU64,
+    writing: Mutex<()>,
+}
+
+impl Writer {
+    pub fn request(&self) -> u64 {
+        self.generation.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub fn current(&self, generation: u64) -> bool {
+        self.generation.load(Ordering::Acquire) == generation
+    }
+
+    pub fn save(&self, generation: u64, write: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+        let _writing = self.writing.lock().map_err(|e| format!("設定を保存できません: {e}"))?;
+        if self.current(generation) { write() } else { Ok(()) }
+    }
+}
+
 /// The settings kept, or the defaults when there are none yet.
 pub fn load() -> Result<Settings, LoadError> {
     let Some(path) = path() else { return Ok(Settings::default()) };
@@ -171,17 +195,57 @@ fn load_from(path: &Path) -> Result<Settings, LoadError> {
 /// Writes beside the file and then over it, so a failed write leaves the old one whole.
 pub fn save(settings: &Settings) -> Result<(), String> {
     let path = path().ok_or("設定の保存先がわかりません")?;
+    save_to(settings, &path)
+}
+
+fn save_to(settings: &Settings, path: &Path) -> Result<(), String> {
     let fail = |e: std::io::Error| format!("設定を保存できません: {e}");
     std::fs::create_dir_all(path.parent().unwrap()).map_err(fail)?;
     let temporary = path.with_extension("json.tmp");
     let json = serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?;
     std::fs::write(&temporary, json).map_err(fail)?;
-    std::fs::rename(&temporary, &path).map_err(fail)
+    std::fs::rename(&temporary, path).map_err(fail)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finishes_an_in_flight_save_before_the_final_one_and_discards_delayed_older_saves() {
+        use std::sync::{Arc, mpsc};
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let writer = Arc::new(Writer::default());
+        let old = writer.request();
+        let (started, entered) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let first_writer = writer.clone();
+        let first_path = path.clone();
+        let first = std::thread::spawn(move || first_writer.save(old, || {
+            started.send(()).unwrap();
+            released.recv().unwrap();
+            save_to(&Settings { instance: "older".into(), ..Settings::default() }, &first_path)
+        }));
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        // The first save is inside its write callback and cannot finish until released. Check the
+        // mutex itself here: a timeout on the second thread could just mean it was not scheduled.
+        let locked = matches!(writer.writing.try_lock(), Err(std::sync::TryLockError::WouldBlock));
+        let newest = writer.request();
+        let last_writer = writer.clone();
+        let last_path = path.clone();
+        let last = std::thread::spawn(move || last_writer.save(newest, || {
+            save_to(&Settings { instance: "latest".into(), ..Settings::default() }, &last_path)
+        }));
+        release.send(()).unwrap();
+        first.join().unwrap().unwrap();
+        last.join().unwrap().unwrap();
+        assert!(locked, "the write callback must run while holding the save lock");
+        writer.save(old, || panic!("a delayed old save must be discarded")).unwrap();
+        assert_eq!(load_from(&path).unwrap().instance, "latest");
+    }
 
     #[test]
     fn fills_in_what_a_partial_file_lacks() {

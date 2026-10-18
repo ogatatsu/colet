@@ -119,8 +119,15 @@ impl Colet {
     }
 
     pub fn run_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(menu) = &self.menu {
+            let Some(index) = self.state.index_of(menu.column) else {
+                self.close_menus(true, window, cx);
+                return;
+            };
+            self.state.set_active(index);
+        }
         match command {
-            Command::Open => self.open_picked(cx),
+            Command::Open => self.open_picked(window, cx),
             Command::Explorer => self.reveal_in_explorer(cx),
             Command::Copy => self.copy(false, cx),
             Command::Cut => self.copy(true, cx),
@@ -132,7 +139,10 @@ impl Colet {
             Command::Favorite(path) => {
                 self.toggle_favorite(&path, cx);
             }
-            Command::Windows => self.show_shell_menu(cx),
+            Command::Windows => {
+                self.show_shell_menu(window, cx);
+                return;
+            }
             Command::EditSearch(query) => self.open_edit(&query, window, cx),
             Command::Unsave(query) => self.toggle_saved(&query, cx),
             Command::Sort(sort) => self.set_sort(sort, cx),

@@ -104,8 +104,19 @@ impl Palette {
 
     /// Gives a field Colet's colors: its selected text on the selection fill, as the old app's.
     pub fn style_input(self, input: &Entity<InputState>, cx: &mut App) {
-        let style = InputEditorStyle { selection: self.selection, ..Default::default() };
-        input.update(cx, |input, _| input.set_editor_style(style));
+        input.update(cx, |input, _| input.set_editor_style(self.input_style()));
+    }
+
+    fn input_style(self) -> InputEditorStyle {
+        InputEditorStyle {
+            foreground: self.text,
+            muted_foreground: self.text_muted,
+            background: self.surface,
+            border: self.border_strong,
+            selection: self.selection,
+            caret: self.text,
+            ..Default::default()
+        }
     }
 
     /// The colors `theme` gives: its own, or for following Windows, those of the window's appearance.
@@ -115,6 +126,26 @@ impl Palette {
             (Theme::Dark, _) => Self::dark(),
             (Theme::System, WindowAppearance::Dark | WindowAppearance::VibrantDark) => Self::dark(),
             (Theme::System, _) => Self::light(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::base::{ColorTokens, SemanticThemeTokens};
+
+    #[test]
+    fn input_ink_and_caret_keep_the_chosen_theme_against_either_base_theme() {
+        for palette in [Palette::light(), Palette::dark()] {
+            for colors in [ColorTokens::light(), ColorTokens::dark()] {
+                let tokens = SemanticThemeTokens { colors, ..Default::default() };
+                let style = palette.input_style().resolved(&tokens);
+                assert_eq!(style.foreground, palette.text);
+                assert_eq!(style.muted_foreground, palette.text_muted);
+                assert_eq!(style.caret, palette.text);
+                assert_eq!(style.selection, palette.selection);
+            }
         }
     }
 }

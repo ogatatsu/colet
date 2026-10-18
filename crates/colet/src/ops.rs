@@ -17,7 +17,7 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, Tone},
     places::Dialog,
-    state::{Kind as ColumnKind, saved_query},
+    state::{Column, ColumnId, Kind as ColumnKind, saved_query},
 };
 
 /// The most operations kept, and the most items of each.
@@ -154,7 +154,7 @@ impl HistoryEntry {
 
 /// Where a menu opened by a right-click or the menu key stands, and what it acts on.
 pub struct Menu {
-    pub index: usize,
+    pub column: ColumnId,
     /// `None` for the column's selection; empty from its empty space, for the folder itself.
     pub paths: Option<Vec<String>>,
     /// In the window.
@@ -186,29 +186,39 @@ fn now() -> u64 {
 }
 
 impl Colet {
+    /// A menu keeps the column it opened on even if another column takes its place in the chain.
+    fn action_column(&self) -> Option<&Column> {
+        let index = match &self.menu {
+            Some(menu) => self.state.index_of(menu.column)?,
+            None => self.state.active,
+        };
+        self.state.columns.get(index)
+    }
+
     /// What the file actions work on: the selection, or while the menu is open, what it was opened on.
     pub fn picked(&self) -> Vec<String> {
+        let Some(column) = self.action_column() else { return Vec::new() };
         match &self.menu {
             Some(Menu { paths: Some(paths), .. }) => paths.clone(),
-            _ => self.state.columns[self.state.active].selected.clone(),
+            _ => column.selected.clone(),
         }
     }
 
     pub fn picked_entries(&self) -> Vec<Entry> {
-        let c = &self.state.columns[self.state.active];
+        let Some(c) = self.action_column() else { return Vec::new() };
         let picked: HashSet<String> = self.picked().into_iter().collect();
         c.entries.iter().filter(|e| picked.contains(&e.path)).cloned().collect()
     }
 
     /// Where a paste or a new folder goes: the folder column worked in.
     pub fn destination(&self) -> Option<String> {
-        let c = &self.state.columns[self.state.active];
+        let c = self.action_column()?;
         (c.kind == ColumnKind::Folder).then(|| c.path.clone())
     }
 
     pub fn reasons(&self) -> Reasons {
         let picked = self.picked();
-        let at_home = self.state.columns[self.state.active].kind == ColumnKind::Home;
+        let at_home = self.action_column().is_none_or(|c| c.kind == ColumnKind::Home);
         let search = picked.iter().any(|p| saved_query(p).is_some());
         let none = picked.is_empty();
         let item = if none { Some(NEEDS_SELECTION) } else if at_home { Some(NOT_AT_HOME) } else { None };
@@ -434,12 +444,12 @@ impl Colet {
     }
 
     /// Opens the picked item: a folder beside it, a file in its app.
-    pub fn open_picked(&mut self, cx: &mut Context<Self>) {
+    pub fn open_picked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let index = self.action_column().and_then(|c| self.state.index_of(c.id));
         let picked = self.picked_entries();
         self.menu = None;
-        if let [entry] = picked.as_slice() {
-            let index = self.state.active;
-            self.open(index, &entry.path.clone(), cx);
+        if let (Some(index), [entry]) = (index, picked.as_slice()) {
+            self.open(index, &entry.path, window, cx);
         }
     }
 
@@ -457,18 +467,26 @@ impl Colet {
         .detach();
     }
 
-    /// The Windows (Explorer) menu, where this one was opened.
-    pub fn show_shell_menu(&mut self, cx: &mut Context<Self>) {
+    /// The Windows (Explorer) menu, where this one was opened. Dismisses Colet's menu and returns its
+    /// keys even when the column it belonged to has gone.
+    pub fn show_shell_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(menu) = self.menu.take() else { return };
+        let index = self.state.index_of(menu.column);
+        if let Some(index) = index {
+            self.state.set_active(index);
+        }
+        let to_column = self.dialog.is_none() && self.menu_focus.is_focused(window);
+        self.close_menus(to_column, window, cx);
+        let Some(index) = index else { return };
         if let Some(reason) = self.reasons_for(&menu).shell {
             self.notify(reason, Tone::Info, cx);
             return;
         }
         let paths = match &menu.paths {
             Some(paths) => paths.clone(),
-            None => self.state.columns[menu.index].selected.clone(),
+            None => self.state.columns[index].selected.clone(),
         };
-        let background = if paths.is_empty() { self.destination().unwrap_or_default() } else { String::new() };
+        let background = if paths.is_empty() { self.state.columns[index].path.clone() } else { String::new() };
         let (backend, owner, at) = (self.backend.clone(), self.owner, menu.screen);
         let task = cx.background_executor().spawn(async move { backend.shell_menu(paths, background, at, owner) });
         cx.spawn(async move |this, cx| {
@@ -479,12 +497,11 @@ impl Colet {
             this.update(cx, |this, cx| this.refresh(cx)).ok();
         })
         .detach();
-        cx.notify();
     }
 
     fn reasons_for(&mut self, menu: &Menu) -> Reasons {
         let paths = menu.paths.clone();
-        let saved = self.menu.replace(Menu { index: menu.index, paths, at: menu.at, screen: menu.screen });
+        let saved = self.menu.replace(Menu { column: menu.column, paths, at: menu.at, screen: menu.screen });
         let reasons = self.reasons();
         self.menu = saved;
         reasons

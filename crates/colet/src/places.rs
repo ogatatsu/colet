@@ -39,6 +39,19 @@ pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
     favorites.chain(searches).chain(drives).filter(|e| seen.insert(key(e))).collect()
 }
 
+/// Home's headings and their rows, shared by drawing and scrolling to the focused row.
+pub fn home_groups<'a>(settings: &Settings, entries: &'a [Entry]) -> Vec<(&'static str, Vec<&'a Entry>)> {
+    let favorite = |e: &&Entry| settings.is_favorite(&e.path);
+    [
+        ("お気に入り", entries.iter().filter(favorite).collect::<Vec<_>>()),
+        ("保存した検索", entries.iter().filter(|e| saved_query(&e.path).is_some()).collect()),
+        ("ドライブ", entries.iter().filter(|e| saved_query(&e.path).is_none() && !favorite(e)).collect()),
+    ]
+    .into_iter()
+    .filter(|(_, rows)| !rows.is_empty())
+    .collect()
+}
+
 /// Where the window opens again: on the display holding the middle of where it was left, which the window
 /// must name or it opens on the primary one; otherwise centered on `primary`, as after that display was
 /// unplugged. Either way it is kept within the display it opens on.
@@ -77,22 +90,25 @@ impl Colet {
             let home = self.state.columns[0].id;
             self.load(home, 0, true, cx);
         }
-        self.save_generation += 1;
-        let generation = self.save_generation;
+        let generation = self.settings_writer.request();
         if self.keep_file {
             cx.notify();
             return;
         }
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(250)).await;
-            let Some((backend, settings)) = this
-                .update(cx, |this, _| (this.save_generation == generation).then(|| (this.backend.clone(), this.settings.clone())))
+            let Some((writer, backend, settings)) = this
+                .update(cx, |this, _| this.settings_writer.current(generation).then(|| {
+                    (this.settings_writer.clone(), this.backend.clone(), this.settings.clone())
+                }))
                 .ok()
                 .flatten()
             else {
                 return;
             };
-            let saved = cx.background_executor().spawn(async move { backend.save_settings(&settings) }).await;
+            let saved = cx.background_executor().spawn(async move {
+                writer.save(generation, || backend.save_settings(&settings))
+            }).await;
             if let Err(error) = saved {
                 this.update(cx, |this, cx| this.notify(error, Tone::Error, cx)).ok();
             }
@@ -103,11 +119,11 @@ impl Colet {
 
     /// Writes the settings now, as the window closes.
     pub fn flush_settings(&mut self) -> Result<(), String> {
-        self.save_generation += 1;
+        let generation = self.settings_writer.request();
         if self.keep_file {
             return Ok(());
         }
-        self.backend.save_settings(&self.settings)
+        self.settings_writer.save(generation, || self.backend.save_settings(&self.settings))
     }
 
     pub fn remember_window(&mut self, window: &Window, cx: &mut Context<Self>) {

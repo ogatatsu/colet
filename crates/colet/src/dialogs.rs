@@ -352,6 +352,7 @@ impl Colet {
         if self.dialog.is_some() {
             return;
         }
+        let Some(column) = self.state.columns.get(index).map(|c| c.id) else { return };
         self.state.set_active(index);
         let handle = if index == 0 { &self.home_focus } else { &self.columns_focus };
         handle.focus(window, cx);
@@ -363,7 +364,7 @@ impl Colet {
         let _ = unsafe {
             windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point)
         };
-        self.menu = Some(Menu { index, paths, at, screen: (point.x, point.y) });
+        self.menu = Some(Menu { column, paths, at, screen: (point.x, point.y) });
         self.sort_open = false;
         self.menu_cursor = None;
         self.menu_focus.focus(window, cx);

@@ -26,8 +26,8 @@ use crate::{
     backend::{self, Search},
     icons::Icons,
     ops::{HistoryEntry, Menu, OperationEvents},
-    places::{Dialog, home_entries},
-    settings::{LoadError, Settings},
+    places::{Dialog, home_entries, home_groups},
+    settings::{LoadError, Settings, Writer},
     state::{ColumnId, Kind, State},
     theme::Palette,
 };
@@ -234,7 +234,7 @@ pub struct Colet {
     pub settings: Settings,
     /// The file read at start could not be read and is still there: never written over this session.
     pub(crate) keep_file: bool,
-    pub(crate) save_generation: u64,
+    pub(crate) settings_writer: Arc<Writer>,
     /// What the latest operation sent away, by path key: a listing that finds it gone takes it as
     /// Colet's own doing.
     pub(crate) departed: HashSet<String>,
@@ -386,7 +386,7 @@ impl Colet {
             typed: (String::new(), Instant::now(), 0),
             settings,
             keep_file,
-            save_generation: 0,
+            settings_writer: Arc::default(),
             departed: HashSet::new(),
             dialog: None,
             dialog_subscriptions: Vec::new(),
@@ -477,6 +477,23 @@ impl Colet {
 
     fn sync(&mut self, cx: &mut Context<Self>) {
         let live: HashSet<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
+        if self.menu.as_ref().is_some_and(|menu| !live.contains(&menu.column)) {
+            self.menu = None;
+            self.menu_cursor = None;
+            let view = cx.weak_entity();
+            let id = cx.entity_id();
+            // Restore the keys after this update, before drawing, only if they are still in the
+            // dismissed menu. A field or another menu opened meanwhile keeps its focus.
+            cx.defer(move |cx| {
+                cx.with_window(id, |window, cx| {
+                    view.update(cx, |this, cx| {
+                        if this.menu.is_none() && !this.sort_open && this.menu_focus.is_focused(window) {
+                            this.close_menus(true, window, cx);
+                        }
+                    }).ok();
+                });
+            });
+        }
         // A column gone stops its listing; a late answer finds no column and is dropped.
         self.cancels.retain(|id, cancelled| {
             let keep = live.contains(id);
@@ -870,8 +887,12 @@ impl Colet {
     }
 
     /// A folder opens beside it, as picking does; a file opens in its app.
-    pub fn open(&mut self, index: usize, path: &str, cx: &mut Context<Self>) {
+    pub fn open(&mut self, index: usize, path: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self.state.columns.get(index).and_then(|c| c.entry(path)).cloned() else { return };
+        if crate::state::saved_query(&entry.path).is_some() {
+            self.pick(index, entry.path, window, cx);
+            return;
+        }
         if entry.directory {
             self.state.select(index, vec![entry.path]);
             self.changed(cx);
@@ -966,8 +987,20 @@ impl Colet {
                 continue;
             }
             let Some(index) = c.entries.iter().position(|e| &e.path == path) else { continue };
-            let handle = self.lists.entry(c.id).or_default();
-            handle.scroll_to_item(index, ScrollStrategy::Nearest);
+            if c.kind == Kind::Home {
+                let mut row = 0;
+                for (_, entries) in home_groups(&self.settings, &c.entries) {
+                    row += 1; // The heading is a child of the same scroll container.
+                    if let Some(at) = entries.iter().position(|e| &e.path == path) {
+                        self.home_scroll.scroll_to_item(row + at);
+                        break;
+                    }
+                    row += entries.len();
+                }
+            } else {
+                let handle = self.lists.entry(c.id).or_default();
+                handle.scroll_to_item(index, ScrollStrategy::Nearest);
+            }
             self.scrolled_to.insert(c.id, path.clone());
         }
     }

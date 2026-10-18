@@ -279,10 +279,10 @@ impl Colet {
                 // From the keys, the first line is lit.
                 this.move_cursor(1, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenItem, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenItem, window, cx| {
                 let index = this.state.active;
                 if let Some(path) = this.state.columns[index].focused.clone() {
-                    this.open(index, &path, cx);
+                    this.open(index, &path, window, cx);
                 }
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
@@ -320,13 +320,13 @@ impl Colet {
         let target = self
             .menu
             .as_ref()
-            .is_some_and(|m| m.index == index && m.paths.as_deref() == Some(std::slice::from_ref(&entry.path)));
+            .is_some_and(|m| m.column == c.id && m.paths.as_deref() == Some(std::slice::from_ref(&entry.path)));
         // The item a search result or favorite points at: a bar, which wins over the selection but not
         // over the one in the column worked in. Home marks its pick so while the columns are worked in.
         let barred = (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked);
         // The menu acts on a row outside the selection, or the folder itself: the selection steps back, so
         // only what the menu acts on stands out.
-        let aside = self.menu.as_ref().is_some_and(|m| m.index == index && m.paths.is_some());
+        let aside = self.menu.as_ref().is_some_and(|m| m.column == c.id && m.paths.is_some());
         let lit = selected && marked && !aside;
         let image = self.icons.get(entry, cx, |this: &mut Colet| &mut this.icons);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
@@ -426,7 +426,7 @@ impl Colet {
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 let modifiers = event.modifiers();
                 if event.click_count() >= 2 {
-                    this.open(index, &path, cx);
+                    this.open(index, &path, window, cx);
                 } else if modifiers.control {
                     this.state.toggle(index, &path);
                     this.state.set_active(index);
@@ -537,18 +537,7 @@ impl Colet {
             // A handful of places: no need to virtualize. The kinds stand under headings, so they don't
             // read as one list.
             let entries = c.entries.clone();
-            let favorite = |e: &&Entry| self.settings.is_favorite(&e.path);
-            let groups: Vec<(&str, Vec<Entry>)> = [
-                ("お気に入り", entries.iter().filter(favorite).cloned().collect::<Vec<_>>()),
-                ("保存した検索", entries.iter().filter(|e| saved_query(&e.path).is_some()).cloned().collect()),
-                (
-                    "ドライブ",
-                    entries.iter().filter(|e| saved_query(&e.path).is_none() && !favorite(e)).cloned().collect(),
-                ),
-            ]
-            .into_iter()
-            .filter(|(_, items)| !items.is_empty())
-            .collect();
+            let groups = crate::places::home_groups(&self.settings, &entries);
             let mut rows = div()
                 .id("home-rows")
                 .role(Role::ListBox)
