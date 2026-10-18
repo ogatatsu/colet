@@ -152,6 +152,30 @@ mod tests {
         }
     }
 
+    /// WCAG's contrast ratio of two opaque colors.
+    fn contrast(a: Hsla, b: Hsla) -> f32 {
+        let luminance = |c: Hsla| {
+            let c = gpui_kit::Rgba::from(c);
+            let lin = |v: f32| if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+            0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+        };
+        let (x, y) = (luminance(a), luminance(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn small_text_on_a_fill_reads_at_4_5_to_1_or_more() {
+        for (palette, dark) in [(Palette::light(), false), (Palette::dark(), true)] {
+            // The count of problems on the history's button.
+            let badge = contrast(palette.on_accent, palette.danger_fill);
+            assert!(badge >= 4.5, "badge {badge}, dark: {dark}");
+            // The paths in the Recycle Bin's question, set into the dialog.
+            let paths = contrast(palette.text_muted, palette.bg);
+            assert!(paths >= 4.5, "paths {paths}, dark: {dark}");
+            assert!(palette.bg != palette.raised, "the paths' ground stands off the dialog, dark: {dark}");
+        }
+    }
+
     #[test]
     fn input_ink_and_caret_keep_the_chosen_theme_against_either_base_theme() {
         for palette in [Palette::light(), Palette::dark()] {

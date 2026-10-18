@@ -161,7 +161,10 @@ impl Colet {
                             .flex_col()
                             .text_size(px(12.))
                             .text_color(p.text_muted)
-                            .bg(p.surface)
+                            // Set into the dialog: in the light colors the dialog and a surface are both white.
+                            .bg(p.bg)
+                            .border_1()
+                            .border_color(p.border)
                             .rounded(px(6.))
                             .children(paths.iter().take(8).map(|path| div().truncate().child(path.clone())))
                             .when(paths.len() > 8, |d| d.child(format!("ほか {} 項目", paths.len() - 8))),
@@ -494,8 +497,9 @@ impl Colet {
                         .h(px(14.))
                         .px(px(3.))
                         .rounded(px(7.))
-                        .bg(p.danger)
-                        .text_color(hsla(0., 0., 0.08, 1.))
+                        // White on the deep red, as the Recycle Bin's button: past 4.5:1 in either theme.
+                        .bg(p.danger_fill)
+                        .text_color(p.on_accent)
                         .text_size(px(10.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .flex()
