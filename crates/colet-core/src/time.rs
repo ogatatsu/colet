@@ -33,9 +33,14 @@ pub fn size(bytes: Option<u64>) -> String {
     if bytes < 1024 {
         return format!("{bytes} B");
     }
-    let i = ((bytes as f64).ln() / 1024f64.ln()).floor().min(4.) as i32;
-    let value = bytes as f64 / 1024f64.powi(i);
-    let unit = ["B", "KB", "MB", "GB", "TB"][i as usize];
+    let shown = |value: f64, i: usize| if i == 1 { value.round() } else { (value * 10.).round() / 10. };
+    let (mut value, mut i) = (bytes as f64, 0);
+    // Rounded, 1023.7 KB would read 1024 KB: such a value goes on to the next unit.
+    while i < 4 && shown(value, i) >= 1024. {
+        value /= 1024.;
+        i += 1;
+    }
+    let unit = ["B", "KB", "MB", "GB", "TB"][i];
     if i == 1 { format!("{value:.0} {unit}") } else { format!("{value:.1} {unit}") }
 }
 
@@ -72,6 +77,11 @@ mod tests {
         assert_eq!(size(Some(1536)), "2 KB");
         assert_eq!(size(Some(1024 * 1024 * 3 / 2)), "1.5 MB");
         assert_eq!(size(Some(1024u64.pow(4) * 2)), "2.0 TB");
+        // Never 1024 of a unit: it rounds up to the next.
+        assert_eq!(size(Some(1024 * 1024 - 1)), "1.0 MB");
+        assert_eq!(size(Some(1024u64.pow(3) - 1)), "1.0 GB");
+        assert_eq!(size(Some(1024 * 1023 + 400)), "1023 KB");
+        assert_eq!(size(Some(1024u64.pow(5) * 3)), "3072.0 TB");
     }
 
     #[test]
