@@ -221,6 +221,8 @@ pub struct Colet {
     unwatched: HashSet<String>,
     /// What the watcher saw change, collected until the UI takes it: `None` inside for any change.
     pub(crate) changed: Arc<Mutex<Option<Option<HashSet<String>>>>>,
+    /// Folders the watcher could list but not watch, until the UI says so.
+    missed: Arc<Mutex<Vec<String>>>,
     searched_at: Option<Instant>,
     search_refresh: bool,
     /// What type-ahead has typed so far, when, and in which column.
@@ -374,6 +376,7 @@ impl Colet {
             watched: Vec::new(),
             unwatched: HashSet::new(),
             changed: Arc::default(),
+            missed: Arc::default(),
             searched_at: None,
             search_refresh: false,
             typed: (String::new(), Instant::now(), 0),
@@ -625,7 +628,8 @@ impl Colet {
 
     // ---- Watching ----
 
-    /// Watches the folders the columns could read, one level deep.
+    /// Watches the folders the columns could read, one level deep. The watcher opens them on its own
+    /// thread, so a share slow to answer never holds up the window.
     fn watch(&mut self, cx: &mut Context<Self>) {
         let paths: Vec<String> = self
             .state
@@ -638,29 +642,40 @@ impl Colet {
             return;
         }
         self.watched = paths.clone();
-        let changed = self.changed.clone();
-        match FolderWatcher::new(&paths, move |paths| {
-            let mut queue = changed.lock().unwrap();
-            let batch = queue.get_or_insert_with(|| Some(HashSet::new()));
-            match (paths.is_empty(), batch.as_mut()) {
-                (true, _) => *batch = None,
-                (false, Some(batch)) => batch.extend(paths),
-                (false, None) => {}
-            }
-        }) {
-            Ok((watcher, unwatched)) => {
-                self.watcher = Some(watcher);
-                let fresh: Vec<String> =
-                    unwatched.into_iter().filter(|p| self.unwatched.insert(path_key(p))).collect();
-                if !fresh.is_empty() {
-                    let names: String = fresh
-                        .iter()
-                        .map(|p| format!("「{}」", colet_core::paths::folder_name(p)))
-                        .collect();
-                    self.notify(format!("{names}の変更を監視できません。F5で更新できます。"), Tone::Error, cx);
+        if self.watcher.is_none() {
+            let (changed, missed) = (self.changed.clone(), self.missed.clone());
+            let watcher = FolderWatcher::new(
+                move |paths| {
+                    let mut queue = changed.lock().unwrap();
+                    let batch = queue.get_or_insert_with(|| Some(HashSet::new()));
+                    match (paths.is_empty(), batch.as_mut()) {
+                        (true, _) => *batch = None,
+                        (false, Some(batch)) => batch.extend(paths),
+                        (false, None) => {}
+                    }
+                },
+                move |paths| missed.lock().unwrap().extend(paths),
+            );
+            match watcher {
+                Ok(watcher) => self.watcher = Some(watcher),
+                Err(error) => {
+                    self.notify(error, Tone::Error, cx);
+                    return;
                 }
             }
-            Err(error) => self.notify(error, Tone::Error, cx),
+        }
+        if let Some(watcher) = &self.watcher {
+            watcher.set(paths);
+        }
+    }
+
+    /// Says which folders the watcher could list but not watch, each once.
+    fn take_missed(&mut self, cx: &mut Context<Self>) {
+        let missed = std::mem::take(&mut *self.missed.lock().unwrap());
+        let fresh: Vec<String> = missed.into_iter().filter(|p| self.unwatched.insert(path_key(p))).collect();
+        if !fresh.is_empty() {
+            let names: String = fresh.iter().map(|p| format!("「{}」", colet_core::paths::folder_name(p))).collect();
+            self.notify(format!("{names}の変更を監視できません。F5で更新できます。"), Tone::Error, cx);
         }
     }
 
@@ -706,8 +721,10 @@ impl Colet {
         .detach();
     }
 
-    /// How the running operation's items ended so far, and what the clipboard now holds.
+    /// The folders that went unwatched, how the running operation's items ended so far, and what the
+    /// clipboard now holds.
     fn take_changes(&mut self, cx: &mut Context<Self>) {
+        self.take_missed(cx);
         if self.take_operation_events() {
             cx.notify();
         }

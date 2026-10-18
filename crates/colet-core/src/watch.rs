@@ -1,6 +1,6 @@
 //! Telling when what the open folders hold changes.
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::Path,
     sync::{Arc, Mutex, mpsc},
     thread,
@@ -39,17 +39,21 @@ impl Changes {
 
 /// Watches folders, one level deep each, and hands `changed` each batch of changed paths a little after
 /// the first in it. Dropped, it stops.
+///
+/// Starting to watch a folder opens it, which a share that answers slowly can keep waiting for seconds:
+/// that happens on a thread of its own, never the caller's.
 pub struct FolderWatcher {
-    _watcher: notify::RecommendedWatcher,
+    wanted: mpsc::Sender<Vec<String>>,
 }
 
 impl FolderWatcher {
-    /// Also returns the folders it could list but not watch, as for a share that sends no change
-    /// notifications. One it cannot read is left out: its column says so.
+    /// Watches nothing until [`set`](Self::set). `unwatched` hears of the folders it could list but not
+    /// watch, as for a share that sends no change notifications; one it cannot read is left out, as its
+    /// column says so. Both are called on the watcher's threads.
     pub fn new(
-        paths: &[String],
         changed: impl Fn(Vec<String>) + Send + 'static,
-    ) -> Result<(Self, Vec<String>), String> {
+        unwatched: impl Fn(Vec<String>) + Send + 'static,
+    ) -> Result<Self, String> {
         let changes = Arc::new(Mutex::new(Changes::default()));
         let (wake, batches) = mpsc::channel::<()>();
         let queued = changes.clone();
@@ -72,14 +76,52 @@ impl FolderWatcher {
             }
         })
         .map_err(|e| e.to_string())?;
-        let mut unwatched = Vec::new();
-        for path in paths {
-            let folder = Path::new(path);
-            if watcher.watch(folder, RecursiveMode::NonRecursive).is_err() && std::fs::read_dir(folder).is_ok() {
-                unwatched.push(path.clone());
-            }
-        }
-        Ok((Self { _watcher: watcher }, unwatched))
+        let (wanted, sets) = mpsc::channel::<Vec<String>>();
+        // Ends once `wanted` is dropped, letting go of the watcher and with it the batches above.
+        thread::Builder::new()
+            .name("folder-watch".into())
+            .spawn(move || {
+                // Each folder asked for, and whether it is watched; one that failed is tried again only
+                // once asked for afresh.
+                let mut asked: HashMap<String, bool> = HashMap::new();
+                while let Ok(mut paths) = sets.recv() {
+                    // Only the latest set matters once the folders before it have kept this waiting.
+                    while let Ok(newer) = sets.try_recv() {
+                        paths = newer;
+                    }
+                    let wanted: HashSet<String> = paths.into_iter().collect();
+                    asked.retain(|path, watched| {
+                        let keep = wanted.contains(path);
+                        if !keep && *watched {
+                            let _ = watcher.unwatch(Path::new(path));
+                        }
+                        keep
+                    });
+                    let mut failed = Vec::new();
+                    for path in wanted {
+                        if asked.contains_key(&path) {
+                            continue;
+                        }
+                        let folder = Path::new(&path);
+                        let watched = watcher.watch(folder, RecursiveMode::NonRecursive).is_ok();
+                        if !watched && std::fs::read_dir(folder).is_ok() {
+                            failed.push(path.clone());
+                        }
+                        asked.insert(path, watched);
+                    }
+                    if !failed.is_empty() {
+                        unwatched(failed);
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(Self { wanted })
+    }
+
+    /// Watches exactly `paths` from now on: the new ones are watched, the ones gone let go. Returns at
+    /// once.
+    pub fn set(&self, paths: Vec<String>) {
+        let _ = self.wanted.send(paths);
     }
 }
 
@@ -111,16 +153,41 @@ mod tests {
         assert_eq!(changes.take(), ["next"]);
     }
 
+    /// Writes a file into `dir` until the watcher reports one there: it starts watching a moment after it
+    /// is asked to.
+    fn reported(dir: &Path, received: &mpsc::Receiver<Vec<String>>) -> bool {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let prefix = dir.display().to_string();
+        let mut i = 0;
+        while std::time::Instant::now() < deadline {
+            i += 1;
+            std::fs::write(dir.join(format!("new{i}.txt")), "x").unwrap();
+            if received.recv_timeout(Duration::from_millis(300)).is_ok_and(|paths| paths.iter().any(|p| p.starts_with(&prefix))) {
+                return true;
+            }
+        }
+        false
+    }
+
     #[test]
-    fn reports_a_new_file_in_a_watched_folder() {
-        let dir = tempfile::tempdir().unwrap();
+    fn watches_the_folders_set_and_lets_go_of_those_dropped() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (sent, received) = mpsc::channel();
-        let (_watcher, unwatched) =
-            FolderWatcher::new(&[dir.path().display().to_string()], move |paths| sent.send(paths).unwrap()).unwrap();
-        assert!(unwatched.is_empty());
-        let file = dir.path().join("new.txt");
-        std::fs::write(&file, "x").unwrap();
-        let paths = received.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(paths.iter().any(|p| p.ends_with("new.txt")), "{paths:?}");
+        let (missed, unwatched) = mpsc::channel();
+        let watcher = FolderWatcher::new(
+            move |paths| sent.send(paths).unwrap(),
+            move |paths| missed.send(paths).unwrap(),
+        )
+        .unwrap();
+        let path = |dir: &tempfile::TempDir| dir.path().display().to_string();
+        watcher.set(vec![path(&a)]);
+        assert!(reported(a.path(), &received));
+        watcher.set(vec![path(&b)]);
+        assert!(reported(b.path(), &received));
+        // Let go of, `a` reports nothing more.
+        while received.recv_timeout(Duration::from_millis(300)).is_ok() {}
+        std::fs::write(a.path().join("later.txt"), "x").unwrap();
+        assert!(received.recv_timeout(Duration::from_millis(500)).is_err());
+        assert!(unwatched.try_recv().is_err());
     }
 }
