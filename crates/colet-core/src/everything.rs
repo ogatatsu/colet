@@ -1,7 +1,7 @@
 //! Searching through Everything 1.5's SDK, which is compiled in from `vendor/everything-sdk3`.
 use std::{ffi::c_void, path::Path, ptr, time::{Duration, Instant}};
 
-use crate::entry::{Entry, Sort};
+use crate::entry::{Entry, Order, Sort};
 
 type Handle = *mut c_void;
 
@@ -55,7 +55,7 @@ pub struct SearchSession {
     client: Handle,
     changes: Handle,
     state: Handle,
-    key: Option<(String, Sort)>,
+    key: Option<(String, Order)>,
     instance: String,
     connected_instance: String,
     watch_retry_at: Option<Instant>,
@@ -128,7 +128,7 @@ impl SearchSession {
     pub fn search(
         &mut self,
         query: &str,
-        sort: Sort,
+        order: Order,
         instance: &str,
         offset: usize,
         count: usize,
@@ -151,10 +151,10 @@ impl SearchSession {
                 }
                 return Err("Everythingの索引を準備中です。しばらく待って再試行してください。".into());
             }
-            let key = (query.to_owned(), sort);
+            let key = (query.to_owned(), order);
             let new_search = self.key.as_ref() != Some(&key) || refresh || self.state.is_null();
             if new_search {
-                self.prepare(query, sort)?;
+                self.prepare(query, order)?;
                 self.start_watching();
             }
             // These setters update the state but return FALSE in the pinned upstream version.
@@ -238,7 +238,7 @@ impl SearchSession {
         }
     }
 
-    unsafe fn prepare(&mut self, query: &str, sort: Sort) -> Result<(), String> {
+    unsafe fn prepare(&mut self, query: &str, order: Order) -> Result<(), String> {
         unsafe {
             if !self.state.is_null() {
                 Everything3_DestroySearchState(self.state);
@@ -253,14 +253,16 @@ impl SearchSession {
             for property in [240, 2, 5] {
                 Everything3_AddSearchPropertyRequest(self.state, property);
             }
-            Everything3_SetSearchFoldersFirst(self.state, 1);
-            let property = match sort {
+            // Folders first only when ascending, so descending turns the whole listing round as Explorer
+            // does.
+            Everything3_SetSearchFoldersFirst(self.state, 0);
+            let property = match order.by {
                 Sort::Name => 0,
                 Sort::Size => 2,
                 Sort::Modified => 5,
             };
-            Everything3_AddSearchSort(self.state, property, i32::from(sort == Sort::Name));
-            if sort != Sort::Name {
+            Everything3_AddSearchSort(self.state, property, i32::from(!order.descending));
+            if order.by != Sort::Name {
                 Everything3_AddSearchSort(self.state, 0, 1);
             }
         }
@@ -310,7 +312,7 @@ mod tests {
     fn reconnects_on_the_first_search_after_both_connections_fail() {
         let query = "parent:\"C:\\colet-sdk-reconnect-probe\"";
         let mut session = SearchSession::default();
-        session.search(query, Sort::Name, "", 0, PAGE, true).unwrap();
+        session.search(query, Order::default(), "", 0, PAGE, true).unwrap();
         // Shut down only this session's handles, reproducing failed IPC on both connections without
         // stopping the user's Everything process.
         unsafe {
@@ -321,7 +323,7 @@ mod tests {
         assert!(error.contains("接続が切れました"));
         assert!(session.client.is_null() && session.changes.is_null());
         assert!(session.key.is_none() && session.watch_retry_at.is_none());
-        session.search(query, Sort::Name, "", 0, PAGE, true).unwrap();
+        session.search(query, Order::default(), "", 0, PAGE, true).unwrap();
         assert!(!session.client.is_null() && !session.changes.is_null());
     }
 
@@ -330,7 +332,7 @@ mod tests {
     fn a_watch_only_failure_preserves_the_paging_connection() {
         let query = "parent:\"C:\\colet-sdk-watch-failure-probe\"";
         let mut session = SearchSession::default();
-        session.search(query, Sort::Name, "", 0, PAGE, true).unwrap();
+        session.search(query, Order::default(), "", 0, PAGE, true).unwrap();
         let client = session.client;
         unsafe { assert_ne!(Everything3_ShutdownClient(session.changes), 0); }
         let error = session.changed().unwrap_err();
@@ -338,7 +340,7 @@ mod tests {
         assert_eq!(session.client, client);
         assert!(session.changes.is_null());
         assert!(session.key.is_some() && session.watch_retry_at.is_some());
-        session.search(query, Sort::Name, "", 0, PAGE, true).unwrap();
+        session.search(query, Order::default(), "", 0, PAGE, true).unwrap();
         assert_eq!(session.client, client);
         assert!(session.changes.is_null());
         assert!(!session.changed().unwrap());
@@ -359,7 +361,7 @@ mod tests {
         let instance = std::mem::replace(&mut session.connected_instance, "colet-nonexistent-watch-test-instance".into());
         let deadline = Instant::now() + Duration::from_secs(15);
         let first = loop {
-            let page = session.search(&query, Sort::Name, "", 0, PAGE, true).unwrap();
+            let page = session.search(&query, Order::default(), "", 0, PAGE, true).unwrap();
             if page.total == 511 { break page; }
             assert!(Instant::now() < deadline, "Everything did not index the fixture: {}", page.total);
             std::thread::sleep(Duration::from_millis(100));
@@ -369,20 +371,20 @@ mod tests {
         assert!(session.changes.is_null());
         assert!(session.connection.contains("手動更新（F5）"));
         assert!(!session.changed().unwrap());
-        assert_eq!(session.search(&query, Sort::Name, "", PAGE, PAGE, false).unwrap().entries.len(), 11);
+        assert_eq!(session.search(&query, Order::default(), "", PAGE, PAGE, false).unwrap().entries.len(), 11);
         session.connected_instance = instance;
         // A healthy watch is available now, but rapid searches must respect the retry deadline.
         // Control the deadline explicitly rather than rely on wall-clock timing for six SDK calls.
         let retry_at = Instant::now() + Duration::from_secs(60);
         session.watch_retry_at = Some(retry_at);
         for i in 0..6 {
-            session.search(&format!("{query} colet-watch-probe-{i}"), Sort::Name, "", 0, PAGE, true).unwrap();
+            session.search(&format!("{query} colet-watch-probe-{i}"), Order::default(), "", 0, PAGE, true).unwrap();
             assert!(session.changes.is_null(), "a query retried the watch before its deadline");
             assert_eq!(session.watch_retry_at, Some(retry_at));
             assert_eq!(session.client, client);
         }
         session.watch_retry_at = Some(Instant::now());
-        session.search(&query, Sort::Name, "", 0, PAGE, true).unwrap();
+        session.search(&query, Order::default(), "", 0, PAGE, true).unwrap();
         assert_eq!(session.client, client);
         assert!(!session.changes.is_null());
         assert!(!session.connection.contains("手動更新"));
@@ -405,7 +407,7 @@ mod tests {
         let mut session = SearchSession::default();
         let deadline = Instant::now() + Duration::from_secs(15);
         let first = loop {
-            let page = session.search(&query, Sort::Name, "", 0, PAGE, true).unwrap();
+            let page = session.search(&query, Order::default(), "", 0, PAGE, true).unwrap();
             if page.total == 511 { break page; }
             assert!(Instant::now() < deadline, "Everything did not index the fixture: {}", page.total);
             std::thread::sleep(Duration::from_millis(100));
@@ -421,10 +423,10 @@ mod tests {
             }
         };
         wait(&mut session);
-        let second = session.search(&query, Sort::Name, "", PAGE, PAGE, false).unwrap();
+        let second = session.search(&query, Order::default(), "", PAGE, PAGE, false).unwrap();
         assert_eq!(second.total, 510);
         assert!(session.changed().unwrap(), "pagination cleared the change notification");
-        let fresh = session.search(&query, Sort::Name, "", 0, PAGE * 2, true).unwrap();
+        let fresh = session.search(&query, Order::default(), "", 0, PAGE * 2, true).unwrap();
         assert_eq!(fresh.entries.len(), 510);
         assert!(!fresh.entries.iter().any(|e| e.path == removed.display().to_string()));
         assert!(fresh.entries.iter().any(|e| e.name == "0500.txt"));
@@ -449,7 +451,7 @@ mod tests {
         let mut session = SearchSession::default();
         let deadline = Instant::now() + Duration::from_secs(15);
         let first = loop {
-            let page = session.search(&query, Sort::Name, "", 0, PAGE, true).unwrap();
+            let page = session.search(&query, Order::default(), "", 0, PAGE, true).unwrap();
             if page.total == 511 {
                 break page;
             }
@@ -457,7 +459,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(150));
         };
         assert_eq!(first.entries.len(), 500);
-        let second = session.search(&query, Sort::Name, "", 500, PAGE, false).unwrap();
+        let second = session.search(&query, Order::default(), "", 500, PAGE, false).unwrap();
         assert_eq!(second.entries.len(), 11);
         assert!(second.entries.iter().chain(&first.entries).any(|e| e.path == unicode.display().to_string()));
         std::fs::write(fixture.path().join("new.txt"), b"new").unwrap();
@@ -466,7 +468,7 @@ mod tests {
             assert!(Instant::now() < deadline, "no change notification");
             std::thread::sleep(Duration::from_millis(100));
         }
-        assert_eq!(session.search(&query, Sort::Modified, "", 0, 1000, true).unwrap().total, 512);
-        assert!(session.search(&query, Sort::Name, "colet-nonexistent-test-instance", 0, PAGE, true).is_err());
+        assert_eq!(session.search(&query, Order { by: Sort::Modified, descending: true }, "", 0, 1000, true).unwrap().total, 512);
+        assert!(session.search(&query, Order::default(), "colet-nonexistent-test-instance", 0, PAGE, true).is_err());
     }
 }

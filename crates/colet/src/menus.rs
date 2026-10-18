@@ -1,6 +1,6 @@
 //! The two menus, the file menu and the sort order's, as lines that the mouse and the keys pick alike:
 //! ↑↓ move, Enter picks, Esc closes, and the keys go back to the column worked in.
-use colet_core::entry::Sort;
+use colet_core::entry::{Sort, direction_label};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -23,6 +23,7 @@ pub enum Command {
     EditSearch(String),
     Unsave(String),
     Sort(Sort),
+    Direction(bool),
 }
 
 pub struct Line {
@@ -55,18 +56,14 @@ impl Colet {
     /// The lines of the open menu: the sort order's, or the file menu's.
     pub fn menu_lines(&self) -> Vec<Line> {
         if self.sort_open {
-            return Sort::ALL
-                .map(|sort| Line {
-                    id: sort.label(),
-                    glyph: None,
-                    text: sort.label(),
-                    hint: None,
-                    off: None,
-                    command: Command::Sort(sort),
-                    group: false,
-                    chosen: sort == self.sort,
-                })
-                .into();
+            let choice = |text, command, chosen| Line { id: text, glyph: None, text, hint: None, off: None, command, group: false, chosen };
+            let mut lines: Vec<Line> =
+                Sort::ALL.map(|by| choice(by.label(), Command::Sort(by), by == self.sort.by)).into();
+            lines.extend([false, true].map(|descending| {
+                choice(direction_label(descending), Command::Direction(descending), descending == self.sort.descending)
+            }));
+            lines[Sort::ALL.len()].group = true;
+            return lines;
         }
         if self.menu.is_none() {
             return Vec::new();
@@ -145,7 +142,8 @@ impl Colet {
             }
             Command::EditSearch(query) => self.open_edit(&query, window, cx),
             Command::Unsave(query) => self.toggle_saved(&query, cx),
-            Command::Sort(sort) => self.set_sort(sort, cx),
+            Command::Sort(by) => self.set_sort(by, cx),
+            Command::Direction(descending) => self.set_direction(descending, cx),
         }
         // What the line opened, a dialog, takes the keys; otherwise they go back to the column.
         let to_column = self.dialog.is_none();
@@ -168,7 +166,7 @@ impl Colet {
     pub fn open_sort(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
         self.sort_open = true;
-        self.menu_cursor = keyboard.then(|| Sort::ALL.iter().position(|s| *s == self.sort).unwrap_or(0));
+        self.menu_cursor = keyboard.then(|| Sort::ALL.iter().position(|s| *s == self.sort.by).unwrap_or(0));
         self.menu_focus.focus(window, cx);
         cx.notify();
     }

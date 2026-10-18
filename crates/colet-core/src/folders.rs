@@ -7,7 +7,7 @@ use std::{
 use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW};
 use windows::core::PCWSTR;
 
-use crate::entry::{Entry, Sort, is_hidden, sort_entries};
+use crate::entry::{Entry, Order, is_hidden, sort_entries};
 
 /// What a listing that a newer one, or its column's removal, made unnecessary fails with.
 pub const STALE: &str = "古いフォルダー要求です";
@@ -29,7 +29,7 @@ fn collect<T>(mut items: impl Iterator<Item = T>, cancelled: &AtomicBool) -> Res
 }
 
 /// The items directly in `path`, sorted; stops early, failing with [`STALE`], once `cancelled` is set.
-pub fn list(path: &str, sort: Sort, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
+pub fn list(path: &str, order: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
     check(cancelled)?;
     if path.contains('\0') || !Path::new(path).is_absolute() {
         return Err("絶対パスを指定してください".into());
@@ -66,7 +66,7 @@ pub fn list(path: &str, sort: Sort, cancelled: &AtomicBool) -> Result<Vec<Entry>
     )?;
     let mut entries = entries.into_iter().collect::<Result<Vec<_>, String>>()?;
     check(cancelled)?;
-    sort_entries(&mut entries, sort);
+    sort_entries(&mut entries, order);
     check(cancelled)?;
     Ok(entries)
 }
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn a_cancelled_listing_never_opens_the_folder() {
-        assert_eq!(list("invalid path", Sort::Name, &AtomicBool::new(true)).unwrap_err(), STALE);
+        assert_eq!(list("invalid path", Order::default(), &AtomicBool::new(true)).unwrap_err(), STALE);
     }
 
     #[test]
@@ -136,7 +136,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "data").unwrap();
         std::fs::create_dir(dir.path().join("z")).unwrap();
-        let entries = list(&dir.path().display().to_string(), Sort::Name, &AtomicBool::new(false)).unwrap();
+        let entries = list(&dir.path().display().to_string(), Order::default(), &AtomicBool::new(false)).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "z");
         assert!(entries[0].directory);

@@ -1,5 +1,5 @@
 //! An item as a column lists it, and the orders they come in.
-use std::{cmp::{Ordering, Reverse}, os::windows::fs::MetadataExt, path::Path, time::UNIX_EPOCH};
+use std::{cmp::Ordering,os::windows::fs::MetadataExt, path::Path, time::UNIX_EPOCH};
 
 use windows::{Win32::UI::Shell::StrCmpLogicalW, core::PCWSTR};
 
@@ -67,23 +67,38 @@ impl Entry {
 pub enum Sort {
     #[default]
     Name,
-    /// Largest first.
     Size,
-    /// Newest first.
     Modified,
 }
 
 impl Sort {
     pub const ALL: [Sort; 3] = [Sort::Name, Sort::Size, Sort::Modified];
 
-    /// Named for their direction, which is fixed per key.
     pub fn label(self) -> &'static str {
         match self {
-            Sort::Name => "名前順",
-            Sort::Size => "大きい順",
-            Sort::Modified => "新しい順",
+            Sort::Name => "名前",
+            Sort::Size => "サイズ",
+            Sort::Modified => "更新日時",
         }
     }
+}
+
+/// A sort and the way it runs. Descending turns the whole listing round, as Explorer does, so folders
+/// come last; ties still go by name from A.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Order {
+    pub by: Sort,
+    pub descending: bool,
+}
+
+impl Order {
+    pub fn label(self) -> String {
+        format!("{}・{}", self.by.label(), direction_label(self.descending))
+    }
+}
+
+pub fn direction_label(descending: bool) -> &'static str {
+    if descending { "降順" } else { "昇順" }
 }
 
 /// A name ordered as Explorer orders it: without case, and numbers by their value.
@@ -115,17 +130,56 @@ impl PartialEq for ExplorerName {
 
 impl Eq for ExplorerName {}
 
-/// Folders first, then by the sort, ties broken by name as Explorer orders it and then by path.
-pub fn sort_entries(entries: &mut [Entry], sort: Sort) {
+struct Key {
+    order: Order,
+    file: bool,
+    rank: Option<u64>,
+    name: ExplorerName,
+    path: String,
+}
+
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let mut by = (self.file, self.rank).cmp(&(other.file, other.rank));
+        if self.order.by == Sort::Name {
+            by = by.then_with(|| self.name.cmp(&other.name));
+        }
+        if self.order.descending {
+            by = by.reverse();
+        }
+        by.then_with(|| self.name.cmp(&other.name)).then_with(|| self.path.cmp(&other.path))
+    }
+}
+
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for Key {}
+
+/// Folders first, then by the sort, all turned round when descending; ties broken by name as Explorer
+/// orders it and then by path.
+pub fn sort_entries(entries: &mut [Entry], order: Order) {
     // Keyed once per entry: converting names inside the comparison would allocate on every one of its
     // n log n calls.
-    entries.sort_by_cached_key(|e| {
-        let rank = match sort {
+    entries.sort_by_cached_key(|e| Key {
+        order,
+        file: !e.directory,
+        rank: match order.by {
             Sort::Name => None,
             Sort::Size => e.size,
             Sort::Modified => e.modified,
-        };
-        (!e.directory, Reverse(rank), ExplorerName::new(&e.name), e.path.to_lowercase())
+        },
+        name: ExplorerName::new(&e.name),
+        path: e.path.to_lowercase(),
     });
 }
 
@@ -134,7 +188,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn directories_precede_files_for_all_sorts() {
+    fn directories_precede_files_ascending_and_follow_them_descending() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a"), "data").unwrap();
         std::fs::create_dir(dir.path().join("z")).unwrap();
@@ -142,14 +196,16 @@ mod tests {
             .unwrap()
             .map(|e| Entry::from_path(&e.unwrap().path()).unwrap())
             .collect();
-        for sort in Sort::ALL {
-            sort_entries(&mut entries, sort);
+        for by in Sort::ALL {
+            sort_entries(&mut entries, Order { by, descending: false });
             assert!(entries[0].directory);
+            sort_entries(&mut entries, Order { by, descending: true });
+            assert!(entries[1].directory);
         }
     }
 
     #[test]
-    fn sorts_ignore_case_put_the_largest_and_newest_first_and_tie_by_path() {
+    fn sorts_ignore_case_run_either_way_and_tie_by_name_from_a() {
         let entry = |path: &str, size: Option<u64>, modified: Option<u64>| Entry {
             path: path.into(),
             name: path.rsplit('\\').next().unwrap().into(),
@@ -166,12 +222,16 @@ mod tests {
             entry(r"C:\a2", Some(2), Some(5)),
         ];
         let order = |entries: &[Entry]| entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>();
-        sort_entries(&mut entries, Sort::Name);
-        assert_eq!(order(&entries), ["A", "a2", "b", "c"]);
-        sort_entries(&mut entries, Sort::Size);
-        assert_eq!(order(&entries), ["A", "a2", "b", "c"]);
-        sort_entries(&mut entries, Sort::Modified);
-        assert_eq!(order(&entries), ["c", "A", "a2", "b"]);
+        let sort = |entries: &mut Vec<Entry>, by, descending| {
+            sort_entries(entries, Order { by, descending });
+            order(entries)
+        };
+        assert_eq!(sort(&mut entries, Sort::Name, false), ["A", "a2", "b", "c"]);
+        assert_eq!(sort(&mut entries, Sort::Name, true), ["c", "b", "a2", "A"]);
+        assert_eq!(sort(&mut entries, Sort::Size, false), ["c", "b", "A", "a2"]);
+        assert_eq!(sort(&mut entries, Sort::Size, true), ["A", "a2", "b", "c"]);
+        assert_eq!(sort(&mut entries, Sort::Modified, false), ["b", "A", "a2", "c"]);
+        assert_eq!(sort(&mut entries, Sort::Modified, true), ["c", "A", "a2", "b"]);
     }
 
     #[test]
@@ -189,12 +249,14 @@ mod tests {
         let mut entries: Vec<_> = names.iter().map(|n| entry(n)).collect();
         let order = |entries: &[Entry]| entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>();
         let expected = ["a01", "a1", "b", "file1.txt", "File2.txt", "ｆｉｌｅ３.txt", "file10.txt", "ア1", "あ9", "あ10"];
-        sort_entries(&mut entries, Sort::Name);
+        sort_entries(&mut entries, Order::default());
         assert_eq!(order(&entries), expected);
-        // The sizes all tie, so they fall back to the same order.
-        entries.reverse();
-        sort_entries(&mut entries, Sort::Size);
-        assert_eq!(order(&entries), expected);
+        // The sizes all tie, so they fall back to the same order either way.
+        for descending in [false, true] {
+            entries.reverse();
+            sort_entries(&mut entries, Order { by: Sort::Size, descending });
+            assert_eq!(order(&entries), expected);
+        }
     }
 
     #[test]

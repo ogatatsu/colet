@@ -10,7 +10,7 @@ use std::{
 };
 
 use colet_core::{
-    entry::{Entry, Sort},
+    entry::{Entry, Order, Sort},
     everything::PAGE,
     paths::path_key,
     shell,
@@ -187,7 +187,7 @@ type Listing = Result<(Vec<Entry>, usize, Option<String>), String>;
 
 pub struct Colet {
     pub state: State,
-    pub sort: Sort,
+    pub sort: Order,
     pub widths: Widths,
     pub palette: Palette,
     pub search: Entity<InputState>,
@@ -345,7 +345,7 @@ impl Colet {
         };
         let mut this = Self {
             state: State::new(),
-            sort: Sort::Name,
+            sort: Order::default(),
             widths: Widths {
                 sidebar: settings.sidebar_width,
                 search: settings.search_width,
@@ -655,10 +655,19 @@ impl Colet {
         }
     }
 
-    pub fn set_sort(&mut self, sort: Sort, cx: &mut Context<Self>) {
+    /// Sorts by `by`, keeping the way it runs.
+    pub fn set_sort(&mut self, by: Sort, cx: &mut Context<Self>) {
+        self.set_order(Order { by, ..self.sort }, cx);
+    }
+
+    pub fn set_direction(&mut self, descending: bool, cx: &mut Context<Self>) {
+        self.set_order(Order { descending, ..self.sort }, cx);
+    }
+
+    fn set_order(&mut self, order: Order, cx: &mut Context<Self>) {
         self.sort_open = false;
-        if sort != self.sort {
-            self.sort = sort;
+        if order != self.sort {
+            self.sort = order;
             self.refresh(cx);
         }
         cx.notify();

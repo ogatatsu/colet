@@ -413,8 +413,8 @@ impl Colet {
                 )
             })
             // A folder has no size of its own; like Explorer, leave it blank.
-            .when(self.sort != Sort::Name && kind != Kind::Home && !(self.sort == Sort::Size && entry.directory), |r| {
-                let meta = match self.sort {
+            .when(self.sort.by != Sort::Name && kind != Kind::Home && !(self.sort.by == Sort::Size && entry.directory), |r| {
+                let meta = match self.sort.by {
                     Sort::Size => time::size(entry.size),
                     _ => entry.modified.and_then(time::date).unwrap_or_else(|| "—".into()),
                 };

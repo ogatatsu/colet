@@ -7,7 +7,7 @@ use std::sync::{
 
 use crate::settings::{self, LoadError, Settings};
 use colet_core::{
-    entry::{Entry, Sort},
+    entry::{Entry, Order},
     everything::{Page, SearchSession},
     folders,
     operations::{self, Event, Request},
@@ -17,7 +17,7 @@ use colet_core::{
 /// A search: the query, the sort, and from where how many results to load; `refresh` searches afresh.
 pub struct Search {
     pub query: String,
-    pub sort: Sort,
+    pub sort: Order,
     pub offset: usize,
     pub count: usize,
     pub refresh: bool,
@@ -29,7 +29,7 @@ pub struct Search {
 
 pub trait Backend: Send + Sync + 'static {
     fn roots(&self) -> Vec<Entry>;
-    fn list(&self, path: &str, sort: Sort, cancelled: &AtomicBool) -> Result<Vec<Entry>, String>;
+    fn list(&self, path: &str, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String>;
     /// The results and the name of what they came from.
     fn search(&self, search: Search) -> Result<(Page, String), String>;
     /// Whether the last search's results changed since asked.
@@ -74,7 +74,7 @@ impl Backend for Live {
         folders::roots()
     }
 
-    fn list(&self, path: &str, sort: Sort, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
+    fn list(&self, path: &str, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
         folders::list(path, sort, cancelled)
     }
 

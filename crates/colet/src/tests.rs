@@ -9,7 +9,7 @@ use std::{
 };
 
 use colet_core::{
-    entry::{Entry, Sort},
+    entry::{Entry, Order, Sort},
     everything::Page,
     operations::{Event, Kind as Operation, Request},
     paths::{ancestors, child, folder_name},
@@ -76,7 +76,7 @@ impl Backend for Fake {
         self.roots.clone()
     }
 
-    fn list(&self, path: &str, _: Sort, _: &AtomicBool) -> Result<Vec<Entry>, String> {
+    fn list(&self, path: &str, _: Order, _: &AtomicBool) -> Result<Vec<Entry>, String> {
         self.lists.lock().unwrap().push(path.into());
         self.folders.lock().unwrap().get(path).cloned().ok_or_else(|| "フォルダーを開けません".into())
     }
@@ -541,10 +541,30 @@ fn sorts_from_the_menu_reloading_what_is_open(cx: &mut TestAppContext) {
     ui.input(cx, "x");
     let before = fake.queries().len();
     ui.click(cx, "sort");
-    ui.click(cx, "大きい順");
-    assert_eq!(ui.read(cx, |v| v.sort), Sort::Size);
+    ui.click(cx, "サイズ");
+    assert_eq!(ui.read(cx, |v| v.sort), Order { by: Sort::Size, descending: false });
     assert_eq!(fake.queries().len(), before + 1);
     assert!(!ui.read(cx, |v| v.sort_open));
+}
+
+#[gpui_kit::test]
+fn turns_the_sort_round_from_the_menu_and_keeps_it_for_another_sort(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "x");
+    let before = fake.queries().len();
+    ui.click(cx, "sort");
+    ui.click(cx, "降順");
+    assert_eq!(ui.read(cx, |v| v.sort), Order { by: Sort::Name, descending: true });
+    assert_eq!(fake.queries().len(), before + 1);
+    assert!(!ui.read(cx, |v| v.sort_open));
+    ui.click(cx, "sort");
+    ui.click(cx, "更新日時");
+    assert_eq!(ui.read(cx, |v| v.sort), Order { by: Sort::Modified, descending: true });
+    // Picking the way it already runs loads nothing again.
+    ui.click(cx, "sort");
+    ui.click(cx, "降順");
+    assert_eq!(fake.queries().len(), before + 2);
 }
 
 #[gpui_kit::test]
@@ -1275,7 +1295,7 @@ fn picks_the_sort_order_by_keys(cx: &mut TestAppContext) {
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "enter");
-    assert_eq!(ui.read(cx, |v| v.sort), Sort::Size);
+    assert_eq!(ui.read(cx, |v| v.sort), Order { by: Sort::Size, descending: false });
     assert!(!ui.read(cx, |v| v.sort_open));
     assert!(ui.columns_focused(cx));
     // From the button itself, the sort in use is lit.
