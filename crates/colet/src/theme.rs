@@ -17,6 +17,8 @@ pub struct Palette {
     pub surface: Hsla,
     pub raised: Hsla,
     pub hover: Hsla,
+    /// What the pointer is on over a raised surface: a notice, a dialog or the history.
+    pub raised_hover: Hsla,
     pub border: Hsla,
     pub border_strong: Hsla,
     pub text: Hsla,
@@ -25,7 +27,8 @@ pub struct Palette {
     pub accent: Hsla,
     pub accent_fill: Hsla,
     pub selected_inactive: Hsla,
-    /// Kept well below `accent_fill`, so a pointed-at file never reads as the selection.
+    /// Kept well below `accent_fill`, so a pointed-at file never reads as the selection, and off
+    /// `hover`, so it never reads as where the pointer is.
     pub highlight: Hsla,
     pub danger: Hsla,
     /// Behind the text of a button that sends to the Recycle Bin.
@@ -53,6 +56,7 @@ impl Palette {
             surface: hsl(210., 13., 12.),
             raised: hsl(210., 12., 16.),
             hover: hsl(210., 12., 17.),
+            raised_hover: hsl(210., 11., 22.),
             border: hsl(210., 10., 19.),
             border_strong: hsl(210., 9., 28.),
             text: hsl(210., 14., 90.),
@@ -61,7 +65,7 @@ impl Palette {
             accent: hsl(178., 40., 62.),
             accent_fill: hsl(184., 42., 28.),
             selected_inactive: hsl(210., 10., 21.),
-            highlight: hsl(184., 20., 16.),
+            highlight: hsl(184., 26., 22.),
             danger: hsl(0., 75., 70.),
             danger_fill: hsl(0., 55., 40.),
             focus: hsl(178., 50., 68.),
@@ -81,6 +85,7 @@ impl Palette {
             surface: hsl(0., 0., 100.),
             raised: hsl(0., 0., 100.),
             hover: hsl(210., 20., 93.),
+            raised_hover: hsl(210., 20., 93.),
             border: hsl(210., 14., 87.),
             border_strong: hsl(210., 12., 76.),
             text: hsl(210., 20., 13.),
@@ -89,7 +94,7 @@ impl Palette {
             accent: hsl(184., 60., 30.),
             accent_fill: hsl(184., 50., 33.),
             selected_inactive: hsl(210., 14., 88.),
-            highlight: hsl(184., 35., 92.),
+            highlight: hsl(184., 40., 89.),
             danger: hsl(0., 65., 45.),
             danger_fill: hsl(0., 65., 42.),
             focus: hsl(184., 60., 35.),
@@ -134,6 +139,18 @@ impl Palette {
 mod tests {
     use super::*;
     use gpui_kit::base::{ColorTokens, SemanticThemeTokens};
+
+    #[test]
+    fn the_pointer_and_the_pointed_at_stand_off_what_they_lie_on() {
+        for (palette, dark) in [(Palette::light(), false), (Palette::dark(), true)] {
+            // Some 4% of lightness, short of what rounding takes off.
+            let apart = |a: Hsla, b: Hsla| (a.l - b.l).abs() >= 0.039;
+            assert!(apart(palette.raised_hover, palette.raised), "hover over a raised surface, dark: {dark}");
+            assert!(apart(palette.highlight, palette.hover), "pointed-at against hovered, dark: {dark}");
+            // Short of the selection's fill, toward the ground.
+            assert!(if dark { palette.highlight.l < palette.accent_fill.l } else { palette.highlight.l > palette.accent_fill.l });
+        }
+    }
 
     #[test]
     fn input_ink_and_caret_keep_the_chosen_theme_against_either_base_theme() {

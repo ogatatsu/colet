@@ -86,7 +86,9 @@ fn button(p: Palette, id: impl Into<ElementId>, text: &'static str, primary: boo
         .border_1()
         .when(primary, |b| b.bg(p.accent_fill).border_color(p.accent_fill).text_color(p.on_accent))
         .when(!primary, |b| b.bg(p.raised).border_color(p.border_strong))
-        .when(enabled, |b| b.cursor_pointer().hover(|b| b.opacity(0.9)))
+        // A plain one lies on the dialog's own color, which a fade would leave as it was.
+        .when(enabled && primary, |b| b.cursor_pointer().hover(|b| b.opacity(0.9)))
+        .when(enabled && !primary, |b| b.cursor_pointer().hover(|b| b.bg(p.raised_hover)))
         .when(!enabled, |b| b.opacity(0.35))
         .child(text)
 }
@@ -526,7 +528,7 @@ impl Colet {
                             .gap_2()
                             .text_size(px(12.))
                             .cursor_pointer()
-                            .hover(|d| d.bg(p.hover))
+                            .hover(|d| d.bg(p.raised_hover))
                             .child(svg().path(if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" }).size(px(12.)).text_color(p.text_faint))
                             .child(div().text_color(p.text_faint).child(clock(entry.started)))
                             .child(div().font_weight(FontWeight::SEMIBOLD).child(entry.kind.title()))
@@ -627,7 +629,7 @@ impl Colet {
                                     .items_center()
                                     .rounded(px(4.))
                                     .text_size(px(12.))
-                                    .when(clearable, |d| d.cursor_pointer().hover(|d| d.bg(p.hover)))
+                                    .when(clearable, |d| d.cursor_pointer().hover(|d| d.bg(p.raised_hover)))
                                     .when(!clearable, |d| d.opacity(0.35))
                                     .child("履歴を消去")
                                     .on_click(cx.listener(|this, _, _, cx| {

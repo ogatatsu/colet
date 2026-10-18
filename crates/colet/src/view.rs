@@ -584,7 +584,7 @@ impl Colet {
                         .border_color(p.border_strong)
                         .bg(p.raised)
                         .cursor_pointer()
-                        .hover(|b| b.bg(p.hover))
+                        .hover(|b| b.bg(p.raised_hover))
                         .child(icon("refresh-cw", 14., p.text_muted))
                         .child("再試行")
                         .on_click(cx.listener(move |this, _, _, cx| this.load(id, 0, false, cx)))
@@ -604,7 +604,7 @@ impl Colet {
                             .border_color(p.border_strong)
                             .bg(p.raised)
                             .cursor_pointer()
-                            .hover(|b| b.bg(p.hover))
+                            .hover(|b| b.bg(p.raised_hover))
                             .child(icon("sliders-horizontal", 14., p.text_muted))
                             .child("設定")
                             .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
@@ -1532,7 +1532,7 @@ impl Colet {
                                 .rounded(px(4.))
                                 .text_color(p.accent)
                                 .cursor_pointer()
-                                .hover(|d| d.bg(p.hover))
+                                .hover(|d| d.bg(p.raised_hover))
                                 .child("詳細")
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.dismiss(id, cx);
@@ -1551,7 +1551,7 @@ impl Colet {
                             .justify_center()
                             .rounded(px(4.))
                             .cursor_pointer()
-                            .hover(|d| d.bg(p.hover))
+                            .hover(|d| d.bg(p.raised_hover))
                             .child(icon("x", 14., p.text_muted))
                             .on_click(cx.listener(move |this, _, _, cx| this.dismiss(id, cx)))
                             .test_support(),
