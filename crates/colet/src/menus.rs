@@ -220,12 +220,21 @@ impl Colet {
                     .text_size(px(12.))
                     .when(line.chosen, |d| d.text_color(p.accent))
                     .when(lit, |d| d.bg(p.accent_fill).text_color(p.on_accent))
-                    .when_some(line.glyph, |d, glyph| {
-                        d.child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if lit { p.on_accent } else { p.text_muted }))
-                    })
-                    .child(div().flex_1().child(line.text))
+                    // An item that is off fades; why it is off is there to be read, and does not.
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .when(line.off.is_some(), |d| d.opacity(0.45))
+                            .when_some(line.glyph, |d, glyph| {
+                                d.child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if lit { p.on_accent } else { p.text_muted }))
+                            })
+                            .child(div().flex_1().child(line.text)),
+                    )
                     .when(line.chosen, |d| d.child(svg().path("icons/check.svg").size(px(14.)).text_color(if lit { p.on_accent } else { p.accent })))
-                    .when_some(line.off, |d, why| d.opacity(0.45).child(div().text_color(p.text_faint).child(why)))
+                    .when_some(line.off, |d, why| d.child(div().text_color(p.text_muted).child(why)))
                     .when(line.off.is_none(), |d| {
                         d.cursor_pointer()
                             .hover(|d| d.bg(p.accent_fill).text_color(p.on_accent))
