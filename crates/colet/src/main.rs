@@ -62,16 +62,19 @@ fn main() {
         let live: backend::Shared = std::sync::Arc::new(backend::Live::default());
         let settings = live.load_settings();
         // Where it was left, or centered on the screen the first time.
-        let window_bounds = match settings.as_ref().ok().and_then(|s| s.window) {
+        let (display_id, window_bounds) = match settings.as_ref().ok().and_then(|s| s.window) {
             Some(w) => {
-                let bounds = Bounds::new(point(px(w.x), px(w.y)), size(px(w.width), px(w.height)));
-                if w.maximized { WindowBounds::Maximized(bounds) } else { WindowBounds::Windowed(bounds) }
+                let displays: Vec<_> = cx.displays().iter().map(|d| (d.id(), d.bounds())).collect();
+                let primary = cx.primary_display().map(|d| d.id());
+                let (display, bounds) = places::restore_bounds(w, &displays, primary);
+                (display, if w.maximized { WindowBounds::Maximized(bounds) } else { WindowBounds::Windowed(bounds) })
             }
-            None => WindowBounds::Windowed(Bounds::centered(None, size(px(1200.), px(780.)), cx)),
+            None => (None, WindowBounds::Windowed(Bounds::centered(None, size(px(1200.), px(780.)), cx))),
         };
         open_window(
             WindowOptions {
                 window_bounds: Some(window_bounds),
+                display_id,
                 titlebar: Some(TitlebarOptions { title: Some("Colet".into()), ..Default::default() }),
                 ..Default::default()
             },

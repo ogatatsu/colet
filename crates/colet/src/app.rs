@@ -27,7 +27,7 @@ use crate::{
     icons::Icons,
     ops::{HistoryEntry, Menu, OperationEvents},
     places::{Dialog, home_entries},
-    settings::Settings,
+    settings::{LoadError, Settings},
     state::{ColumnId, Kind, State},
     theme::Palette,
 };
@@ -226,6 +226,8 @@ pub struct Colet {
     /// What type-ahead has typed so far, when, and in which column.
     typed: (String, Instant, ColumnId),
     pub settings: Settings,
+    /// The file read at start could not be read and is still there: never written over this session.
+    pub(crate) keep_file: bool,
     pub(crate) save_generation: u64,
     /// What the latest operation sent away, by path key: a listing that finds it gone takes it as
     /// Colet's own doing.
@@ -278,10 +280,11 @@ pub struct Colet {
 }
 
 impl Colet {
-    /// `settings` as read at start; an error is said once the window is up, and the defaults used.
+    /// `settings` as read at start; an error is said once the window is up, and the defaults used. A file
+    /// still there unread is never written over.
     pub fn new(
         backend: backend::Shared,
-        settings: Result<Settings, String>,
+        settings: Result<Settings, LoadError>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -327,9 +330,9 @@ impl Colet {
                 true
             })
         });
-        let (settings, problem) = match settings {
-            Ok(settings) => (settings, None),
-            Err(error) => (Settings::default(), Some(error)),
+        let (settings, problem, keep_file) = match settings {
+            Ok(settings) => (settings, None, false),
+            Err(error) => (Settings::default(), Some(error.message), error.kept),
         };
         let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
             Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
@@ -375,6 +378,7 @@ impl Colet {
             search_refresh: false,
             typed: (String::new(), Instant::now(), 0),
             settings,
+            keep_file,
             save_generation: 0,
             departed: HashSet::new(),
             dialog: None,

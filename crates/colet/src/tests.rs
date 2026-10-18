@@ -24,7 +24,7 @@ use gpui_kit::{
 use crate::{
     app::{Colet, Engine},
     backend::{Backend, Search},
-    settings::{SavedSearch, Settings},
+    settings::{LoadError, SavedSearch, Settings},
     state::{Kind, search_key},
 };
 
@@ -42,6 +42,8 @@ struct Fake {
     /// The settings as last written, starting from those it is made with.
     settings: Mutex<Settings>,
     saves: AtomicUsize,
+    /// What reading the settings fails with, in place of them.
+    unreadable: Mutex<Option<LoadError>>,
     reconnects: AtomicUsize,
     clipboard: Mutex<ClipboardFiles>,
     text: Mutex<String>,
@@ -97,8 +99,11 @@ impl Backend for Fake {
         self.reconnects.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn load_settings(&self) -> Result<Settings, String> {
-        Ok(self.settings.lock().unwrap().clone())
+    fn load_settings(&self) -> Result<Settings, LoadError> {
+        match self.unreadable.lock().unwrap().clone() {
+            Some(error) => Err(error),
+            None => Ok(self.settings.lock().unwrap().clone()),
+        }
     }
 
     fn save_settings(&self, settings: &Settings) -> Result<(), String> {
@@ -726,6 +731,31 @@ fn unsaves_a_search_with_ctrl_d_and_says_so(cx: &mut TestAppContext) {
     ui.press(cx, "escape");
     ui.press(cx, "ctrl-d");
     assert!(ui.toasts(cx).iter().any(|t| t.contains("検索語を入力すると保存できます")));
+}
+
+#[gpui_kit::test]
+fn never_writes_over_settings_it_could_not_read(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
+    *fake.unreadable.lock().unwrap() = Some(LoadError { message: "設定を読み込めません".into(), kept: true });
+    let ui = open(cx, fake.clone());
+    assert!(ui.toasts(cx).iter().any(|t| t == "設定を読み込めません"), "{:?}", ui.toasts(cx));
+    ui.input(cx, "ext:pdf");
+    ui.press(cx, "ctrl-d");
+    // Kept for the session, but the file stays as it was.
+    assert_eq!(ui.read(cx, |v| v.settings.saved_searches.len()), 1);
+    // Nor as the window closes.
+    assert!(ui.view.update(cx, |v, _| v.flush_settings()).is_ok());
+    assert_eq!(fake.saves.load(Ordering::Relaxed), 0);
+}
+
+#[gpui_kit::test]
+fn saves_afresh_once_a_broken_file_is_put_aside(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
+    *fake.unreadable.lock().unwrap() = Some(LoadError { message: "壊れていました".into(), kept: false });
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "ext:pdf");
+    ui.press(cx, "ctrl-d");
+    assert_eq!(fake.settings.lock().unwrap().saved_searches.len(), 1);
 }
 
 #[gpui_kit::test]

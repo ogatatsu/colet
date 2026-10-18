@@ -1,6 +1,9 @@
 //! What Colet keeps between runs: the widths, the favorites, the saved searches, which Everything to ask,
 //! and where the window was. Searches typed, history and the columns open are not kept.
-use std::path::PathBuf;
+use std::{
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -91,17 +94,52 @@ pub fn path() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("APPDATA")?).join("Colet").join("settings.json"))
 }
 
+/// Why the settings kept could not be used; Colet starts on the defaults either way.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoadError {
+    pub message: String,
+    /// The file is still where it was, unread: writing the defaults over it would lose it, so nothing is
+    /// saved until Colet is started again.
+    pub kept: bool,
+}
+
 /// The settings kept, or the defaults when there are none yet.
-pub fn load() -> Result<Settings, String> {
+pub fn load() -> Result<Settings, LoadError> {
     let Some(path) = path() else { return Ok(Settings::default()) };
-    let bytes = match std::fs::read(&path) {
+    load_from(&path)
+}
+
+/// A file that does not parse is put aside, so the defaults written next do not take its place unseen.
+fn load_from(path: &Path) -> Result<Settings, LoadError> {
+    let kept = |e: &dyn std::fmt::Display| LoadError {
+        message: format!("設定を読み込めません: {e}。元の設定ファイルを残すため、変更は保存しません。"),
+        kept: true,
+    };
+    let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Settings::default()),
-        Err(e) => return Err(format!("設定を読み込めません: {e}")),
+        Err(e) => return Err(kept(&e)),
     };
-    let mut settings: Settings = serde_json::from_slice(&bytes).map_err(|e| format!("設定を読み込めません: {e}"))?;
-    settings.normalize();
-    Ok(settings)
+    match serde_json::from_slice::<Settings>(&bytes) {
+        Ok(mut settings) => {
+            settings.normalize();
+            Ok(settings)
+        }
+        Err(e) => {
+            let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let aside = path.with_file_name(format!("settings.broken-{stamp}.json"));
+            match std::fs::rename(path, &aside) {
+                Ok(()) => Err(LoadError {
+                    message: format!(
+                        "設定ファイルが壊れていたため、既定の設定で始めました（{e}）。元のファイルは{}に残しています。",
+                        aside.display()
+                    ),
+                    kept: false,
+                }),
+                Err(_) => Err(kept(&e)),
+            }
+        }
+    }
 }
 
 /// Writes beside the file and then over it, so a failed write leaves the old one whole.
@@ -147,6 +185,29 @@ mod tests {
         assert_eq!(settings.saved_searches, [search("PDF", "ext:pdf"), search("", "dm:today")]);
         assert_eq!(settings.favorites, [r"D:\Work"]);
         assert_eq!(settings.saved_searches[1].label(), "dm:today");
+    }
+
+    #[test]
+    fn puts_a_broken_file_aside_rather_than_have_it_written_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert_eq!(load_from(&path), Ok(Settings::default()));
+        std::fs::write(&path, r#"{"favorites":["D:\\Work"],"#).unwrap();
+        let error = load_from(&path).unwrap_err();
+        assert!(!error.kept, "{error:?}");
+        assert!(!path.exists());
+        let aside: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().path()).collect();
+        assert_eq!(aside.len(), 1);
+        assert_eq!(std::fs::read_to_string(&aside[0]).unwrap(), r#"{"favorites":["D:\\Work"],"#);
+        assert!(error.message.contains(&aside[0].display().to_string()), "{}", error.message);
+    }
+
+    #[test]
+    fn keeps_a_file_it_cannot_read_from_being_written_over() {
+        let dir = tempfile::tempdir().unwrap();
+        // A folder where the file should be cannot be read as one.
+        let error = load_from(dir.path()).unwrap_err();
+        assert!(error.kept, "{error:?}");
     }
 
     #[test]

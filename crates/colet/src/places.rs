@@ -34,8 +34,35 @@ pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
     favorites.chain(searches).chain(drives).filter(|e| seen.insert(e.path.clone())).collect()
 }
 
+/// Where the window opens again: on the display holding the middle of where it was left, which the window
+/// must name or it opens on the primary one; otherwise centered on `primary`, as after that display was
+/// unplugged. Either way it is kept within the display it opens on.
+pub fn restore_bounds(
+    placement: Placement,
+    displays: &[(DisplayId, Bounds<Pixels>)],
+    primary: Option<DisplayId>,
+) -> (Option<DisplayId>, Bounds<Pixels>) {
+    let saved = Bounds::new(point(px(placement.x), px(placement.y)), size(px(placement.width), px(placement.height)));
+    let held = displays.iter().find(|(_, d)| d.contains(&saved.center()));
+    let Some(&(id, display)) = held.or_else(|| displays.iter().find(|(id, _)| Some(*id) == primary)).or(displays.first())
+    else {
+        return (None, saved);
+    };
+    let size = size(saved.size.width.min(display.size.width), saved.size.height.min(display.size.height));
+    let origin = if held.is_some() {
+        point(
+            saved.origin.x.clamp(display.left(), display.right() - size.width),
+            saved.origin.y.clamp(display.top(), display.bottom() - size.height),
+        )
+    } else {
+        display.center() - point(size.width / 2., size.height / 2.)
+    };
+    (Some(id), Bounds::new(origin, size))
+}
+
 impl Colet {
-    /// Changes the settings and writes them a moment later, once a burst of changes (a drag) is over.
+    /// Changes the settings and writes them a moment later, once a burst of changes (a drag) is over;
+    /// never over a file that could not be read.
     pub fn update_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
         let before = (self.settings.favorites.clone(), self.settings.saved_searches.clone());
         change(&mut self.settings);
@@ -47,6 +74,10 @@ impl Colet {
         }
         self.save_generation += 1;
         let generation = self.save_generation;
+        if self.keep_file {
+            cx.notify();
+            return;
+        }
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(250)).await;
             let Some((backend, settings)) = this
@@ -68,6 +99,9 @@ impl Colet {
     /// Writes the settings now, as the window closes.
     pub fn flush_settings(&mut self) -> Result<(), String> {
         self.save_generation += 1;
+        if self.keep_file {
+            return Ok(());
+        }
         self.backend.save_settings(&self.settings)
     }
 
@@ -253,7 +287,31 @@ impl Colet {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, SavedSearch, Settings, home_entries};
+    use super::{Entry, Placement, SavedSearch, Settings, home_entries, restore_bounds};
+    use gpui_kit::{Bounds, DisplayId, point, px, size};
+
+    #[test]
+    fn reopens_on_the_display_it_was_left_on_or_centered_on_the_primary_one() {
+        let primary = (DisplayId::new(1), Bounds::new(point(px(0.), px(0.)), size(px(1920.), px(1080.))));
+        let second = (DisplayId::new(2), Bounds::new(point(px(1920.), px(0.)), size(px(1280.), px(720.))));
+        let at = |x: f32, y: f32, width: f32, height: f32| Placement { x, y, width, height, maximized: false };
+        let bounds = |x: f32, y: f32, w: f32, h: f32| Bounds::new(point(px(x), px(y)), size(px(w), px(h)));
+        // Left on the second display, it opens there as it was.
+        assert_eq!(
+            restore_bounds(at(2000., 50., 800., 600.), &[primary, second], Some(primary.0)),
+            (Some(second.0), bounds(2000., 50., 800., 600.))
+        );
+        // Larger than that display now is, it is kept within it.
+        assert_eq!(
+            restore_bounds(at(2000., 0., 1600., 900.), &[primary, second], Some(primary.0)),
+            (Some(second.0), bounds(1920., 0., 1280., 720.))
+        );
+        // That display unplugged, it opens centered on the primary one with the size it had.
+        assert_eq!(
+            restore_bounds(at(2000., 50., 800., 600.), &[primary], Some(primary.0)),
+            (Some(primary.0), bounds(560., 240., 800., 600.))
+        );
+    }
 
     #[test]
     fn lists_favorites_then_saved_searches_then_drives_each_once() {

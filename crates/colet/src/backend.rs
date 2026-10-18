@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
-use crate::settings::{self, Settings};
+use crate::settings::{self, LoadError, Settings};
 use colet_core::{
     entry::{Entry, Sort},
     everything::{Page, SearchSession},
@@ -36,7 +36,7 @@ pub trait Backend: Send + Sync + 'static {
     fn search_changed(&self) -> Result<bool, String>;
     /// Lets go of Everything, so the next search connects afresh.
     fn reconnect(&self);
-    fn load_settings(&self) -> Result<Settings, String>;
+    fn load_settings(&self) -> Result<Settings, LoadError>;
     fn save_settings(&self, settings: &Settings) -> Result<(), String>;
     /// Carries out a file operation, telling `report` how each item ends. Blocks until it is done.
     fn operate(&self, request: Request, owner: Owner, report: Box<dyn FnMut(Event) + Send>) -> Result<(), String>;
@@ -99,7 +99,7 @@ impl Backend for Live {
         }
     }
 
-    fn load_settings(&self) -> Result<Settings, String> {
+    fn load_settings(&self) -> Result<Settings, LoadError> {
         settings::load()
     }
 
