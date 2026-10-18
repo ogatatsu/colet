@@ -155,6 +155,10 @@ impl Backend for Live {
             Err(error) if error.code() == windows::Win32::Foundation::E_INVALIDARG => {
                 Err("同じフォルダーの項目を選んだときに使えます".into())
             }
+            // A command from the menu before is still running, as a dialog it opened.
+            Err(error) if error.code() == shell::MENU_BUSY => {
+                Err("その他のオプションで開いた操作が終わってから使えます".into())
+            }
             Err(error) => Err(said(error)),
         }
     }

@@ -6,7 +6,7 @@ mod open;
 mod operation;
 
 pub use icon::{Icon, IconSource, icon};
-pub use menu::{MenuThread, ShowMenu};
+pub use menu::{BUSY_ERROR as MENU_BUSY, MenuThread, ShowMenu};
 pub use open::{open, reveal};
 pub use operation::{Item, Operation, operate};
 

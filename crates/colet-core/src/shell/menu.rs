@@ -2,7 +2,7 @@
 //! when there are none. Built and shown on one thread for the life of the process: a dialog a command
 //! opens, such as Properties, closes when the thread that invoked it ends, and the submenus (Send to, New)
 //! draw themselves through messages to the window that owns the menu.
-use std::{cell::RefCell, ptr, sync::mpsc, thread};
+use std::{cell::{Cell, RefCell}, ptr, sync::mpsc, thread};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -21,7 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     TrackPopupMenuEx, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_DRAWITEM, WM_INITMENUPOPUP,
     WM_MEASUREITEM, WM_MENUCHAR, WM_NULL, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
-use windows::core::{Error, Interface, PCSTR, PCWSTR, PSTR, Result, w};
+use windows::core::{Error, HRESULT, Interface, PCSTR, PCWSTR, PSTR, Result, w};
 
 use super::{Apartment, Owner, Wide};
 
@@ -72,7 +72,13 @@ impl MenuThread {
 
 thread_local! {
     static SHOWN: RefCell<(Option<IContextMenu2>, Option<IContextMenu3>)> = const { RefCell::new((None, None)) };
+    /// A menu is up, or a command picked from it is running: a dialog it opens runs its own message loop,
+    /// which would hand a second request to this thread in the middle of the first.
+    static BUSY: Cell<bool> = const { Cell::new(false) };
 }
+
+/// What [`MenuThread::show`] fails with while the thread is still busy with the menu before.
+pub const BUSY_ERROR: HRESULT = HRESULT(0x8007_00AA_u32 as i32);
 
 fn run(ready: mpsc::Sender<Result<isize>>) {
     let apartment = Apartment::enter();
@@ -130,7 +136,13 @@ fn create_window() -> Result<HWND> {
 unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     if message == WM_APP {
         let request = unsafe { Box::from_raw(l.0 as *mut Request) };
-        let _ = request.done.send(show(window, &request.menu));
+        if BUSY.replace(true) {
+            let _ = request.done.send(Err(Error::from_hresult(BUSY_ERROR)));
+            return LRESULT(0);
+        }
+        let result = show(window, &request.menu);
+        BUSY.set(false);
+        let _ = request.done.send(result);
         return LRESULT(0);
     }
     if matches!(message, WM_INITMENUPOPUP | WM_DRAWITEM | WM_MEASUREITEM | WM_MENUCHAR) {
