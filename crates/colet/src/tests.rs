@@ -1561,3 +1561,27 @@ fn keeps_a_dialog_taller_than_the_window_within_it_its_buttons_in_reach(cx: &mut
     ui.click(cx, "close-preferences");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
 }
+
+#[gpui_kit::test]
+fn scrolls_a_column_s_last_row_clear_of_the_columns_scrollbar(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let deepest = chain.last().unwrap().clone();
+    let files: Vec<Entry> = (0..80).map(|n| file(&format!(r"{deepest}\{n:02}.txt"))).collect();
+    let last = files.last().unwrap().path.clone();
+    for entry in files {
+        fake.add(&deepest, entry);
+    }
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..=chain.len() {
+        ui.press(cx, "right");
+    }
+    ui.press(cx, "end");
+    rest(&ui, cx);
+    let active = ui.active(cx);
+    assert_eq!(ui.selected(cx, active), [last.clone()]);
+    let (view, bottom) = ui.act(cx, |window, _| (window.find("columns-scroll").bounds(), window.find(row(&last)).bounds().bottom()));
+    // The columns scroll sideways, so their scrollbar lies over the bottom.
+    assert!(ui.read(cx, |v| v.columns_scroll.max_offset().x) > px(0.));
+    assert!(bottom <= view.bottom() - px(crate::view::SCROLLBAR_WIDTH), "{bottom:?} against {view:?}");
+}

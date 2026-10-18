@@ -142,7 +142,7 @@ pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette) -> gp
 /// How wide the edge a drag widens a column or home's pane from is.
 const RESIZER_WIDTH: f32 = 6.;
 /// How thick a scrollbar's track is.
-const SCROLLBAR_WIDTH: f32 = 8.;
+pub(crate) const SCROLLBAR_WIDTH: f32 = 8.;
 
 /// Draws its child over everything laid out after it, as `deferred` does, but clipped where it is, for
 /// presses as for paint: a column scrolled under home's pane keeps its edge there.
@@ -679,7 +679,9 @@ impl Colet {
         })
         .track_scroll(&handle)
         .size_full()
-        .p_1();
+        .p_1()
+        // The last row scrolls clear of the columns' scrollbar laid over the bottom.
+        .pb(px(4. + SCROLLBAR_WIDTH));
         // Shift and the wheel send the columns sideways; the rows under it stay put. A list has no
         // builder for this, as a div has.
         list.style().restrict_scroll_to_axis = Some(true);
