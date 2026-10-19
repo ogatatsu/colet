@@ -570,7 +570,7 @@ impl Colet {
                                 let path = item.path.clone();
                                 let name = folder_name(&item.path).to_owned();
                                 let color = match item.status {
-                                    ItemStatus::Done => p.text_muted,
+                                    ItemStatus::Done | ItemStatus::Handed => p.text_muted,
                                     ItemStatus::Failed => p.danger,
                                     _ => p.text_faint,
                                 };

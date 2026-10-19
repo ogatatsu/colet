@@ -1,6 +1,7 @@
 //! Files on the clipboard as Explorer puts them there (`CF_HDROP` with a preferred drop effect), so a copy
 //! or cut here pastes in Explorer and the other way round; and paths as text. Shell items with no path, as
-//! Explorer puts those from a ZIP folder or a phone there, are only noticed: the shell reads them itself.
+//! Explorer puts those from a ZIP folder or a phone there, and what is given only by its contents, as
+//! Outlook puts its attachments there, are only noticed: the shell reads them itself.
 use std::{ffi::c_void, mem, ptr, thread, time::Duration};
 
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
@@ -9,9 +10,9 @@ use windows::Win32::System::DataExchange::{
     IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
+use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::Ole::{CF_HDROP, CF_UNICODETEXT, DROPEFFECT_COPY, DROPEFFECT_MOVE};
-use windows::Win32::UI::Shell::{DROPFILES, DragQueryFileW, HDROP};
+use windows::Win32::UI::Shell::{DROPFILES, DragQueryFileW, FILEDESCRIPTORW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, HWND_MESSAGE,
     MSG, RegisterClassW, SetWindowLongPtrW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLIPBOARDUPDATE,
@@ -27,6 +28,9 @@ pub struct ClipboardFiles {
     pub paths: Vec<String>,
     /// With no `paths`: shell items with none, as from a ZIP folder or a phone, which only the shell reads.
     pub items: bool,
+    /// With no `paths` or `items`: the names of what is given only by its contents, as Outlook's attachments,
+    /// which the shell writes out.
+    pub contents: Vec<String>,
     pub cut: bool,
     /// The clipboard's sequence number as read, so a cut is let go of only while it is still there.
     pub sequence: u32,
@@ -136,7 +140,8 @@ pub fn read_files() -> Result<ClipboardFiles> {
         }
         let Ok(drop) = GetClipboardData(CF_HDROP.0.into()) else {
             let items = IsClipboardFormatAvailable(RegisterClipboardFormatW(w!("Shell IDList Array"))).is_ok();
-            return Ok(ClipboardFiles { items, cut, sequence, ..ClipboardFiles::default() });
+            let contents = if items { Vec::new() } else { described() };
+            return Ok(ClipboardFiles { items, contents, cut, sequence, ..ClipboardFiles::default() });
         };
         let drop = HDROP(drop.0);
         let count = DragQueryFileW(drop, u32::MAX, None);
@@ -148,8 +153,40 @@ pub fn read_files() -> Result<ClipboardFiles> {
                 String::from_utf16_lossy(&buffer[..len])
             })
             .collect();
-        Ok(ClipboardFiles { paths, items: false, cut, sequence })
+        Ok(ClipboardFiles { paths, cut, sequence, ..ClipboardFiles::default() })
     }
+}
+
+/// The names at the top of the open clipboard's file group descriptor, once each: those of what it gives
+/// only by its contents. An item inside a folder it gives is named with the folder's path.
+unsafe fn described() -> Vec<String> {
+    let Ok(handle) = (unsafe { GetClipboardData(RegisterClipboardFormatW(w!("FileGroupDescriptorW"))) }) else {
+        return Vec::new();
+    };
+    let handle = HGLOBAL(handle.0);
+    let group = unsafe { GlobalLock(handle) }.cast::<u8>();
+    if group.is_null() {
+        return Vec::new();
+    }
+    let size = unsafe { GlobalSize(handle) };
+    let mut names: Vec<String> = Vec::new();
+    if size >= mem::size_of::<u32>() {
+        let count = unsafe { group.cast::<u32>().read_unaligned() } as usize;
+        let room = (size - mem::size_of::<u32>()) / mem::size_of::<FILEDESCRIPTORW>();
+        for i in 0..count.min(room) {
+            let at = unsafe { group.add(mem::size_of::<u32>() + i * mem::size_of::<FILEDESCRIPTORW>()) };
+            let descriptor = unsafe { at.cast::<FILEDESCRIPTORW>().read_unaligned() };
+            let file_name = descriptor.cFileName;
+            let len = file_name.iter().position(|&c| c == 0).unwrap_or(file_name.len());
+            let name = String::from_utf16_lossy(&file_name[..len]);
+            let top = name.trim_start_matches('\\').split('\\').next().unwrap_or_default().to_owned();
+            if !top.is_empty() && !names.contains(&top) {
+                names.push(top);
+            }
+        }
+    }
+    let _ = unsafe { GlobalUnlock(handle) };
+    names
 }
 
 /// A cut pasted: empties the clipboard, as Explorer does, if what was read is still what it holds.

@@ -25,6 +25,7 @@ use gpui_kit::{
 use crate::{
     app::{Colet, Engine},
     backend::{Backend, Search},
+    ops::ItemStatus,
     settings::{LoadError, SavedSearch, Settings, Theme},
     theme::Palette,
     state::{ColumnId, Kind, search_key},
@@ -164,6 +165,10 @@ impl Backend for Fake {
                         report(Event::Left { path: path.clone() });
                     }
                     report(Event::Placed { path: made });
+                }
+                // Written out by the shell later, as it says nothing back.
+                for name in &files.contents {
+                    report(Event::Handed { path: child(&request.destination, name) });
                 }
             }
         }
@@ -1259,6 +1264,20 @@ fn copies_and_pastes_picking_what_was_pasted(cx: &mut TestAppContext) {
     // Paths as text, one a line.
     ui.press(cx, "ctrl-shift-c");
     assert_eq!(*fake.text.lock().unwrap(), r"D:\work\a.txt - コピー");
+}
+
+#[gpui_kit::test]
+fn picks_what_the_shell_writes_out_by_its_name_once_it_is_listed(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    *fake.clipboard.lock().unwrap() = ClipboardFiles { contents: vec!["添付.txt".into()], sequence: 2, ..Default::default() };
+    ui.press(cx, "ctrl-v");
+    let entry = ui.read(cx, |v| v.history[0].clone());
+    assert_eq!((entry.items[0].path.as_str(), entry.items[0].status), (r"D:\work\添付.txt", ItemStatus::Handed));
+    assert!(!entry.has_problems());
+    // Written out after the paste returned: picked once the listing shows it.
+    fake.add(r"D:\work", file(r"D:\work\添付.txt"));
+    ui.click(cx, "refresh");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\添付.txt"]);
 }
 
 #[gpui_kit::test]

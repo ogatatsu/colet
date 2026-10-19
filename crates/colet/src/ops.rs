@@ -30,6 +30,8 @@ pub enum ItemStatus {
     Failed,
     Skipped,
     Cancelled,
+    /// Handed to the shell to write out, which tells nothing of how it went.
+    Handed,
 }
 
 impl ItemStatus {
@@ -39,6 +41,7 @@ impl ItemStatus {
             ItemStatus::Failed => "失敗",
             ItemStatus::Skipped => "スキップ",
             ItemStatus::Cancelled => "キャンセル",
+            ItemStatus::Handed => "シェルに渡した",
         }
     }
 }
@@ -98,6 +101,7 @@ impl HistoryEntry {
             Event::Failed { path, error } => (path, ItemStatus::Failed, Some(error)),
             Event::Skipped { path } => (path, ItemStatus::Skipped, None),
             Event::Cancelled { path } => (path, ItemStatus::Cancelled, None),
+            Event::Handed { path } => (path, ItemStatus::Handed, None),
         };
         let gone = self.request.kind == Kind::Recycle && status == ItemStatus::Done;
         if self.items.len() < MAX_ITEMS {
@@ -519,7 +523,8 @@ impl Colet {
                 Event::Left { path } => {
                     self.departed.insert(path_key(path));
                 }
-                Event::Placed { path } => running.placed.push(path.clone()),
+                // What the shell writes out on its own is picked by its name once it is listed.
+                Event::Placed { path } | Event::Handed { path } => running.placed.push(path.clone()),
                 _ => {}
             }
             if let Some(entry) = &mut entry {
@@ -662,6 +667,16 @@ mod tests {
         assert!(paste.has_problems());
         assert_eq!(paste.target(), "3 項目 → dest");
         assert_eq!(paste.count(ItemStatus::Done), 1);
+    }
+
+    #[test]
+    fn lists_what_was_handed_to_the_shell_by_its_name_without_a_problem() {
+        let mut paste = entry(Kind::Paste);
+        paste.record(Event::Handed { path: r"D:\dest\添付.txt".into() });
+        assert_eq!((paste.items[0].path.as_str(), paste.items[0].status), (r"D:\dest\添付.txt", ItemStatus::Handed));
+        paste.status = Status::Done;
+        assert!(!paste.has_problems());
+        assert_eq!(paste.target(), "1 項目 → dest");
     }
 
     #[test]

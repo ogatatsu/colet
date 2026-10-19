@@ -2,7 +2,7 @@
 //! when there are none. Built and shown on one thread for the life of the process: a dialog a command
 //! opens, such as Properties, closes when the thread that invoked it ends, and the submenus (Send to, New)
 //! draw themselves through messages to the window that owns the menu.
-use std::{cell::{Cell, RefCell}, ptr, sync::mpsc, thread};
+use std::{cell::{Cell, RefCell}, sync::mpsc, thread};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -11,8 +11,8 @@ use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN, CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN,
     CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX, GCS_VERBW, IContextMenu,
-    IContextMenu2, IContextMenu3, ILClone, ILFindLastID, ILFree, ILIsParent, ILRemoveLastID,
-    IShellFolder, SHBindToObject, SHBindToParent, SHParseDisplayName,
+    IContextMenu2, IContextMenu3, ILClone, ILFindLastID, ILIsParent, ILRemoveLastID,
+    IShellFolder, SHBindToObject, SHBindToParent,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DeleteMenu, DestroyMenu, DispatchMessageW,
@@ -23,7 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Error, HRESULT, Interface, PCSTR, PCWSTR, PSTR, Result, w};
 
-use super::{Apartment, Owner, Wide};
+use super::{Apartment, Owner, Pidls, parse};
 
 /// The bindings leave this one out; it is `SEE_MASK_UNICODE`'s bit.
 const CMIC_MASK_UNICODE: u32 = 0x4000;
@@ -218,24 +218,6 @@ fn invoke(menu: &IContextMenu, owner: HWND, command: usize, at: POINT) -> Result
         ..Default::default()
     };
     unsafe { menu.InvokeCommand(&info as *const _ as *const CMINVOKECOMMANDINFO) }
-}
-
-/// Item ID lists, freed when dropped.
-struct Pidls(Vec<*mut ITEMIDLIST>);
-
-impl Drop for Pidls {
-    fn drop(&mut self) {
-        for pidl in &self.0 {
-            unsafe { ILFree(Some(*pidl)) };
-        }
-    }
-}
-
-fn parse(path: &str) -> Result<*mut ITEMIDLIST> {
-    let path = Wide::new(path);
-    let mut pidl = ptr::null_mut();
-    unsafe { SHParseDisplayName(path.get(), None, &mut pidl, 0, None)? };
-    Ok(pidl)
 }
 
 fn context_menu(owner: HWND, paths: &[String], background: &str) -> Result<IContextMenu> {

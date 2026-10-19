@@ -1,19 +1,21 @@
 //! The Windows shell: icons, the Explorer context menu and file operations with the shell's own dialogs.
 pub mod clipboard;
+mod drop;
 mod icon;
 mod menu;
 mod open;
 mod operation;
 
+pub use drop::{Dropped, drop_clipboard};
 pub use icon::{Icon, IconSource, icon};
 pub use menu::{BUSY_ERROR as MENU_BUSY, MenuThread, ShowMenu};
 pub use open::{open, reveal};
 pub use operation::{Item, Operation, operate, operate_clipboard};
-#[cfg(test)]
-pub(crate) use operation::fixtures;
 
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
+use windows::Win32::UI::Shell::Common::ITEMIDLIST;
+use windows::Win32::UI::Shell::{ILFree, SHParseDisplayName};
 use windows::core::{HRESULT, PCWSTR};
 
 /// A window that owns the shell's dialogs, as its raw `HWND`.
@@ -54,6 +56,24 @@ impl Drop for Ole {
     }
 }
 
+/// Item ID lists, freed when dropped.
+struct Pidls(Vec<*mut ITEMIDLIST>);
+
+impl Drop for Pidls {
+    fn drop(&mut self) {
+        for pidl in &self.0 {
+            unsafe { ILFree(Some(*pidl)) };
+        }
+    }
+}
+
+fn parse(path: &str) -> windows::core::Result<*mut ITEMIDLIST> {
+    let path = Wide::new(path);
+    let mut pidl = std::ptr::null_mut();
+    unsafe { SHParseDisplayName(path.get(), None, &mut pidl, 0, None)? };
+    Ok(pidl)
+}
+
 /// A NUL-terminated UTF-16 copy of `text`, kept alive while a `PCWSTR` points into it.
 struct Wide(Vec<u16>);
 
@@ -64,4 +84,10 @@ impl Wide {
     fn get(&self) -> PCWSTR {
         PCWSTR(self.0.as_ptr())
     }
+}
+
+#[cfg(test)]
+pub(crate) mod fixtures {
+    pub use super::drop::fixtures::*;
+    pub use super::operation::fixtures::*;
 }

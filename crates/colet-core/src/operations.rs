@@ -9,7 +9,8 @@ use std::sync::{
 use windows::Win32::Foundation::E_ABORT;
 use windows::core::HRESULT;
 
-use crate::shell::{self, Item, Operation, Owner, clipboard};
+use crate::paths::child;
+use crate::shell::{self, Dropped, Item, Operation, Owner, clipboard};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -58,6 +59,9 @@ pub enum Event {
     /// The last item done is no longer where it was: moved, renamed or sent to the Recycle Bin. A copy's
     /// source stays, and a new folder was nowhere before.
     Left { path: String },
+    /// Handed to the shell, which writes it out on its own and tells nothing back: where it goes by the
+    /// name it was given, which a name clash may change.
+    Handed { path: String },
 }
 
 /// What an operation the user stopped fails with.
@@ -231,8 +235,13 @@ pub fn run(request: Request, owner: Owner, report: impl FnMut(Event) + Send + 's
         Kind::Paste => clipboard::read_files().map_err(|e| message(e.code()))?,
         _ => clipboard::ClipboardFiles::default(),
     };
-    if request.kind == Kind::Paste && files.paths.is_empty() && files.items {
-        return paste_items(request.destination, files, owner, report);
+    if request.kind == Kind::Paste && files.paths.is_empty() {
+        if files.items {
+            return paste_items(request.destination, files, owner, report);
+        }
+        if !files.contents.is_empty() {
+            return paste_contents(request.destination, files, owner, report);
+        }
     }
     let prepared = prepare(request, || Ok(files))?;
     // A cut pasted where it already is: nothing moves, and it stays cut.
@@ -271,6 +280,30 @@ fn paste_items(
         clipboard::complete(files.sequence);
     }
     outcome(result, tally.failed.load(Ordering::Relaxed))
+}
+
+/// A paste of what is given only by its contents, as Outlook's attachments: dropped on the folder for the
+/// shell to write out, as Explorer pastes it. Its items are told only by the names they were given.
+fn paste_contents(
+    destination: String,
+    files: clipboard::ClipboardFiles,
+    owner: Owner,
+    mut report: impl FnMut(Event) + Send + 'static,
+) -> Result<(), String> {
+    check_destination(&[], &destination)?;
+    match shell::drop_clipboard(&destination, files.cut, owner) {
+        Ok(Dropped::Refused) => Err("貼り付け先がクリップボードの内容を受け付けませんでした".into()),
+        Ok(dropped) => {
+            for name in &files.contents {
+                report(Event::Handed { path: child(&destination, name) });
+            }
+            if dropped == Dropped::Moved {
+                clipboard::complete(files.sequence);
+            }
+            Ok(())
+        }
+        Err(error) => outcome(Err(error), false),
+    }
 }
 
 /// How the items of an operation went.
@@ -410,6 +443,24 @@ mod tests {
         assert!(matches!(&events[0], Event::Done { path } if path.ends_with(r"archive.zip\inner.txt")), "{events:?}");
         assert_eq!(events[1], Event::Placed { path: out.join("inner.txt").display().to_string() });
         assert_eq!(events.len(), 2, "{events:?}");
+    }
+
+    #[test]
+    #[ignore = "replaces the real clipboard"]
+    fn pastes_what_is_given_only_by_its_contents_from_the_clipboard() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().to_path_buf();
+        let (events, files) = shell::fixtures::while_on_clipboard("添付.txt", b"attached", move || {
+            let files = clipboard::read_files().unwrap();
+            let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let seen = events.clone();
+            run(request(Kind::Paste, vec![], &destination, ""), 0, move |event| seen.lock().unwrap().push(event)).unwrap();
+            let events = events.lock().unwrap().clone();
+            (events, files)
+        });
+        assert_eq!((files.paths.len(), files.items, files.contents), (0, false, vec!["添付.txt".to_owned()]));
+        assert_eq!(std::fs::read(dir.path().join("添付.txt")).unwrap(), b"attached");
+        assert_eq!(events, [Event::Handed { path: dir.path().join("添付.txt").display().to_string() }]);
     }
 
     #[test]
