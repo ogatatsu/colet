@@ -74,7 +74,7 @@ Tauri＋React版のColet（`D:\colet`）を、GPUI Kitを使ったRustだけの�
 
 ## メモ
 
-- Everything SDKはC言語のソース（`crates/colet-core/vendor/everything-sdk3`、約9,600行）をそのまま`cc`でビルドしている。Q6の「C++をRustに」はnative.cppのことで、SDKまでは書き直さない。
+- Everything SDKはC言語のソースを`crates/colet-core/vendor/everything-sdk3`にgitサブモジュール（voidtools/everything_sdk3のタグ3.0.1.12に固定）として置き、そのまま`cc`でビルドしている。取ってきていなければビルドは`git submodule update --init`を促して止まる。Q6の「C++をRustに」はnative.cppのことで、SDKまでは書き直さない。
 - `gpui-kit`の`test-support`機能を使うと、古いロックファイルでは依存関係を解決できなかった（`cocoa`の版の衝突）。ロックファイルを作り直すと解決した。
 
 ## 試作で確かめたこと（`spike/`）

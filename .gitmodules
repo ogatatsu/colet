@@ -1,0 +1,3 @@
+[submodule "crates/colet-core/vendor/everything-sdk3"]
+	path = crates/colet-core/vendor/everything-sdk3
+	url = https://github.com/voidtools/everything_sdk3

@@ -50,6 +50,22 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
 }
 
+/// Connect to an instance ("" for the unnamed one). The SDK gives up when every pipe server is busy
+/// for a moment, as when connections overlap, so try a few more times before calling it missing.
+unsafe fn open(instance: &str) -> Handle {
+    let name = wide(instance);
+    for attempt in 0..10 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let client = unsafe { Everything3_ConnectW(if instance.is_empty() { ptr::null() } else { name.as_ptr() }) };
+        if !client.is_null() {
+            return client;
+        }
+    }
+    ptr::null_mut()
+}
+
 /// The last search and its pages, with a separate client whose change flag pagination cannot clear.
 pub struct SearchSession {
     client: Handle,
@@ -180,8 +196,7 @@ impl SearchSession {
     unsafe fn connect(&mut self, instance: &str) -> Result<(), String> {
         let candidates: &[&str] = if instance.is_empty() { &["", "1.5a"] } else { &[instance] };
         for candidate in candidates {
-            let name = wide(candidate);
-            let client = unsafe { Everything3_ConnectW(if candidate.is_empty() { ptr::null() } else { name.as_ptr() }) };
+            let client = unsafe { open(candidate) };
             if !client.is_null() {
                 self.client = client;
                 self.instance = instance.to_owned();
@@ -200,8 +215,7 @@ impl SearchSession {
                 if self.watch_retry_at.is_some_and(|at| Instant::now() < at) {
                     return;
                 }
-                let name = wide(&self.connected_instance);
-                self.changes = Everything3_ConnectW(if self.connected_instance.is_empty() { ptr::null() } else { name.as_ptr() });
+                self.changes = open(&self.connected_instance);
             }
             if !self.changes.is_null() {
                 Everything3_SetSearchViewportOffset(self.state, 0);
