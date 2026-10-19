@@ -786,6 +786,9 @@ impl Colet {
                     }
                 }),
             )
+            // Let go, it slides on screen as a crumb brings it, even when it was already active: sliding
+            // under the press would carry a button in it away from the pointer.
+            .on_click(cx.listener(|this, _, _, cx| this.changed(cx)))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {

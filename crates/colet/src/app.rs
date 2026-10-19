@@ -933,10 +933,13 @@ impl Colet {
         self.in_background(move || backend.open(&entry.path, owner).map_err(|error| format!("開けません: {error}")), None, cx);
     }
 
-    /// A crumb takes the keys to its column, bringing it on screen even when it is already active.
+    /// A crumb takes the keys to its column, bringing it on screen even when it is already active. It only
+    /// goes there: nothing in it is picked, as a press in the column picks nothing.
     pub fn go_to(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.state.set_active(index);
-        self.focus_active(window, cx);
+        let handle = if index == 0 { &self.home_focus } else { &self.columns_focus };
+        handle.focus(window, cx);
+        self.changed(cx);
     }
 
     pub fn step(&mut self, by: isize, window: &mut Window, cx: &mut Context<Self>) {

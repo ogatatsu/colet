@@ -27,7 +27,7 @@ use crate::{
     backend::{Backend, Search},
     settings::{LoadError, SavedSearch, Settings, Theme},
     theme::Palette,
-    state::{Kind, search_key},
+    state::{ColumnId, Kind, search_key},
 };
 
 #[derive(Default)]
@@ -856,6 +856,61 @@ fn rest(ui: &Ui, cx: &mut TestAppContext) {
             break;
         }
     }
+}
+
+#[gpui_kit::test]
+fn slides_a_column_on_screen_once_a_press_in_its_header_or_its_empty_room_is_let_go(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    // Brought back to the start by hand: the column cut by the right edge, and how far it reaches past it.
+    let cut = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.read(cx, |v| v.columns_scroll.set_offset(point(px(0.), px(0.))));
+        ui.act(cx, |_, _| ());
+        let ids: Vec<ColumnId> = ui.read(cx, |v| v.state.columns.iter().map(|c| c.id).collect());
+        ui.act(cx, |window, _| {
+            let edge = window.find("columns-scroll").bounds().right();
+            ids.into_iter().find_map(|id| {
+                let b = window.try_find(("column", id))?.bounds();
+                (b.left() + px(40.) < edge && b.right() > edge).then_some(id)
+            })
+        })
+        .expect("a column cut by the right edge")
+    };
+    for target in ["head", "column"] {
+        let id = cut(&ui, cx);
+        let index = ui.read(cx, |v| v.state.index_of(id).unwrap());
+        let selected = ui.selected(cx, index);
+        let at = if target == "head" { point(px(20.), px(10.)) } else { point(px(20.), px(300.)) };
+        ui.act(cx, |window, cx| window.click_at((target, id), at, cx));
+        settle(cx);
+        rest(&ui, cx);
+        assert_eq!(ui.active(cx), index, "{target}");
+        let (column, view) = ui.act(cx, |window, _| (window.find(("column", id)).bounds(), window.find("columns-scroll").bounds()));
+        assert!(column.right() <= view.right() + px(1.), "{target}: the column slid on screen");
+        // Only gone to: what it had picked stays as it was.
+        assert_eq!(ui.selected(cx, index), selected, "{target}");
+    }
+}
+
+#[gpui_kit::test]
+fn goes_to_a_crumb_s_column_picking_nothing_in_it(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\alpha"), folder(r"D:\beta")])])
+    });
+    let ui = open(cx, fake);
+    ui.click_in(cx, "home", row(r"D:\"));
+    assert_eq!(ui.active(cx), 0);
+    ui.click(cx, ("crumb", 1usize));
+    assert_eq!(ui.active(cx), 1);
+    assert!(ui.columns_focused(cx));
+    assert!(ui.selected(cx, 1).is_empty());
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
 }
 
 /// How far the columns' view reaches past the last column, as the frame drawn now shows it: none when
