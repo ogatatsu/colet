@@ -1,11 +1,12 @@
 //! Files on the clipboard as Explorer puts them there (`CF_HDROP` with a preferred drop effect), so a copy
-//! or cut here pastes in Explorer and the other way round; and paths as text.
+//! or cut here pastes in Explorer and the other way round; and paths as text. Shell items with no path, as
+//! Explorer puts those from a ZIP folder or a phone there, are only noticed: the shell reads them itself.
 use std::{ffi::c_void, mem, ptr, thread, time::Duration};
 
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::DataExchange::{
     AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-    OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+    IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
@@ -24,6 +25,8 @@ use super::Owner;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClipboardFiles {
     pub paths: Vec<String>,
+    /// With no `paths`: shell items with none, as from a ZIP folder or a phone, which only the shell reads.
+    pub items: bool,
     pub cut: bool,
     /// The clipboard's sequence number as read, so a cut is let go of only while it is still there.
     pub sequence: u32,
@@ -123,10 +126,6 @@ pub fn read_files() -> Result<ClipboardFiles> {
     let _clipboard = Opened::new(0)?;
     unsafe {
         let sequence = GetClipboardSequenceNumber();
-        let Ok(drop) = GetClipboardData(CF_HDROP.0.into()) else {
-            return Ok(ClipboardFiles { sequence, ..ClipboardFiles::default() });
-        };
-        let drop = HDROP(drop.0);
         let mut cut = false;
         if let Ok(effect) = GetClipboardData(preferred_effect()) {
             let value = GlobalLock(HGLOBAL(effect.0)).cast::<u32>();
@@ -135,6 +134,11 @@ pub fn read_files() -> Result<ClipboardFiles> {
                 let _ = GlobalUnlock(HGLOBAL(effect.0));
             }
         }
+        let Ok(drop) = GetClipboardData(CF_HDROP.0.into()) else {
+            let items = IsClipboardFormatAvailable(RegisterClipboardFormatW(w!("Shell IDList Array"))).is_ok();
+            return Ok(ClipboardFiles { items, cut, sequence, ..ClipboardFiles::default() });
+        };
+        let drop = HDROP(drop.0);
         let count = DragQueryFileW(drop, u32::MAX, None);
         let paths = (0..count)
             .map(|i| {
@@ -144,7 +148,7 @@ pub fn read_files() -> Result<ClipboardFiles> {
                 String::from_utf16_lossy(&buffer[..len])
             })
             .collect();
-        Ok(ClipboardFiles { paths, cut, sequence })
+        Ok(ClipboardFiles { paths, items: false, cut, sequence })
     }
 }
 

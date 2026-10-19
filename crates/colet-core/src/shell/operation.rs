@@ -2,18 +2,20 @@
 //! shell's own dialogs, owned by our window.
 use std::cell::RefCell;
 
-use windows::Win32::Foundation::{E_ABORT, ERROR_NOT_SUPPORTED};
+use windows::Win32::Foundation::{E_ABORT, E_INVALIDARG, ERROR_NOT_SUPPORTED};
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
-use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
+use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, IDataObject};
+use windows::Win32::System::Ole::OleGetClipboard;
 use windows::Win32::UI::Shell::{
     FileOperation, FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_RENAMEONCOLLISION, FOFX_ADDUNDORECORD,
     FOFX_RECYCLEONDELETE, IFileOperation, IFileOperationProgressSink, IFileOperationProgressSink_Impl,
-    IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH, TSF_DELETE_RECYCLE_IF_POSSIBLE,
+    IShellItem, IShellItemArray, SHCreateItemFromParsingName, SHCreateShellItemArrayFromDataObject,
+    SIGDN_DESKTOPABSOLUTEEDITING, SIGDN_FILESYSPATH, TSF_DELETE_RECYCLE_IF_POSSIBLE,
 };
 use windows::Win32::Foundation::HWND;
 use windows::core::{AsImpl, Error, HRESULT, PCWSTR, Ref, Result, implement};
 
-use super::{Apartment, Owner, Wide};
+use super::{Apartment, Ole, Owner, Wide};
 
 #[derive(Clone, Debug)]
 pub enum Operation {
@@ -44,6 +46,43 @@ pub fn operate(
     owner: Owner,
     report: impl FnMut(Item) + 'static,
 ) -> Result<()> {
+    perform(operation, rename, owner, report, |op, sink| queue(op, operation, paths, sink))
+}
+
+/// Copies or moves the shell items on the clipboard into `operation`'s destination: those with no path,
+/// as from a ZIP folder or a phone, which the shell reads from the clipboard's data object itself. Items
+/// with no path are told by the name the address bar shows. Blocks as [`operate`] does.
+pub fn operate_clipboard(operation: &Operation, owner: Owner, report: impl FnMut(Item) + 'static) -> Result<()> {
+    operate_data(operation, owner, report, || unsafe { OleGetClipboard() })
+}
+
+fn operate_data(
+    operation: &Operation,
+    owner: Owner,
+    report: impl FnMut(Item) + 'static,
+    data: impl FnOnce() -> Result<IDataObject>,
+) -> Result<()> {
+    let _ole = Ole::enter()?;
+    perform(operation, false, owner, report, |op, _| {
+        let items: IShellItemArray = unsafe { SHCreateShellItemArrayFromDataObject(&data()?)? };
+        unsafe {
+            match operation {
+                Operation::Copy { destination } => op.CopyItems(&items, &item(destination)?),
+                Operation::Move { destination } => op.MoveItems(&items, &item(destination)?),
+                _ => Err(Error::from_hresult(E_INVALIDARG)),
+            }
+        }
+    })
+}
+
+/// Sets the shell's file operation up, has `queue` put the items in, and carries them out.
+fn perform(
+    operation: &Operation,
+    rename: bool,
+    owner: Owner,
+    report: impl FnMut(Item) + 'static,
+    queue: impl FnOnce(&IFileOperation, &IFileOperationProgressSink) -> Result<()>,
+) -> Result<()> {
     let apartment = Apartment::enter();
     apartment.result()?;
     let op: IFileOperation = unsafe { CoCreateInstance(&FileOperation, None, CLSCTX_ALL)? };
@@ -59,7 +98,7 @@ pub fn operate(
     unsafe { op.SetOperationFlags(flags)? };
     let sink: IFileOperationProgressSink = Sink(RefCell::new(Box::new(report))).into();
     let cookie = unsafe { op.Advise(&sink)? };
-    let queued = queue(&op, operation, paths, &sink);
+    let queued = queue(&op, &sink);
     let result = queued.and_then(|()| unsafe { op.PerformOperations() });
     let aborted = unsafe { op.GetAnyOperationsAborted() }.is_ok_and(|aborted| aborted.as_bool());
     unsafe {
@@ -129,9 +168,13 @@ impl Sink {
     }
 }
 
+/// The item's path, or for one with none, as in a ZIP folder or on a phone, its name in the address bar.
 fn path(item: Option<&IShellItem>) -> String {
     let Some(item) = item else { return String::new() };
-    let Ok(name) = (unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }) else { return String::new() };
+    let named = |form| unsafe { item.GetDisplayName(form) };
+    let Ok(name) = named(SIGDN_FILESYSPATH).or_else(|_| named(SIGDN_DESKTOPABSOLUTEEDITING)) else {
+        return String::new();
+    };
     let path = unsafe { name.to_string() }.unwrap_or_default();
     unsafe { CoTaskMemFree(Some(name.0 as _)) };
     path
@@ -220,11 +263,99 @@ impl IFileOperationProgressSink_Impl for Sink_Impl {
 }
 
 #[cfg(test)]
+pub(crate) mod fixtures {
+    use std::path::Path;
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        !bytes.iter().fold(!0u32, |crc, &byte| {
+            (0..8).fold(crc ^ byte as u32, |crc, _| if crc & 1 == 1 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 })
+        })
+    }
+
+    /// A ZIP file at `path` storing `name` holding `content`, uncompressed: a folder whose items have no path.
+    pub fn zip(path: &Path, name: &str, content: &[u8]) {
+        let (crc, size, name_len) = (crc32(content), content.len() as u32, name.len() as u16);
+        // Version 2.0, no flags, stored, 1980-01-01.
+        let common = |out: &mut Vec<u8>| {
+            for half in [20u16, 0, 0, 0, 0x21] {
+                out.extend(half.to_le_bytes());
+            }
+            for word in [crc, size, size] {
+                out.extend(word.to_le_bytes());
+            }
+            out.extend(name_len.to_le_bytes());
+        };
+        let mut out = 0x0403_4b50u32.to_le_bytes().to_vec();
+        common(&mut out);
+        out.extend(0u16.to_le_bytes());
+        out.extend(name.as_bytes());
+        out.extend(content);
+        let directory = out.len() as u32;
+        out.extend(0x0201_4b50u32.to_le_bytes());
+        out.extend(20u16.to_le_bytes());
+        common(&mut out);
+        // No extra field, comment, disk or attributes; the local header at the start.
+        out.extend([0u8; 16]);
+        out.extend(name.as_bytes());
+        let directory_size = out.len() as u32 - directory;
+        out.extend(0x0605_4b50u32.to_le_bytes());
+        for half in [0u16, 0, 1, 1] {
+            out.extend(half.to_le_bytes());
+        }
+        out.extend(directory_size.to_le_bytes());
+        out.extend(directory.to_le_bytes());
+        out.extend(0u16.to_le_bytes());
+        std::fs::write(path, out).unwrap();
+    }
+
+    /// Puts the shell item at `path` on the clipboard as Explorer would, as a copy, replacing what it held.
+    pub fn put_on_clipboard(path: &str) {
+        use windows::Win32::System::Com::IDataObject;
+        use windows::Win32::System::Ole::{OleFlushClipboard, OleSetClipboard};
+        use windows::Win32::UI::Shell::BHID_DataObject;
+
+        let _ole = super::Ole::enter().unwrap();
+        unsafe {
+            let data: IDataObject = super::item(path).unwrap().BindToHandler(None, &BHID_DataObject).unwrap();
+            OleSetClipboard(&data).unwrap();
+            // Left behind on the clipboard once this thread lets OLE go.
+            OleFlushClipboard().unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::{rc::Rc, cell::RefCell};
 
     use super::*;
-    use windows::Win32::UI::Shell::TSF_NORMAL;
+    use windows::Win32::UI::Shell::{BHID_DataObject, TSF_NORMAL};
+
+    #[test]
+    fn copies_items_with_no_path_and_names_them_as_the_address_bar_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("archive.zip");
+        fixtures::zip(&archive, "inner.txt", b"zipped");
+        let out = dir.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let inner = format!(r"{}\inner.txt", archive.display());
+        let reports = Rc::new(RefCell::new(Vec::new()));
+        let seen = reports.clone();
+        operate_data(
+            &Operation::Copy { destination: out.to_string_lossy().into_owned() },
+            0,
+            move |item| seen.borrow_mut().push(item),
+            || unsafe { item(&inner)?.BindToHandler(None, &BHID_DataObject) },
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(out.join("inner.txt")).unwrap(), b"zipped");
+        let reports = reports.borrow();
+        assert!(
+            matches!(&reports[0], Item::Done { path, result } if result.is_ok() && path.ends_with(r"archive.zip\inner.txt")),
+            "{reports:?}"
+        );
+        assert_eq!(reports[1], Item::Placed { path: out.join("inner.txt").to_string_lossy().into_owned() });
+    }
 
     #[test]
     fn refuses_to_delete_what_the_bin_cannot_take() {

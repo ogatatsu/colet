@@ -8,9 +8,12 @@ mod operation;
 pub use icon::{Icon, IconSource, icon};
 pub use menu::{BUSY_ERROR as MENU_BUSY, MenuThread, ShowMenu};
 pub use open::{open, reveal};
-pub use operation::{Item, Operation, operate};
+pub use operation::{Item, Operation, operate, operate_clipboard};
+#[cfg(test)]
+pub(crate) use operation::fixtures;
 
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
+use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows::core::{HRESULT, PCWSTR};
 
 /// A window that owns the shell's dialogs, as its raw `HWND`.
@@ -33,6 +36,21 @@ impl Drop for Apartment {
         if self.0.is_ok() {
             unsafe { CoUninitialize() };
         }
+    }
+}
+
+/// OLE on this thread, as the clipboard's data objects need, for as long as it lives.
+struct Ole;
+
+impl Ole {
+    fn enter() -> windows::core::Result<Self> {
+        unsafe { OleInitialize(None) }.map(|()| Self)
+    }
+}
+
+impl Drop for Ole {
+    fn drop(&mut self) {
+        unsafe { OleUninitialize() };
     }
 }
 

@@ -175,7 +175,7 @@ impl Backend for Fake {
     }
 
     fn copy_files(&self, paths: &[String], cut: bool, _: Owner) -> Result<(), String> {
-        *self.clipboard.lock().unwrap() = ClipboardFiles { paths: paths.to_vec(), cut, sequence: 1 };
+        *self.clipboard.lock().unwrap() = ClipboardFiles { paths: paths.to_vec(), cut, sequence: 1, ..Default::default() };
         if let Some(changed) = &*self.watcher.lock().unwrap() {
             changed();
         }
@@ -1293,7 +1293,7 @@ fn marks_the_rows_the_clipboard_holds(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn marks_a_row_another_app_put_on_the_clipboard_in_another_case(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
-    *fake.clipboard.lock().unwrap() = ClipboardFiles { paths: vec![r"d:\WORK\A.TXT".into()], cut: false, sequence: 2 };
+    *fake.clipboard.lock().unwrap() = ClipboardFiles { paths: vec![r"d:\WORK\A.TXT".into()], cut: false, sequence: 2, ..Default::default() };
     (fake.watcher.lock().unwrap().as_ref().unwrap())();
     settle(cx);
     assert!(ui.act(cx, |window, _| window.try_find(SharedString::from(r"held:D:\work\a.txt")).is_some()));

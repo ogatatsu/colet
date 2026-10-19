@@ -1,6 +1,10 @@
 //! File operations as Colet asks for them: a paste from the clipboard, sending to the Recycle Bin, a
 //! rename, a new folder. Checked here, carried out by the shell with its own dialogs.
 use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use windows::Win32::Foundation::E_ABORT;
 use windows::core::HRESULT;
@@ -222,16 +226,65 @@ fn prepare(request: Request, clipboard: impl FnOnce() -> Result<clipboard::Clipb
 
 /// Carries out `request`, telling `report` how each item ends. Fails with [`CANCELLED`] when the user
 /// stopped it, and says so when some items failed. Blocks until the shell is done.
-pub fn run(request: Request, owner: Owner, mut report: impl FnMut(Event) + Send + 'static) -> Result<(), String> {
-    let prepared = prepare(request, || clipboard::read_files().map_err(|e| message(e.code())))?;
+pub fn run(request: Request, owner: Owner, report: impl FnMut(Event) + Send + 'static) -> Result<(), String> {
+    let files = match request.kind {
+        Kind::Paste => clipboard::read_files().map_err(|e| message(e.code()))?,
+        _ => clipboard::ClipboardFiles::default(),
+    };
+    if request.kind == Kind::Paste && files.paths.is_empty() && files.items {
+        return paste_items(request.destination, files, owner, report);
+    }
+    let prepared = prepare(request, || Ok(files))?;
     // A cut pasted where it already is: nothing moves, and it stays cut.
     if matches!(prepared.operation, Operation::Move { .. }) && prepared.paths.is_empty() {
         return Ok(());
     }
-    let failed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let any_failed = failed.clone();
+    let tally = Arc::new(Tally::default());
     let leaves = matches!(prepared.operation, Operation::Move { .. } | Operation::Recycle | Operation::Rename { .. });
-    let result = shell::operate(&prepared.operation, &prepared.paths, prepared.rename, owner, move |item| {
+    let result =
+        shell::operate(&prepared.operation, &prepared.paths, prepared.rename, owner, reporter(leaves, tally.clone(), report));
+    let failed = tally.failed.load(Ordering::Relaxed);
+    // Never empty a replaced clipboard, or one whose cut did not all go.
+    if let Some(sequence) = prepared.cut
+        && result.is_ok()
+        && !failed
+        && prepared.paths.iter().all(|p| !Path::new(p).exists())
+    {
+        clipboard::complete(sequence);
+    }
+    outcome(result, failed)
+}
+
+/// A paste of shell items with no path, as from a ZIP folder or a phone, which the shell reads from the
+/// clipboard itself. A cut is let go of once every item went, as there is no path to look for them by.
+fn paste_items(
+    destination: String,
+    files: clipboard::ClipboardFiles,
+    owner: Owner,
+    report: impl FnMut(Event) + Send + 'static,
+) -> Result<(), String> {
+    check_destination(&[], &destination)?;
+    let operation = if files.cut { Operation::Move { destination } } else { Operation::Copy { destination } };
+    let tally = Arc::new(Tally::default());
+    let result = shell::operate_clipboard(&operation, owner, reporter(files.cut, tally.clone(), report));
+    if files.cut && result.is_ok() && !tally.kept.load(Ordering::Relaxed) {
+        clipboard::complete(files.sequence);
+    }
+    outcome(result, tally.failed.load(Ordering::Relaxed))
+}
+
+/// How the items of an operation went.
+#[derive(Default)]
+struct Tally {
+    failed: AtomicBool,
+    /// Some item stayed where it was: failed, skipped or cancelled.
+    kept: AtomicBool,
+}
+
+/// Tells `report` how each item the shell reports ends; with `leaves`, that those done are gone from where
+/// they were.
+fn reporter(leaves: bool, tally: Arc<Tally>, mut report: impl FnMut(Event) + Send + 'static) -> impl FnMut(Item) + 'static {
+    move |item| {
         let left = match &item {
             Item::Done { path, result } if leaves && result.is_ok() && *result != PENDING && *result != USER_IGNORED => {
                 Some(path.clone())
@@ -243,26 +296,24 @@ pub fn run(request: Request, owner: Owner, mut report: impl FnMut(Event) + Send 
             Item::Done { path, result } if result == USER_CANCELLED => Event::Cancelled { path },
             Item::Done { path, result } if result == USER_IGNORED => Event::Skipped { path },
             Item::Done { path, result } if result.is_err() => {
-                any_failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                tally.failed.store(true, Ordering::Relaxed);
                 Event::Failed { path, error: message(result) }
             }
             Item::Done { path, .. } => Event::Done { path },
             Item::Placed { path } => Event::Placed { path },
         };
+        if matches!(event, Event::Cancelled { .. } | Event::Skipped { .. } | Event::Failed { .. }) {
+            tally.kept.store(true, Ordering::Relaxed);
+        }
         report(event);
         if let Some(path) = left {
             report(Event::Left { path });
         }
-    });
-    let failed = failed.load(std::sync::atomic::Ordering::Relaxed);
-    // Never empty a replaced clipboard, or one whose cut did not all go.
-    if let Some(sequence) = prepared.cut
-        && result.is_ok()
-        && !failed
-        && prepared.paths.iter().all(|p| !Path::new(p).exists())
-    {
-        clipboard::complete(sequence);
     }
+}
+
+/// What the operation comes to, from the shell's result and whether any item failed.
+fn outcome(result: windows::core::Result<()>, failed: bool) -> Result<(), String> {
     match result {
         Err(error) if error.code() == E_ABORT || error.code() == USER_CANCELLED => Err(CANCELLED.into()),
         Err(error) => Err(message(error.code())),
@@ -280,7 +331,7 @@ mod tests {
     }
 
     fn files(paths: Vec<String>, cut: bool) -> impl FnOnce() -> Result<clipboard::ClipboardFiles, String> {
-        move || Ok(clipboard::ClipboardFiles { paths, cut, sequence: 1 })
+        move || Ok(clipboard::ClipboardFiles { paths, cut, sequence: 1, ..Default::default() })
     }
 
     #[test]
@@ -336,6 +387,29 @@ mod tests {
         assert!(name_problem("COM1.txt", true).is_some());
         assert_eq!(name_problem("COM0", true), None);
         assert_eq!(name_problem("config", true), None);
+    }
+
+    #[test]
+    #[ignore = "replaces the real clipboard"]
+    fn pastes_items_with_no_path_from_the_clipboard() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("archive.zip");
+        shell::fixtures::zip(&archive, "inner.txt", b"zipped");
+        let out = dir.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        shell::fixtures::put_on_clipboard(&format!(r"{}\inner.txt", archive.display()));
+        // Clipboard history and the like open it as it changes: let them be done with it.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let files = clipboard::read_files().unwrap();
+        assert_eq!((files.paths.len(), files.items, files.cut), (0, true, false));
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = events.clone();
+        run(request(Kind::Paste, vec![], &out, ""), 0, move |event| seen.lock().unwrap().push(event)).unwrap();
+        assert_eq!(std::fs::read(out.join("inner.txt")).unwrap(), b"zipped");
+        let events = events.lock().unwrap();
+        assert!(matches!(&events[0], Event::Done { path } if path.ends_with(r"archive.zip\inner.txt")), "{events:?}");
+        assert_eq!(events[1], Event::Placed { path: out.join("inner.txt").display().to_string() });
+        assert_eq!(events.len(), 2, "{events:?}");
     }
 
     #[test]
