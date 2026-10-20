@@ -22,8 +22,8 @@ pub enum Dialog {
     Recycle { paths: Vec<String>, permanent: bool },
     /// A saved search's name and query, found by the query it had as the dialog opened.
     EditSearch { original: String, name: Entity<InputState>, query: Entity<InputState> },
-    /// Which Everything to ask, and the keys.
-    Preferences { instance: Entity<InputState> },
+    /// The theme, the connection to Everything, and the keys.
+    Preferences,
 }
 
 /// Home's rows: the favorites, the saved searches, then the drives, each place once.
@@ -262,20 +262,9 @@ impl Colet {
     }
 
     pub fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let instance =
-            cx.new(|cx| InputState::new(window, cx).placeholder("自動（既定 → 1.5a）").default_value(self.settings.instance.clone()));
-        let subscription = cx.subscribe_in(&instance, window, |this: &mut Self, input, event, _, cx| match event {
-            InputEvent::Change => {
-                let instance = input.read(cx).value().trim().to_owned();
-                this.update_settings(|s| s.instance = instance, cx);
-            }
-            InputEvent::Focus | InputEvent::Blur => cx.notify(),
-            _ => {}
-        });
-        self.dialog_subscriptions.push(subscription);
-        self.palette.style_input(&instance, cx);
-        instance.update(cx, |input, cx| input.focus(window, cx));
-        self.dialog = Some(Dialog::Preferences { instance });
+        // The theme now chosen takes the keys, as a radio group's checked one does.
+        self.stop(format!("theme:{:?}", self.settings.theme), cx).focus(window, cx);
+        self.dialog = Some(Dialog::Preferences);
         cx.notify();
     }
 
@@ -285,7 +274,7 @@ impl Colet {
         self.apply_theme(window, cx);
     }
 
-    /// Lets go of Everything and makes the search afresh, so it connects to the instance now named.
+    /// Lets go of Everything and makes the search afresh, so it connects anew.
     pub fn reconnect(&mut self, cx: &mut Context<Self>) {
         let backend = self.backend.clone();
         let task = cx.background_executor().spawn(async move { backend.reconnect() });
@@ -295,7 +284,7 @@ impl Colet {
                 this.engine = Engine::Unknown;
                 this.state.reset_search();
                 this.changed(cx);
-                this.notify("接続設定を更新しました。検索を入力すると接続します。", Tone::Info, cx);
+                this.notify("Everythingとの接続を切りました。次の検索で接続し直します。", Tone::Info, cx);
             })
             .ok();
         })

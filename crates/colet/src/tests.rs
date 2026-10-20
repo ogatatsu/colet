@@ -1161,13 +1161,9 @@ fn reconnects_from_the_preferences_making_the_search_afresh(cx: &mut TestAppCont
     let before = ui.read(cx, |v| v.state.columns[1].id);
     let searches = fake.queries().len();
     ui.click(cx, "preferences");
-    let instance = ui.read(cx, |v| match &v.dialog {
-        Some(crate::places::Dialog::Preferences { instance }) => instance.clone(),
-        _ => panic!("no dialog"),
-    });
-    ui.act(cx, |window, cx| instance.update(cx, |input, cx| input.set_value("1.5a", window, cx)));
-    ui.input(cx, " ");
-    settle(cx);
+    assert!(ui.read(cx, |v| matches!(v.dialog, Some(crate::places::Dialog::Preferences))));
+    // The theme chosen takes the keys, there being no field to type in.
+    assert!(ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.stop("theme:System", cx).is_focused(window))));
     ui.click(cx, "reconnect");
     assert_eq!(fake.reconnects.load(Ordering::Relaxed), 1);
     assert_ne!(ui.read(cx, |v| v.state.columns[1].id), before);
@@ -1629,12 +1625,12 @@ fn the_final_settings_save_supersedes_debounced_saves(cx: &mut TestAppContext) {
     let ui = open(cx, fake.clone());
     let before = fake.saves.load(Ordering::Relaxed);
     ui.view.update(cx, |v, cx| {
-        v.update_settings(|s| s.instance = "older".into(), cx);
-        v.update_settings(|s| s.instance = "latest".into(), cx);
+        v.update_settings(|s| s.favorites = vec!["older".into()], cx);
+        v.update_settings(|s| s.favorites = vec!["latest".into()], cx);
         v.flush_settings().unwrap();
     });
     settle(cx);
-    assert_eq!(fake.settings.lock().unwrap().instance, "latest");
+    assert_eq!(fake.settings.lock().unwrap().favorites, ["latest"]);
     assert_eq!(fake.saves.load(Ordering::Relaxed), before + 1);
 }
 

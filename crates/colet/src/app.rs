@@ -154,8 +154,22 @@ pub struct Resize {
 #[derive(Clone)]
 pub enum Engine {
     Unknown,
+    /// A search is on its way while not connected, and may wait out a busy Everything.
+    Connecting,
     Connected(String),
     Failed(String),
+}
+
+impl Engine {
+    /// What the status bar shows, and what it says in full.
+    pub fn describe(&self) -> (String, String) {
+        match self {
+            Engine::Unknown => ("Everything".into(), "検索エンジン: Everything（検索すると接続します）".into()),
+            Engine::Connecting => ("Everything · 接続中…".into(), "検索エンジン: Everythingに接続しています".into()),
+            Engine::Connected(name) => (name.clone(), format!("検索エンジン: {name}（接続済み）")),
+            Engine::Failed(error) => ("Everything · 要確認".into(), error.clone()),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -440,8 +454,7 @@ impl Colet {
         match &self.dialog {
             Some(Dialog::Name { input, .. }) => inputs.push(input.clone()),
             Some(Dialog::EditSearch { name, query, .. }) => inputs.extend([name.clone(), query.clone()]),
-            Some(Dialog::Preferences { instance }) => inputs.push(instance.clone()),
-            Some(Dialog::Recycle { .. }) | None => {}
+            Some(Dialog::Recycle { .. } | Dialog::Preferences) | None => {}
         }
         for input in &inputs {
             self.palette.style_input(input, cx);
@@ -617,8 +630,10 @@ impl Colet {
                 let query = self.state.query.clone();
                 // A refresh reloads all it has loaded, so later selections stay.
                 let count = if offset > 0 { PAGE } else { PAGE.max(c.entries.len()) };
-                let instance = self.settings.instance.clone();
-                let search = Search { query, sort, offset, count, refresh: offset == 0, instance, request };
+                if !matches!(self.engine, Engine::Connected(_)) {
+                    self.engine = Engine::Connecting;
+                }
+                let search = Search { query, sort, offset, count, refresh: offset == 0, request };
                 cx.background_executor().spawn(async move {
                     let (page, connection) = backend.search(search)?;
                     Ok((page.entries, page.total, Some(connection)))
@@ -653,7 +668,8 @@ impl Colet {
         match result {
             Ok((entries, total, connection)) => {
                 self.state.page(id, request, entries, total, offset, &self.departed);
-                if let Some(name) = connection.filter(|_| current) {
+                // One left behind still ends the wait for the connection.
+                if let Some(name) = connection.filter(|_| current || matches!(self.engine, Engine::Connecting)) {
                     self.engine = Engine::Connected(name);
                 }
             }

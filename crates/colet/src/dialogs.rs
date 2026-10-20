@@ -229,7 +229,8 @@ impl Colet {
                 ];
                 (content, buttons)
             }
-            Dialog::Preferences { instance } => {
+            Dialog::Preferences => {
+                let (engine, said) = self.engine.describe();
                 let content = div()
                     .flex()
                     .flex_col()
@@ -255,11 +256,26 @@ impl Colet {
                         ),
                     )
                     .child(
-                        div().flex().flex_col().gap_1().child(label(p, "Everything インスタンス名")).child(
+                        div().flex().flex_col().gap_1().child(label(p, "Everything")).child(
                             div()
                                 .flex()
+                                .items_center()
                                 .gap_2()
-                                .child(div().flex_1().child(field(p, instance, window, cx)))
+                                .child(
+                                    div()
+                                        .id("engine-state")
+                                        .flex_1()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .text_size(px(13.))
+                                        .text_color(p.text)
+                                        .role(Role::Status)
+                                        .aria_label(said.clone())
+                                        .tip(p, said)
+                                        .child(format!("接続先：{engine}")),
+                                )
                                 .child(
                                     button(p, "reconnect", "再接続", false, true)
                                         .on_click(cx.listener(|this, _, _, cx| this.reconnect(cx)))
@@ -268,7 +284,7 @@ impl Colet {
                         ),
                     )
                     .child(div().text_size(px(12.)).text_color(p.text_muted).child(
-                        "Everything 1.5を起動してお使いください。空欄の場合は自動接続します。名前を変更したら「再接続」を押してください。",
+                        "Everything 1.5.0.1424以降を起動してお使いください。つながらないときは「再接続」を押してください。",
                     ))
                     .child(div().pt_1().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
                     .child(div().flex().flex_col().gap_1().text_size(px(12.)).children(SHORTCUTS.map(|(key, what)| {

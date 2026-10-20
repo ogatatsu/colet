@@ -1522,10 +1522,11 @@ impl Colet {
             }
             _ => String::new(),
         };
-        let (name, color, dot, title) = match &self.engine {
-            Engine::Unknown => ("Everything 1.5".to_owned(), p.text_faint, None, "検索エンジン: Everything 1.5（検索すると接続します）".to_owned()),
-            Engine::Connected(name) => (name.clone(), p.text_faint, Some(p.accent), format!("検索エンジン: {name}（接続済み）")),
-            Engine::Failed(error) => ("Everything 1.5 · 要確認".to_owned(), p.danger, Some(p.danger), error.clone()),
+        let (name, title) = self.engine.describe();
+        let (color, dot) = match &self.engine {
+            Engine::Unknown | Engine::Connecting => (p.text_faint, None),
+            Engine::Connected(_) => (p.text_faint, Some(p.accent)),
+            Engine::Failed(_) => (p.danger, Some(p.danger)),
         };
         div()
             .h(px(26.))

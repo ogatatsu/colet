@@ -21,8 +21,6 @@ pub struct Search {
     pub offset: usize,
     pub count: usize,
     pub refresh: bool,
-    /// The Everything instance to ask; empty tries the default, then `1.5a`.
-    pub instance: String,
     /// The search's request; one superseded before it runs is not sent.
     pub request: u64,
 }
@@ -85,7 +83,7 @@ impl Backend for Live {
             return Err("古い検索要求です".into());
         }
         let page =
-            session.search(&search.query, search.sort, &search.instance, search.offset, search.count, search.refresh)?;
+            session.search(&search.query, search.sort, search.offset, search.count, search.refresh)?;
         Ok((page, session.connection.clone()))
     }
 

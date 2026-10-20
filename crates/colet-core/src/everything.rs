@@ -12,6 +12,10 @@ unsafe extern "system" {
     #[cfg(test)]
     fn Everything3_ShutdownClient(client: Handle) -> i32;
     fn Everything3_IsDBLoaded(client: Handle) -> i32;
+    fn Everything3_GetMajorVersion(client: Handle) -> u32;
+    fn Everything3_GetMinorVersion(client: Handle) -> u32;
+    fn Everything3_GetRevision(client: Handle) -> u32;
+    fn Everything3_GetBuildNumber(client: Handle) -> u32;
     fn Everything3_GetLastError() -> u32;
     fn Everything3_CreateSearchState() -> Handle;
     fn Everything3_DestroySearchState(state: Handle) -> i32;
@@ -38,6 +42,9 @@ pub const PAGE: usize = 500;
 
 const WATCH_RETRY: Duration = Duration::from_secs(5);
 
+/// The oldest Everything it asks, 1.5.0.1424b: the one that names its pipes by session.
+const OLDEST: [u32; 4] = [1, 5, 0, 1424];
+
 /// A run of results: `entries` from `offset` on, of `total` in all.
 #[derive(Debug)]
 pub struct Page {
@@ -50,20 +57,11 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
 }
 
-/// Connect to an instance ("" for the unnamed one). The SDK gives up when every pipe server is busy
-/// for a moment, as when connections overlap, so try a few more times before calling it missing.
-unsafe fn open(instance: &str) -> Handle {
-    let name = wide(instance);
-    for attempt in 0..10 {
-        if attempt > 0 {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        let client = unsafe { Everything3_ConnectW(if instance.is_empty() { ptr::null() } else { name.as_ptr() }) };
-        if !client.is_null() {
-            return client;
-        }
-    }
-    ptr::null_mut()
+/// Connect to the unnamed instance, or to `instance` when given. The SDK waits out a busy pipe itself,
+/// for up to 30 seconds.
+unsafe fn open(instance: Option<&str>) -> Handle {
+    let name = instance.map(wide);
+    unsafe { Everything3_ConnectW(name.as_ref().map_or(ptr::null(), |n| n.as_ptr())) }
 }
 
 /// The last search and its pages, with a separate client whose change flag pagination cannot clear.
@@ -72,8 +70,10 @@ pub struct SearchSession {
     changes: Handle,
     state: Handle,
     key: Option<(String, Order)>,
-    instance: String,
-    connected_instance: String,
+    /// The connected Everything's, as 1.5.0.1424.
+    version: String,
+    /// The instance the watch connects to; only tests name one, to make it fail.
+    watch_instance: Option<String>,
     watch_retry_at: Option<Instant>,
     /// What it is connected to, as the status bar names it.
     pub connection: String,
@@ -86,7 +86,7 @@ impl Default for SearchSession {
     fn default() -> Self {
         Self {
             client: ptr::null_mut(), changes: ptr::null_mut(), state: ptr::null_mut(), key: None,
-            instance: String::new(), connected_instance: String::new(), watch_retry_at: None, connection: String::new(),
+            version: String::new(), watch_instance: None, watch_retry_at: None, connection: String::new(),
         }
     }
 }
@@ -140,25 +140,14 @@ impl SearchSession {
     }
 
     /// `count` results of `query` from `offset` on. `refresh` searches afresh even when the query and
-    /// sort are the ones last run. `instance` empty tries the default instance, then `1.5a`.
-    pub fn search(
-        &mut self,
-        query: &str,
-        order: Order,
-        instance: &str,
-        offset: usize,
-        count: usize,
-        refresh: bool,
-    ) -> Result<Page, String> {
-        if query.contains('\0') || instance.contains('\0') {
+    /// sort are the ones last run.
+    pub fn search(&mut self, query: &str, order: Order, offset: usize, count: usize, refresh: bool) -> Result<Page, String> {
+        if query.contains('\0') {
             return Err("入力に使用できない文字が含まれています".into());
-        }
-        if !self.client.is_null() && self.instance != instance {
-            self.disconnect();
         }
         unsafe {
             if self.client.is_null() {
-                self.connect(instance)?;
+                self.connect()?;
             }
             if Everything3_IsDBLoaded(self.client) == 0 {
                 if Everything3_GetLastError() != 0 {
@@ -193,18 +182,32 @@ impl SearchSession {
         }
     }
 
-    unsafe fn connect(&mut self, instance: &str) -> Result<(), String> {
-        let candidates: &[&str] = if instance.is_empty() { &["", "1.5a"] } else { &[instance] };
-        for candidate in candidates {
-            let client = unsafe { open(candidate) };
-            if !client.is_null() {
-                self.client = client;
-                self.instance = instance.to_owned();
-                self.connected_instance = (*candidate).to_owned();
-                return Ok(());
-            }
+    /// Connects to the unnamed instance, turning away an Everything older than [`OLDEST`].
+    unsafe fn connect(&mut self) -> Result<(), String> {
+        let client = unsafe { open(None) };
+        if client.is_null() {
+            return Err("Everything 1.5に接続できません。本体が起動しているか確認して、再試行してください。".into());
         }
-        Err("Everything 1.5に接続できません。本体が起動しているか確認して、再試行してください。".into())
+        let version = unsafe {
+            [
+                Everything3_GetMajorVersion(client),
+                Everything3_GetMinorVersion(client),
+                Everything3_GetRevision(client),
+                Everything3_GetBuildNumber(client),
+            ]
+        };
+        let dotted = |v: [u32; 4]| v.map(|n| n.to_string()).join(".");
+        if version < OLDEST {
+            unsafe { Everything3_DestroyClient(client); }
+            return Err(format!(
+                "Everything {}以降が必要です（接続先: {}）。更新してから再試行してください。",
+                dotted(OLDEST),
+                dotted(version)
+            ));
+        }
+        self.client = client;
+        self.version = dotted(version);
+        Ok(())
     }
 
     /// Retry a missing watch at most once per interval, on a new query or full refresh. A successful
@@ -215,7 +218,7 @@ impl SearchSession {
                 if self.watch_retry_at.is_some_and(|at| Instant::now() < at) {
                     return;
                 }
-                self.changes = open(&self.connected_instance);
+                self.changes = open(self.watch_instance.as_deref());
             }
             if !self.changes.is_null() {
                 Everything3_SetSearchViewportOffset(self.state, 0);
@@ -242,11 +245,7 @@ impl SearchSession {
     }
 
     fn name_connection(&mut self) {
-        self.connection = if self.connected_instance.is_empty() {
-            "Everything 1.5".into()
-        } else {
-            format!("Everything · {}", self.connected_instance)
-        };
+        self.connection = format!("Everything {}", self.version);
         if self.changes.is_null() {
             self.connection.push_str(" · 手動更新（F5）");
         }
@@ -321,12 +320,23 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    /// One test at a time talks to Everything: it turns away a connection made as another's pipe is
+    /// being replaced, and the app never connects twice at once.
+    static EVERYTHING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn alone() -> std::sync::MutexGuard<'static, ()> {
+        EVERYTHING.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     #[ignore = "needs a running Everything 1.5"]
     fn reconnects_on_the_first_search_after_both_connections_fail() {
+        let _alone = alone();
         let query = "parent:\"C:\\colet-sdk-reconnect-probe\"";
         let mut session = SearchSession::default();
-        session.search(query, Order::default(), "", 0, PAGE, true).unwrap();
+        session.search(query, Order::default(), 0, PAGE, true).unwrap();
+        // Named by its version, which the session pipes made the oldest asked.
+        assert!(session.connection.starts_with("Everything 1.5.0."), "{}", session.connection);
         // Shut down only this session's handles, reproducing failed IPC on both connections without
         // stopping the user's Everything process.
         unsafe {
@@ -337,16 +347,17 @@ mod tests {
         assert!(error.contains("接続が切れました"));
         assert!(session.client.is_null() && session.changes.is_null());
         assert!(session.key.is_none() && session.watch_retry_at.is_none());
-        session.search(query, Order::default(), "", 0, PAGE, true).unwrap();
+        session.search(query, Order::default(), 0, PAGE, true).unwrap();
         assert!(!session.client.is_null() && !session.changes.is_null());
     }
 
     #[test]
     #[ignore = "needs a running Everything 1.5"]
     fn a_watch_only_failure_preserves_the_paging_connection() {
+        let _alone = alone();
         let query = "parent:\"C:\\colet-sdk-watch-failure-probe\"";
         let mut session = SearchSession::default();
-        session.search(query, Order::default(), "", 0, PAGE, true).unwrap();
+        session.search(query, Order::default(), 0, PAGE, true).unwrap();
         let client = session.client;
         unsafe { assert_ne!(Everything3_ShutdownClient(session.changes), 0); }
         let error = session.changed().unwrap_err();
@@ -354,7 +365,7 @@ mod tests {
         assert_eq!(session.client, client);
         assert!(session.changes.is_null());
         assert!(session.key.is_some() && session.watch_retry_at.is_some());
-        session.search(query, Order::default(), "", 0, PAGE, true).unwrap();
+        session.search(query, Order::default(), 0, PAGE, true).unwrap();
         assert_eq!(session.client, client);
         assert!(session.changes.is_null());
         assert!(!session.changed().unwrap());
@@ -363,19 +374,20 @@ mod tests {
     #[test]
     #[ignore = "needs a running Everything 1.5 that indexes the temporary folder"]
     fn a_failed_watch_keeps_search_and_pagination_usable_and_retries_on_refresh() {
+        let _alone = alone();
         let fixture = tempfile::Builder::new().prefix("colet-sdk-watch-").tempdir().unwrap();
         for i in 0..511 {
             std::fs::write(fixture.path().join(format!("{i:04}.txt")), b"fixture").unwrap();
         }
         let query = format!("parent:\"{}\"", fixture.path().display());
         let mut session = SearchSession::default();
-        unsafe { session.connect("").unwrap(); }
+        unsafe { session.connect().unwrap(); }
         let client = session.client;
         // Keep the real paging connection, but make only the watch's connection attempt fail.
-        let instance = std::mem::replace(&mut session.connected_instance, "colet-nonexistent-watch-test-instance".into());
+        session.watch_instance = Some("colet-nonexistent-watch-test-instance".into());
         let deadline = Instant::now() + Duration::from_secs(15);
         let first = loop {
-            let page = session.search(&query, Order::default(), "", 0, PAGE, true).unwrap();
+            let page = session.search(&query, Order::default(), 0, PAGE, true).unwrap();
             if page.total == 511 { break page; }
             assert!(Instant::now() < deadline, "Everything did not index the fixture: {}", page.total);
             std::thread::sleep(Duration::from_millis(100));
@@ -385,20 +397,20 @@ mod tests {
         assert!(session.changes.is_null());
         assert!(session.connection.contains("手動更新（F5）"));
         assert!(!session.changed().unwrap());
-        assert_eq!(session.search(&query, Order::default(), "", PAGE, PAGE, false).unwrap().entries.len(), 11);
-        session.connected_instance = instance;
+        assert_eq!(session.search(&query, Order::default(), PAGE, PAGE, false).unwrap().entries.len(), 11);
+        session.watch_instance = None;
         // A healthy watch is available now, but rapid searches must respect the retry deadline.
         // Control the deadline explicitly rather than rely on wall-clock timing for six SDK calls.
         let retry_at = Instant::now() + Duration::from_secs(60);
         session.watch_retry_at = Some(retry_at);
         for i in 0..6 {
-            session.search(&format!("{query} colet-watch-probe-{i}"), Order::default(), "", 0, PAGE, true).unwrap();
+            session.search(&format!("{query} colet-watch-probe-{i}"), Order::default(), 0, PAGE, true).unwrap();
             assert!(session.changes.is_null(), "a query retried the watch before its deadline");
             assert_eq!(session.watch_retry_at, Some(retry_at));
             assert_eq!(session.client, client);
         }
         session.watch_retry_at = Some(Instant::now());
-        session.search(&query, Order::default(), "", 0, PAGE, true).unwrap();
+        session.search(&query, Order::default(), 0, PAGE, true).unwrap();
         assert_eq!(session.client, client);
         assert!(!session.changes.is_null());
         assert!(!session.connection.contains("手動更新"));
@@ -413,6 +425,7 @@ mod tests {
     #[test]
     #[ignore = "needs a running Everything 1.5 that indexes the temporary folder"]
     fn pagination_keeps_changes_until_the_loaded_range_is_refreshed() {
+        let _alone = alone();
         let fixture = tempfile::Builder::new().prefix("colet-sdk-pages-").tempdir().unwrap();
         for i in 0..511 {
             std::fs::write(fixture.path().join(format!("{i:04}.txt")), b"fixture").unwrap();
@@ -421,7 +434,7 @@ mod tests {
         let mut session = SearchSession::default();
         let deadline = Instant::now() + Duration::from_secs(15);
         let first = loop {
-            let page = session.search(&query, Order::default(), "", 0, PAGE, true).unwrap();
+            let page = session.search(&query, Order::default(), 0, PAGE, true).unwrap();
             if page.total == 511 { break page; }
             assert!(Instant::now() < deadline, "Everything did not index the fixture: {}", page.total);
             std::thread::sleep(Duration::from_millis(100));
@@ -437,10 +450,10 @@ mod tests {
             }
         };
         wait(&mut session);
-        let second = session.search(&query, Order::default(), "", PAGE, PAGE, false).unwrap();
+        let second = session.search(&query, Order::default(), PAGE, PAGE, false).unwrap();
         assert_eq!(second.total, 510);
         assert!(session.changed().unwrap(), "pagination cleared the change notification");
-        let fresh = session.search(&query, Order::default(), "", 0, PAGE * 2, true).unwrap();
+        let fresh = session.search(&query, Order::default(), 0, PAGE * 2, true).unwrap();
         assert_eq!(fresh.entries.len(), 510);
         assert!(!fresh.entries.iter().any(|e| e.path == removed.display().to_string()));
         assert!(fresh.entries.iter().any(|e| e.name == "0500.txt"));
@@ -455,6 +468,7 @@ mod tests {
     #[test]
     #[ignore = "needs a running Everything 1.5 that indexes the temporary folder"]
     fn pages_unicode_and_changes() {
+        let _alone = alone();
         let fixture = tempfile::Builder::new().prefix("colet-sdk-").tempdir().unwrap();
         for i in 0..510 {
             std::fs::write(fixture.path().join(format!("{i:04}.txt")), b"fixture").unwrap();
@@ -465,7 +479,7 @@ mod tests {
         let mut session = SearchSession::default();
         let deadline = Instant::now() + Duration::from_secs(15);
         let first = loop {
-            let page = session.search(&query, Order::default(), "", 0, PAGE, true).unwrap();
+            let page = session.search(&query, Order::default(), 0, PAGE, true).unwrap();
             if page.total == 511 {
                 break page;
             }
@@ -473,7 +487,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(150));
         };
         assert_eq!(first.entries.len(), 500);
-        let second = session.search(&query, Order::default(), "", 500, PAGE, false).unwrap();
+        let second = session.search(&query, Order::default(), 500, PAGE, false).unwrap();
         assert_eq!(second.entries.len(), 11);
         assert!(second.entries.iter().chain(&first.entries).any(|e| e.path == unicode.display().to_string()));
         std::fs::write(fixture.path().join("new.txt"), b"new").unwrap();
@@ -482,7 +496,6 @@ mod tests {
             assert!(Instant::now() < deadline, "no change notification");
             std::thread::sleep(Duration::from_millis(100));
         }
-        assert_eq!(session.search(&query, Order { by: Sort::Modified, descending: true }, "", 0, 1000, true).unwrap().total, 512);
-        assert!(session.search(&query, Order::default(), "colet-nonexistent-test-instance", 0, PAGE, true).is_err());
+        assert_eq!(session.search(&query, Order { by: Sort::Modified, descending: true }, 0, 1000, true).unwrap().total, 512);
     }
 }

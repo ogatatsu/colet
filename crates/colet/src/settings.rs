@@ -68,8 +68,6 @@ pub struct Settings {
     pub sidebar_width: f32,
     pub favorites: Vec<String>,
     pub saved_searches: Vec<SavedSearch>,
-    /// The Everything instance to ask; empty tries the default, then `1.5a`.
-    pub instance: String,
     pub theme: Theme,
     pub window: Option<Placement>,
 }
@@ -82,7 +80,6 @@ impl Default for Settings {
             sidebar_width: 240.,
             favorites: Vec::new(),
             saved_searches: Vec::new(),
-            instance: String::new(),
             theme: Theme::System,
             window: None,
         }
@@ -231,22 +228,22 @@ mod tests {
         let gate = Mutex::new((started, released));
         let target = path.clone();
         let saver = Saver::new(move |settings| {
-            if settings.instance == "older" {
+            if settings.favorites == ["older"] {
                 let gate = gate.lock().unwrap();
                 gate.0.send(()).unwrap();
                 gate.1.recv().unwrap();
             }
             save_to(settings, &target)
         });
-        let older = saver.save(Settings { instance: "older".into(), ..Settings::default() });
+        let older = saver.save(Settings { favorites: vec!["older".into()], ..Settings::default() });
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
         // The older save is in the middle of its write; the final one waits behind it.
-        let latest = saver.save(Settings { instance: "latest".into(), ..Settings::default() });
+        let latest = saver.save(Settings { favorites: vec!["latest".into()], ..Settings::default() });
         assert!(latest.try_recv().is_err());
         release.send(()).unwrap();
         written(older).unwrap();
         written(latest).unwrap();
-        assert_eq!(load_from(&path).unwrap().instance, "latest");
+        assert_eq!(load_from(&path).unwrap().favorites, ["latest"]);
     }
 
     #[test]
@@ -258,6 +255,13 @@ mod tests {
         assert!(settings.saved_searches.is_empty());
         // One written before the theme could be chosen follows Windows.
         assert_eq!(settings.theme, Theme::System);
+    }
+
+    #[test]
+    fn reads_a_file_that_still_names_an_everything_instance() {
+        let settings: Settings = serde_json::from_str(r#"{"instance":"1.5a","favorites":["D:\\"]}"#).unwrap();
+        assert_eq!(settings.favorites, [r"D:\"]);
+        assert!(!serde_json::to_string(&settings).unwrap().contains("instance"));
     }
 
     #[test]
