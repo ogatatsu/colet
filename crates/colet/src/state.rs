@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use colet_core::{
-    entry::Entry,
+    entry::{Entry, Marks},
     paths::{ancestors, folder_name, path_key},
 };
 
@@ -596,6 +596,7 @@ impl State {
             size: None,
             modified: None,
             hidden: false,
+            marks: Marks::default(),
         };
         let here = self.snapshot();
         let mut home = self.columns.swap_remove(0);
@@ -816,6 +817,7 @@ mod tests {
             size: None,
             modified: None,
             hidden: false,
+            marks: Marks::default(),
         }
     }
 

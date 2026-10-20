@@ -1,6 +1,6 @@
 //! How the window looks: home's pane on the left; the search field, the trail of folders, the columns
 //! and the status bar beside it.
-use std::{rc::Rc, time::Instant};
+use std::{ops::Range, rc::Rc, time::Instant};
 
 use colet_core::{entry::{Entry, Sort}, paths::{folder_name, path_key}, time};
 use gpui_kit::base::input::{self, Input};
@@ -250,6 +250,12 @@ fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
 }
 
+/// `text` with what a search matched in it on a marker, in `ink` when given.
+fn with_marks(text: &str, marks: &[Range<usize>], mark: Hsla, ink: Option<Hsla>) -> StyledText {
+    let style = HighlightStyle { background_color: Some(mark), color: ink, ..Default::default() };
+    StyledText::new(text.to_owned()).with_highlights(marks.iter().map(|range| (range.clone(), style)))
+}
+
 /// Rows of home and the folders; search results carry their folder on a second line.
 fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
@@ -432,6 +438,7 @@ impl Colet {
         let lit = selected && marked && !aside;
         let image = self.icons.get(entry, cx);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
+        let (mark, ink) = if lit { (p.mark_on_fill, p.on_accent) } else { (p.mark, p.text) };
         let path = entry.path.clone();
         let picture = match (saved, image) {
             (Some(_), _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
@@ -493,10 +500,10 @@ impl Colet {
                             .w_full()
                             .truncate()
                             .when(barred && highlighted, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
-                            .child(entry.name.clone()),
+                            .child(with_marks(&entry.name, &entry.marks.name, mark, None)),
                     )
                     .when(kind == Kind::Search, |d| {
-                        d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(entry.parent.clone()))
+                        d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(with_marks(&entry.parent, &entry.marks.parent, mark, Some(ink))))
                     }),
             )
             // Out of the name, so type-ahead stays the file's own: a fade alone would read as hidden.

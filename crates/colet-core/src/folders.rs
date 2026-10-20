@@ -7,7 +7,7 @@ use std::{
 use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW};
 use windows::core::PCWSTR;
 
-use crate::entry::{Entry, Order, is_hidden, sort_entries};
+use crate::entry::{Entry, Marks, Order, is_hidden, sort_entries};
 
 /// What a listing that a newer one, or its column's removal, made unnecessary fails with.
 pub const STALE: &str = "古いフォルダー要求です";
@@ -60,6 +60,7 @@ pub fn list(path: &str, order: Order, cancelled: &AtomicBool) -> Result<Vec<Entr
                 hidden: listed.as_ref().is_ok_and(|m| {
                     is_hidden(&p, std::os::windows::fs::MetadataExt::file_attributes(m))
                 }),
+                marks: Marks::default(),
             }))
         }),
         cancelled,

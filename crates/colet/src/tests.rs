@@ -9,7 +9,7 @@ use std::{
 };
 
 use colet_core::{
-    entry::{Entry, Order, Sort},
+    entry::{Entry, Marks, Order, Sort},
     everything::Page,
     operations::{Event, Kind as Operation, Request},
     paths::{ancestors, child, folder_name},
@@ -230,6 +230,7 @@ fn entry(path: &str, directory: bool) -> Entry {
         size: (!directory).then_some(1),
         modified: None,
         hidden: false,
+        marks: Marks::default(),
     }
 }
 

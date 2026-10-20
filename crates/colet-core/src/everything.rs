@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::entry::{Entry, Order, Sort};
+use crate::entry::{Entry, Marks, Order, Sort, marked};
 
 type Handle = *mut c_void;
 
@@ -29,6 +29,7 @@ unsafe extern "system" {
     fn Everything3_SetSearchViewportOffset(state: Handle, offset: usize) -> i32;
     fn Everything3_SetSearchViewportCount(state: Handle, count: usize) -> i32;
     fn Everything3_AddSearchPropertyRequest(state: Handle, property: u32) -> i32;
+    fn Everything3_AddSearchPropertyRequestHighlighted(state: Handle, property: u32) -> i32;
     fn Everything3_AddSearchSort(state: Handle, property: u32, ascending: i32) -> i32;
     fn Everything3_SetSearchFoldersFirst(state: Handle, mode: u32) -> i32;
     fn Everything3_Search(client: Handle, state: Handle) -> Handle;
@@ -40,8 +41,16 @@ unsafe extern "system" {
     fn Everything3_IsFolderResult(result: Handle, index: usize) -> i32;
     fn Everything3_GetResultSize(result: Handle, index: usize) -> u64;
     fn Everything3_GetResultDateModified(result: Handle, index: usize) -> u64;
+    fn Everything3_GetResultPropertyTextHighlightedW(result: Handle, index: usize, property: u32, buf: *mut u16, size: usize) -> usize;
     fn Everything3_WaitForResultListChange(client: Handle) -> i32;
 }
+
+// The properties it asks for, as `EVERYTHING3_PROPERTY_ID_*`.
+const NAME: u32 = 0;
+const PATH: u32 = 1;
+const SIZE: u32 = 2;
+const DATE_MODIFIED: u32 = 5;
+const FULL_PATH: u32 = 240;
 
 /// How many results a page holds.
 pub const PAGE: usize = 500;
@@ -320,24 +329,37 @@ impl SearchSession {
             Everything3_SetSearchTextW(self.state, wide(query).as_ptr());
             // Not attributes: Everything rarely indexes them, and reads each result's from the disk
             // instead, stalling the search as it is typed.
-            for property in [240, 2, 5] {
+            for property in [FULL_PATH, SIZE, DATE_MODIFIED] {
                 Everything3_AddSearchPropertyRequest(self.state, property);
+            }
+            // Where the search matched, to mark in the name and in the folder it is in.
+            for property in [NAME, PATH] {
+                Everything3_AddSearchPropertyRequestHighlighted(self.state, property);
             }
             // Folders first only when ascending, so descending turns the whole listing round as Explorer
             // does.
             Everything3_SetSearchFoldersFirst(self.state, 0);
             let property = match order.by {
-                Sort::Name => 0,
-                Sort::Size => 2,
-                Sort::Modified => 5,
+                Sort::Name => NAME,
+                Sort::Size => SIZE,
+                Sort::Modified => DATE_MODIFIED,
             };
             Everything3_AddSearchSort(self.state, property, i32::from(!order.descending));
             if order.by != Sort::Name {
-                Everything3_AddSearchSort(self.state, 0, 1);
+                Everything3_AddSearchSort(self.state, NAME, 1);
             }
         }
         Ok(())
     }
+}
+
+/// A result's text, which the SDK writes as UTF-16 into a buffer it first says the length of.
+unsafe fn text(write: impl Fn(*mut u16, usize) -> usize) -> String {
+    let length = write(ptr::null_mut(), 0);
+    let mut buffer = vec![0u16; length + 1];
+    write(buffer.as_mut_ptr(), buffer.len());
+    let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..end])
 }
 
 unsafe fn read(result: Handle, offset: usize) -> Page {
@@ -346,18 +368,19 @@ unsafe fn read(result: Handle, offset: usize) -> Page {
         let count = Everything3_GetResultListViewportCount(result);
         let mut entries = Vec::with_capacity(count);
         for index in 0..count {
-            let length = Everything3_GetResultFullPathNameW(result, index, ptr::null_mut(), 0);
-            let mut buffer = vec![0u16; length + 1];
-            Everything3_GetResultFullPathNameW(result, index, buffer.as_mut_ptr(), buffer.len());
-            let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
-            let path = String::from_utf16_lossy(&buffer[..end]);
+            let path = text(|buf, size| Everything3_GetResultFullPathNameW(result, index, buf, size));
+            let highlighted =
+                |property| text(|buf, size| Everything3_GetResultPropertyTextHighlightedW(result, index, property, buf, size));
             let directory = Everything3_IsFolderResult(result, index) != 0;
             let size = Everything3_GetResultSize(result, index);
             let modified = Everything3_GetResultDateModified(result, index);
             let p = Path::new(&path);
+            let name = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
+            let parent = p.parent().map(|s| s.display().to_string()).unwrap_or_default();
+            let marks = Marks { name: marked(&highlighted(NAME), &name), parent: marked(&highlighted(PATH), &parent) };
             entries.push(Entry {
-                name: p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone()),
-                parent: p.parent().map(|s| s.display().to_string()).unwrap_or_default(),
+                name,
+                parent,
                 directory,
                 size: (!directory && size != u64::MAX).then_some(size),
                 // FILETIME to Unix milliseconds.
@@ -365,6 +388,7 @@ unsafe fn read(result: Handle, offset: usize) -> Page {
                     .then(|| modified.checked_sub(116_444_736_000_000_000).map(|v| v / 10_000))
                     .flatten(),
                 hidden: false,
+                marks,
                 path,
             });
         }
@@ -532,6 +556,34 @@ mod tests {
         wait(&mut session);
         session.disconnect();
         assert!(!session.changed().unwrap());
+    }
+
+    #[test]
+    #[ignore = "needs a running Everything 1.5 that indexes the temporary folder"]
+    fn marks_where_the_search_matched_in_the_name_and_the_folder() {
+        let _alone = alone();
+        let fixture = tempfile::Builder::new().prefix("colet-sdk-marks-").tempdir().unwrap();
+        std::fs::write(fixture.path().join("report 日本語.txt"), b"x").unwrap();
+        let folder = fixture.path().display().to_string();
+        let mut session = SearchSession::default();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let entry = loop {
+            let page = session.search(&format!("parent:\"{folder}\" 本"), Order::default(), 0, PAGE, true).unwrap();
+            if let Some(entry) = page.entries.into_iter().next() { break entry; }
+            assert!(Instant::now() < deadline, "Everything did not index the fixture");
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        assert_eq!(entry.marks.name, [10..13], "{entry:?}");
+        assert_eq!(&entry.name[10..13], "本");
+        // A folder matched as a whole marks the whole of it.
+        assert_eq!(entry.marks.parent, [0..folder.len()]);
+        // A path searched for marks it in the folder, and the rest of it in the name.
+        let page = session.search(&format!(r"{folder}\rep"), Order::default(), 0, PAGE, true).unwrap();
+        let entry = &page.entries[0];
+        assert_eq!(entry.marks.parent, [0..folder.len()], "{entry:?}");
+        assert_eq!(&entry.name[entry.marks.name[0].clone()], "rep");
+        // Outside a search, nothing is marked.
+        assert_eq!(Entry::folder(r"C:\", "C:").marks, Marks::default());
     }
 
     #[test]

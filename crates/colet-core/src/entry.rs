@@ -1,5 +1,5 @@
 //! An item as a column lists it, and the orders they come in.
-use std::{cmp::Ordering,os::windows::fs::MetadataExt, path::Path, time::UNIX_EPOCH};
+use std::{cmp::Ordering, ops::Range, os::windows::fs::MetadataExt, path::Path, time::UNIX_EPOCH};
 
 use windows::{Win32::UI::Shell::StrCmpLogicalW, core::PCWSTR};
 
@@ -15,6 +15,40 @@ pub struct Entry {
     /// Hidden or system, as Explorer leaves out by default. A search result never says: Everything has
     /// no attributes for it to give cheaply.
     pub hidden: bool,
+    /// Where a search matched it; empty outside the results.
+    pub marks: Marks,
+}
+
+/// The byte ranges of `name` and of `parent` that a search matched.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Marks {
+    pub name: Vec<Range<usize>>,
+    pub parent: Vec<Range<usize>>,
+}
+
+/// The ranges of `shown` that Everything's `highlighted` text stars: `*` turns the mark on and off,
+/// and `**` stands for a `*`. None, when the text it marks is not where `shown` begins, as they would
+/// fall on the wrong letters.
+pub fn marked(highlighted: &str, shown: &str) -> Vec<Range<usize>> {
+    let (mut plain, mut ranges, mut start) = (String::new(), Vec::new(), None);
+    let mut chars = highlighted.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '*' {
+            plain.push(c);
+        } else if chars.next_if_eq(&'*').is_some() {
+            plain.push('*');
+        } else if let Some(from) = start.take() {
+            if from < plain.len() {
+                ranges.push(from..plain.len());
+            }
+        } else {
+            start = Some(plain.len());
+        }
+    }
+    if let Some(from) = start.filter(|from| *from < plain.len()) {
+        ranges.push(from..plain.len());
+    }
+    if shown.starts_with(&plain) { ranges } else { Vec::new() }
 }
 
 const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
@@ -46,6 +80,7 @@ impl Entry {
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as u64),
             hidden: is_hidden(path, metadata.file_attributes()),
+            marks: Marks::default(),
         }
     }
 
@@ -59,6 +94,7 @@ impl Entry {
             size: None,
             modified: None,
             hidden: false,
+            marks: Marks::default(),
         }
     }
 }
@@ -188,6 +224,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn marks_what_everything_stars_counting_a_double_star_as_one_and_bytes_not_chars() {
+        assert_eq!(marked("*rep*ort.txt", "report.txt"), [0..3]);
+        assert_eq!(marked("a**b*c*", "a*bc"), [3..4]);
+        assert_eq!(marked("日本*語*", "日本語"), [6..9]);
+        // A mark left open runs to the end; an empty one marks nothing.
+        assert_eq!(marked("ab*c", "abc"), [2..3]);
+        assert_eq!(marked("a**", "a*"), Vec::<Range<usize>>::new());
+        assert_eq!(marked("**", "*"), Vec::<Range<usize>>::new());
+        // Everything gives a drive's path without the separator the column shows.
+        assert_eq!(marked("*C:*", r"C:\"), [0..2]);
+        assert!(marked("*other*", "report").is_empty());
+    }
+
+    #[test]
     fn directories_precede_files_ascending_and_follow_them_descending() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a"), "data").unwrap();
@@ -214,6 +264,7 @@ mod tests {
             size,
             modified,
             hidden: false,
+            marks: Marks::default(),
         };
         let mut entries = vec![
             entry(r"C:\b", Some(1), None),
@@ -244,6 +295,7 @@ mod tests {
             size: Some(1),
             modified: None,
             hidden: false,
+            marks: Marks::default(),
         };
         let names = ["file10.txt", "File2.txt", "file1.txt", "あ10", "あ9", "ア1", "a01", "a1", "b", "ｆｉｌｅ３.txt"];
         let mut entries: Vec<_> = names.iter().map(|n| entry(n)).collect();
