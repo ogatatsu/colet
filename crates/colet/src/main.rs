@@ -32,7 +32,8 @@ gpui_kit::assets::icon_assets!(ExtraIcons, [
         PencilLine,
         FolderPlus,
         Trash,
-        Clock
+        Clock,
+        Funnel
     ]);
 
 /// GPUI Kit's icons, and the few more Colet draws.

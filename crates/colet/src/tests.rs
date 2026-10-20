@@ -1743,3 +1743,64 @@ fn closes_a_toast_from_the_keys_handing_them_back_to_where_they_were(cx: &mut Te
     assert!(ui.home_focused(cx));
     assert!(ui.read(cx, |v| !v.stops.contains_key("close-toast:1")));
 }
+
+#[gpui_kit::test]
+fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\alpha"), file(r"D:\beta.txt"), folder(r"D:\gamma")]),
+            (r"D:\alpha", vec![]),
+        ])
+    });
+    let ui = open(cx, fake);
+    // Home narrows nothing, and says so.
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "left");
+    ui.press(cx, "/");
+    assert!(ui.toasts(cx).iter().any(|t| t.contains("フォルダーのカラムでだけ")));
+    ui.press(cx, "right");
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
+    let id = ui.read(cx, |v| v.state.columns[1].id);
+    ui.press(cx, "/");
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
+    // What is typed narrows the rows rather than jumping through them; the folder it hides closes.
+    ui.input(cx, "TA");
+    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>());
+    assert_eq!(shown(&ui, cx), [r"D:\beta.txt"]);
+    assert!(ui.selected(cx, 1).is_empty());
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
+    // ↓ goes into the rows, on the first.
+    ui.press(cx, "down");
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
+    // / goes back to the field, its text picked to type over.
+    ui.press(cx, "/");
+    ui.input(cx, "mm");
+    assert_eq!(shown(&ui, cx), [r"D:\gamma"]);
+    ui.press(cx, "enter");
+    assert_eq!(ui.selected(cx, 1), [r"D:\gamma"]);
+    // Esc in the rows lists all again and puts the field away, the pick kept.
+    ui.press(cx, "escape");
+    assert_eq!(shown(&ui, cx).len(), 3);
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_none()));
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.selected(cx, 1), [r"D:\gamma"]);
+    // In the field, Esc clears it, then puts it away.
+    ui.press(cx, "/");
+    ui.input(cx, "zz");
+    assert!(shown(&ui, cx).is_empty());
+    ui.press(cx, "escape");
+    assert_eq!(shown(&ui, cx).len(), 3);
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
+    ui.press(cx, "escape");
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_none()));
+    assert!(ui.columns_focused(cx));
+    // The button in its heading opens it, and lifts it.
+    ui.click(cx, ("funnel", id));
+    ui.input(cx, "be");
+    assert_eq!(shown(&ui, cx), [r"D:\beta.txt"]);
+    ui.click(cx, ("funnel", id));
+    assert_eq!(shown(&ui, cx).len(), 3);
+    assert!(ui.read(cx, |v| v.filters.is_empty()));
+}

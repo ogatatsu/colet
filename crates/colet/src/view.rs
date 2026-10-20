@@ -393,10 +393,20 @@ impl Colet {
                     this.open(index, &path, window, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &FocusFilter, window, cx| this.open_filter(window, cx)))
+            .on_action(cx.listener(|this, _: &ClearFilter, window, cx| {
+                let c = &this.state.columns[this.state.active];
+                if c.filter.is_some() {
+                    this.close_filter(c.id, window, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let keystroke = &event.keystroke;
                 let m = keystroke.modifiers;
-                if m.control || m.alt || m.platform {
+                // A filter's field sits in its column, under these keys; what is typed there is its own.
+                if m.control || m.alt || m.platform || this.filter_focused(window, cx) {
                     return;
                 }
                 if let Some(text) = keystroke.key_char.as_deref()
@@ -651,6 +661,7 @@ impl Colet {
             let (name, text) = match kind {
                 Kind::Search => ("search", "一致する項目はありません"),
                 Kind::Home => ("hard-drive", "ドライブもお気に入りもありません"),
+                Kind::Folder if c.total > 0 && c.filter.is_some() => ("funnel", "一致する項目はありません"),
                 Kind::Folder => ("folder", "このフォルダーは空です"),
             };
             return self.message(name, text.into()).into_any_element();
@@ -773,10 +784,18 @@ impl Colet {
         };
         let title = c.title().to_owned();
         let header_title = title.clone();
-        let count = if c.error.is_some() || c.unread() { String::new() } else { time::count(c.total as u64) };
+        let count = match &c.filter {
+            _ if c.error.is_some() || c.unread() => String::new(),
+            Some(f) if !f.text.is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.total as u64)),
+            _ => time::count(c.total as u64),
+        };
+        let filtering = c.filter.as_ref().is_some_and(|f| !f.text.is_empty());
+        let field = self.filters.get(&id).map(|(input, _)| input.clone());
         let path = c.path.clone();
         let star_path = c.path.clone();
         let star_focus = self.stop(format!("star:{id}"), cx);
+        let funnel_focus = self.stop(format!("funnel:{id}"), cx);
+        let clear_focus = self.stop(format!("clear-filter:{id}"), cx);
         let body = self.column_body(index, marked, window, cx);
         div()
             .id(("column", id))
@@ -839,6 +858,34 @@ impl Colet {
                             .child(header_title),
                     )
                     .child(div().text_size(px(12.)).text_color(p.text_faint).child(count))
+                    .when(kind == Kind::Folder, |d| {
+                        let label = if field.is_some() { "フィルタを解除" } else { "フィルタ（/）" };
+                        d.child(
+                            ring(div().id(("funnel", id)).track_focus(&funnel_focus), p)
+                                .role(Role::Button)
+                                .aria_label(label)
+                                .size(px(24.))
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(4.))
+                                .cursor_pointer()
+                                .hover(|d| d.bg(p.hover))
+                                .tip(p, label)
+                                .child(icon("funnel", 14., if filtering { p.accent } else { p.text_muted }))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let Some(index) = this.state.index_of(id) else { return };
+                                    if this.filters.contains_key(&id) {
+                                        this.close_filter(id, window, cx);
+                                    } else {
+                                        this.state.set_active(index);
+                                        this.open_filter(window, cx);
+                                    }
+                                }))
+                                .test_support(),
+                        )
+                    })
                     .child({
                         let kept = match kind {
                             Kind::Search => self.settings.saved(&self.state.query).is_some(),
@@ -875,6 +922,70 @@ impl Colet {
                     })
                     .test_support(),
             )
+            .when_some(field, |d, input| {
+                let focused = input.read(cx).focus_handle(cx).is_focused(window);
+                let has_text = !input.read(cx).value().is_empty();
+                d.child(
+                    div().flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(
+                        // Ringed as the search field is; the ring lies over the gaps around.
+                        frame(p, focused).m(px(-3.)).child(
+                            div()
+                                .id(("filter", id))
+                                .w_full()
+                                .h(px(28.))
+                                .pl(px(8.))
+                                .pr(px(2.))
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .bg(p.surface)
+                                .border_1()
+                                .border_color(p.border_strong)
+                                .rounded(px(6.))
+                                .child(icon("funnel", 13., if focused { p.accent } else { p.text_muted }))
+                                .child(div().flex_1().min_w_0().child(Input::new(&input)))
+                                // ↓ goes into the rows it lets through; Esc clears it, then puts it away.
+                                .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
+                                    cx.stop_propagation();
+                                    this.leave_filter(id, window, cx);
+                                }))
+                                .on_action(cx.listener(move |this, _: &input::Escape, window, cx| {
+                                    cx.stop_propagation();
+                                    this.escape_filter(id, window, cx);
+                                }))
+                                .when(has_text, |b| {
+                                    b.child(
+                                        ring(div().id(("clear-filter", id)).track_focus(&clear_focus), p)
+                                            .role(Role::Button)
+                                            .aria_label("フィルタをクリア")
+                                            .size(px(22.))
+                                            .flex()
+                                            .flex_none()
+                                            .items_center()
+                                            .justify_center()
+                                            .rounded(px(4.))
+                                            .cursor_pointer()
+                                            .hover(|d| d.bg(p.hover))
+                                            .tip(p, "フィルタをクリア（Esc）")
+                                            .child(icon("x", 13., p.text_muted))
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                if let Some((input, _)) = this.filters.get(&id) {
+                                                    let input = input.clone();
+                                                    input.update(cx, |input, cx| {
+                                                        input.set_value("", window, cx);
+                                                        input.focus(window, cx);
+                                                    });
+                                                    this.filter(id, "", cx);
+                                                }
+                                            }))
+                                            .test_support(),
+                                    )
+                                })
+                                .test_support(),
+                        ),
+                    ),
+                )
+            })
             .child(body)
             .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
             .test_support()

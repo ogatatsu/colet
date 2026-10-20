@@ -1,6 +1,6 @@
 //! Where the user is: the columns on screen, what each lists and has picked, and the way back and forward.
 //! Knows nothing of drawing or of where listings come from.
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Range};
 
 use colet_core::{
     entry::{Entry, Marks},
@@ -41,6 +41,50 @@ pub struct Column {
     /// What to pick once listed, by path key: the items just pasted here, which the listing that shows
     /// them may come after the paste is done.
     pub pick: Option<Vec<String>>,
+    /// A folder column narrowed to some names: `entries` then holds only those.
+    pub filter: Option<Filter>,
+}
+
+/// The names a folder column is narrowed to, those holding `text`, and all it lists, kept aside.
+#[derive(Clone, Debug)]
+pub struct Filter {
+    pub text: String,
+    all: Vec<Entry>,
+}
+
+/// Where `needle` stands in `name`, case aside, each time it does: byte ranges of `name`.
+pub fn found(name: &str, needle: &str) -> Vec<Range<usize>> {
+    let needle = needle.to_lowercase();
+    let mut ranges = Vec::new();
+    if needle.is_empty() {
+        return ranges;
+    }
+    let chars: Vec<(usize, char)> = name.char_indices().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        // A letter may lower into more than one, so the name is lowered a letter at a time from here.
+        let (mut lowered, mut j) = (String::new(), i);
+        while j < chars.len() && lowered.len() < needle.len() {
+            lowered.extend(chars[j].1.to_lowercase());
+            j += 1;
+        }
+        if lowered == needle {
+            ranges.push(chars[i].0..chars.get(j).map_or(name.len(), |c| c.0));
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    ranges
+}
+
+/// `entry` with its marks on where its name holds `text`, if it does; any entry while `text` is empty.
+fn narrowed(entry: &Entry, text: &str) -> Option<Entry> {
+    let name = found(&entry.name, text);
+    if !text.is_empty() && name.is_empty() {
+        return None;
+    }
+    Some(Entry { marks: Marks { name, parent: Vec::new() }, ..entry.clone() })
 }
 
 impl Column {
@@ -59,6 +103,7 @@ impl Column {
             highlight,
             anchor: None,
             pick: None,
+            filter: None,
         }
     }
 
@@ -632,7 +677,7 @@ impl State {
         let name = folder_name(to).to_owned();
         for c in &mut self.columns {
             c.path = moved(&c.path);
-            for e in &mut c.entries {
+            for e in c.entries.iter_mut().chain(c.filter.iter_mut().flat_map(|f| f.all.iter_mut())) {
                 if e.path == from {
                     e.name = name.clone();
                 }
@@ -659,6 +704,14 @@ impl State {
                 }
             }
         }
+        // Its marks follow the new name; one the filter would hide shows without it.
+        for index in 0..self.columns.len() {
+            if self.hides(index, to) {
+                self.set_filter(index, None);
+            } else {
+                self.narrow(index);
+            }
+        }
     }
 
     /// Like Explorer, a new folder is picked once made: listed ahead of the listing that sorts it in.
@@ -667,11 +720,62 @@ impl State {
             return;
         };
         let c = &mut self.columns[index];
+        let text = c.filter.take().map(|f| {
+            c.entries = f.all;
+            f.text
+        });
         if c.entry(path).is_none() {
             c.entries.push(Entry { parent: parent.into(), ..Entry::folder(path, folder_name(path)) });
             c.total += 1;
         }
+        // It shows, to be seen picked, even where the filter would hide it: the filter goes then.
+        if let Some(text) = text.filter(|text| text.is_empty() || !found(folder_name(path), text).is_empty()) {
+            c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries) });
+            self.narrow(index);
+        }
         self.select(index, vec![path.to_owned()]);
+    }
+
+    /// Narrows the folder column at `index` to the names holding `text`, or with none lists them all
+    /// again. What it hides leaves the selection, and the folder open beside it closes.
+    pub fn set_filter(&mut self, index: usize, text: Option<&str>) {
+        let Some(c) = self.columns.get_mut(index).filter(|c| c.kind == Kind::Folder) else { return };
+        match text {
+            None => {
+                if let Some(filter) = c.filter.take() {
+                    c.entries = filter.all;
+                }
+            }
+            Some(text) => {
+                let all = match c.filter.take() {
+                    Some(filter) => filter.all,
+                    None => std::mem::take(&mut c.entries),
+                };
+                c.filter = Some(Filter { text: text.into(), all });
+                self.narrow(index);
+            }
+        }
+    }
+
+    /// Lists what the column's filter lets through, letting go of what it hides.
+    fn narrow(&mut self, index: usize) {
+        let c = &mut self.columns[index];
+        let Some(filter) = &c.filter else { return };
+        c.entries = filter.all.iter().filter_map(|e| narrowed(e, &filter.text)).collect();
+        let shown: HashSet<&str> = c.entries.iter().map(|e| e.path.as_str()).collect();
+        if c.focused.as_ref().is_some_and(|f| !shown.contains(f.as_str())) {
+            c.focused = None;
+        }
+        let kept: Vec<String> = c.selected.iter().filter(|p| shown.contains(p.as_str())).cloned().collect();
+        if kept.len() != c.selected.len() {
+            self.select(index, kept);
+        }
+    }
+
+    /// Whether the folder column at `index` narrowed to its names, holds `path` but hides it.
+    fn hides(&self, index: usize, path: &str) -> bool {
+        let c = &self.columns[index];
+        c.filter.as_ref().is_some_and(|f| f.all.iter().any(|e| e.path == path && narrowed(e, &f.text).is_none()))
     }
 
     /// Picked in the folder they went to once it lists them, while it is the column worked in.
@@ -681,6 +785,10 @@ impl State {
         };
         if index != self.active {
             return;
+        }
+        // Listed already where the filter hides them, they show without it.
+        if paths.iter().any(|p| self.hides(index, p)) {
+            self.set_filter(index, None);
         }
         self.columns[index].pick = Some(paths.iter().map(|p| path_key(p)).collect());
         self.pick_listed(index);
@@ -731,6 +839,37 @@ impl State {
         departed: &HashSet<String>,
     ) {
         let Some(index) = self.index_of(id) else { return };
+        let c = &mut self.columns[index];
+        if c.request != request {
+            return;
+        }
+        // The listing stands for all the column lists; the filter narrows it again after.
+        let text = c.filter.take().map(|f| {
+            c.entries = f.all;
+            f.text
+        });
+        let waiting = c.pick.is_some();
+        self.list(index, request, entries, total, offset, departed);
+        let Some(text) = text else { return };
+        let c = &mut self.columns[index];
+        // What was just pasted here shows picked, as a new folder does: the filter goes when it hides any.
+        let picked = waiting && c.pick.is_none() && index == self.active;
+        if picked && c.selected.iter().any(|p| c.entry(p).is_some_and(|e| narrowed(e, &text).is_none())) {
+            return;
+        }
+        c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries) });
+        self.narrow(index);
+    }
+
+    fn list(
+        &mut self,
+        index: usize,
+        request: u64,
+        entries: Vec<Entry>,
+        total: usize,
+        offset: usize,
+        departed: &HashSet<String>,
+    ) {
         let c = &mut self.columns[index];
         if c.request != request {
             return;
@@ -1301,6 +1440,99 @@ mod tests {
         assert_eq!(s.active, 2);
         s.back();
         assert_eq!(s.query, "x");
+    }
+
+    fn names(s: &State, index: usize) -> Vec<&str> {
+        s.columns[index].entries.iter().map(|e| e.path.as_str()).collect()
+    }
+
+    #[test]
+    fn finds_every_place_a_name_holds_the_text_case_aside() {
+        assert_eq!(found("ReadMe readme.TXT", "README"), [0..6, 7..13]);
+        assert_eq!(found("資料メモ.txt", "メモ"), [6..12]);
+        // A letter lowering into two is matched whole.
+        assert_eq!(found("\u{130}x", "\u{69}\u{307}x"), [0..3]);
+        assert!(found("abc", "").is_empty());
+        assert!(found("abc", "abcd").is_empty());
+    }
+
+    #[test]
+    fn narrows_a_folder_to_the_names_holding_the_text_dropping_what_it_hides() {
+        let mut s = drive(vec![folder(r"D:\alpha"), file(r"D:\beta.txt"), folder(r"D:\gamma")]);
+        s.select(1, one(r"D:\alpha"));
+        assert_eq!(s.columns.len(), 3);
+        s.set_filter(1, Some("TA"));
+        assert_eq!(names(&s, 1), [r"D:\beta.txt"]);
+        assert_eq!(s.columns[1].entries[0].marks.name, [5..7]);
+        // The folder it had open beside it is hidden: it lets go of it, and its column closes.
+        assert!(s.columns[1].selected.is_empty());
+        assert_eq!(s.columns.len(), 2);
+        // What it still shows stays picked.
+        s.select(1, one(r"D:\beta.txt"));
+        s.set_filter(1, Some("t"));
+        assert_eq!(s.columns[1].selected, one(r"D:\beta.txt"));
+        // Ctrl+A picks only what shows.
+        s.set_filter(1, Some("a"));
+        s.select_all(1);
+        assert_eq!(s.columns[1].selected.len(), 3);
+        s.set_filter(1, Some("mm"));
+        s.select_all(1);
+        assert_eq!(s.columns[1].selected, one(r"D:\gamma"));
+        // Lifted, it lists all again, unmarked.
+        s.set_filter(1, None);
+        assert_eq!(names(&s, 1).len(), 3);
+        assert!(s.columns[1].entries.iter().all(|e| e.marks.name.is_empty()));
+        assert!(s.columns[1].filter.is_none());
+        // Only folders narrow.
+        s.set_filter(0, Some("x"));
+        assert!(s.columns[0].filter.is_none());
+    }
+
+    #[test]
+    fn narrows_each_listing_that_comes_after() {
+        let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
+        let id = s.columns[1].id;
+        s.set_filter(1, Some("ta"));
+        s.load(id, 3, true);
+        s.page(id, 3, vec![file(r"D:\beta.txt"), file(r"D:\delta"), file(r"D:\gamma")], 3, 0, &HashSet::new());
+        assert_eq!(names(&s, 1), [r"D:\beta.txt", r"D:\delta"]);
+        assert_eq!(s.columns[1].total, 3);
+        s.set_filter(1, Some(""));
+        assert_eq!(names(&s, 1).len(), 3);
+    }
+
+    #[test]
+    fn lifts_the_filter_for_what_is_made_or_renamed_here_that_it_would_hide() {
+        let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
+        s.set_filter(1, Some("ta"));
+        s.created(r"D:\", r"D:\data");
+        assert_eq!(names(&s, 1), [r"D:\beta.txt", r"D:\data"]);
+        assert_eq!(s.columns[1].selected, one(r"D:\data"));
+        s.created(r"D:\", r"D:\new");
+        assert!(s.columns[1].filter.is_none());
+        assert_eq!(s.columns[1].selected, one(r"D:\new"));
+
+        let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
+        s.set_filter(1, Some("ta"));
+        s.renamed(r"D:\beta.txt", r"D:\beta2.txt");
+        assert_eq!(s.columns[1].entries[0].marks.name, [2..4]);
+        s.renamed(r"D:\beta2.txt", r"D:\b.txt");
+        assert!(s.columns[1].filter.is_none());
+
+        // Pasted where it hides them, already listed or listed after.
+        let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
+        s.set_filter(1, Some("ta"));
+        s.pasted(r"D:\", &[r"D:\gamma".into()]);
+        assert!(s.columns[1].filter.is_none());
+        assert_eq!(s.columns[1].selected, one(r"D:\gamma"));
+        let mut s = drive(vec![file(r"D:\beta.txt")]);
+        s.set_filter(1, Some("ta"));
+        s.pasted(r"D:\", &[r"D:\x".into()]);
+        let id = s.columns[1].id;
+        s.load(id, 4, true);
+        s.page(id, 4, vec![file(r"D:\beta.txt"), file(r"D:\x")], 2, 0, &HashSet::new());
+        assert!(s.columns[1].filter.is_none());
+        assert_eq!(s.columns[1].selected, one(r"D:\x"));
     }
 
     #[test]

@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// The keys the preferences list, as the old app's did.
-const SHORTCUTS: [(&str, &str); 22] = [
+const SHORTCUTS: [(&str, &str); 23] = [
     ("↑ ↓", "項目を選択（Shift で範囲選択）"),
     ("← →", "カラムを移動"),
     ("Enter", "開く"),
@@ -38,6 +38,7 @@ const SHORTCUTS: [(&str, &str); 22] = [
     ("Delete / Shift+Delete", "ごみ箱へ移動"),
     ("F5", "更新"),
     ("文字キー", "その文字で始まる項目へ移動"),
+    ("/", "フォルダーを名前で絞り込む（Esc で解除）"),
     ("☆", "お気に入り / 検索の保存"),
     ("右クリック", "メニュー"),
     ("ステータスバー右端", "操作履歴"),

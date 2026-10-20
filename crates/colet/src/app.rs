@@ -68,6 +68,8 @@ actions!(
         MenuConfirm,
         CloseMenu,
         OpenSort,
+        FocusFilter,
+        ClearFilter,
     ]
 );
 
@@ -121,6 +123,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", OpenSort, Some(SORT)),
         KeyBinding::new("space", OpenSort, Some(SORT)),
         KeyBinding::new("down", OpenSort, Some(SORT)),
+        KeyBinding::new("/", FocusFilter, Some(COLUMNS)),
+        KeyBinding::new("escape", ClearFilter, Some(COLUMNS)),
     ]);
 }
 
@@ -207,6 +211,8 @@ pub struct Colet {
     pub search: Entity<InputState>,
     /// The search field has the keys: no column is marked as worked in.
     pub search_focused: bool,
+    /// The field of each folder column narrowed to some names, and what it tells.
+    pub filters: HashMap<ColumnId, (Entity<InputState>, Subscription)>,
     pub home_focus: FocusHandle,
     pub columns_focus: FocusHandle,
     pub icons: Icons,
@@ -373,6 +379,7 @@ impl Colet {
             palette: Palette::for_window(window, settings.theme),
             search,
             search_focused: false,
+            filters: HashMap::new(),
             home_focus: cx.focus_handle().tab_stop(true),
             columns_focus: cx.focus_handle().tab_stop(true),
             icons: Icons::default(),
@@ -451,6 +458,7 @@ impl Colet {
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
         self.palette = Palette::for_window(window, self.settings.theme);
         let mut inputs = vec![self.search.clone()];
+        inputs.extend(self.filters.values().map(|(input, _)| input.clone()));
         match &self.dialog {
             Some(Dialog::Name { input, .. }) => inputs.push(input.clone()),
             Some(Dialog::EditSearch { name, query, .. }) => inputs.extend([name.clone(), query.clone()]),
@@ -526,6 +534,9 @@ impl Colet {
         self.pending.retain(|id, _| live.contains(id));
         self.lists.retain(|id, _| live.contains(id));
         self.scrolled_to.retain(|id, _| live.contains(id));
+        // A field goes with its column, or with the filter, which a new folder or a paste can lift.
+        let filtered: HashSet<ColumnId> = self.state.columns.iter().filter(|c| c.filter.is_some()).map(|c| c.id).collect();
+        self.filters.retain(|id, _| filtered.contains(id));
         let fresh: Vec<(ColumnId, Kind)> =
             self.state.columns.iter().filter(|c| !self.requested.contains(&c.id)).map(|c| (c.id, c.kind)).collect();
         for (id, kind) in fresh {
@@ -995,6 +1006,87 @@ impl Colet {
             self.state.select(index, vec![path]);
             self.sync_search_field(window, cx);
         }
+    }
+
+    // ---- Filters ----
+
+    /// The field narrowing the folder column worked in takes the keys: opened, or with its text picked to
+    /// type over.
+    pub fn open_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let index = self.state.active;
+        let c = &self.state.columns[index];
+        if c.kind != Kind::Folder {
+            self.notify("フィルタはフォルダーのカラムでだけ使えます。", Tone::Info, cx);
+            return;
+        }
+        let id = c.id;
+        if c.filter.is_none() {
+            self.state.set_filter(index, Some(""));
+        }
+        let input = match self.filters.get(&id) {
+            Some((input, _)) => input.clone(),
+            None => {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder("名前で絞り込む"));
+                self.palette.style_input(&input, cx);
+                let subscription = cx.subscribe_in(&input, window, move |this: &mut Self, input, event, window, cx| match event {
+                    InputEvent::Change => {
+                        let text = input.read(cx).value().to_string();
+                        this.filter(id, &text, cx);
+                    }
+                    InputEvent::PressEnter { .. } => this.leave_filter(id, window, cx),
+                    InputEvent::Focus | InputEvent::Blur => cx.notify(),
+                });
+                self.filters.insert(id, (input.clone(), subscription));
+                input
+            }
+        };
+        input.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(window, cx);
+        });
+        self.changed(cx);
+    }
+
+    /// Narrows the column `id` to the names holding `text`, as it is typed.
+    pub fn filter(&mut self, id: ColumnId, text: &str, cx: &mut Context<Self>) {
+        let Some(index) = self.state.index_of(id) else { return };
+        self.state.set_filter(index, Some(text));
+        // The rows move: the focused one is brought in sight again.
+        self.scrolled_to.remove(&id);
+        self.changed(cx);
+    }
+
+    /// From the field into the rows it lets through, landing on the first while none is picked.
+    pub fn leave_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.state.index_of(id) else { return };
+        self.state.set_active(index);
+        self.focus_active(window, cx);
+    }
+
+    /// Lists all again and puts the field away; the keys go back to the rows.
+    pub fn close_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.state.index_of(id) else { return };
+        self.state.set_filter(index, None);
+        self.filters.remove(&id);
+        self.scrolled_to.remove(&id);
+        self.leave_filter(id, window, cx);
+    }
+
+    /// Esc in the field: clears what it holds, or, empty, puts it away.
+    pub fn escape_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((input, _)) = self.filters.get(&id) else { return };
+        let input = input.clone();
+        if input.read(cx).value().is_empty() {
+            self.close_filter(id, window, cx);
+        } else {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+            self.filter(id, "", cx);
+        }
+    }
+
+    /// Whether a filter's field has the keys, which type there rather than ahead in the rows.
+    pub fn filter_focused(&self, window: &Window, cx: &App) -> bool {
+        self.filters.values().any(|(input, _)| input.read(cx).focus_handle(cx).is_focused(window))
     }
 
     pub fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
