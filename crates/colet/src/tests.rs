@@ -85,6 +85,10 @@ impl Backend for Fake {
 
     fn search(&self, search: Search) -> Result<(Page, String), String> {
         self.searches.lock().unwrap().push((search.query.clone(), search.offset));
+        // As Everything's watch, it says the results changed until they are searched afresh.
+        if search.refresh {
+            self.changed.store(false, Ordering::Relaxed);
+        }
         if let Some(error) = self.failing.lock().unwrap().clone() {
             return Err(error);
         }
@@ -95,7 +99,7 @@ impl Backend for Fake {
     }
 
     fn search_changed(&self) -> Result<bool, String> {
-        Ok(self.changed.swap(false, Ordering::Relaxed))
+        Ok(self.changed.load(Ordering::Relaxed))
     }
 
     fn reconnect(&self) {

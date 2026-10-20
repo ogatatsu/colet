@@ -30,7 +30,7 @@ pub trait Backend: Send + Sync + 'static {
     fn list(&self, path: &str, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String>;
     /// The results and the name of what they came from.
     fn search(&self, search: Search) -> Result<(Page, String), String>;
-    /// Whether the last search's results changed since asked.
+    /// Whether the last search's results changed; so until it is searched afresh.
     fn search_changed(&self) -> Result<bool, String>;
     /// Lets go of Everything, so the next search connects afresh.
     fn reconnect(&self);
@@ -88,7 +88,12 @@ impl Backend for Live {
     }
 
     fn search_changed(&self) -> Result<bool, String> {
-        self.session.lock().map_err(|e| e.to_string())?.changed()
+        match self.session.try_lock() {
+            Ok(mut session) => session.changed(),
+            // A search under way, perhaps waiting out a busy Everything, is asked next time.
+            Err(std::sync::TryLockError::WouldBlock) => Ok(false),
+            Err(error) => Err(error.to_string()),
+        }
     }
 
     fn reconnect(&self) {

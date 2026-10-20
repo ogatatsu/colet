@@ -762,25 +762,20 @@ impl Colet {
         }
     }
 
-    /// Takes in what changed, every 200ms: folder changes reload the columns showing them, and every
-    /// second Everything is asked whether the results changed.
+    /// Takes in what changed, every 200ms: folder changes reload the columns showing them, and what the
+    /// watch on Everything heard of the results.
     fn poll(&mut self, cx: &mut Context<Self>) {
         let changed = self.changed.clone();
         let backend = self.backend.clone();
         cx.spawn(async move |this, cx| {
-            let mut tick = 0u32;
             loop {
                 cx.background_executor().timer(Duration::from_millis(200)).await;
-                tick += 1;
                 if this.update(cx, |this, cx| this.take_changes(cx)).is_err() {
                     return;
                 }
                 let batch = changed.lock().unwrap().take();
                 if batch != Changes::Nothing && this.update(cx, |this, cx| this.files_changed(batch, cx)).is_err() {
                     return;
-                }
-                if !tick.is_multiple_of(5) {
-                    continue;
                 }
                 let backend = backend.clone();
                 let result = cx.background_executor().spawn(async move { backend.search_changed() }).await;

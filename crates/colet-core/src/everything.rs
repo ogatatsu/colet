@@ -1,5 +1,12 @@
 //! Searching through Everything 1.5's SDK, which is compiled in from `vendor/everything-sdk3`.
-use std::{ffi::c_void, path::Path, ptr, time::{Duration, Instant}};
+use std::{
+    ffi::c_void,
+    path::Path,
+    ptr,
+    sync::{Arc, atomic::{AtomicBool, AtomicU32, Ordering}},
+    thread::JoinHandle,
+    time::{Duration, Instant},
+};
 
 use crate::entry::{Entry, Order, Sort};
 
@@ -9,7 +16,6 @@ type Handle = *mut c_void;
 unsafe extern "system" {
     fn Everything3_ConnectW(instance: *const u16) -> Handle;
     fn Everything3_DestroyClient(client: Handle) -> i32;
-    #[cfg(test)]
     fn Everything3_ShutdownClient(client: Handle) -> i32;
     fn Everything3_IsDBLoaded(client: Handle) -> i32;
     fn Everything3_GetMajorVersion(client: Handle) -> u32;
@@ -34,7 +40,7 @@ unsafe extern "system" {
     fn Everything3_IsFolderResult(result: Handle, index: usize) -> i32;
     fn Everything3_GetResultSize(result: Handle, index: usize) -> u64;
     fn Everything3_GetResultDateModified(result: Handle, index: usize) -> u64;
-    fn Everything3_IsResultListChange(client: Handle) -> i32;
+    fn Everything3_WaitForResultListChange(client: Handle) -> i32;
 }
 
 /// How many results a page holds.
@@ -64,10 +70,77 @@ unsafe fn open(instance: Option<&str>) -> Handle {
     unsafe { Everything3_ConnectW(name.as_ref().map_or(ptr::null(), |n| n.as_ptr())) }
 }
 
-/// The last search and its pages, with a separate client whose change flag pagination cannot clear.
+/// What a watch has heard: that the results changed, and the error it stopped on (0 for none).
+#[derive(Default)]
+struct News {
+    changed: AtomicBool,
+    failed: AtomicU32,
+    /// Set before the watch is woken on purpose, so the shutdown it wakes to is no failure.
+    stopping: AtomicBool,
+}
+
+/// A client of its own, given the search and waiting for its results to change on a thread, so
+/// paging through them on the other client cannot clear the change.
+struct Watch {
+    client: Handle,
+    news: Arc<News>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Watch {
+    /// Gives `client`, which it then owns, the search in `state`, and waits on it; `None` if the
+    /// search fails, having let go of `client`.
+    unsafe fn start(client: Handle, state: Handle) -> Option<Self> {
+        unsafe {
+            Everything3_SetSearchViewportOffset(state, 0);
+            Everything3_SetSearchViewportCount(state, 1);
+            let watched = Everything3_Search(client, state);
+            if watched.is_null() {
+                Everything3_DestroyClient(client);
+                return None;
+            }
+            Everything3_DestroyResultList(watched);
+        }
+        let news = Arc::new(News::default());
+        let heard = news.clone();
+        let address = client as usize;
+        let thread = std::thread::spawn(move || {
+            let client = address as Handle;
+            loop {
+                // Holds the client's lock until a change comes, or the client is shut down.
+                if unsafe { Everything3_WaitForResultListChange(client) } != 0 {
+                    heard.changed.store(true, Ordering::Relaxed);
+                    continue;
+                }
+                let error = unsafe { Everything3_GetLastError() };
+                if error == 0 {
+                    continue;
+                }
+                if !heard.stopping.load(Ordering::Relaxed) {
+                    heard.failed.store(error, Ordering::Relaxed);
+                }
+                return;
+            }
+        });
+        Some(Self { client, news, thread: Some(thread) })
+    }
+}
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        self.news.stopping.store(true, Ordering::Relaxed);
+        unsafe { Everything3_ShutdownClient(self.client); }
+        if let Some(thread) = self.thread.take() {
+            thread.join().ok();
+        }
+        unsafe { Everything3_DestroyClient(self.client); }
+    }
+}
+
+/// The last search and its pages, and the watch on its results.
 pub struct SearchSession {
     client: Handle,
-    changes: Handle,
+    watch: Option<Watch>,
     state: Handle,
     key: Option<(String, Order)>,
     /// The connected Everything's, as 1.5.0.1424.
@@ -85,7 +158,7 @@ unsafe impl Send for SearchSession {}
 impl Default for SearchSession {
     fn default() -> Self {
         Self {
-            client: ptr::null_mut(), changes: ptr::null_mut(), state: ptr::null_mut(), key: None,
+            client: ptr::null_mut(), watch: None, state: ptr::null_mut(), key: None,
             version: String::new(), watch_instance: None, watch_retry_at: None, connection: String::new(),
         }
     }
@@ -99,6 +172,7 @@ impl Drop for SearchSession {
 
 impl SearchSession {
     pub fn disconnect(&mut self) {
+        self.watch = None;
         unsafe {
             if !self.state.is_null() {
                 Everything3_DestroySearchState(self.state);
@@ -108,35 +182,26 @@ impl SearchSession {
                 Everything3_DestroyClient(self.client);
                 self.client = ptr::null_mut();
             }
-            if !self.changes.is_null() {
-                Everything3_DestroyClient(self.changes);
-                self.changes = ptr::null_mut();
-            }
         }
         self.key = None;
         self.watch_retry_at = None;
     }
 
-    /// Whether Everything has said the last search's results changed since it was last asked.
+    /// Whether Everything has said the last search's results changed; it stays so until searched afresh.
     pub fn changed(&mut self) -> Result<bool, String> {
-        if self.changes.is_null() || self.key.is_none() {
-            return Ok(false);
-        }
-        unsafe {
-            let changed = Everything3_IsResultListChange(self.changes) != 0;
-            let error = Everything3_GetLastError();
-            if !changed && error != 0 {
-                // A stopped Everything breaks both pipes. Discard them together so the next search
-                // connects afresh; a watch-only failure keeps the usable paging connection.
-                if self.client.is_null() || (Everything3_IsDBLoaded(self.client) == 0 && Everything3_GetLastError() != 0) {
-                    self.disconnect();
-                    return Err(format!("Everythingとの接続が切れました。次の検索で再接続します (0x{error:08X})"));
-                }
-                self.stop_watching();
-                return Err(format!("Everythingの自動更新を停止しました。F5で一覧を更新できます (0x{error:08X})"));
+        let Some(watch) = self.watch.as_ref().filter(|_| self.key.is_some()) else { return Ok(false) };
+        let error = watch.news.failed.load(Ordering::Relaxed);
+        if error != 0 {
+            // A stopped Everything breaks both pipes. Discard them together so the next search
+            // connects afresh; a watch-only failure keeps the usable paging connection.
+            if unsafe { Everything3_IsDBLoaded(self.client) == 0 && Everything3_GetLastError() != 0 } {
+                self.disconnect();
+                return Err(format!("Everythingとの接続が切れました。次の検索で再接続します (0x{error:08X})"));
             }
-            Ok(changed)
+            self.stop_watching();
+            return Err(format!("Everythingの自動更新を停止しました。F5で一覧を更新できます (0x{error:08X})"));
         }
+        Ok(watch.news.changed.load(Ordering::Relaxed))
     }
 
     /// `count` results of `query` from `offset` on. `refresh` searches afresh even when the query and
@@ -210,43 +275,35 @@ impl SearchSession {
         Ok(())
     }
 
-    /// Retry a missing watch at most once per interval, on a new query or full refresh. A successful
-    /// watch starts before reading results so pagination cannot hide changes.
+    /// Watches the new search on a client of its own, as the wait cannot be told of another search
+    /// but only shut down, and a shut-down client is spent. One that failed is tried again at most once
+    /// per interval, on a new query or full refresh. It starts before the results are read, so none of
+    /// their changes is missed.
     unsafe fn start_watching(&mut self) {
-        unsafe {
-            if self.changes.is_null() {
-                if self.watch_retry_at.is_some_and(|at| Instant::now() < at) {
-                    return;
-                }
-                self.changes = open(self.watch_instance.as_deref());
-            }
-            if !self.changes.is_null() {
-                Everything3_SetSearchViewportOffset(self.state, 0);
-                Everything3_SetSearchViewportCount(self.state, 1);
-                let watch = Everything3_Search(self.changes, self.state);
-                if !watch.is_null() {
-                    Everything3_DestroyResultList(watch);
-                    self.watch_retry_at = None;
-                    self.name_connection();
-                    return;
-                }
-            }
+        let failed = self.watch.is_none();
+        self.watch = None;
+        if failed && self.watch_retry_at.is_some_and(|at| Instant::now() < at) {
+            return;
         }
-        self.stop_watching();
+        let client = unsafe { open(self.watch_instance.as_deref()) };
+        self.watch = if client.is_null() { None } else { unsafe { Watch::start(client, self.state) } };
+        if self.watch.is_some() {
+            self.watch_retry_at = None;
+            self.name_connection();
+        } else {
+            self.stop_watching();
+        }
     }
 
     fn stop_watching(&mut self) {
-        if !self.changes.is_null() {
-            unsafe { Everything3_DestroyClient(self.changes); }
-            self.changes = ptr::null_mut();
-        }
+        self.watch = None;
         self.watch_retry_at = Some(Instant::now() + WATCH_RETRY);
         self.name_connection();
     }
 
     fn name_connection(&mut self) {
         self.connection = format!("Everything {}", self.version);
-        if self.changes.is_null() {
+        if self.watch.is_none() {
             self.connection.push_str(" · 手動更新（F5）");
         }
     }
@@ -328,6 +385,18 @@ mod tests {
         EVERYTHING.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// The error `changed` reports once the watch thread hears its client fail.
+    fn failure(session: &mut SearchSession) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match session.changed() {
+                Err(error) => return error,
+                Ok(_) => assert!(Instant::now() < deadline, "the watch did not report the failure"),
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
     #[ignore = "needs a running Everything 1.5"]
     fn reconnects_on_the_first_search_after_both_connections_fail() {
@@ -341,14 +410,14 @@ mod tests {
         // stopping the user's Everything process.
         unsafe {
             assert_ne!(Everything3_ShutdownClient(session.client), 0);
-            assert_ne!(Everything3_ShutdownClient(session.changes), 0);
+            assert_ne!(Everything3_ShutdownClient(session.watch.as_ref().unwrap().client), 0);
         }
-        let error = session.changed().unwrap_err();
+        let error = failure(&mut session);
         assert!(error.contains("接続が切れました"));
-        assert!(session.client.is_null() && session.changes.is_null());
+        assert!(session.client.is_null() && session.watch.is_none());
         assert!(session.key.is_none() && session.watch_retry_at.is_none());
         session.search(query, Order::default(), 0, PAGE, true).unwrap();
-        assert!(!session.client.is_null() && !session.changes.is_null());
+        assert!(!session.client.is_null() && session.watch.is_some());
     }
 
     #[test]
@@ -359,15 +428,15 @@ mod tests {
         let mut session = SearchSession::default();
         session.search(query, Order::default(), 0, PAGE, true).unwrap();
         let client = session.client;
-        unsafe { assert_ne!(Everything3_ShutdownClient(session.changes), 0); }
-        let error = session.changed().unwrap_err();
+        unsafe { assert_ne!(Everything3_ShutdownClient(session.watch.as_ref().unwrap().client), 0); }
+        let error = failure(&mut session);
         assert!(error.contains("自動更新を停止しました"));
         assert_eq!(session.client, client);
-        assert!(session.changes.is_null());
+        assert!(session.watch.is_none());
         assert!(session.key.is_some() && session.watch_retry_at.is_some());
         session.search(query, Order::default(), 0, PAGE, true).unwrap();
         assert_eq!(session.client, client);
-        assert!(session.changes.is_null());
+        assert!(session.watch.is_none());
         assert!(!session.changed().unwrap());
     }
 
@@ -394,7 +463,7 @@ mod tests {
         };
         assert_eq!(first.entries.len(), PAGE);
         assert_eq!(session.client, client);
-        assert!(session.changes.is_null());
+        assert!(session.watch.is_none());
         assert!(session.connection.contains("手動更新（F5）"));
         assert!(!session.changed().unwrap());
         assert_eq!(session.search(&query, Order::default(), PAGE, PAGE, false).unwrap().entries.len(), 11);
@@ -405,14 +474,14 @@ mod tests {
         session.watch_retry_at = Some(retry_at);
         for i in 0..6 {
             session.search(&format!("{query} colet-watch-probe-{i}"), Order::default(), 0, PAGE, true).unwrap();
-            assert!(session.changes.is_null(), "a query retried the watch before its deadline");
+            assert!(session.watch.is_none(), "a query retried the watch before its deadline");
             assert_eq!(session.watch_retry_at, Some(retry_at));
             assert_eq!(session.client, client);
         }
         session.watch_retry_at = Some(Instant::now());
         session.search(&query, Order::default(), 0, PAGE, true).unwrap();
         assert_eq!(session.client, client);
-        assert!(!session.changes.is_null());
+        assert!(session.watch.is_some());
         assert!(!session.connection.contains("手動更新"));
         std::fs::remove_file(fixture.path().join("0000.txt")).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
