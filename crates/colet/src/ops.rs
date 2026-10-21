@@ -27,6 +27,8 @@ const MAX_ITEMS: usize = 500;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemStatus {
     Done,
+    /// Deleted outright: asked so, or one the Recycle Bin could not take.
+    Destroyed,
     Failed,
     Skipped,
     Cancelled,
@@ -38,6 +40,7 @@ impl ItemStatus {
     pub fn label(self) -> &'static str {
         match self {
             ItemStatus::Done => "完了",
+            ItemStatus::Destroyed => "完全に削除",
             ItemStatus::Failed => "失敗",
             ItemStatus::Skipped => "スキップ",
             ItemStatus::Cancelled => "キャンセル",
@@ -49,13 +52,13 @@ impl ItemStatus {
 /// One item of an operation, as the history lists it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HistoryItem {
-    /// Where it is now; where it was, when it failed or went to the Recycle Bin.
+    /// Where it is now; where it was, when it failed or was deleted.
     pub path: String,
     /// Where a paste or a rename took it from.
     pub from: Option<String>,
     pub status: ItemStatus,
     pub error: Option<String>,
-    /// Sent to the Recycle Bin: nothing to open.
+    /// Sent to the Recycle Bin or deleted outright: nothing to open.
     pub gone: bool,
 }
 
@@ -102,8 +105,16 @@ impl HistoryEntry {
             Event::Skipped { path } => (path, ItemStatus::Skipped, None),
             Event::Cancelled { path } => (path, ItemStatus::Cancelled, None),
             Event::Handed { path } => (path, ItemStatus::Handed, None),
+            Event::Destroyed { .. } => {
+                if self.more == 0
+                    && let Some(last) = self.items.last_mut()
+                {
+                    last.status = ItemStatus::Destroyed;
+                }
+                return;
+            }
         };
-        let gone = self.request.kind == Kind::Recycle && status == ItemStatus::Done;
+        let gone = matches!(self.request.kind, Kind::Recycle | Kind::Delete) && status == ItemStatus::Done;
         if self.items.len() < MAX_ITEMS {
             self.items.push(HistoryItem { path, from: None, status, error, gone });
         } else {
@@ -120,8 +131,8 @@ impl HistoryEntry {
         let Request { kind, paths, destination, name } = &self.request;
         match kind {
             Kind::Paste => format!("{} 項目 → {}", self.items.len() + self.more, folder_name(destination)),
-            Kind::Recycle if paths.len() == 1 => folder_name(&paths[0]).to_owned(),
-            Kind::Recycle => format!("{} 項目", paths.len()),
+            Kind::Recycle | Kind::Delete if paths.len() == 1 => folder_name(&paths[0]).to_owned(),
+            Kind::Recycle | Kind::Delete => format!("{} 項目", paths.len()),
             Kind::Rename => format!("{} → {name}", folder_name(paths.first().map_or("", |p| p))),
             Kind::NewFolder => format!("{name}（{}）", folder_name(destination)),
         }
@@ -390,13 +401,15 @@ impl Colet {
         self.run(request, cx);
     }
 
-    /// Delete and Shift+Delete ask first; Colet never deletes for good.
-    pub fn ask_recycle(&mut self, permanent: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Delete sends to the Recycle Bin and Shift+Delete deletes outright, as in Explorer: whether to ask
+    /// first, and what to do with an item the bin cannot take, is the shell's.
+    pub fn delete_picked(&mut self, permanent: bool, cx: &mut Context<Self>) {
         let (picked, reasons) = (self.picked(), self.reasons());
         self.menu = None;
         if picked.is_empty() {
             return;
         }
+        let kind = if permanent { Kind::Delete } else { Kind::Recycle };
         if let Some(reason) = reasons.delete {
             let hint = if reason != NOT_AT_HOME {
                 ""
@@ -405,19 +418,10 @@ impl Colet {
             } else {
                 "お気に入りは右クリックメニューの「お気に入りを解除」で外せます。"
             };
-            self.notify(format!("「ごみ箱へ移動」は{reason}。{hint}"), Tone::Info, cx);
+            self.notify(format!("「{}」は{reason}。{hint}", kind.title()), Tone::Info, cx);
             return;
         }
-        self.dialog_focus.focus(window, cx);
-        self.dialog = Some(Dialog::Recycle { paths: picked, permanent });
-        cx.notify();
-    }
-
-    pub fn confirm_recycle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialog::Recycle { paths, .. }) = &self.dialog else { return };
-        let paths = paths.clone();
-        self.close_dialog(window, cx);
-        self.run(Request { kind: Kind::Recycle, paths, destination: String::new(), name: String::new() }, cx);
+        self.run(Request { kind, paths: picked, destination: String::new(), name: String::new() }, cx);
     }
 
     /// Opens the picked item: a folder beside it, a file in its app.
@@ -557,8 +561,14 @@ impl Colet {
         let Some(index) = self.history.iter().position(|e| e.id == id) else { return };
         let entry = &mut self.history[index];
         let (failed, skipped) = (entry.count(ItemStatus::Failed), entry.count(ItemStatus::Skipped));
-        // A cut pasted where it already was moved nothing: no trace.
-        if kind == Kind::Paste && problem.is_none() && !cancelled && entry.items.is_empty() && entry.more == 0 {
+        // A cut pasted where it already was moved nothing, and a deletion turned down at the shell's
+        // question deleted nothing: no trace, as in Explorer.
+        let moved_nothing = kind == Kind::Paste && problem.is_none() && !cancelled && entry.items.is_empty() && entry.more == 0;
+        let declined = matches!(kind, Kind::Recycle | Kind::Delete)
+            && cancelled
+            && entry.more == 0
+            && entry.items.iter().all(|i| i.status == ItemStatus::Cancelled);
+        if moved_nothing || declined {
             self.history.remove(index);
         } else {
             if let Some(to) = renamed

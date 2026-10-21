@@ -2,15 +2,16 @@
 //! shell's own dialogs, owned by our window.
 use std::cell::RefCell;
 
-use windows::Win32::Foundation::{E_ABORT, E_INVALIDARG, ERROR_NOT_SUPPORTED};
+use windows::Win32::Foundation::{E_ABORT, E_INVALIDARG};
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, IDataObject};
 use windows::Win32::System::Ole::OleGetClipboard;
 use windows::Win32::UI::Shell::{
-    FileOperation, FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_RENAMEONCOLLISION, FOFX_ADDUNDORECORD,
-    FOFX_RECYCLEONDELETE, IFileOperation, IFileOperationProgressSink, IFileOperationProgressSink_Impl,
-    IShellItem, IShellItemArray, SHCreateItemFromParsingName, SHCreateShellItemArrayFromDataObject,
-    SIGDN_DESKTOPABSOLUTEEDITING, SIGDN_FILESYSPATH, TSF_DELETE_RECYCLE_IF_POSSIBLE,
+    FileOperation, FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_RENAMEONCOLLISION, FOF_WANTNUKEWARNING,
+    FOFX_ADDUNDORECORD, FOFX_RECYCLEONDELETE, IFileOperation, IFileOperationProgressSink,
+    IFileOperationProgressSink_Impl, IShellItem, IShellItemArray, SHCreateItemFromParsingName,
+    SHCreateShellItemArrayFromDataObject, SHELLFLAGSTATE, SHGetSettings, SIGDN_DESKTOPABSOLUTEEDITING,
+    SIGDN_FILESYSPATH, SSF_NOCONFIRMRECYCLE,
 };
 use windows::Win32::Foundation::HWND;
 use windows::core::{AsImpl, Error, HRESULT, PCWSTR, Ref, Result, implement};
@@ -21,8 +22,11 @@ use super::{Apartment, Ole, Owner, Wide};
 pub enum Operation {
     Copy { destination: String },
     Move { destination: String },
-    /// To the Recycle Bin only: an item the bin cannot take is refused, never deleted outright.
+    /// To the Recycle Bin, as Explorer's Delete: asked first only as its setting says, and an item the
+    /// bin cannot take is deleted outright once the shell has asked.
     Recycle,
+    /// Deleted outright, as Explorer's Shift+Delete, once the shell has asked.
+    Delete,
     Rename { name: String },
     NewFolder { parent: String, name: String },
 }
@@ -34,6 +38,8 @@ pub enum Item {
     Done { path: String, result: HRESULT },
     /// Where a copy or move put it, which a name clash may have renamed.
     Placed { path: String },
+    /// The item just deleted went for good, not to the Recycle Bin.
+    Destroyed { path: String },
 }
 
 /// Carries out `operation` on `paths`, telling `report` how each item ends. `rename`: a copy into its own
@@ -87,9 +93,13 @@ fn perform(
     apartment.result()?;
     let op: IFileOperation = unsafe { CoCreateInstance(&FileOperation, None, CLSCTX_ALL)? };
     unsafe { op.SetOwnerWindow(HWND(owner as *mut _))? };
-    // Do not suppress clash dialogs or approve destructive decisions on the user's behalf.
-    let mut flags = FOFX_RECYCLEONDELETE | FOFX_ADDUNDORECORD | FOF_NOCONFIRMMKDIR;
-    if matches!(operation, Operation::Recycle) {
+    // Do not suppress clash dialogs or approve destructive decisions on the user's behalf: deleting
+    // outright is always asked, even where sending to the bin is not.
+    let mut flags = FOFX_ADDUNDORECORD | FOF_NOCONFIRMMKDIR;
+    if !matches!(operation, Operation::Delete) {
+        flags |= FOFX_RECYCLEONDELETE | FOF_WANTNUKEWARNING;
+    }
+    if matches!(operation, Operation::Recycle) && !confirms_recycle() {
         flags |= FOF_NOCONFIRMATION;
     }
     if rename {
@@ -108,6 +118,14 @@ fn perform(
         Ok(()) if aborted => Err(Error::from_hresult(E_ABORT)),
         result => result,
     }
+}
+
+/// Whether the Recycle Bin's "Display delete confirmation dialog" is on, which Explorer asks by.
+fn confirms_recycle() -> bool {
+    let mut state = SHELLFLAGSTATE::default();
+    unsafe { SHGetSettings(&mut state, SSF_NOCONFIRMRECYCLE.0) };
+    // fNoConfirmRecycle, the third bit.
+    state._bitfield & 0b100 == 0
 }
 
 fn item(path: &str) -> Result<IShellItem> {
@@ -134,7 +152,7 @@ fn queue(op: &IFileOperation, operation: &Operation, paths: &[String], sink: &IF
             match operation {
                 Operation::Copy { .. } => op.CopyItem(&source, target.as_ref(), PCWSTR::null(), None)?,
                 Operation::Move { .. } => op.MoveItem(&source, target.as_ref(), PCWSTR::null(), None)?,
-                Operation::Recycle => op.DeleteItem(&source, None)?,
+                Operation::Recycle | Operation::Delete => op.DeleteItem(&source, None)?,
                 Operation::Rename { name } => {
                     let name = Wide::new(name);
                     op.RenameItem(&source, name.get(), None)?
@@ -222,16 +240,17 @@ impl IFileOperationProgressSink_Impl for Sink_Impl {
     ) -> Result<()> {
         self.placed(item, result, made)
     }
-    fn PreDeleteItem(&self, flags: u32, item: Ref<IShellItem>) -> Result<()> {
-        // The shell says here whether the item really goes to the bin. Refuse deleting it outright.
-        if flags & TSF_DELETE_RECYCLE_IF_POSSIBLE.0 as u32 == 0 {
-            self.report(Item::Done { path: path(item.as_ref()), result: ERROR_NOT_SUPPORTED.to_hresult() });
-            return Err(Error::from_hresult(E_ABORT));
-        }
+    fn PreDeleteItem(&self, _: u32, _: Ref<IShellItem>) -> Result<()> {
         Ok(())
     }
-    fn PostDeleteItem(&self, _: u32, item: Ref<IShellItem>, result: HRESULT, _: Ref<IShellItem>) -> Result<()> {
-        self.done(item, result)
+    fn PostDeleteItem(&self, _: u32, item: Ref<IShellItem>, result: HRESULT, recycled: Ref<IShellItem>) -> Result<()> {
+        let gone = path(item.as_ref());
+        self.done(item, result)?;
+        // Sent to the bin, the shell hands the item there; deleted outright, nothing.
+        if result.is_ok() && recycled.is_null() {
+            self.report(Item::Destroyed { path: gone });
+        }
+        Ok(())
     }
     fn PreNewItem(&self, _: u32, _: Ref<IShellItem>, _: &PCWSTR) -> Result<()> {
         Ok(())
@@ -329,7 +348,8 @@ mod tests {
     use std::{rc::Rc, cell::RefCell};
 
     use super::*;
-    use windows::Win32::UI::Shell::{BHID_DataObject, TSF_NORMAL};
+    use windows::Win32::Foundation::{E_ACCESSDENIED, S_OK};
+    use windows::Win32::UI::Shell::BHID_DataObject;
 
     #[test]
     fn copies_items_with_no_path_and_names_them_as_the_address_bar_does() {
@@ -358,16 +378,23 @@ mod tests {
     }
 
     #[test]
-    fn refuses_to_delete_what_the_bin_cannot_take() {
+    fn says_which_deleted_items_went_for_good() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, "a").unwrap();
+        let a = item(&file.to_string_lossy()).unwrap();
         let reports = Rc::new(RefCell::new(Vec::new()));
         let seen = reports.clone();
         let sink: IFileOperationProgressSink =
             Sink(RefCell::new(Box::new(move |item| seen.borrow_mut().push(item)))).into();
         unsafe {
-            assert_eq!(sink.PreDeleteItem(TSF_NORMAL.0 as u32, None).unwrap_err().code(), E_ABORT);
-            assert!(sink.PreDeleteItem(TSF_DELETE_RECYCLE_IF_POSSIBLE.0 as u32, None).is_ok());
+            sink.PostDeleteItem(0, &a, S_OK, &a).unwrap();
+            sink.PostDeleteItem(0, &a, S_OK, None).unwrap();
+            sink.PostDeleteItem(0, &a, E_ACCESSDENIED, None).unwrap();
         }
-        assert_eq!(reports.borrow().len(), 1);
+        let reports = reports.borrow();
+        assert_eq!(reports.iter().filter(|i| matches!(i, Item::Destroyed { .. })).count(), 1, "{reports:?}");
+        assert_eq!(reports[2], Item::Destroyed { path: file.to_string_lossy().into_owned() });
     }
 
     #[test]

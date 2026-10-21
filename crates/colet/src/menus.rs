@@ -18,6 +18,8 @@ pub enum Command {
     Rename,
     NewFolder,
     Recycle,
+    /// "ごみ箱へ移動" picked with Shift held, as Explorer's Delete deletes outright then.
+    Delete,
     Favorite(String),
     Windows,
     EditSearch(String),
@@ -133,7 +135,8 @@ impl Colet {
             Command::CopyPath => self.copy_paths(cx),
             Command::Rename => self.ask_rename(window, cx),
             Command::NewFolder => self.ask_new_folder(window, cx),
-            Command::Recycle => self.ask_recycle(false, window, cx),
+            Command::Recycle => self.delete_picked(false, cx),
+            Command::Delete => self.delete_picked(true, cx),
             Command::Favorite(path) => {
                 self.toggle_favorite(&path, cx);
             }
@@ -274,7 +277,13 @@ impl Colet {
                         d.cursor_pointer()
                             .hover(|d| d.bg(p.accent_fill).text_color(p.on_accent))
                             .when_some(line.hint, |d, key| d.child(div().text_color(if lit { p.on_accent_muted } else { p.text_faint }).child(key)))
-                            .on_click(cx.listener(move |this, _, window, cx| this.run_command(command.clone(), window, cx)))
+                            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                                let command = match &command {
+                                    Command::Recycle if event.modifiers().shift => Command::Delete,
+                                    command => command.clone(),
+                                };
+                                this.run_command(command, window, cx)
+                            }))
                     })
                     .test_support()
                     .into_any_element(),

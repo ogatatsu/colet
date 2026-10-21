@@ -8,7 +8,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
-    app::{CloseDialog, Colet, ConfirmDialog, DIALOG},
+    app::{CloseDialog, Colet, DIALOG},
     ops::{ItemStatus, Menu, Status},
     places::Dialog,
     settings::Theme,
@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// The keys the preferences list, as the old app's did.
-const SHORTCUTS: [(&str, &str); 23] = [
+const SHORTCUTS: [(&str, &str); 24] = [
     ("↑ ↓", "項目を選択（Shift で範囲選択）"),
     ("← →", "カラムを移動"),
     ("Enter", "開く"),
@@ -34,8 +34,8 @@ const SHORTCUTS: [(&str, &str); 23] = [
     ("Ctrl+Shift+N", "新規フォルダー"),
     ("Ctrl+D", "検索を保存 / フォルダーをお気に入りに追加"),
     ("F2", "名前を変更（保存した検索は編集）"),
-    // Shift+Delete asks the same; Colet never deletes for good.
-    ("Delete / Shift+Delete", "ごみ箱へ移動"),
+    ("Delete", "ごみ箱へ移動"),
+    ("Shift+Delete", "完全に削除"),
     ("F5", "更新"),
     ("文字キー", "その文字で始まる項目へ移動"),
     ("/", "フォルダーを名前で絞り込む（Esc で解除）"),
@@ -98,7 +98,6 @@ impl Colet {
         let title = match self.dialog.as_ref()? {
             Dialog::Name { request: Request { kind: Operation::NewFolder, .. }, .. } => "新規フォルダー",
             Dialog::Name { .. } => "名前を変更",
-            Dialog::Recycle { .. } => "ごみ箱へ移動しますか？",
             Dialog::EditSearch { .. } => "保存した検索を編集",
             Dialog::Preferences { .. } => "設定",
         };
@@ -136,58 +135,6 @@ impl Colet {
                     button(p, "submit-name", submit, true, !empty && problem.is_none())
                         .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx)))
                         .test_support()
-                        .into_any_element(),
-                ];
-                (content, buttons)
-            }
-            Dialog::Recycle { paths, permanent } => {
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .when(*permanent, |d| d.child(div().text_size(px(12.)).child("Coletは完全な削除（Shift+Delete）に対応していません。")))
-                    .child(div().text_size(px(12.)).child(format!(
-                        "{} 項目をごみ箱へ移動します。ごみ箱を使用できない場所では操作を中止します。",
-                        paths.len()
-                    )))
-                    .child(
-                        div()
-                            .p_2()
-                            .flex()
-                            .flex_col()
-                            .text_size(px(12.))
-                            .text_color(p.text_muted)
-                            // Set into the dialog: in the light colors the dialog and a surface are both white.
-                            .bg(p.bg)
-                            .border_1()
-                            .border_color(p.border)
-                            .rounded(px(6.))
-                            .children(paths.iter().take(8).map(|path| div().truncate().child(path.clone())))
-                            .when(paths.len() > 8, |d| d.child(format!("ほか {} 項目", paths.len() - 8))),
-                    );
-                let buttons = vec![
-                    button(p, "cancel", "キャンセル", false, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .test_support()
-                        .into_any_element(),
-                    // Delete → Enter confirms, as in Explorer: ringed as the one the keys are on.
-                    crate::view::frame(p, self.dialog_focus.is_focused(window))
-                        .child(
-                            div()
-                                .id("confirm-recycle")
-                                .h(px(30.))
-                                .px_3()
-                                .flex()
-                                .items_center()
-                                .rounded(px(6.))
-                                .bg(p.danger_fill)
-                                .text_color(p.on_accent)
-                                .cursor_pointer()
-                                .hover(|b| b.opacity(0.9))
-                                .child("ごみ箱へ移動")
-                                .on_click(cx.listener(|this, _, window, cx| this.confirm_recycle(window, cx)))
-                                .test_support(),
-                        )
                         .into_any_element(),
                 ];
                 (content, buttons)
@@ -309,14 +256,6 @@ impl Colet {
                 .id("dialog-overlay")
                 .key_context(DIALOG)
                 .on_action(cx.listener(|this, _: &CloseDialog, window, cx| this.close_dialog(window, cx)))
-                .on_action(cx.listener(|this, _: &ConfirmDialog, window, cx| {
-                    if matches!(this.dialog, Some(Dialog::Recycle { .. })) {
-                        this.confirm_recycle(window, cx);
-                    } else {
-                        // Nothing to confirm: Enter presses the button that has the keys.
-                        cx.propagate();
-                    }
-                }))
                 .absolute()
                 .inset_0()
                 .flex()
@@ -473,7 +412,8 @@ impl Colet {
             .child(div().mx(px(6.)).w(px(1.)).h(px(16.)).bg(p.border))
             .child(action("rename", "pencil-line", "名前を変更", "F2", reasons.rename).on_click(cx.listener(|this, _, window, cx| this.ask_rename(window, cx))).test_support())
             .child(action("new-folder", "folder-plus", "新規フォルダー", "Ctrl+Shift+N", reasons.paste).on_click(cx.listener(|this, _, window, cx| this.ask_new_folder(window, cx))).test_support())
-            .child(action("recycle", "trash", "ごみ箱へ移動", "Delete", reasons.delete).on_click(cx.listener(|this, _, window, cx| this.ask_recycle(false, window, cx))).test_support());
+            // With Shift held it deletes outright, as Explorer's Delete does.
+            .child(crate::view::keep_focus(action("recycle", "trash", "ごみ箱へ移動", "Delete", reasons.delete)).on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))).test_support());
         (7. * 30. + 13. + 16., row.into_any_element())
     }
 
@@ -508,7 +448,7 @@ impl Colet {
                         .h(px(14.))
                         .px(px(3.))
                         .rounded(px(7.))
-                        // White on the deep red, as the Recycle Bin's button: past 4.5:1 in either theme.
+                        // White on the deep red: past 4.5:1 in either theme.
                         .bg(p.danger_fill)
                         .text_color(p.on_accent)
                         .text_size(px(10.))
@@ -587,7 +527,7 @@ impl Colet {
                                 let path = item.path.clone();
                                 let name = folder_name(&item.path).to_owned();
                                 let color = match item.status {
-                                    ItemStatus::Done | ItemStatus::Handed => p.text_muted,
+                                    ItemStatus::Done | ItemStatus::Destroyed | ItemStatus::Handed => p.text_muted,
                                     ItemStatus::Failed => p.danger,
                                     _ => p.text_faint,
                                 };
@@ -604,7 +544,7 @@ impl Colet {
                                             .items_center()
                                             .gap_2()
                                             .child(if item.gone {
-                                                // Gone to the Recycle Bin, it has no place to open.
+                                                // Deleted, it has no place to open.
                                                 div().child(name).into_any_element()
                                             } else {
                                                 crate::view::keep_focus(crate::view::ring(

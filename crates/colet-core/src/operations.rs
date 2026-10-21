@@ -1,5 +1,5 @@
-//! File operations as Colet asks for them: a paste from the clipboard, sending to the Recycle Bin, a
-//! rename, a new folder. Checked here, carried out by the shell with its own dialogs.
+//! File operations as Colet asks for them: a paste from the clipboard, sending to the Recycle Bin or
+//! deleting outright, a rename, a new folder. Checked here, carried out by the shell with its own dialogs.
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -16,8 +16,10 @@ use crate::shell::{self, Dropped, Item, Operation, Owner, clipboard};
 pub enum Kind {
     /// What the clipboard holds, copied or moved into `destination`.
     Paste,
-    /// To the Recycle Bin, never deleted outright.
+    /// To the Recycle Bin; what the bin cannot take is deleted outright, once the shell has asked.
     Recycle,
+    /// Deleted outright, once the shell has asked.
+    Delete,
     Rename,
     NewFolder,
 }
@@ -28,6 +30,7 @@ impl Kind {
         match self {
             Kind::Paste => "貼り付け",
             Kind::Recycle => "ごみ箱へ移動",
+            Kind::Delete => "完全に削除",
             Kind::Rename => "名前を変更",
             Kind::NewFolder => "フォルダーを作成",
         }
@@ -56,7 +59,9 @@ pub enum Event {
     Cancelled { path: String },
     /// Where the last item went, which a name clash may have renamed.
     Placed { path: String },
-    /// The last item done is no longer where it was: moved, renamed or sent to the Recycle Bin. A copy's
+    /// The last item done was deleted outright, not sent to the Recycle Bin.
+    Destroyed { path: String },
+    /// The last item done is no longer where it was: moved, renamed or deleted. A copy's
     /// source stays, and a new folder was nowhere before.
     Left { path: String },
     /// Handed to the shell, which writes it out on its own and tells nothing back: where it goes by the
@@ -222,6 +227,7 @@ fn prepare(request: Request, clipboard: impl FnOnce() -> Result<clipboard::Clipb
         Kind::Paste if copy => Operation::Copy { destination },
         Kind::Paste => Operation::Move { destination },
         Kind::Recycle => Operation::Recycle,
+        Kind::Delete => Operation::Delete,
         Kind::Rename => Operation::Rename { name },
         Kind::NewFolder => Operation::NewFolder { parent: destination, name },
     };
@@ -249,7 +255,7 @@ pub fn run(request: Request, owner: Owner, report: impl FnMut(Event) + Send + 's
         return Ok(());
     }
     let tally = Arc::new(Tally::default());
-    let leaves = matches!(prepared.operation, Operation::Move { .. } | Operation::Recycle | Operation::Rename { .. });
+    let leaves = matches!(prepared.operation, Operation::Move { .. } | Operation::Recycle | Operation::Delete | Operation::Rename { .. });
     let result =
         shell::operate(&prepared.operation, &prepared.paths, prepared.rename, owner, reporter(leaves, tally.clone(), report));
     let failed = tally.failed.load(Ordering::Relaxed);
@@ -334,6 +340,7 @@ fn reporter(leaves: bool, tally: Arc<Tally>, mut report: impl FnMut(Event) + Sen
             }
             Item::Done { path, .. } => Event::Done { path },
             Item::Placed { path } => Event::Placed { path },
+            Item::Destroyed { path } => Event::Destroyed { path },
         };
         if matches!(event, Event::Cancelled { .. } | Event::Skipped { .. } | Event::Failed { .. }) {
             tally.kept.store(true, Ordering::Relaxed);

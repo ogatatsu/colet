@@ -363,8 +363,8 @@ impl Colet {
             .on_action(cx.listener(|this, _: &PasteItems, _, cx| this.paste(cx)))
             .on_action(cx.listener(|this, _: &CopyPaths, _, cx| this.copy_paths(cx)))
             .on_action(cx.listener(|this, _: &NewFolder, window, cx| this.ask_new_folder(window, cx)))
-            .on_action(cx.listener(|this, _: &RecycleItems, window, cx| this.ask_recycle(false, window, cx)))
-            .on_action(cx.listener(|this, _: &RecycleItemsForGood, window, cx| this.ask_recycle(true, window, cx)))
+            .on_action(cx.listener(|this, _: &RecycleItems, _, cx| this.delete_picked(false, cx)))
+            .on_action(cx.listener(|this, _: &RecycleItemsForGood, _, cx| this.delete_picked(true, cx)))
             .on_action(cx.listener(|this, _: &SelectAll, _, cx| {
                 this.state.select_all(this.state.active);
                 this.changed(cx);

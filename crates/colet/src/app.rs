@@ -51,7 +51,6 @@ actions!(
         SaveCurrent,
         RenameItem,
         CloseDialog,
-        ConfirmDialog,
         CopyItems,
         CutItems,
         PasteItems,
@@ -114,7 +113,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("f5", RefreshAll, None),
         KeyBinding::new("ctrl-d", SaveCurrent, None),
         KeyBinding::new("escape", CloseDialog, Some(DIALOG)),
-        KeyBinding::new("enter", ConfirmDialog, Some(DIALOG)),
         KeyBinding::new("up", MenuUp, Some(MENU)),
         KeyBinding::new("down", MenuDown, Some(MENU)),
         KeyBinding::new("enter", MenuConfirm, Some(MENU)),
@@ -271,7 +269,7 @@ pub struct Colet {
     pub(crate) departed: HashSet<String>,
     pub dialog: Option<Dialog>,
     pub(crate) dialog_subscriptions: Vec<Subscription>,
-    /// Takes the keys in a dialog with no field, as the Recycle Bin's question.
+    /// Takes the keys in a dialog with no field.
     pub dialog_focus: FocusHandle,
     /// What a dialog holds between its heading and its buttons, scrolled when the window is too low.
     pub dialog_scroll: ScrollHandle,
@@ -468,7 +466,7 @@ impl Colet {
         match &self.dialog {
             Some(Dialog::Name { input, .. }) => inputs.push(input.clone()),
             Some(Dialog::EditSearch { name, query, .. }) => inputs.extend([name.clone(), query.clone()]),
-            Some(Dialog::Recycle { .. } | Dialog::Preferences) | None => {}
+            Some(Dialog::Preferences) | None => {}
         }
         for input in &inputs {
             self.palette.style_input(input, cx);

@@ -31,7 +31,7 @@ pub struct Palette {
     /// `hover`, so it never reads as where the pointer is.
     pub highlight: Hsla,
     pub danger: Hsla,
-    /// Behind the text of a button that sends to the Recycle Bin.
+    /// Behind the count of problems on the history's button.
     pub danger_fill: Hsla,
     /// The ring around what has the keys.
     pub focus: Hsla,
@@ -177,7 +177,7 @@ mod tests {
             // The count of problems on the history's button.
             let badge = contrast(palette.on_accent, palette.danger_fill);
             assert!(badge >= 4.5, "badge {badge}, dark: {dark}");
-            // The paths in the Recycle Bin's question, set into the dialog.
+            // Muted text on the window's own color.
             let paths = contrast(palette.text_muted, palette.bg);
             assert!(paths >= 4.5, "paths {paths}, dark: {dark}");
             assert!(palette.bg != palette.raised, "the paths' ground stands off the dialog, dark: {dark}");

@@ -11,7 +11,7 @@ use std::{
 use colet_core::{
     entry::{Entry, Marks, Order, Sort},
     everything::Page,
-    operations::{Event, Kind as Operation, Request},
+    operations::{CANCELLED, Event, Kind as Operation, Request},
     paths::{ancestors, child, folder_name},
     shell::{Owner, clipboard::ClipboardFiles},
     watch::Changes,
@@ -55,6 +55,10 @@ struct Fake {
     /// What each operation was asked, and the paths that refuse to go.
     operations: Mutex<Vec<Request>>,
     stuck: Mutex<Vec<String>>,
+    /// Paths the Recycle Bin cannot take, deleted outright.
+    unbinnable: Mutex<Vec<String>>,
+    /// The shell's question on deleting is turned down.
+    declined: AtomicBool,
     opened: Mutex<Vec<String>>,
     menus: Mutex<Vec<(Vec<String>, String)>>,
     /// Told of every clipboard change, as the real watcher is.
@@ -129,7 +133,9 @@ impl Backend for Fake {
         let stuck = self.stuck.lock().unwrap().clone();
         let mut failed = false;
         match request.kind {
-            Operation::Recycle => {
+            Operation::Recycle | Operation::Delete if self.declined.load(Ordering::Relaxed) => return Err(CANCELLED.into()),
+            Operation::Recycle | Operation::Delete => {
+                let unbinnable = self.unbinnable.lock().unwrap().clone();
                 for path in &request.paths {
                     if stuck.contains(path) {
                         failed = true;
@@ -137,6 +143,9 @@ impl Backend for Fake {
                     } else {
                         self.remove(path);
                         report(Event::Done { path: path.clone() });
+                        if request.kind == Operation::Delete || unbinnable.contains(path) {
+                            report(Event::Destroyed { path: path.clone() });
+                        }
                         report(Event::Left { path: path.clone() });
                     }
                 }
@@ -1387,20 +1396,48 @@ fn makes_a_folder_and_picks_it(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn sends_to_the_bin_after_asking_and_picks_the_next_row(cx: &mut TestAppContext) {
+fn sends_to_the_bin_leaving_the_asking_to_the_shell_and_picks_the_next_row(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "down");
     ui.press(cx, "delete");
-    assert!(ui.read(cx, |v| matches!(v.dialog, Some(crate::places::Dialog::Recycle { .. }))));
-    ui.press(cx, "enter");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
-    assert_eq!(fake.operations.lock().unwrap()[0].paths, [r"D:\work\b.txt"]);
+    let asked = fake.operations.lock().unwrap()[0].clone();
+    assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![r"D:\work\b.txt".to_owned()]));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\c.txt"]);
-    assert!(ui.read(cx, |v| v.history[0].items[0].gone));
-    // Escape leaves it be.
+    let entry = ui.read(cx, |v| v.history[0].clone());
+    assert!(entry.items[0].gone);
+    assert_eq!(entry.items[0].status, crate::ops::ItemStatus::Done);
+}
+
+#[gpui_kit::test]
+fn deletes_outright_on_shift_delete_and_says_so_of_what_the_bin_could_not_take(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "shift-delete");
+    assert_eq!(fake.operations.lock().unwrap()[0].kind, Operation::Delete);
+    let entry = ui.read(cx, |v| v.history[0].clone());
+    assert_eq!(entry.request.kind.title(), "完全に削除");
+    assert_eq!(entry.items[0].status.label(), "完全に削除");
+    // Sent to the bin, one it could not take is told apart from the rest.
+    fake.unbinnable.lock().unwrap().push(r"D:\work\c.txt".into());
+    ui.press(cx, "ctrl-a");
     ui.press(cx, "delete");
-    ui.press(cx, "escape");
-    assert_eq!(fake.operations.lock().unwrap().len(), 1);
+    let entry = ui.read(cx, |v| v.history[0].clone());
+    assert_eq!(entry.request.kind, Operation::Recycle);
+    let statuses: Vec<_> = entry.items.iter().map(|i| (folder_name(&i.path).to_owned(), i.status.label())).collect();
+    assert_eq!(statuses, [("b.txt".to_owned(), "完了"), ("c.txt".to_owned(), "完全に削除")]);
+    assert_eq!(entry.outcome(), "完了");
+}
+
+#[gpui_kit::test]
+fn leaves_no_trace_of_a_deletion_turned_down_at_the_shells_question(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    fake.declined.store(true, Ordering::Relaxed);
+    ui.press(cx, "delete");
+    ui.press(cx, "shift-delete");
+    assert_eq!(fake.operations.lock().unwrap().len(), 2);
+    assert!(ui.read(cx, |v| v.history.is_empty() && v.unseen == 0));
+    assert!(ui.toasts(cx).is_empty(), "{:?}", ui.toasts(cx));
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
 }
 
 #[gpui_kit::test]
@@ -1420,7 +1457,6 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     let (fake, ui) = in_work(cx);
     fake.stuck.lock().unwrap().push(r"D:\work\a.txt".into());
     ui.press(cx, "delete");
-    ui.click(cx, "confirm-recycle");
     assert!(ui.toasts(cx).iter().any(|t| t == "「ごみ箱へ移動」: 1 件失敗"), "{:?}", ui.toasts(cx));
     assert_eq!(ui.read(cx, |v| v.unseen), 1);
     let toast = ui.read(cx, |v| v.toasts.iter().find(|t| t.entry.is_some()).unwrap().id);
@@ -1459,7 +1495,7 @@ fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &m
     let (fake, ui) = in_work(cx);
     let dialog_paths = |ui: &Ui, cx: &mut TestAppContext| {
         ui.read(cx, |v| match &v.dialog {
-            Some(crate::places::Dialog::Name { request: Request { paths, .. }, .. } | crate::places::Dialog::Recycle { paths, .. }) => paths.clone(),
+            Some(crate::places::Dialog::Name { request: Request { paths, .. }, .. }) => paths.clone(),
             _ => Vec::new(),
         })
     };
@@ -1483,7 +1519,8 @@ fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &m
     menu(&ui, cx, r"D:\work\b.txt", "menu-copy");
     assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\b.txt"]);
     menu(&ui, cx, r"D:\work\b.txt", "menu-recycle");
-    assert_eq!(dialog_paths(&ui, cx), [r"D:\work\b.txt"]);
+    let asked = fake.operations.lock().unwrap().last().unwrap().clone();
+    assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![r"D:\work\b.txt".to_owned()]));
 }
 
 #[gpui_kit::test]
