@@ -1761,9 +1761,13 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     assert!(ui.toasts(cx).iter().any(|t| t.contains("フォルダーのカラムでだけ")));
     ui.press(cx, "right");
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
-    let id = ui.read(cx, |v| v.state.columns[1].id);
-    ui.press(cx, "/");
+    let (home, id, alpha) = ui.read(cx, |v| (v.state.columns[0].id, v.state.columns[1].id, v.state.columns[2].id));
+    // Each folder has its field from the start, an empty one too; home has none.
     assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", alpha)).is_some()));
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", home)).is_none()));
+    let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string());
+    ui.press(cx, "/");
     // What is typed narrows the rows rather than jumping through them; the folder it hides closes.
     ui.input(cx, "TA");
     let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>());
@@ -1780,27 +1784,39 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     assert_eq!(shown(&ui, cx), [r"D:\gamma"]);
     ui.press(cx, "enter");
     assert_eq!(ui.selected(cx, 1), [r"D:\gamma"]);
-    // Esc in the rows lists all again and puts the field away, the pick kept.
+    // Esc in the rows lists all again and empties the field, the pick kept.
     ui.press(cx, "escape");
     assert_eq!(shown(&ui, cx).len(), 3);
-    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_none()));
+    assert_eq!(typed(&ui, cx), "");
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
     assert!(ui.columns_focused(cx));
     assert_eq!(ui.selected(cx, 1), [r"D:\gamma"]);
-    // In the field, Esc clears it, then puts it away.
+    // In the field, Esc clears it, then goes back to the rows.
     ui.press(cx, "/");
     ui.input(cx, "zz");
     assert!(shown(&ui, cx).is_empty());
     ui.press(cx, "escape");
     assert_eq!(shown(&ui, cx).len(), 3);
-    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
+    assert!(!ui.columns_focused(cx));
     ui.press(cx, "escape");
-    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_none()));
     assert!(ui.columns_focused(cx));
-    // The button in its heading opens it, and lifts it.
-    ui.click(cx, ("funnel", id));
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
+    // Its x clears it.
+    ui.press(cx, "/");
     ui.input(cx, "be");
     assert_eq!(shown(&ui, cx), [r"D:\beta.txt"]);
-    ui.click(cx, ("funnel", id));
+    ui.click(cx, ("clear-filter", id));
     assert_eq!(shown(&ui, cx).len(), 3);
-    assert!(ui.read(cx, |v| v.filters.is_empty()));
+    assert_eq!(typed(&ui, cx), "");
+    // Lifted for what was made or pasted, the field empties too.
+    ui.press(cx, "/");
+    ui.input(cx, "be");
+    ui.view.update(cx, |v, cx| {
+        v.state.set_filter(1, None);
+        cx.notify();
+    });
+    settle(cx);
+    ui.act(cx, |_, _| ());
+    assert_eq!(typed(&ui, cx), "");
+    assert_eq!(shown(&ui, cx).len(), 3);
 }

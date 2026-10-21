@@ -203,6 +203,14 @@ pub struct Slide {
 /// What a listing came back with: the entries, how many in all, and for a search what answered it.
 type Listing = Result<(Vec<Entry>, usize, Option<String>), String>;
 
+/// The field narrowing a folder column, and what it last narrowed it to: the column lifting the filter on
+/// its own, for what was made or pasted there, tells from that, not from text typed and yet to be told.
+pub struct FilterField {
+    pub input: Entity<InputState>,
+    applied: String,
+    _changes: Subscription,
+}
+
 pub struct Colet {
     pub state: State,
     pub sort: Order,
@@ -211,8 +219,8 @@ pub struct Colet {
     pub search: Entity<InputState>,
     /// The search field has the keys: no column is marked as worked in.
     pub search_focused: bool,
-    /// The field of each folder column narrowed to some names, and what it tells.
-    pub filters: HashMap<ColumnId, (Entity<InputState>, Subscription)>,
+    /// The field of each folder column, narrowing it to some names.
+    pub filters: HashMap<ColumnId, FilterField>,
     pub home_focus: FocusHandle,
     pub columns_focus: FocusHandle,
     pub icons: Icons,
@@ -458,7 +466,7 @@ impl Colet {
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
         self.palette = Palette::for_window(window, self.settings.theme);
         let mut inputs = vec![self.search.clone()];
-        inputs.extend(self.filters.values().map(|(input, _)| input.clone()));
+        inputs.extend(self.filters.values().map(|field| field.input.clone()));
         match &self.dialog {
             Some(Dialog::Name { input, .. }) => inputs.push(input.clone()),
             Some(Dialog::EditSearch { name, query, .. }) => inputs.extend([name.clone(), query.clone()]),
@@ -534,9 +542,6 @@ impl Colet {
         self.pending.retain(|id, _| live.contains(id));
         self.lists.retain(|id, _| live.contains(id));
         self.scrolled_to.retain(|id, _| live.contains(id));
-        // A field goes with its column, or with the filter, which a new folder or a paste can lift.
-        let filtered: HashSet<ColumnId> = self.state.columns.iter().filter(|c| c.filter.is_some()).map(|c| c.id).collect();
-        self.filters.retain(|id, _| filtered.contains(id));
         let fresh: Vec<(ColumnId, Kind)> =
             self.state.columns.iter().filter(|c| !self.requested.contains(&c.id)).map(|c| (c.id, c.kind)).collect();
         for (id, kind) in fresh {
@@ -1010,37 +1015,48 @@ impl Colet {
 
     // ---- Filters ----
 
-    /// The field narrowing the folder column worked in takes the keys: opened, or with its text picked to
-    /// type over.
+    /// Each folder column has its field, holding what it is narrowed to: a field is made for a column new
+    /// here, goes with one gone, and empties where a new folder or a paste lifted the filter.
+    pub fn filter_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let folders: HashSet<ColumnId> = self.state.columns.iter().filter(|c| c.kind == Kind::Folder).map(|c| c.id).collect();
+        self.filters.retain(|id, _| folders.contains(id));
+        for c in self.state.columns.iter().filter(|c| c.kind == Kind::Folder) {
+            let id = c.id;
+            match self.filters.get_mut(&id) {
+                Some(field) => {
+                    if c.filter.is_none() && !field.applied.is_empty() {
+                        field.applied.clear();
+                        field.input.update(cx, |input, cx| input.set_value("", window, cx));
+                    }
+                }
+                None => {
+                    let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む（/）"));
+                    self.palette.style_input(&input, cx);
+                    let subscription = cx.subscribe_in(&input, window, move |this: &mut Self, input, event, window, cx| match event {
+                        InputEvent::Change => {
+                            let text = input.read(cx).value().to_string();
+                            this.filter(id, &text, cx);
+                        }
+                        InputEvent::PressEnter { .. } => this.leave_filter(id, window, cx),
+                        InputEvent::Focus | InputEvent::Blur => cx.notify(),
+                    });
+                    self.filters.insert(id, FilterField { input, applied: String::new(), _changes: subscription });
+                }
+            }
+        }
+    }
+
+    /// The field of the folder column worked in takes the keys, with its text picked to type over.
     pub fn open_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let index = self.state.active;
-        let c = &self.state.columns[index];
+        let c = &self.state.columns[self.state.active];
         if c.kind != Kind::Folder {
             self.notify("フィルタはフォルダーのカラムでだけ使えます。", Tone::Info, cx);
             return;
         }
         let id = c.id;
-        if c.filter.is_none() {
-            self.state.set_filter(index, Some(""));
-        }
-        let input = match self.filters.get(&id) {
-            Some((input, _)) => input.clone(),
-            None => {
-                let input = cx.new(|cx| InputState::new(window, cx).placeholder("名前で絞り込む"));
-                self.palette.style_input(&input, cx);
-                let subscription = cx.subscribe_in(&input, window, move |this: &mut Self, input, event, window, cx| match event {
-                    InputEvent::Change => {
-                        let text = input.read(cx).value().to_string();
-                        this.filter(id, &text, cx);
-                    }
-                    InputEvent::PressEnter { .. } => this.leave_filter(id, window, cx),
-                    InputEvent::Focus | InputEvent::Blur => cx.notify(),
-                });
-                self.filters.insert(id, (input.clone(), subscription));
-                input
-            }
-        };
-        input.update(cx, |input, cx| {
+        self.filter_fields(window, cx);
+        let Some(field) = self.filters.get(&id) else { return };
+        field.input.clone().update(cx, |input, cx| {
             input.focus(window, cx);
             input.select_all(window, cx);
         });
@@ -1051,6 +1067,9 @@ impl Colet {
     pub fn filter(&mut self, id: ColumnId, text: &str, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
         self.state.set_filter(index, Some(text));
+        if let Some(field) = self.filters.get_mut(&id) {
+            field.applied = text.into();
+        }
         // The rows move: the focused one is brought in sight again.
         self.scrolled_to.remove(&id);
         self.changed(cx);
@@ -1063,21 +1082,24 @@ impl Colet {
         self.focus_active(window, cx);
     }
 
-    /// Lists all again and puts the field away; the keys go back to the rows.
+    /// Lists all again and empties the field; the keys go back to the rows.
     pub fn close_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
         self.state.set_filter(index, None);
-        self.filters.remove(&id);
+        if let Some(field) = self.filters.get_mut(&id) {
+            field.applied.clear();
+            field.input.clone().update(cx, |input, cx| input.set_value("", window, cx));
+        }
         self.scrolled_to.remove(&id);
         self.leave_filter(id, window, cx);
     }
 
-    /// Esc in the field: clears what it holds, or, empty, puts it away.
+    /// Esc in the field: clears what it holds, or, empty, goes back to the rows.
     pub fn escape_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((input, _)) = self.filters.get(&id) else { return };
-        let input = input.clone();
+        let Some(field) = self.filters.get(&id) else { return };
+        let input = field.input.clone();
         if input.read(cx).value().is_empty() {
-            self.close_filter(id, window, cx);
+            self.leave_filter(id, window, cx);
         } else {
             input.update(cx, |input, cx| input.set_value("", window, cx));
             self.filter(id, "", cx);
@@ -1086,7 +1108,7 @@ impl Colet {
 
     /// Whether a filter's field has the keys, which type there rather than ahead in the rows.
     pub fn filter_focused(&self, window: &Window, cx: &App) -> bool {
-        self.filters.values().any(|(input, _)| input.read(cx).focus_handle(cx).is_focused(window))
+        self.filters.values().any(|field| field.input.read(cx).focus_handle(cx).is_focused(window))
     }
 
     pub fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {

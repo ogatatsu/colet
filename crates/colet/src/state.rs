@@ -729,18 +729,18 @@ impl State {
             c.total += 1;
         }
         // It shows, to be seen picked, even where the filter would hide it: the filter goes then.
-        if let Some(text) = text.filter(|text| text.is_empty() || !found(folder_name(path), text).is_empty()) {
+        if let Some(text) = text.filter(|text| !found(folder_name(path), text).is_empty()) {
             c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries) });
             self.narrow(index);
         }
         self.select(index, vec![path.to_owned()]);
     }
 
-    /// Narrows the folder column at `index` to the names holding `text`, or with none lists them all
-    /// again. What it hides leaves the selection, and the folder open beside it closes.
+    /// Narrows the folder column at `index` to the names holding `text`, or with none, or an empty one,
+    /// lists them all again. What it hides leaves the selection, and the folder open beside it closes.
     pub fn set_filter(&mut self, index: usize, text: Option<&str>) {
         let Some(c) = self.columns.get_mut(index).filter(|c| c.kind == Kind::Folder) else { return };
-        match text {
+        match text.filter(|text| !text.is_empty()) {
             None => {
                 if let Some(filter) = c.filter.take() {
                     c.entries = filter.all;
@@ -1497,8 +1497,10 @@ mod tests {
         s.page(id, 3, vec![file(r"D:\beta.txt"), file(r"D:\delta"), file(r"D:\gamma")], 3, 0, &HashSet::new());
         assert_eq!(names(&s, 1), [r"D:\beta.txt", r"D:\delta"]);
         assert_eq!(s.columns[1].total, 3);
+        // Emptied, it narrows no more.
         s.set_filter(1, Some(""));
         assert_eq!(names(&s, 1).len(), 3);
+        assert!(s.columns[1].filter.is_none());
     }
 
     #[test]

@@ -790,11 +790,10 @@ impl Colet {
             _ => time::count(c.total as u64),
         };
         let filtering = c.filter.as_ref().is_some_and(|f| !f.text.is_empty());
-        let field = self.filters.get(&id).map(|(input, _)| input.clone());
+        let field = self.filters.get(&id).map(|field| field.input.clone());
         let path = c.path.clone();
         let star_path = c.path.clone();
         let star_focus = self.stop(format!("star:{id}"), cx);
-        let funnel_focus = self.stop(format!("funnel:{id}"), cx);
         let clear_focus = self.stop(format!("clear-filter:{id}"), cx);
         let body = self.column_body(index, marked, window, cx);
         div()
@@ -858,34 +857,6 @@ impl Colet {
                             .child(header_title),
                     )
                     .child(div().text_size(px(12.)).text_color(p.text_faint).child(count))
-                    .when(kind == Kind::Folder, |d| {
-                        let label = if field.is_some() { "フィルタを解除" } else { "フィルタ（/）" };
-                        d.child(
-                            ring(div().id(("funnel", id)).track_focus(&funnel_focus), p)
-                                .role(Role::Button)
-                                .aria_label(label)
-                                .size(px(24.))
-                                .flex()
-                                .flex_none()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(4.))
-                                .cursor_pointer()
-                                .hover(|d| d.bg(p.hover))
-                                .tip(p, label)
-                                .child(icon("funnel", 14., if filtering { p.accent } else { p.text_muted }))
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    let Some(index) = this.state.index_of(id) else { return };
-                                    if this.filters.contains_key(&id) {
-                                        this.close_filter(id, window, cx);
-                                    } else {
-                                        this.state.set_active(index);
-                                        this.open_filter(window, cx);
-                                    }
-                                }))
-                                .test_support(),
-                        )
-                    })
                     .child({
                         let kept = match kind {
                             Kind::Search => self.settings.saved(&self.state.query).is_some(),
@@ -942,9 +913,10 @@ impl Colet {
                                 .border_1()
                                 .border_color(p.border_strong)
                                 .rounded(px(6.))
-                                .child(icon("funnel", 13., if focused { p.accent } else { p.text_muted }))
+                                // Accented while it has the keys, or narrows the rows from out of them.
+                                .child(icon("funnel", 13., if focused || filtering { p.accent } else { p.text_muted }))
                                 .child(div().flex_1().min_w_0().child(Input::new(&input)))
-                                // ↓ goes into the rows it lets through; Esc clears it, then puts it away.
+                                // ↓ goes into the rows it lets through; Esc clears it, then goes there too.
                                 .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
                                     cx.stop_propagation();
                                     this.leave_filter(id, window, cx);
@@ -969,8 +941,8 @@ impl Colet {
                                             .tip(p, "フィルタをクリア（Esc）")
                                             .child(icon("x", 13., p.text_muted))
                                             .on_click(cx.listener(move |this, _, window, cx| {
-                                                if let Some((input, _)) = this.filters.get(&id) {
-                                                    let input = input.clone();
+                                                if let Some(field) = this.filters.get(&id) {
+                                                    let input = field.input.clone();
                                                     input.update(cx, |input, cx| {
                                                         input.set_value("", window, cx);
                                                         input.focus(window, cx);
@@ -1431,6 +1403,7 @@ impl Colet {
         let (hidden_left, hidden_right) = (screen.hidden_left(), screen.hidden_right());
         let hold = self.hold;
         let fit = cx.entity().downgrade();
+        self.filter_fields(window, cx);
         let pinned_column = pinned.then(|| self.render_column(1, window, cx));
         let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, window, cx)).collect();
         let main = div()
