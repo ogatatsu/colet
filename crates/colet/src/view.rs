@@ -925,6 +925,11 @@ impl Colet {
                                     cx.stop_propagation();
                                     this.escape_filter(id, window, cx);
                                 }))
+                                // ← and → past the text's ends stay here, not going on to the next column; Enter
+                                // only goes into the rows, opening nothing there.
+                                .on_action(|_: &input::MoveLeft, _, cx| cx.stop_propagation())
+                                .on_action(|_: &input::MoveRight, _, cx| cx.stop_propagation())
+                                .on_action(|_: &input::Enter, _, cx| cx.stop_propagation())
                                 .when(has_text, |b| {
                                     b.child(
                                         ring(div().id(("clear-filter", id)).track_focus(&clear_focus), p)

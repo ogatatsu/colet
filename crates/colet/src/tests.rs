@@ -1820,3 +1820,42 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     assert_eq!(typed(&ui, cx), "");
     assert_eq!(shown(&ui, cx).len(), 3);
 }
+
+#[gpui_kit::test]
+fn keeps_the_arrows_and_enter_in_a_filter_field_to_itself(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\alpha"), file(r"D:\beta.txt")]),
+            (r"D:\alpha", vec![]),
+        ])
+    });
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    assert_eq!(ui.selected(cx, 1), [r"D:\alpha"]);
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
+    let active = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.active);
+    ui.press(cx, "/");
+    ui.input(cx, "al");
+    // Past either end of the text, ← and → stay in the field rather than going to the next column.
+    ui.press(cx, "right");
+    assert_eq!(active(&ui, cx), 1);
+    assert!(!ui.columns_focused(cx));
+    ui.press(cx, "left");
+    ui.press(cx, "left");
+    ui.press(cx, "left");
+    assert_eq!(active(&ui, cx), 1);
+    assert!(!ui.columns_focused(cx));
+    ui.press(cx, "escape");
+    ui.press(cx, "escape");
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
+    // Enter goes into the rows and opens nothing there.
+    ui.press(cx, "/");
+    ui.input(cx, "ta");
+    ui.press(cx, "enter");
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
+    assert!(fake.opened.lock().unwrap().is_empty());
+}
