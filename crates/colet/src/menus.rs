@@ -57,10 +57,11 @@ impl Colet {
     pub fn menu_lines(&self) -> Vec<Line> {
         if self.sort_open {
             let choice = |text, command, chosen| Line { id: text, glyph: None, text, hint: None, off: None, command, group: false, chosen };
+            let sort = self.settings.sort;
             let mut lines: Vec<Line> =
-                Sort::ALL.map(|by| choice(by.label(), Command::Sort(by), by == self.sort.by)).into();
+                Sort::ALL.map(|by| choice(by.label(), Command::Sort(by), by == sort.by)).into();
             lines.extend([false, true].map(|descending| {
-                choice(direction_label(descending), Command::Direction(descending), descending == self.sort.descending)
+                choice(direction_label(descending), Command::Direction(descending), descending == sort.descending)
             }));
             lines[Sort::ALL.len()].group = true;
             return lines;
@@ -200,7 +201,7 @@ impl Colet {
         self.menu = None;
         self.crumb_menu_open = false;
         self.sort_open = true;
-        self.menu_cursor = keyboard.then(|| Sort::ALL.iter().position(|s| *s == self.sort.by).unwrap_or(0));
+        self.menu_cursor = keyboard.then(|| Sort::ALL.iter().position(|s| *s == self.settings.sort.by).unwrap_or(0));
         self.menu_focus.focus(window, cx);
         cx.notify();
     }

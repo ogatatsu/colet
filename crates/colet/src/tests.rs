@@ -40,6 +40,8 @@ struct Fake {
     searches: Mutex<Vec<(String, usize)>>,
     /// Each folder listed.
     lists: Mutex<Vec<String>>,
+    /// The order each listing and search was asked in.
+    orders: Mutex<Vec<Order>>,
     failing: Mutex<Option<String>>,
     changed: AtomicBool,
     /// The settings as last written, starting from those it is made with.
@@ -78,13 +80,15 @@ impl Backend for Fake {
         self.roots.clone()
     }
 
-    fn list(&self, path: &str, _: Order, _: &AtomicBool) -> Result<Vec<Entry>, String> {
+    fn list(&self, path: &str, sort: Order, _: &AtomicBool) -> Result<Vec<Entry>, String> {
         self.lists.lock().unwrap().push(path.into());
+        self.orders.lock().unwrap().push(sort);
         self.folders.lock().unwrap().get(path).cloned().ok_or_else(|| "フォルダーを開けません".into())
     }
 
     fn search(&self, search: Search) -> Result<(Page, String), String> {
         self.searches.lock().unwrap().push((search.query.clone(), search.offset));
+        self.orders.lock().unwrap().push(search.sort);
         // As Everything's watch, it says the results changed until they are searched afresh.
         if search.refresh {
             self.changed.store(false, Ordering::Relaxed);
@@ -553,7 +557,7 @@ fn sorts_from_the_menu_reloading_what_is_open(cx: &mut TestAppContext) {
     let before = fake.queries().len();
     ui.click(cx, "sort");
     ui.click(cx, "サイズ");
-    assert_eq!(ui.read(cx, |v| v.sort), Order { by: Sort::Size, descending: false });
+    assert_eq!(ui.read(cx, |v| v.settings.sort), Order { by: Sort::Size, descending: false });
     assert_eq!(fake.queries().len(), before + 1);
     assert!(!ui.read(cx, |v| v.sort_open));
 }
@@ -566,16 +570,50 @@ fn turns_the_sort_round_from_the_menu_and_keeps_it_for_another_sort(cx: &mut Tes
     let before = fake.queries().len();
     ui.click(cx, "sort");
     ui.click(cx, "降順");
-    assert_eq!(ui.read(cx, |v| v.sort), Order { by: Sort::Name, descending: true });
+    assert_eq!(ui.read(cx, |v| v.settings.sort), Order { by: Sort::Name, descending: true });
     assert_eq!(fake.queries().len(), before + 1);
     assert!(!ui.read(cx, |v| v.sort_open));
     ui.click(cx, "sort");
     ui.click(cx, "更新日時");
-    assert_eq!(ui.read(cx, |v| v.sort), Order { by: Sort::Modified, descending: true });
+    assert_eq!(ui.read(cx, |v| v.settings.sort), Order { by: Sort::Modified, descending: true });
     // Picking the way it already runs loads nothing again.
     ui.click(cx, "sort");
     ui.click(cx, "降順");
     assert_eq!(fake.queries().len(), before + 2);
+}
+
+#[gpui_kit::test]
+fn keeps_the_sort_order_for_the_next_start(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    let ui = open(cx, fake.clone());
+    let saves = fake.saves.load(Ordering::Relaxed);
+    ui.click(cx, "sort");
+    ui.click(cx, "サイズ");
+    settle(cx);
+    assert_eq!(fake.settings.lock().unwrap().sort, Order { by: Sort::Size, descending: false });
+    ui.click(cx, "sort");
+    ui.click(cx, "降順");
+    settle(cx);
+    assert_eq!(fake.settings.lock().unwrap().sort, Order { by: Sort::Size, descending: true });
+    assert_eq!(fake.saves.load(Ordering::Relaxed), saves + 2);
+    // Picking the order already in use writes nothing.
+    ui.click(cx, "sort");
+    ui.click(cx, "サイズ");
+    settle(cx);
+    assert_eq!(fake.saves.load(Ordering::Relaxed), saves + 2);
+}
+
+#[gpui_kit::test]
+fn opens_in_the_sort_order_kept(cx: &mut TestAppContext) {
+    let kept = Order { by: Sort::Modified, descending: true };
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    fake.settings.lock().unwrap().sort = kept;
+    let ui = open(cx, fake.clone());
+    assert_eq!(ui.read(cx, |v| v.settings.sort), kept);
+    ui.input(cx, "x");
+    let orders = fake.orders.lock().unwrap().clone();
+    assert!(!orders.is_empty());
+    assert!(orders.iter().all(|o| *o == kept), "{orders:?}");
 }
 
 #[gpui_kit::test]
@@ -1479,7 +1517,7 @@ fn picks_the_sort_order_by_keys(cx: &mut TestAppContext) {
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "enter");
-    assert_eq!(ui.read(cx, |v| v.sort), Order { by: Sort::Size, descending: false });
+    assert_eq!(ui.read(cx, |v| v.settings.sort), Order { by: Sort::Size, descending: false });
     assert!(!ui.read(cx, |v| v.sort_open));
     assert!(ui.columns_focused(cx));
     // From the button itself, the sort in use is lit.

@@ -448,6 +448,7 @@ impl Colet {
         let lit = selected && marked && !aside;
         let image = self.icons.get(entry, cx);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
+        let by = self.settings.sort.by;
         let (mark, ink) = if lit { (p.mark_on_fill, p.on_accent) } else { (p.mark, p.text) };
         let path = entry.path.clone();
         let picture = match (saved, image) {
@@ -527,8 +528,8 @@ impl Colet {
                 )
             })
             // A folder has no size of its own; like Explorer, leave it blank.
-            .when(self.sort.by != Sort::Name && kind != Kind::Home && !(self.sort.by == Sort::Size && entry.directory), |r| {
-                let meta = match self.sort.by {
+            .when(by != Sort::Name && kind != Kind::Home && !(by == Sort::Size && entry.directory), |r| {
+                let meta = match by {
                     Sort::Size => time::size(entry.size),
                     _ => entry.modified.and_then(time::date).unwrap_or_else(|| "—".into()),
                 };
@@ -1019,7 +1020,7 @@ impl Colet {
         let p = self.palette;
         let focused = self.search_focused;
         let has_query = !self.state.query.is_empty();
-        let sort = self.sort;
+        let sort = self.settings.sort;
         let clear_focus = self.stop("clear-search", cx);
         let sort_lines = if self.sort_open { self.render_lines(cx) } else { Vec::new() };
         let sort_keyed = keyed(&self.sort_focus, window);

@@ -213,7 +213,6 @@ pub struct FilterField {
 
 pub struct Colet {
     pub state: State,
-    pub sort: Order,
     pub widths: Widths,
     pub palette: Palette,
     pub search: Entity<InputState>,
@@ -378,7 +377,6 @@ impl Colet {
         };
         let mut this = Self {
             state: State::new(),
-            sort: Order::default(),
             widths: Widths {
                 sidebar: settings.sidebar_width,
                 search: settings.search_width,
@@ -631,7 +629,7 @@ impl Colet {
         self.pending.insert(id, request);
         self.state.load(id, request, quiet);
         let c = &self.state.columns[index];
-        let sort = self.sort;
+        let sort = self.settings.sort;
         let backend = self.backend.clone();
         let task: Task<Listing> = match c.kind {
             Kind::Home => {
@@ -720,17 +718,17 @@ impl Colet {
 
     /// Sorts by `by`, keeping the way it runs.
     pub fn set_sort(&mut self, by: Sort, cx: &mut Context<Self>) {
-        self.set_order(Order { by, ..self.sort }, cx);
+        self.set_order(Order { by, ..self.settings.sort }, cx);
     }
 
     pub fn set_direction(&mut self, descending: bool, cx: &mut Context<Self>) {
-        self.set_order(Order { descending, ..self.sort }, cx);
+        self.set_order(Order { descending, ..self.settings.sort }, cx);
     }
 
     fn set_order(&mut self, order: Order, cx: &mut Context<Self>) {
         self.sort_open = false;
-        if order != self.sort {
-            self.sort = order;
+        if order != self.settings.sort {
+            self.update_settings(|s| s.sort = order, cx);
             self.refresh(cx);
         }
         cx.notify();

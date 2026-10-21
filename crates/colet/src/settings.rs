@@ -1,12 +1,14 @@
-//! What Colet keeps between runs: the widths, the favorites, the saved searches, which Everything to ask,
-//! the theme, and where the window was. Searches typed, history and the columns open are not kept.
+//! What Colet keeps between runs: the widths, the favorites, the saved searches, the sort order, which
+//! Everything to ask, the theme, and where the window was. Searches typed, history and the columns open
+//! are not kept.
 use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde::{Deserialize, Serialize};
+use colet_core::entry::{Order, Sort};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::app::{COLUMN_WIDTHS, SIDEBAR_WIDTHS};
 
@@ -68,6 +70,9 @@ pub struct Settings {
     pub sidebar_width: f32,
     pub favorites: Vec<String>,
     pub saved_searches: Vec<SavedSearch>,
+    /// The one order the folders and the search results share.
+    #[serde(with = "order")]
+    pub sort: Order,
     pub theme: Theme,
     pub window: Option<Placement>,
 }
@@ -80,6 +85,7 @@ impl Default for Settings {
             sidebar_width: 240.,
             favorites: Vec::new(),
             saved_searches: Vec::new(),
+            sort: Order::default(),
             theme: Theme::System,
             window: None,
         }
@@ -110,6 +116,37 @@ impl Settings {
     pub fn is_favorite(&self, path: &str) -> bool {
         let key = colet_core::paths::path_key(path);
         self.favorites.iter().any(|f| colet_core::paths::path_key(f) == key)
+    }
+}
+
+/// The sort order as `{"by": "size", "descending": true}`, read leniently: what is missing or not known
+/// (a file edited by hand, or written by a later Colet) goes back to its default alone, rather than have
+/// the whole file taken for broken.
+mod order {
+    use super::*;
+
+    fn name(by: Sort) -> &'static str {
+        match by {
+            Sort::Name => "name",
+            Sort::Size => "size",
+            Sort::Modified => "modified",
+        }
+    }
+
+    #[derive(Serialize)]
+    struct Kept {
+        by: &'static str,
+        descending: bool,
+    }
+
+    pub fn serialize<S: Serializer>(order: &Order, serializer: S) -> Result<S::Ok, S::Error> {
+        Kept { by: name(order.by), descending: order.descending }.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Order, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let by = value["by"].as_str().and_then(|by| Sort::ALL.into_iter().find(|s| name(*s) == by));
+        Ok(Order { by: by.unwrap_or_default(), descending: value["descending"].as_bool().unwrap_or_default() })
     }
 }
 
@@ -270,6 +307,35 @@ mod tests {
         assert_eq!(settings.theme, Theme::Dark);
         let written = serde_json::to_string(&Settings { theme: Theme::Light, ..Settings::default() }).unwrap();
         assert!(written.contains(r#""theme":"light""#), "{written}");
+    }
+
+    #[test]
+    fn keeps_the_sort_order_chosen() {
+        let order = Order { by: Sort::Modified, descending: true };
+        let written = serde_json::to_string(&Settings { sort: order, ..Settings::default() }).unwrap();
+        assert!(written.contains(r#""sort":{"by":"modified","descending":true}"#), "{written}");
+        assert_eq!(serde_json::from_str::<Settings>(&written).unwrap().sort, order);
+    }
+
+    #[test]
+    fn sorts_by_name_from_a_to_z_when_the_file_keeps_no_order() {
+        let settings: Settings = serde_json::from_str(r#"{"favorites":["D:\\"]}"#).unwrap();
+        assert_eq!(settings.sort, Order::default());
+        assert_eq!(settings.favorites, [r"D:\"]);
+    }
+
+    #[test]
+    fn puts_back_only_what_it_cannot_read_of_the_sort_order() {
+        let sort = |json: &str| serde_json::from_str::<Settings>(json).unwrap().sort;
+        assert_eq!(sort(r#"{"sort":{"by":"size"}}"#), Order { by: Sort::Size, descending: false });
+        assert_eq!(sort(r#"{"sort":{"descending":true}}"#), Order { by: Sort::Name, descending: true });
+        assert_eq!(sort(r#"{"sort":{"by":"type","descending":true}}"#), Order { by: Sort::Name, descending: true });
+        assert_eq!(sort(r#"{"sort":{"by":"size","descending":"yes"}}"#), Order { by: Sort::Size, descending: false });
+        assert_eq!(sort(r#"{"sort":"size"}"#), Order::default());
+        assert_eq!(sort(r#"{"sort":null}"#), Order::default());
+        // The rest of the file is read as ever.
+        let settings: Settings = serde_json::from_str(r#"{"sort":3,"theme":"dark"}"#).unwrap();
+        assert_eq!((settings.sort, settings.theme), (Order::default(), Theme::Dark));
     }
 
     #[test]
