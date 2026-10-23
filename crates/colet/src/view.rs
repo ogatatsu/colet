@@ -672,7 +672,7 @@ impl Colet {
         if c.entries.is_empty() {
             let (name, text) = match kind {
                 Kind::Search => ("search", "一致する項目はありません"),
-                Kind::Home => ("hard-drive", "ドライブもお気に入りもありません"),
+                Kind::Home => ("hard-drive", "場所もお気に入りもありません"),
                 Kind::Folder if c.total > 0 && c.filter.is_some() => ("funnel", "一致する項目はありません"),
                 Kind::Folder => ("folder", "このフォルダーは空です"),
             };

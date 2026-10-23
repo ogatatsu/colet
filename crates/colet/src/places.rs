@@ -28,7 +28,20 @@ pub enum Dialog {
     Preferences,
 }
 
-/// Home's rows: the favorites, the saved searches, then the drives, each place once.
+/// The places home lists: the drives in letter order, then the other folders Everything's index starts
+/// from, by path and named by it. An indexed volume, `C:`, is the drive `C:\`.
+pub fn places(drives: Vec<Entry>, indexed: Vec<String>) -> Vec<Entry> {
+    let mut seen: std::collections::HashSet<String> = drives.iter().map(|e| path_key(&e.path)).collect();
+    let mut others: Vec<String> = indexed
+        .into_iter()
+        .map(|path| if path.len() == 2 && path.ends_with(':') { format!("{path}\\") } else { path })
+        .filter(|path| seen.insert(path_key(path)))
+        .collect();
+    others.sort_by_key(|path| path.to_lowercase());
+    drives.into_iter().chain(others.iter().map(|path| Entry::folder(path, path))).collect()
+}
+
+/// Home's rows: the favorites, the saved searches, then the places, each place once.
 pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
     let favorites = settings.favorites.iter().map(|path| Entry::folder(path, folder_name(path)));
     let searches = settings.saved_searches.iter().map(|s| Entry {
@@ -47,7 +60,7 @@ pub fn home_groups<'a>(settings: &Settings, entries: &'a [Entry]) -> Vec<(&'stat
     [
         ("お気に入り", entries.iter().filter(favorite).collect::<Vec<_>>()),
         ("保存した検索", entries.iter().filter(|e| saved_query(&e.path).is_some()).collect()),
-        ("ドライブ", entries.iter().filter(|e| saved_query(&e.path).is_none() && !favorite(e)).collect()),
+        ("場所", entries.iter().filter(|e| saved_query(&e.path).is_none() && !favorite(e)).collect()),
     ]
     .into_iter()
     .filter(|(_, rows)| !rows.is_empty())
@@ -320,7 +333,7 @@ impl Colet {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Placement, SavedSearch, Settings, home_entries, restore_bounds};
+    use super::{Entry, Placement, SavedSearch, Settings, home_entries, places, restore_bounds};
     use gpui_kit::{Bounds, DisplayId, point, px, size};
 
     #[test]
@@ -360,6 +373,18 @@ mod tests {
         let rows: Vec<(&str, &str)> = entries.iter().map(|e| (e.path.as_str(), e.name.as_str())).collect();
         assert_eq!(rows, [(r"D:\Work", "Work"), (r"C:\", "C:"), ("search:ext:pdf", "PDF"), ("search:cat\0画像", "猫"), (r"D:\", "D:")]);
         assert!(!entries[2].directory);
+    }
+
+    #[test]
+    fn lists_the_drives_then_the_other_index_roots_by_path_each_once() {
+        let drives = vec![Entry::folder(r"C:\", "OS (C:)"), Entry::folder(r"D:\", "データ (D:)")];
+        let indexed = vec!["C:".into(), r"\\nas\Share".into(), r"d:\Projects".into(), "E:".into(), r"D:\".into(), r"\\NAS\share".into()];
+        let rows: Vec<(String, String)> = places(drives, indexed).into_iter().map(|e| (e.path, e.name)).collect();
+        let at = |path: &str, name: &str| (path.to_string(), name.to_string());
+        assert_eq!(
+            rows,
+            [at(r"C:\", "OS (C:)"), at(r"D:\", "データ (D:)"), at(r"\\nas\Share", r"\\nas\Share"), at(r"d:\Projects", r"d:\Projects"), at(r"E:\", r"E:\")]
+        );
     }
 
     #[test]

@@ -79,6 +79,51 @@ unsafe fn open(instance: Option<&str>) -> Handle {
     unsafe { Everything3_ConnectW(name.as_ref().map_or(ptr::null(), |n| n.as_ptr())) }
 }
 
+/// The most index roots it reads.
+const ROOTS: usize = 1000;
+
+/// The folders Everything's index starts from (`root:`): its volumes, as `C:`, and the folders and shares
+/// added to it. Asked on a client of its own and let go, so the last search and its watch are left alone.
+pub fn roots() -> Result<Vec<String>, String> {
+    unsafe {
+        let client = open(None);
+        if client.is_null() {
+            return Err("Everything 1.5に接続できません".into());
+        }
+        let roots = indexed_roots(client);
+        Everything3_DestroyClient(client);
+        roots
+    }
+}
+
+unsafe fn indexed_roots(client: Handle) -> Result<Vec<String>, String> {
+    unsafe {
+        if Everything3_IsDBLoaded(client) == 0 {
+            return Err("Everythingの索引を準備中です".into());
+        }
+        let state = Everything3_CreateSearchState();
+        if state.is_null() {
+            return Err("検索状態を作成できません".into());
+        }
+        Everything3_SetSearchTextW(state, wide("root:").as_ptr());
+        Everything3_AddSearchPropertyRequest(state, FULL_PATH);
+        Everything3_SetSearchViewportCount(state, ROOTS);
+        let result = Everything3_Search(client, state);
+        let roots = if result.is_null() {
+            Err(format!("Everything検索に失敗しました (0x{:08X})", Everything3_GetLastError()))
+        } else {
+            let count = Everything3_GetResultListViewportCount(result);
+            let roots = (0..count)
+                .map(|index| text(|buf, size| Everything3_GetResultFullPathNameW(result, index, buf, size)))
+                .collect();
+            Everything3_DestroyResultList(result);
+            Ok(roots)
+        };
+        Everything3_DestroySearchState(state);
+        roots
+    }
+}
+
 /// What a watch has heard: that the results changed, and the error it stopped on (0 for none).
 #[derive(Default)]
 struct News {
@@ -419,6 +464,14 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    #[ignore = "needs a running Everything 1.5"]
+    fn names_the_index_roots_with_the_volumes_as_letters() {
+        let _alone = alone();
+        let roots = roots().unwrap();
+        assert!(roots.iter().any(|r| r.len() == 2 && r.ends_with(':')), "{roots:?}");
     }
 
     #[test]

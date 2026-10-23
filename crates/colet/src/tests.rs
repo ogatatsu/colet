@@ -35,6 +35,8 @@ use crate::{
 #[derive(Default)]
 struct Fake {
     roots: Vec<Entry>,
+    /// The folders Everything's index starts from, none while searches fail.
+    indexed: Mutex<Vec<String>>,
     folders: Mutex<HashMap<String, Vec<Entry>>>,
     results: Mutex<Vec<Entry>>,
     /// Each search sent: its query and where its page starts.
@@ -83,6 +85,10 @@ impl Fake {
 impl Backend for Fake {
     fn roots(&self) -> Vec<Entry> {
         self.roots.clone()
+    }
+
+    fn indexed_roots(&self) -> Vec<String> {
+        if self.failing.lock().unwrap().is_some() { Vec::new() } else { self.indexed.lock().unwrap().clone() }
     }
 
     fn list(&self, path: &str, sort: Order, _: &AtomicBool) -> Result<Vec<Entry>, String> {
@@ -501,6 +507,23 @@ fn reports_a_failed_search_as_one_and_retries(cx: &mut TestAppContext) {
     ui.click(cx, ("retry", id));
     assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 1);
     assert!(ui.read(cx, |v| matches!(v.engine, Engine::Connected(_))));
+}
+
+#[gpui_kit::test]
+fn adds_the_index_roots_to_home_once_a_search_reaches_everything(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        indexed: Mutex::new(vec!["D:".into(), r"\\nas\share".into()]),
+        ..Fake::default().with_results(vec![file(r"D:\x.txt")])
+    });
+    *fake.failing.lock().unwrap() = Some("Everything 1.5に接続できません。".into());
+    let ui = open(cx, fake.clone());
+    let home = |cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>());
+    assert_eq!(home(cx), [r"D:\"]);
+    *fake.failing.lock().unwrap() = None;
+    ui.input(cx, "x");
+    assert!(ui.read(cx, |v| matches!(v.engine, Engine::Connected(_))));
+    assert_eq!(home(cx), [r"D:\", r"\\nas\share"]);
 }
 
 #[gpui_kit::test]

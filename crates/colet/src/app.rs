@@ -26,7 +26,7 @@ use crate::{
     backend::{self, Search},
     icons::Icons,
     ops::{HistoryEntry, Menu, Running},
-    places::{Dialog, home_entries, home_groups},
+    places::{Dialog, home_entries, home_groups, places},
     settings::{LoadError, Saver, Settings, everything_query},
     state::{ColumnId, Kind, State},
     theme::Palette,
@@ -643,7 +643,7 @@ impl Colet {
             Kind::Home => {
                 let settings = self.settings.clone();
                 cx.background_executor().spawn(async move {
-                    let entries = home_entries(&settings, backend.roots());
+                    let entries = home_entries(&settings, places(backend.roots(), backend.indexed_roots()));
                     let total = entries.len();
                     Ok((entries, total, None))
                 })
@@ -693,7 +693,16 @@ impl Colet {
                 self.state.page(id, request, entries, total, offset, &self.departed);
                 // One left behind still ends the wait for the connection.
                 if let Some(name) = connection.filter(|_| current || matches!(self.engine, Engine::Connecting)) {
+                    let reached = !matches!(self.engine, Engine::Connected(_));
                     self.engine = Engine::Connected(name);
+                    // Home, listed while Everything could not be asked, gains the folders its index starts from.
+                    if reached {
+                        let homes: Vec<ColumnId> =
+                            self.state.columns.iter().filter(|c| c.kind == Kind::Home).map(|c| c.id).collect();
+                        for home in homes {
+                            self.load(home, 0, true, cx);
+                        }
+                    }
                 }
             }
             Err(error) => {

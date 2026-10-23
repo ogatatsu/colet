@@ -8,7 +8,7 @@ use std::sync::{
 use crate::settings::{self, LoadError, Settings};
 use colet_core::{
     entry::{Entry, Order},
-    everything::{Page, SearchSession},
+    everything::{self, Page, SearchSession},
     folders,
     operations::{self, Event, Request},
     shell::{self, MenuThread, Owner, ShowMenu, clipboard::{self, ClipboardFiles}},
@@ -27,6 +27,8 @@ pub struct Search {
 
 pub trait Backend: Send + Sync + 'static {
     fn roots(&self) -> Vec<Entry>;
+    /// The folders Everything's index starts from; none while it cannot be asked.
+    fn indexed_roots(&self) -> Vec<String>;
     fn list(&self, path: &str, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String>;
     /// The results and the name of what they came from.
     fn search(&self, search: Search) -> Result<(Page, String), String>;
@@ -70,6 +72,12 @@ pub struct Live {
 impl Backend for Live {
     fn roots(&self) -> Vec<Entry> {
         folders::roots()
+    }
+
+    fn indexed_roots(&self) -> Vec<String> {
+        // Held so it never connects as a search does.
+        let Ok(_session) = self.session.lock() else { return Vec::new() };
+        everything::roots().unwrap_or_default()
     }
 
     fn list(&self, path: &str, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
