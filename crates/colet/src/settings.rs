@@ -1,5 +1,5 @@
-//! What Colet keeps between runs: the widths, the favorites, the saved searches, the sort order, which
-//! Everything to ask, the theme, and where the window was. Searches typed, history and the columns open
+//! What Colet keeps between runs: the widths, the favorites, the saved searches, the search filters and
+//! the one chosen, the sort order, which Everything to ask, the theme, and where the window was. Searches typed, history and the columns open
 //! are not kept.
 use std::{
     path::{Path, PathBuf},
@@ -18,11 +18,32 @@ use crate::app::{COLUMN_WIDTHS, SIDEBAR_WIDTHS};
 pub struct SavedSearch {
     pub name: String,
     pub query: String,
+    /// The search filter it was saved with, by name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
 }
 
 impl SavedSearch {
     pub fn label(&self) -> &str {
         if self.name.is_empty() { &self.query } else { &self.name }
+    }
+}
+
+/// An Everything query a search can be narrowed by, one at a time, found by its name.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SearchFilter {
+    pub name: String,
+    pub query: String,
+}
+
+/// What Everything is asked: the query narrowed by the filter's, each in `< >` so an `|` in one does not
+/// reach into the other. A filter alone asks for all it lets through.
+pub fn everything_query(query: &str, filter: Option<&str>) -> String {
+    match filter {
+        None => query.to_owned(),
+        Some(filter) if query.trim().is_empty() => format!("<{filter}>"),
+        Some(filter) => format!("<{filter}> <{query}>"),
     }
 }
 
@@ -70,6 +91,9 @@ pub struct Settings {
     pub sidebar_width: f32,
     pub favorites: Vec<String>,
     pub saved_searches: Vec<SavedSearch>,
+    pub filters: Vec<SearchFilter>,
+    /// The filter the next search is narrowed by, by name.
+    pub filter: Option<String>,
     /// The one order the folders and the search results share.
     #[serde(with = "order")]
     pub sort: Order,
@@ -85,6 +109,8 @@ impl Default for Settings {
             sidebar_width: 240.,
             favorites: Vec::new(),
             saved_searches: Vec::new(),
+            filters: Vec::new(),
+            filter: None,
             sort: Order::default(),
             theme: Theme::System,
             window: None,
@@ -99,9 +125,21 @@ impl Settings {
         self.column_width = clamp(self.column_width, COLUMN_WIDTHS);
         self.search_width = clamp(self.search_width, COLUMN_WIDTHS);
         self.sidebar_width = clamp(self.sidebar_width, SIDEBAR_WIDTHS);
-        // A search is found by its query, and a favorite by its path: one of each, none empty.
+        // A filter is found by its name, a search by its query and filter, and a favorite by its path: one
+        // of each, none empty. What names a filter gone goes without it.
+        let mut names = std::collections::HashSet::new();
+        self.filters.retain(|f| !f.name.trim().is_empty() && !f.query.trim().is_empty() && names.insert(f.name.clone()));
+        let known = |name: &Option<String>| name.as_ref().is_none_or(|name| names.contains(name));
+        if !known(&self.filter) {
+            self.filter = None;
+        }
+        for search in &mut self.saved_searches {
+            if !known(&search.filter) {
+                search.filter = None;
+            }
+        }
         let mut seen = std::collections::HashSet::new();
-        self.saved_searches.retain(|s| !s.query.trim().is_empty() && seen.insert(s.query.clone()));
+        self.saved_searches.retain(|s| !s.query.trim().is_empty() && seen.insert((s.query.clone(), s.filter.clone())));
         let mut seen = std::collections::HashSet::new();
         self.favorites.retain(|f| !f.is_empty() && seen.insert(colet_core::paths::path_key(f)));
         if self.window.is_some_and(|w| !(w.width >= 200. && w.height >= 150.)) {
@@ -109,8 +147,13 @@ impl Settings {
         }
     }
 
-    pub fn saved(&self, query: &str) -> Option<&SavedSearch> {
-        self.saved_searches.iter().find(|s| s.query == query)
+    pub fn saved(&self, query: &str, filter: Option<&str>) -> Option<&SavedSearch> {
+        self.saved_searches.iter().find(|s| s.query == query && s.filter.as_deref() == filter)
+    }
+
+    /// The query of the filter named `name`, if there is one.
+    pub fn filter_query(&self, name: &str) -> Option<&str> {
+        self.filters.iter().find(|f| f.name == name).map(|f| f.query.as_str())
     }
 
     pub fn is_favorite(&self, path: &str) -> bool {
@@ -347,7 +390,7 @@ mod tests {
 
     #[test]
     fn keeps_one_of_each_saved_search_and_favorite_and_none_empty() {
-        let search = |name: &str, query: &str| SavedSearch { name: name.into(), query: query.into() };
+        let search = |name: &str, query: &str| SavedSearch { name: name.into(), query: query.into(), filter: None };
         let mut settings = Settings {
             saved_searches: vec![search("PDF", "ext:pdf"), search("", "  "), search("again", "ext:pdf"), search("", "dm:today")],
             favorites: vec![r"D:\Work".into(), r"d:\work".into(), String::new()],
@@ -357,6 +400,46 @@ mod tests {
         assert_eq!(settings.saved_searches, [search("PDF", "ext:pdf"), search("", "dm:today")]);
         assert_eq!(settings.favorites, [r"D:\Work"]);
         assert_eq!(settings.saved_searches[1].label(), "dm:today");
+    }
+
+    #[test]
+    fn keeps_one_filter_of_each_name_and_lets_go_of_the_names_of_those_gone() {
+        let filter = |name: &str, query: &str| SearchFilter { name: name.into(), query: query.into() };
+        let search = |query: &str, filter: Option<&str>| SavedSearch { name: String::new(), query: query.into(), filter: filter.map(Into::into) };
+        let mut settings = Settings {
+            filters: vec![filter("画像", "ext:jpg;png"), filter("", "ext:mp3"), filter("動画", " "), filter("画像", "ext:gif")],
+            filter: Some("動画".into()),
+            saved_searches: vec![search("cat", Some("画像")), search("cat", None), search("cat", Some("動画")), search("cat", Some("画像"))],
+            ..Settings::default()
+        };
+        settings.normalize();
+        assert_eq!(settings.filters, [filter("画像", "ext:jpg;png")]);
+        assert_eq!(settings.filter, None);
+        // The one saved with a filter gone is the one saved with none, already there.
+        assert_eq!(settings.saved_searches, [search("cat", Some("画像")), search("cat", None)]);
+        assert!(settings.saved("cat", Some("画像")).is_some());
+        assert_eq!(settings.filter_query("画像"), Some("ext:jpg;png"));
+    }
+
+    #[test]
+    fn keeps_the_filters_and_the_one_chosen() {
+        let settings = Settings {
+            filters: vec![SearchFilter { name: "画像".into(), query: "ext:jpg".into() }],
+            filter: Some("画像".into()),
+            saved_searches: vec![SavedSearch { name: String::new(), query: "cat".into(), filter: None }],
+            ..Settings::default()
+        };
+        let written = serde_json::to_string(&settings).unwrap();
+        // One saved with no filter is written as before.
+        assert!(written.contains(r#"{"name":"","query":"cat"}"#), "{written}");
+        assert_eq!(serde_json::from_str::<Settings>(&written).unwrap(), settings);
+    }
+
+    #[test]
+    fn asks_everything_for_the_query_within_the_filter() {
+        assert_eq!(everything_query("cat", None), "cat");
+        assert_eq!(everything_query("cat | dog", Some("ext:jpg;png")), "<ext:jpg;png> <cat | dog>");
+        assert_eq!(everything_query(" ", Some("ext:jpg")), "<ext:jpg>");
     }
 
     #[test]

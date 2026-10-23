@@ -427,7 +427,9 @@ impl Colet {
         let saved = saved_query(&entry.path);
         // Home lights the saved search that is running.
         let highlighted = c.highlight.as_ref() == Some(&entry.path)
-            || saved.is_some_and(|q| !self.state.query.is_empty() && q == self.state.query);
+            || saved.is_some_and(|(q, f)| self.state.pinned() && q == self.state.query && f == self.state.search_filter.as_deref());
+        // The filter a saved search runs within, faint beside its name.
+        let within = saved.and_then(|(_, f)| f).map(str::to_owned);
         // On the clipboard, cut or copied, whoever put it there.
         let held = !self.held.is_empty() && self.held.contains(&path_key(&entry.path));
         let cut = held && self.clipboard.cut;
@@ -509,9 +511,18 @@ impl Colet {
                     .child(
                         div()
                             .w_full()
-                            .truncate()
-                            .when(barred && highlighted, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
-                            .child(with_marks(&entry.name, &entry.marks.name, mark, None)),
+                            .flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .when(barred && highlighted, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
+                                    .child(with_marks(&entry.name, &entry.marks.name, mark, None)),
+                            )
+                            .when_some(within, |d, filter| {
+                                d.child(div().flex_shrink_0().max_w(px(96.)).truncate().text_size(px(12.)).text_color(muted).child(filter))
+                            }),
                     )
                     .when(kind == Kind::Search, |d| {
                         d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(with_marks(&entry.parent, &entry.marks.parent, mark, Some(ink))))
@@ -860,7 +871,7 @@ impl Colet {
                     .child(div().text_size(px(12.)).text_color(p.text_faint).child(count))
                     .child({
                         let kept = match kind {
-                            Kind::Search => self.settings.saved(&self.state.query).is_some(),
+                            Kind::Search => self.settings.saved(&self.state.query, self.state.search_filter.as_deref()).is_some(),
                             _ => self.settings.is_favorite(&star_path),
                         };
                         let label = match (kind, kept) {
@@ -884,8 +895,8 @@ impl Colet {
                             .child(icon(if kept { "star-fill" } else { "star" }, 14., if kept { p.accent } else { p.text_muted }))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if kind == Kind::Search {
-                                    let query = this.state.query.clone();
-                                    this.toggle_saved(&query, cx);
+                                    let (query, filter) = (this.state.query.clone(), this.state.search_filter.clone());
+                                    this.toggle_saved(&query, filter, cx);
                                 } else {
                                     this.toggle_favorite(&star_path, cx);
                                 }
@@ -1024,6 +1035,7 @@ impl Colet {
         let clear_focus = self.stop("clear-search", cx);
         let sort_lines = if self.sort_open { self.render_lines(cx) } else { Vec::new() };
         let sort_keyed = keyed(&self.sort_focus, window);
+        let filter_button = self.filter_button(window, cx);
         div()
             .h(px(48.))
             .flex_none()
@@ -1054,9 +1066,12 @@ impl Colet {
                             cx.stop_propagation();
                             this.leave_search(window, cx);
                         }))
+                        // Esc empties the field, then lets go of the filter, and home shows alone.
                         .on_action(cx.listener(|this, _: &input::Escape, window, cx| {
                             if !this.state.query.is_empty() {
                                 this.clear_search(window, cx);
+                            } else if this.settings.filter.is_some() {
+                                this.choose_filter(None, cx);
                             }
                         }))
                         .when(has_query, |b| {
@@ -1081,6 +1096,7 @@ impl Colet {
                         }),
                 ),
             )
+            .child(filter_button)
             .child(
                 div()
                     .relative()
@@ -1170,6 +1186,89 @@ impl Colet {
             .into_any_element()
     }
 
+    /// The search filters' button beside the field, naming the one chosen in the accent color, and its menu.
+    fn filter_button(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let focus = self.stop("search-filter", cx);
+        let chosen = self.settings.filter.clone();
+        let lines = if self.filter_open { self.render_lines(cx) } else { Vec::new() };
+        let on = chosen.is_some();
+        let label = format!("検索フィルター: {}", chosen.as_deref().unwrap_or("なし"));
+        div()
+            .relative()
+            .child(
+                frame(p, keyed(&focus, window)).m(px(-3.)).child(
+                    div()
+                        .id("search-filter")
+                        .track_focus(&focus)
+                        .key_context(SORT)
+                        .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_filter_menu(true, window, cx)))
+                        .role(Role::Button)
+                        .aria_label(label.clone())
+                        .aria_expanded(self.filter_open)
+                        .h(px(32.))
+                        .max_w(px(200.))
+                        .pl(px(10.))
+                        .pr_2()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .text_size(px(12.))
+                        .text_color(if on { p.accent } else { p.text_muted })
+                        .bg(p.surface)
+                        .border_1()
+                        .border_color(if on { p.accent } else { p.border_strong })
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .hover(|d| d.bg(p.hover))
+                        .tip(p, format!("{label}（Ctrl+Shift+F）"))
+                        .child(icon("funnel", 14., if on { p.accent } else { p.text_muted }))
+                        .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| "フィルター".into())))
+                        .child(icon("chevron-down", 14., p.text_faint))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if this.filter_open {
+                                this.close_menus(true, window, cx);
+                            } else {
+                                this.open_filter_menu(false, window, cx);
+                            }
+                        }))
+                        .test_support(),
+                ),
+            )
+            .when(self.filter_open, |d| {
+                d.child(
+                    deferred(
+                        div()
+                            .id("search-filter-menu")
+                            .role(Role::Menu)
+                            .aria_label("検索フィルター")
+                            .track_focus(&self.menu_focus)
+                            .key_context(MENU)
+                            .on_action(cx.listener(|this, _: &MenuUp, _, cx| this.move_cursor(-1, cx)))
+                            .on_action(cx.listener(|this, _: &MenuDown, _, cx| this.move_cursor(1, cx)))
+                            .on_action(cx.listener(|this, _: &MenuConfirm, window, cx| this.confirm_cursor(window, cx)))
+                            .on_action(cx.listener(|this, _: &CloseMenu, window, cx| this.close_menus(true, window, cx)))
+                            .absolute()
+                            .top(px(36.))
+                            .right_0()
+                            .min_w(px(200.))
+                            .max_w(px(320.))
+                            .p_1()
+                            .bg(p.raised)
+                            .border_1()
+                            .border_color(p.border_strong)
+                            .rounded(px(8.))
+                            .shadow_lg()
+                            .occlude()
+                            .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menus(false, window, cx)))
+                            .children(lines),
+                    )
+                    .with_priority(1),
+                )
+            })
+            .into_any_element()
+    }
+
     /// The trail from the search or the drive down to the deepest folder; when it outgrows the bar, the
     /// crumbs furthest from the deepest fold into a menu so the nearest stay readable.
     fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -1178,7 +1277,12 @@ impl Colet {
         let results = self.state.pinned();
         let mut crumbs: Vec<(usize, String, String)> = Vec::new();
         if results {
-            crumbs.push((1, "検索結果".into(), self.state.query.clone()));
+            let searched = match (&self.state.search_filter, self.state.query.as_str()) {
+                (Some(filter), "") => format!("フィルター: {filter}"),
+                (Some(filter), query) => format!("{query}（フィルター: {filter}）"),
+                (None, query) => query.to_owned(),
+            };
+            crumbs.push((1, "検索結果".into(), searched));
         }
         for (index, c) in self.state.columns.iter().enumerate().filter(|(_, c)| c.kind == Kind::Folder) {
             crumbs.push((index, folder_name(&c.path).to_owned(), c.path.clone()));
@@ -1587,7 +1691,10 @@ impl Colet {
                                 .hover(|d| d.bg(p.hover))
                                 .child(div().text_color(p.accent).font_family("Consolas").child(query))
                                 .child(label)
-                                .on_click(cx.listener(move |this, _, window, cx| this.search_for(query, window, cx)))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let filter = this.settings.filter.clone();
+                                    this.search_for(query, filter, window, cx)
+                                }))
                                 .test_support(),
                         )
                     },
@@ -1847,7 +1954,8 @@ impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.search_focused = self.search.read(cx).focus_handle(cx).is_focused(window);
         self.follow_focus(window, cx);
-        let open = [self.dialog.is_some(), self.menu.is_some(), self.sort_open, self.history_open, self.crumb_menu_open];
+        let open =
+            [self.dialog.is_some(), self.menu.is_some(), self.sort_open || self.filter_open, self.history_open, self.crumb_menu_open];
         Tips::set_open(open.iter().enumerate().fold(0, |bits, (i, &o)| bits | u8::from(o) << i), cx);
         self.scroll_rows();
         self.reveal(window);
@@ -1870,6 +1978,11 @@ impl Render for Colet {
                     input.focus(window, cx);
                     input.select_all(window, cx);
                 });
+            }))
+            .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| {
+                if this.dialog.is_none() {
+                    this.open_filter_menu(true, window, cx);
+                }
             }))
             .on_action(cx.listener(|this, _: &RefreshAll, _, cx| this.refresh(cx)))
             .on_action(cx.listener(|this, _: &SaveCurrent, _, cx| {

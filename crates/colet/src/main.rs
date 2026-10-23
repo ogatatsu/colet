@@ -9,6 +9,7 @@ mod menus;
 mod ops;
 mod places;
 mod reveal;
+mod search_filters;
 mod settings;
 mod state;
 #[cfg(test)]

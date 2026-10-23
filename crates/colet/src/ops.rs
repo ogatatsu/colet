@@ -296,7 +296,7 @@ impl Colet {
         if picked.is_empty() {
             return;
         }
-        let text = picked.iter().map(|p| saved_query(p).unwrap_or(p)).collect::<Vec<_>>().join("\r\n");
+        let text = picked.iter().map(|p| saved_query(p).map_or(p.as_str(), |(query, _)| query)).collect::<Vec<_>>().join("\r\n");
         let (backend, owner) = (self.backend.clone(), self.owner);
         let done = format!("{} 項目のパスをコピーしました", picked.len());
         self.in_background(move || backend.copy_text(&text, owner), Some(done), cx);
@@ -318,10 +318,10 @@ impl Colet {
         let (picked, reasons, entries) = (self.picked(), self.reasons(), self.picked_entries());
         self.menu = None;
         if let [path] = picked.as_slice()
-            && let Some(query) = saved_query(path)
+            && let Some((query, filter)) = saved_query(path)
         {
-            let query = query.to_owned();
-            self.open_edit(&query, window, cx);
+            let (query, filter) = (query.to_owned(), filter.map(str::to_owned));
+            self.open_edit(&query, filter.as_deref(), window, cx);
             return;
         }
         if picked.is_empty() {

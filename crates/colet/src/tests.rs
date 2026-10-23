@@ -26,7 +26,8 @@ use crate::{
     app::{Colet, Engine},
     backend::{Backend, Search},
     ops::ItemStatus,
-    settings::{LoadError, SavedSearch, Settings, Theme},
+    places::Dialog,
+    settings::{LoadError, SavedSearch, SearchFilter, Settings, Theme},
     theme::Palette,
     state::{ColumnId, Kind, search_key},
 };
@@ -1100,11 +1101,11 @@ fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppC
     ui.input(cx, "ext:pdf");
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.click(cx, ("star", results));
-    assert_eq!(fake.settings.lock().unwrap().saved_searches, [SavedSearch { name: String::new(), query: "ext:pdf".into() }]);
+    assert_eq!(fake.settings.lock().unwrap().saved_searches, [SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None }]);
     ui.press(cx, "ctrl-f");
     ui.press(cx, "escape");
     assert_eq!(ui.field(cx), "");
-    ui.click(cx, row(&search_key("ext:pdf")));
+    ui.click(cx, row(&search_key("ext:pdf", None)));
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(ui.home_focused(cx));
@@ -1118,7 +1119,7 @@ fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppC
 #[gpui_kit::test]
 fn unsaves_a_search_with_ctrl_d_and_says_so(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
-    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into() }];
+    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None }];
     let ui = open(cx, fake.clone());
     ui.input(cx, "ext:pdf");
     ui.press(cx, "ctrl-d");
@@ -1159,11 +1160,11 @@ fn saves_afresh_once_a_broken_file_is_put_aside(cx: &mut TestAppContext) {
 fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
     fake.settings.lock().unwrap().saved_searches = vec![
-        SavedSearch { name: String::new(), query: "ext:pdf".into() },
-        SavedSearch { name: String::new(), query: "dm:today".into() },
+        SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None },
+        SavedSearch { name: String::new(), query: "dm:today".into(), filter: None },
     ];
     let ui = open(cx, fake.clone());
-    ui.click(cx, row(&search_key("ext:pdf")));
+    ui.click(cx, row(&search_key("ext:pdf", None)));
     ui.press(cx, "f2");
     let (name, query) = ui.read(cx, |v| match &v.dialog {
         Some(crate::places::Dialog::EditSearch { name, query, .. }) => (name.clone(), query.clone()),
@@ -1181,13 +1182,13 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     assert!(ui.read(cx, |v| v.dialog.is_none()));
     assert_eq!(
         fake.settings.lock().unwrap().saved_searches[0],
-        SavedSearch { name: "PDF".into(), query: "ext:pdf dm:thisweek".into() }
+        SavedSearch { name: "PDF".into(), query: "ext:pdf dm:thisweek".into(), filter: None }
     );
     // The search showing follows its new query.
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf dm:thisweek");
     assert_eq!(ui.field(cx), "ext:pdf dm:thisweek");
     // Escape closes the dialog without a change.
-    ui.click(cx, row(&search_key("ext:pdf dm:thisweek")));
+    ui.click(cx, row(&search_key("ext:pdf dm:thisweek", None)));
     ui.press(cx, "f2");
     ui.press(cx, "escape");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
@@ -1590,7 +1591,7 @@ fn marks_under_the_crumbs_what_is_on_screen_while_some_are_folded(cx: &mut TestA
 #[gpui_kit::test]
 fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_shell(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
-    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into() }];
+    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None }];
     let ui = open(cx, fake.clone());
     ui.press(cx, "down");
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "");
@@ -1601,7 +1602,7 @@ fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_she
     assert!(fake.opened.lock().unwrap().is_empty());
     ui.press(cx, "ctrl-f");
     ui.press(cx, "escape");
-    ui.act(cx, |window, cx| window.double_click(row(&search_key("ext:pdf")), cx));
+    ui.act(cx, |window, cx| window.double_click(row(&search_key("ext:pdf", None)), cx));
     settle(cx);
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(fake.opened.lock().unwrap().is_empty());
@@ -1616,7 +1617,7 @@ fn brings_homes_focused_row_into_view_across_all_three_headings(cx: &mut TestApp
     {
         let mut settings = fake.settings.lock().unwrap();
         settings.favorites = vec![r"D:\favorite".into()];
-        settings.saved_searches = (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}") }).collect();
+        settings.saved_searches = (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None }).collect();
     }
     let ui = open(cx, fake);
     ui.press(cx, "down");
@@ -1933,4 +1934,190 @@ fn keeps_the_arrows_and_enter_in_a_filter_field_to_itself(cx: &mut TestAppContex
     assert!(ui.columns_focused(cx));
     assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
     assert!(fake.opened.lock().unwrap().is_empty());
+}
+
+fn with_filters(fake: Fake) -> Fake {
+    fake.settings.lock().unwrap().filters = vec![
+        SearchFilter { name: "画像".into(), query: "ext:jpg;png".into() },
+        SearchFilter { name: "動画".into(), query: "ext:mp4".into() },
+    ];
+    fake
+}
+
+impl Ui {
+    fn search_field_focused(&self, cx: &mut TestAppContext) -> bool {
+        let view = self.view.clone();
+        self.act(cx, |window, cx| view.read(cx).search.read(cx).focus_handle(cx).is_focused(window))
+    }
+
+    /// Types into the fields of the filter being added or edited.
+    fn type_filter(&self, cx: &mut TestAppContext, name: &str, query: &str) {
+        let (name_field, query_field) = self.read(cx, |v| match &v.dialog {
+            Some(Dialog::Filters { edit: Some(edit), .. }) => (edit.name.clone(), edit.query.clone()),
+            _ => panic!("no filter being edited"),
+        });
+        self.act(cx, |window, cx| {
+            name_field.update(cx, |input, cx| input.set_value(name.to_owned(), window, cx));
+            query_field.update(cx, |input, cx| input.set_value(query.to_owned(), window, cx));
+        });
+        settle(cx);
+    }
+}
+
+fn last_query(fake: &Fake) -> String {
+    fake.queries().last().cloned().unwrap_or_default()
+}
+
+#[gpui_kit::test]
+fn searches_within_the_filter_chosen_with_nothing_typed_too(cx: &mut TestAppContext) {
+    let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\a.jpg")])));
+    let ui = open(cx, fake.clone());
+    ui.click(cx, "search-filter");
+    assert!(ui.read(cx, |v| v.filter_open));
+    ui.click(cx, ("filter", 0usize));
+    assert!(!ui.read(cx, |v| v.filter_open));
+    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("画像"));
+    assert_eq!(last_query(&fake), "<ext:jpg;png>");
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 1);
+    // What is typed is searched within it.
+    ui.press(cx, "ctrl-f");
+    ui.input(cx, "cat");
+    assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
+    // Esc empties the field, the filter still showing all it lets through; again, it lets go of it.
+    ui.press(cx, "escape");
+    assert_eq!(ui.field(cx), "");
+    assert_eq!(last_query(&fake), "<ext:jpg;png>");
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
+    ui.press(cx, "escape");
+    assert_eq!(fake.settings.lock().unwrap().filter, None);
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 1);
+    // Without one, what is typed is searched as it stands.
+    ui.input(cx, "cat");
+    assert_eq!(last_query(&fake), "cat");
+}
+
+#[gpui_kit::test]
+fn chooses_a_filter_from_the_keys_and_hands_them_back_to_the_field(cx: &mut TestAppContext) {
+    let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\a.jpg")])));
+    let ui = open(cx, fake.clone());
+    assert!(ui.search_field_focused(cx));
+    ui.press(cx, "ctrl-shift-f");
+    assert!(ui.read(cx, |v| v.filter_open));
+    // The filter in use is lit: none yet.
+    assert_eq!(ui.read(cx, |v| v.menu_cursor), Some(0));
+    ui.press(cx, "down");
+    ui.press(cx, "down");
+    ui.press(cx, "enter");
+    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
+    assert!(ui.search_field_focused(cx));
+    ui.press(cx, "ctrl-shift-f");
+    assert_eq!(ui.read(cx, |v| v.menu_cursor), Some(2));
+    ui.press(cx, "escape");
+    assert!(!ui.read(cx, |v| v.filter_open));
+    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
+}
+
+#[gpui_kit::test]
+fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext) {
+    let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\cat.jpg")])));
+    let ui = open(cx, fake.clone());
+    ui.click(cx, "search-filter");
+    ui.click(cx, ("filter", 0usize));
+    ui.press(cx, "ctrl-f");
+    ui.input(cx, "cat");
+    ui.press(cx, "ctrl-d");
+    let saved = |filter: Option<&str>| SavedSearch { name: String::new(), query: "cat".into(), filter: filter.map(Into::into) };
+    assert_eq!(fake.settings.lock().unwrap().saved_searches, [saved(Some("画像"))]);
+    // The same query with no filter is another search, saved apart.
+    ui.click(cx, "search-filter");
+    ui.click(cx, "filter-none");
+    assert_eq!(ui.read(cx, |v| (v.state.query.clone(), v.state.search_filter.clone())), ("cat".into(), None));
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "ctrl-d");
+    assert_eq!(fake.settings.lock().unwrap().saved_searches, [saved(Some("画像")), saved(None)]);
+    // Run from home, it chooses its filter again.
+    ui.click(cx, row(&search_key("cat", Some("画像"))));
+    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("画像"));
+    assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
+    // Back, the filter of the search before comes back with it.
+    ui.press(cx, "alt-left");
+    assert_eq!(ui.read(cx, |v| v.state.search_filter.clone()), None);
+    assert_eq!(fake.settings.lock().unwrap().filter, None);
+    // Its query alone is copied.
+    ui.click(cx, row(&search_key("cat", Some("画像"))));
+    ui.press(cx, "ctrl-shift-c");
+    assert_eq!(*fake.text.lock().unwrap(), "cat");
+}
+
+#[gpui_kit::test]
+fn changes_the_filter_a_saved_search_runs_within_from_its_edit(cx: &mut TestAppContext) {
+    let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\cat.jpg")])));
+    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: String::new(), query: "cat".into(), filter: Some("画像".into()) }];
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(&search_key("cat", Some("画像"))));
+    ui.press(cx, "f2");
+    ui.click(cx, ("edit-search-filter", 2usize));
+    ui.click(cx, "save-search");
+    assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter.as_deref(), Some("動画"));
+    // The search showing follows it.
+    assert_eq!(last_query(&fake), "<ext:mp4> <cat>");
+    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
+}
+
+#[gpui_kit::test]
+fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\cat.jpg")]));
+    let ui = open(cx, fake.clone());
+    let listing = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| matches!(v.dialog, Some(Dialog::Filters { edit: None, deleting: None })));
+    ui.click(cx, "search-filter");
+    ui.click(cx, "edit-filters");
+    assert!(listing(&ui, cx));
+    ui.click(cx, "add-filter");
+    ui.type_filter(cx, "画像", "ext:jpg;png");
+    ui.click(cx, "save-filter");
+    ui.click(cx, "add-filter");
+    ui.type_filter(cx, "動画", "ext:mp4");
+    ui.press(cx, "enter");
+    let names = |fake: &Fake| fake.settings.lock().unwrap().filters.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&fake), ["画像", "動画"]);
+    // A name taken cannot be had; Esc goes back to the list.
+    ui.click(cx, ("filter-edit", 1usize));
+    ui.type_filter(cx, "画像", "ext:mp4");
+    ui.click(cx, "save-filter");
+    assert!(!listing(&ui, cx));
+    ui.press(cx, "escape");
+    assert!(listing(&ui, cx));
+    assert_eq!(names(&fake), ["画像", "動画"]);
+    ui.click(cx, "close-filters");
+    // Chosen, saved with a search, and shown.
+    ui.click(cx, "search-filter");
+    ui.click(cx, ("filter", 0usize));
+    ui.press(cx, "ctrl-f");
+    ui.input(cx, "cat");
+    ui.press(cx, "ctrl-d");
+    // Renamed and asking another query, what names it follows, and the results ask again.
+    ui.click(cx, "search-filter");
+    ui.click(cx, "edit-filters");
+    ui.click(cx, ("filter-edit", 0usize));
+    ui.type_filter(cx, "写真", "ext:jpg");
+    ui.click(cx, "save-filter");
+    assert_eq!(names(&fake), ["写真", "動画"]);
+    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("写真"));
+    assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter.as_deref(), Some("写真"));
+    assert_eq!(ui.read(cx, |v| v.state.search_filter.clone()).as_deref(), Some("写真"));
+    assert_eq!(last_query(&fake), "<ext:jpg> <cat>");
+    // Put in another order.
+    ui.click(cx, ("filter-down", 0usize));
+    assert_eq!(names(&fake), ["動画", "写真"]);
+    // Asked about first, with the saved searches that use it counted; gone, they go without it.
+    ui.click(cx, ("filter-delete", 1usize));
+    assert_eq!(ui.read(cx, |v| v.filter_users("写真")), 1);
+    assert!(ui.read(cx, |v| matches!(&v.dialog, Some(Dialog::Filters { deleting: Some(name), .. }) if name == "写真")));
+    ui.click(cx, "delete-filter");
+    assert_eq!(names(&fake), ["動画"]);
+    assert_eq!(fake.settings.lock().unwrap().filter, None);
+    assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter, None);
+    assert_eq!(last_query(&fake), "cat");
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
 }

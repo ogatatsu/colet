@@ -11,13 +11,14 @@ use crate::{
     app::{CloseDialog, Colet, DIALOG},
     ops::{ItemStatus, Menu, Status},
     places::Dialog,
+    search_filters::FilterEdit,
     settings::Theme,
     theme::Palette,
     view::TipExt,
 };
 
 /// The keys the preferences list, as the old app's did.
-const SHORTCUTS: [(&str, &str); 24] = [
+const SHORTCUTS: [(&str, &str); 25] = [
     ("↑ ↓", "項目を選択（Shift で範囲選択）"),
     ("← →", "カラムを移動"),
     ("Enter", "開く"),
@@ -26,7 +27,8 @@ const SHORTCUTS: [(&str, &str); 24] = [
     ("Shift+F10", "メニューを開く"),
     ("Ctrl+F / Ctrl+L", "検索"),
     ("↓ / Enter", "検索欄から結果へ移動"),
-    ("Esc", "検索をクリア"),
+    ("Esc", "検索をクリア（空ならフィルターを解除）"),
+    ("Ctrl+Shift+F", "検索フィルターを選ぶ"),
     ("Ctrl+クリック / Shift+クリック", "複数選択"),
     ("Ctrl+A", "読み込み済み項目を全選択"),
     ("Ctrl+C / X / V", "コピー / 切り取り / 貼り付け"),
@@ -74,7 +76,8 @@ fn label(p: Palette, text: &'static str) -> Div {
     div().text_size(px(12.)).text_color(p.text_muted).child(text)
 }
 
-fn button(p: Palette, id: impl Into<ElementId>, text: &'static str, primary: bool, enabled: bool) -> Stateful<Div> {
+fn button(p: Palette, id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, enabled: bool) -> Stateful<Div> {
+    let text = text.into();
     div()
         .id(id)
         .h(px(30.))
@@ -92,6 +95,31 @@ fn button(p: Palette, id: impl Into<ElementId>, text: &'static str, primary: boo
         .child(text)
 }
 
+/// A small button with a glyph, a stop for Tab, for each filter in the list.
+fn tool(p: Palette, id: ElementId, focus: &FocusHandle, glyph: &'static str, label: String, enabled: bool) -> Stateful<Div> {
+    crate::view::ring(div().id(id).track_focus(focus), p)
+        .role(Role::Button)
+        .aria_label(label.clone())
+        .size(px(26.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.))
+        .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).text_color(p.text_muted))
+        .when(enabled, |d| d.cursor_pointer().hover(|d| d.bg(p.raised_hover)).tip(p, label))
+        .when(!enabled, |d| d.opacity(0.35))
+}
+
+/// A choice among the filters, a stop for Tab, checked as a radio button is.
+fn filter_choice(p: Palette, id: ElementId, focus: &FocusHandle, text: &str, chosen: bool) -> Stateful<Div> {
+    button(p, id, text.to_owned(), chosen, true)
+        .track_focus(focus)
+        .role(Role::RadioButton)
+        .aria_label(text.to_owned())
+        .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
+}
+
 impl Colet {
     pub fn render_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = self.palette;
@@ -99,11 +127,27 @@ impl Colet {
             Dialog::Name { request: Request { kind: Operation::NewFolder, .. }, .. } => "新規フォルダー",
             Dialog::Name { .. } => "名前を変更",
             Dialog::EditSearch { .. } => "保存した検索を編集",
+            Dialog::Filters { edit: Some(FilterEdit { original: None, .. }), .. } => "フィルターを追加",
+            Dialog::Filters { edit: Some(_), .. } => "フィルターを編集",
+            Dialog::Filters { deleting: Some(_), .. } => "フィルターを削除",
+            Dialog::Filters { .. } => "検索フィルター",
             Dialog::Preferences { .. } => "設定",
         };
         // Each theme a stop for Tab, kept across frames.
         let themes: Vec<(Theme, FocusHandle)> =
             Theme::ALL.into_iter().map(|theme| (theme, self.stop(format!("theme:{theme:?}"), cx))).collect();
+        // The saved search's choice of filter, none first, and each filter's buttons in the list: their
+        // stops kept by the filter's name, so the keys move with it.
+        let names: Vec<String> = self.settings.filters.iter().map(|f| f.name.clone()).collect();
+        let choices: Vec<(Option<String>, FocusHandle)> = std::iter::once(None)
+            .chain(names.iter().cloned().map(Some))
+            .map(|choice| {
+                let focus = self.stop(format!("edit-search-filter:{}", choice.as_deref().unwrap_or("")), cx);
+                (choice, focus)
+            })
+            .collect();
+        let tools: Vec<[FocusHandle; 4]> =
+            names.iter().map(|name| ["up", "down", "edit", "delete"].map(|what| self.stop(format!("filter-{what}:{name}"), cx))).collect();
         let (content, buttons) = match self.dialog.as_ref()? {
             Dialog::Name { request: Request { kind, paths, destination, .. }, input, .. } => {
                 let problem = self.name_problem(cx);
@@ -139,8 +183,9 @@ impl Colet {
                 ];
                 (content, buttons)
             }
-            Dialog::EditSearch { name, query, .. } => {
+            Dialog::EditSearch { name, query, filter, .. } => {
                 let problem = self.edit_problem(cx);
+                let chosen = filter.clone();
                 let content = div()
                     .flex()
                     .flex_col()
@@ -164,6 +209,25 @@ impl Colet {
                             .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                                 d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
                             }),
+                    )
+                    .child(
+                        div().flex().flex_col().gap_1().child(label(p, "検索フィルター")).child(
+                            div()
+                                .id("edit-search-filters")
+                                .flex()
+                                .flex_wrap()
+                                .gap(px(2.))
+                                .role(Role::RadioGroup)
+                                .aria_label("検索フィルター")
+                                .children(choices.into_iter().enumerate().map(|(i, (choice, focus))| {
+                                    let text = choice.clone().unwrap_or_else(|| "なし".into());
+                                    crate::view::frame(p, crate::view::keyed(&focus, window)).child(
+                                        filter_choice(p, ("edit-search-filter", i).into(), &focus, &text, choice == chosen)
+                                            .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(choice.clone(), cx)))
+                                            .test_support(),
+                                    )
+                                })),
+                        ),
                     );
                 let buttons = vec![
                     button(p, "cancel", "キャンセル", false, true)
@@ -172,6 +236,144 @@ impl Colet {
                         .into_any_element(),
                     button(p, "save-search", "保存", true, problem.is_none())
                         .on_click(cx.listener(|this, _, window, cx| this.submit_edit(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                ];
+                (content, buttons)
+            }
+            Dialog::Filters { edit: Some(FilterEdit { name, query, .. }), .. } => {
+                let problem = self.filter_problem(cx);
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(label(p, "名前"))
+                            .child(field(p, name, window, cx))
+                            .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
+                                d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(label(p, "検索文字列"))
+                            .child(field(p, query, window, cx))
+                            .child(div().text_size(px(12.)).text_color(p.text_faint).child(
+                                "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
+                            )),
+                    );
+                let buttons = vec![
+                    button(p, "cancel", "キャンセル", false, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                    button(p, "save-filter", "保存", true, problem.is_none())
+                        .on_click(cx.listener(|this, _, window, cx| this.submit_filter(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                ];
+                (content, buttons)
+            }
+            Dialog::Filters { deleting: Some(name), .. } => {
+                let users = self.filter_users(name);
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .text_size(px(13.))
+                    .child(format!("「{name}」を削除しますか？"))
+                    .when(users > 0, |d| {
+                        d.child(div().text_size(px(12.)).text_color(p.text_muted).child(format!(
+                            "このフィルターを使う保存した検索が{users}件あります。削除すると、それらはフィルターなしで検索します。"
+                        )))
+                    });
+                let buttons = vec![
+                    button(p, "cancel", "キャンセル", false, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                    button(p, "delete-filter", "削除", true, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.delete_filter(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                ];
+                (content, buttons)
+            }
+            Dialog::Filters { .. } => {
+                let filters = self.settings.filters.clone();
+                let last = filters.len().saturating_sub(1);
+                let rows: Vec<AnyElement> = filters
+                    .into_iter()
+                    .zip(tools)
+                    .enumerate()
+                    .map(|(i, (f, [up, down, edit, delete]))| {
+                        let name = f.name.clone();
+                        let (up_name, down_name, edit_name) = (name.clone(), name.clone(), name.clone());
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .py_1()
+                            .border_b_1()
+                            .border_color(p.border)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .child(div().truncate().text_size(px(13.)).child(f.name.clone()))
+                                    .child(div().truncate().text_size(px(12.)).text_color(p.text_muted).font_family("Consolas").child(f.query.clone())),
+                            )
+                            .child(
+                                tool(p, ("filter-up", i).into(), &up, "arrow-up", format!("「{}」を上へ", f.name), i > 0)
+                                    .when(i > 0, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&up_name, -1, cx))))
+                                    .test_support(),
+                            )
+                            .child(
+                                tool(p, ("filter-down", i).into(), &down, "arrow-down", format!("「{}」を下へ", f.name), i < last)
+                                    .when(i < last, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&down_name, 1, cx))))
+                                    .test_support(),
+                            )
+                            .child(
+                                tool(p, ("filter-edit", i).into(), &edit, "pencil-line", format!("「{}」を編集", f.name), true)
+                                    .on_click(cx.listener(move |this, _, window, cx| this.edit_filter(Some(edit_name.clone()), window, cx)))
+                                    .test_support(),
+                            )
+                            .child(
+                                tool(p, ("filter-delete", i).into(), &delete, "trash", format!("「{}」を削除", f.name), true)
+                                    .on_click(cx.listener(move |this, _, window, cx| this.ask_delete_filter(name.clone(), window, cx)))
+                                    .test_support(),
+                            )
+                            .into_any_element()
+                    })
+                    .collect();
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(div().text_size(px(12.)).text_color(p.text_muted).child(
+                        "検索に加えるEverythingの検索式を登録し、検索欄の右のボタン（Ctrl+Shift+F）で1つ選んで使います。",
+                    ))
+                    .child(if rows.is_empty() {
+                        div().py_2().text_size(px(12.)).text_color(p.text_faint).child("フィルターはまだありません").into_any_element()
+                    } else {
+                        div().flex().flex_col().children(rows).into_any_element()
+                    });
+                let buttons = vec![
+                    button(p, "add-filter", "追加", false, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.edit_filter(None, window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                    button(p, "close-filters", "閉じる", true, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
                         .test_support()
                         .into_any_element(),
                 ];
@@ -255,7 +457,7 @@ impl Colet {
             div()
                 .id("dialog-overlay")
                 .key_context(DIALOG)
-                .on_action(cx.listener(|this, _: &CloseDialog, window, cx| this.close_dialog(window, cx)))
+                .on_action(cx.listener(|this, _: &CloseDialog, window, cx| this.escape_dialog(window, cx)))
                 .absolute()
                 .inset_0()
                 .flex()
@@ -333,6 +535,7 @@ impl Colet {
         self.menu = Some(Menu { column, paths, at, screen: (point.x, point.y) });
         self.crumb_menu_open = false;
         self.sort_open = false;
+        self.filter_open = false;
         self.menu_cursor = None;
         self.menu_focus.focus(window, cx);
         cx.notify();

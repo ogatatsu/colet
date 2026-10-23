@@ -27,7 +27,7 @@ use crate::{
     icons::Icons,
     ops::{HistoryEntry, Menu, Running},
     places::{Dialog, home_entries, home_groups},
-    settings::{LoadError, Saver, Settings},
+    settings::{LoadError, Saver, Settings, everything_query},
     state::{ColumnId, Kind, State},
     theme::Palette,
 };
@@ -69,6 +69,7 @@ actions!(
         OpenSort,
         FocusFilter,
         ClearFilter,
+        OpenSearchFilters,
     ]
 );
 
@@ -98,6 +99,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-right", GoForward, Some(COLUMNS)),
         KeyBinding::new("ctrl-f", FocusSearch, None),
         KeyBinding::new("ctrl-l", FocusSearch, None),
+        KeyBinding::new("ctrl-shift-f", OpenSearchFilters, None),
         KeyBinding::new("f2", RenameItem, Some(COLUMNS)),
         KeyBinding::new("ctrl-c", CopyItems, Some(COLUMNS)),
         KeyBinding::new("ctrl-x", CutItems, Some(COLUMNS)),
@@ -225,6 +227,10 @@ pub struct Colet {
     pub toasts: Vec<Toast>,
     next_toast: u64,
     pub sort_open: bool,
+    /// The search filters' menu, beside the search field.
+    pub filter_open: bool,
+    /// The search field had the keys as the filters' menu opened, and has them back as it closes.
+    pub(crate) filter_from_search: bool,
     pub crumb_menu_open: bool,
     /// The line of the trail's menu ↑↓ have lit; none when the mouse opened it.
     pub crumb_cursor: Option<usize>,
@@ -325,9 +331,10 @@ impl Colet {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Everythingで検索（Ctrl+F）"));
         let subscriptions = vec![
             cx.subscribe_in(&search, window, |this: &mut Self, input, event, window, cx| match event {
+                // What is typed is searched within the filter chosen, as is an empty field while one is.
                 InputEvent::Change => {
                     let query = input.read(cx).value().to_string();
-                    this.state.set_query(&query);
+                    this.state.set_search(&query, this.settings.filter.clone());
                     this.changed(cx);
                 }
                 InputEvent::PressEnter { .. } => this.leave_search(window, cx),
@@ -391,6 +398,8 @@ impl Colet {
             toasts: Vec::new(),
             next_toast: 0,
             sort_open: false,
+            filter_open: false,
+            filter_from_search: false,
             crumb_menu_open: false,
             crumb_cursor: None,
             resizing: None,
@@ -466,7 +475,8 @@ impl Colet {
         match &self.dialog {
             Some(Dialog::Name { input, .. }) => inputs.push(input.clone()),
             Some(Dialog::EditSearch { name, query, .. }) => inputs.extend([name.clone(), query.clone()]),
-            Some(Dialog::Preferences) | None => {}
+            Some(Dialog::Filters { edit: Some(edit), .. }) => inputs.extend([edit.name.clone(), edit.query.clone()]),
+            Some(Dialog::Filters { .. } | Dialog::Preferences) | None => {}
         }
         for input in &inputs {
             self.palette.style_input(input, cx);
@@ -519,7 +529,7 @@ impl Colet {
             cx.defer(move |cx| {
                 cx.with_window(id, |window, cx| {
                     view.update(cx, |this, cx| {
-                        if this.menu.is_none() && !this.sort_open && this.menu_focus.is_focused(window) {
+                        if this.menu.is_none() && !this.sort_open && !this.filter_open && this.menu_focus.is_focused(window) {
                             this.close_menus(true, window, cx);
                         }
                     }).ok();
@@ -639,7 +649,8 @@ impl Colet {
                 })
             }
             Kind::Search => {
-                let query = self.state.query.clone();
+                let filter = self.state.search_filter.as_deref().and_then(|name| self.settings.filter_query(name));
+                let query = everything_query(&self.state.query, filter);
                 // A refresh reloads all it has loaded, so later selections stay.
                 let count = if offset > 0 { PAGE } else { PAGE.max(c.entries.len()) };
                 if !matches!(self.engine, Engine::Connected(_)) {
@@ -912,22 +923,25 @@ impl Colet {
 
     /// Into the results, as from a search field in Explorer, or home with nothing searched.
     pub fn leave_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.state.set_active(if self.state.query.is_empty() { 0 } else { 1 });
+        self.state.set_active(if self.state.pinned() { 1 } else { 0 });
         self.focus_active(window, cx);
     }
 
+    /// Empties the field; the filter chosen, if any, still shows all it lets through.
     pub fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.update(cx, |input, cx| input.set_value("", window, cx));
-        self.state.set_query("");
+        self.state.set_search("", self.settings.filter.clone());
         self.changed(cx);
     }
 
-    pub fn search_for(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+    /// Searches for `query` within `filter`, which becomes the one chosen.
+    pub fn search_for(&mut self, query: &str, filter: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         self.search.update(cx, |input, cx| {
             input.set_value(query.to_owned(), window, cx);
             input.focus(window, cx);
         });
-        self.state.set_query(query);
+        self.state.set_search(query, filter);
+        self.adopt_filter(cx);
         self.changed(cx);
     }
 
@@ -1117,13 +1131,23 @@ impl Colet {
         self.sync_search_field(window, cx);
     }
 
-    /// Going back or forward can bring another query; the field shows it.
+    /// Going back or forward can bring another query, and another filter; the field shows the one, and
+    /// the other becomes the one chosen.
     pub(crate) fn sync_search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.state.query.clone();
         if self.search.read(cx).value().as_ref() != query {
             self.search.update(cx, |input, cx| input.set_value(query, window, cx));
         }
+        self.adopt_filter(cx);
         self.changed(cx);
+    }
+
+    /// The results shown, a saved search's or those gone back to, choose their filter for the next search.
+    fn adopt_filter(&mut self, cx: &mut Context<Self>) {
+        if self.state.pinned() && self.state.search_filter != self.settings.filter {
+            let filter = self.state.search_filter.clone();
+            self.update_settings(|s| s.filter = filter, cx);
+        }
     }
 
     // ---- Scrolling ----

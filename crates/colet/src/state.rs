@@ -11,7 +11,7 @@ use colet_core::{
 pub enum Kind {
     /// The drives, always the first column, in its own pane.
     Home,
-    /// Everything's results for the query, pinned beside home.
+    /// Everything's results for the query and the search filter, pinned beside home.
     Search,
     Folder,
 }
@@ -136,6 +136,7 @@ pub struct Fold<A> {
 #[derive(Clone, Debug)]
 struct Location {
     query: String,
+    search_filter: Option<String>,
     folders: Vec<(String, Option<String>)>,
     selections: Vec<Vec<String>>,
     active: usize,
@@ -151,17 +152,24 @@ pub struct Folded {
     pub open: bool,
 }
 
-/// Home keys a saved search by its query behind this; no path starts this way, a drive letter being one
-/// character.
+/// Home keys a saved search by its query behind this, and its filter's name after a NUL, which neither
+/// can hold; no path starts this way, a drive letter being one character.
 const SEARCH_KEY: &str = "search:";
 
-pub fn search_key(query: &str) -> String {
-    format!("{SEARCH_KEY}{query}")
+pub fn search_key(query: &str, filter: Option<&str>) -> String {
+    match filter {
+        Some(filter) => format!("{SEARCH_KEY}{query}\0{filter}"),
+        None => format!("{SEARCH_KEY}{query}"),
+    }
 }
 
-/// The query a home row runs, when it is a saved search.
-pub fn saved_query(path: &str) -> Option<&str> {
-    path.strip_prefix(SEARCH_KEY)
+/// The query a home row runs and the filter it runs within, when it is a saved search.
+pub fn saved_query(path: &str) -> Option<(&str, Option<&str>)> {
+    let key = path.strip_prefix(SEARCH_KEY)?;
+    Some(match key.split_once('\0') {
+        Some((query, filter)) => (query, Some(filter)),
+        None => (key, None),
+    })
 }
 
 /// How far back it goes.
@@ -169,6 +177,8 @@ const HISTORY: usize = 50;
 
 pub struct State {
     pub query: String,
+    /// The search filter the results are narrowed by, by name; with one, they show with no query too.
+    pub search_filter: Option<String>,
     pub columns: Vec<Column>,
     /// The column being worked in.
     pub active: usize,
@@ -227,6 +237,7 @@ impl State {
     pub fn new() -> Self {
         let mut state = Self {
             query: String::new(),
+            search_filter: None,
             columns: Vec::new(),
             active: 0,
             past: Vec::new(),
@@ -281,6 +292,7 @@ impl State {
         let folders: Vec<&Column> = self.columns.iter().filter(|c| c.kind == Kind::Folder).collect();
         Location {
             query: self.query.clone(),
+            search_filter: self.search_filter.clone(),
             folders: folders.iter().map(|c| (c.path.clone(), c.highlight.clone())).collect(),
             selections: self.columns.iter().map(|c| c.selected.clone()).collect(),
             active: self.active,
@@ -304,7 +316,7 @@ impl State {
     fn restore(&mut self, location: Location) {
         let home = self.columns.swap_remove(0);
         let mut columns = vec![home];
-        if !location.query.is_empty() {
+        if !location.query.is_empty() || location.search_filter.is_some() {
             columns.push(self.column(Kind::Search, "", None));
         }
         for (path, highlight) in &location.folders {
@@ -319,18 +331,27 @@ impl State {
             Some(Fold { anchor: column.id, open: fold.open })
         });
         self.query = location.query;
+        self.search_filter = location.search_filter;
         self.active = location.active.min(columns.len() - 1);
         self.columns = columns;
         self.fold = anchor;
     }
 
-    /// Home stays beside the results; its pick has nothing to do with them, so it lets go.
+    /// Searches for `query` within the search filter already in use.
+    #[cfg(test)]
     pub fn set_query(&mut self, query: &str) {
-        if query == self.query {
+        let filter = self.search_filter.clone();
+        self.set_search(query, filter);
+    }
+
+    /// Home stays beside the results; its pick has nothing to do with them, so it lets go. A filter alone
+    /// searches too. Another filter is a step back and forth, as leaving the results is; a key typed is not.
+    pub fn set_search(&mut self, query: &str, filter: Option<String>) {
+        if query == self.query && filter == self.search_filter {
             return;
         }
-        let leaving = self.columns.len() > if self.query.is_empty() { 1 } else { 2 }
-            || (query.is_empty() && !self.query.is_empty());
+        let (was, searching) = (self.pinned(), !query.is_empty() || filter.is_some());
+        let leaving = self.columns.len() > if was { 2 } else { 1 } || (was && (!searching || filter != self.search_filter));
         if leaving {
             let location = self.snapshot();
             self.remember(location);
@@ -341,13 +362,38 @@ impl State {
         home.selected.clear();
         home.focused = None;
         self.columns = vec![home];
-        if !query.is_empty() {
+        if searching {
             let search = self.column(Kind::Search, "", None);
             self.columns.push(search);
         }
         self.query = query.into();
-        self.active = if query.is_empty() { 0 } else { 1 };
+        self.search_filter = filter;
+        self.active = if searching { 1 } else { 0 };
         self.fold = None;
+    }
+
+    /// The search filter `from` is named `to` now, or is gone: the way back and forth follows it. Gone
+    /// from the results, they show without it, or go with it when nothing was typed.
+    pub fn rename_search_filter(&mut self, from: &str, to: Option<&str>) {
+        for location in self.past.iter_mut().chain(self.future.iter_mut()) {
+            if location.search_filter.as_deref() == Some(from) {
+                location.search_filter = to.map(Into::into);
+            }
+        }
+        if self.search_filter.as_deref() != Some(from) {
+            return;
+        }
+        self.search_filter = to.map(Into::into);
+        if to.is_some() {
+            return;
+        }
+        if self.query.is_empty() {
+            self.columns.truncate(1);
+            self.active = 0;
+            self.fold = None;
+        } else {
+            self.reset_search();
+        }
     }
 
     pub fn set_active(&mut self, index: usize) {
@@ -401,20 +447,21 @@ impl State {
         // one is a keystroke away.
         if c.kind == Kind::Home
             && let [path] = paths.as_slice()
-            && let Some(query) = saved_query(path)
+            && let Some((query, filter)) = saved_query(path)
         {
-            if self.query == query && self.columns.len() == 2 && c.selected == paths {
+            if self.query == query && self.search_filter.as_deref() == filter && self.columns.len() == 2 && c.selected == paths {
                 self.active = index;
                 return;
             }
             let path = path.clone();
-            let query = query.to_owned();
+            let (query, filter) = (query.to_owned(), filter.map(str::to_owned));
             let mut home = self.columns.swap_remove(0);
             home.selected = vec![path.clone()];
             home.focused = Some(path);
             let search = self.column(Kind::Search, "", None);
             self.columns = vec![home, search];
             self.query = query;
+            self.search_filter = filter;
             self.active = index;
             self.fold = None;
             self.remember(here);
@@ -423,12 +470,13 @@ impl State {
         // Picking a place in home while searching leaves the search, as a sidebar does in Finder; one
         // step back returns to the results.
         if c.kind == Kind::Home
-            && !self.query.is_empty()
+            && self.pinned()
             && paths.len() == 1
             && c.entries.iter().any(|e| e.path == paths[0])
         {
             let past = std::mem::take(&mut self.past);
             self.query.clear();
+            self.search_filter = None;
             self.columns.truncate(1);
             self.active = 0;
             self.fold = None;
@@ -658,6 +706,7 @@ impl State {
         self.active = at.unwrap_or(columns.len() - 1);
         self.columns = columns;
         self.query.clear();
+        self.search_filter = None;
         self.fold = None;
         self.remember(here);
     }
@@ -1305,7 +1354,7 @@ mod tests {
     #[test]
     fn runs_a_saved_search_picked_in_home_keeping_homes_pick() {
         let mut s = State::new();
-        let pdf = search_key("ext:pdf");
+        let pdf = search_key("ext:pdf", None);
         with_entries(&mut s, 0, vec![Entry::folder(&pdf, "PDF"), folder(r"D:\")]);
         s.select(0, one(&pdf));
         assert_eq!(s.query, "ext:pdf");
@@ -1548,5 +1597,73 @@ mod tests {
         s.back();
         assert_eq!(s.query, "x");
         assert_eq!(s.columns.iter().map(|c| c.kind).collect::<Vec<_>>(), [Kind::Home, Kind::Search]);
+    }
+
+    fn kinds(s: &State) -> Vec<Kind> {
+        s.columns.iter().map(|c| c.kind).collect()
+    }
+
+    #[test]
+    fn searches_with_a_filter_alone_and_steps_back_to_the_filter_before() {
+        let mut s = State::new();
+        s.set_search("", Some("画像".into()));
+        assert_eq!(kinds(&s), [Kind::Home, Kind::Search]);
+        assert_eq!(s.active, 1);
+        // Typing keeps the filter, and is no step of its own.
+        s.set_query("cat");
+        assert_eq!(s.search_filter.as_deref(), Some("画像"));
+        assert!(!s.can_go_back());
+        s.set_search("cat", Some("動画".into()));
+        s.set_search("cat", None);
+        s.back();
+        assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", Some("動画")));
+        s.back();
+        assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", Some("画像")));
+        s.forward();
+        assert_eq!(s.search_filter.as_deref(), Some("動画"));
+        // Nothing typed and no filter, the results go.
+        s.set_search("", None);
+        assert_eq!(kinds(&s), [Kind::Home]);
+        s.back();
+        assert_eq!(kinds(&s), [Kind::Home, Kind::Search]);
+    }
+
+    #[test]
+    fn runs_a_saved_search_within_its_filter() {
+        let mut s = State::new();
+        let images = search_key("cat", Some("画像"));
+        let plain = search_key("cat", None);
+        assert_ne!(images, plain);
+        assert_eq!(saved_query(&images), Some(("cat", Some("画像"))));
+        assert_eq!(saved_query(&plain), Some(("cat", None)));
+        with_entries(&mut s, 0, vec![Entry::folder(&images, "cat"), Entry::folder(&plain, "cat"), folder(r"D:\")]);
+        s.select(0, one(&images));
+        assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", Some("画像")));
+        s.select(0, one(&plain));
+        assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", None));
+        // A place picked leaves the search and its filter.
+        s.select(0, one(&images));
+        s.select(0, one(r"D:\"));
+        assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("", None));
+        s.back();
+        assert_eq!(s.search_filter.as_deref(), Some("画像"));
+    }
+
+    #[test]
+    fn follows_a_filter_renamed_or_gone_back_and_forth() {
+        let mut s = State::new();
+        s.set_search("", Some("画像".into()));
+        s.set_search("cat", Some("動画".into()));
+        s.rename_search_filter("画像", Some("写真"));
+        s.rename_search_filter("動画", None);
+        // Gone from the results, they show without it.
+        assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", None));
+        assert_eq!(kinds(&s), [Kind::Home, Kind::Search]);
+        s.back();
+        assert_eq!(s.search_filter.as_deref(), Some("写真"));
+        // With nothing typed, the results go with it.
+        s.rename_search_filter("写真", None);
+        assert_eq!(kinds(&s), [Kind::Home]);
+        assert_eq!(s.active, 0);
     }
 }

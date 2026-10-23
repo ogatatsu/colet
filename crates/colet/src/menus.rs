@@ -1,5 +1,5 @@
-//! The two menus, the file menu and the sort order's, as lines that the mouse and the keys pick alike:
-//! ↑↓ move, Enter picks, Esc closes, and the keys go back to the column worked in.
+//! The menus, the file menu, the sort order's and the search filters', as lines that the mouse and the
+//! keys pick alike: ↑↓ move, Enter picks, Esc closes, and the keys go back to where they were.
 use colet_core::entry::{Sort, direction_label};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -22,16 +22,20 @@ pub enum Command {
     Delete,
     Favorite(String),
     Windows,
-    EditSearch(String),
-    Unsave(String),
+    /// A saved search, by its query and filter.
+    EditSearch(String, Option<String>),
+    Unsave(String, Option<String>),
     Sort(Sort),
     Direction(bool),
+    /// The search filter to search within, or none.
+    SearchFilter(Option<String>),
+    EditFilters,
 }
 
 pub struct Line {
-    pub id: &'static str,
+    pub id: ElementId,
     pub glyph: Option<&'static str>,
-    pub text: &'static str,
+    pub text: SharedString,
     /// The key that does the same.
     pub hint: Option<&'static str>,
     /// Why it is off; empty when no word is needed.
@@ -44,7 +48,12 @@ pub struct Line {
 }
 
 fn line(id: &'static str, glyph: &'static str, text: &'static str, hint: Option<&'static str>, off: Option<&'static str>, command: Command) -> Line {
-    Line { id, glyph: Some(glyph), text, hint, off, command, group: false, chosen: false }
+    Line { id: id.into(), glyph: Some(glyph), text: text.into(), hint, off, command, group: false, chosen: false }
+}
+
+/// A line to choose, checked when it is the one in use.
+fn choice(id: impl Into<ElementId>, text: impl Into<SharedString>, command: Command, chosen: bool) -> Line {
+    Line { id: id.into(), glyph: None, text: text.into(), hint: None, off: None, command, group: false, chosen }
 }
 
 impl Line {
@@ -55,17 +64,26 @@ impl Line {
 }
 
 impl Colet {
-    /// The lines of the open menu: the sort order's, or the file menu's.
+    /// The lines of the open menu: the sort order's, the search filters', or the file menu's.
     pub fn menu_lines(&self) -> Vec<Line> {
         if self.sort_open {
-            let choice = |text, command, chosen| Line { id: text, glyph: None, text, hint: None, off: None, command, group: false, chosen };
             let sort = self.settings.sort;
             let mut lines: Vec<Line> =
-                Sort::ALL.map(|by| choice(by.label(), Command::Sort(by), by == sort.by)).into();
+                Sort::ALL.map(|by| choice(by.label(), by.label(), Command::Sort(by), by == sort.by)).into();
             lines.extend([false, true].map(|descending| {
-                choice(direction_label(descending), Command::Direction(descending), descending == sort.descending)
+                let label = direction_label(descending);
+                choice(label, label, Command::Direction(descending), descending == sort.descending)
             }));
             lines[Sort::ALL.len()].group = true;
+            return lines;
+        }
+        if self.filter_open {
+            let chosen = self.settings.filter.as_deref();
+            let mut lines = vec![choice("filter-none", "なし", Command::SearchFilter(None), chosen.is_none())];
+            lines.extend(self.settings.filters.iter().enumerate().map(|(i, f)| {
+                choice(("filter", i), f.name.clone(), Command::SearchFilter(Some(f.name.clone())), chosen == Some(f.name.as_str()))
+            }));
+            lines.push(line("edit-filters", "pencil-line", "フィルターを編集…", None, None, Command::EditFilters).grouped());
             return lines;
         }
         if self.menu.is_none() {
@@ -75,12 +93,13 @@ impl Colet {
         let picked = self.picked();
         let entries = self.picked_entries();
         if let [path] = picked.as_slice()
-            && let Some(query) = saved_query(path)
+            && let Some((query, filter)) = saved_query(path)
         {
+            let filter = filter.map(str::to_owned);
             return vec![
                 line("menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None, Command::CopyPath),
-                line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, Command::EditSearch(query.into())).grouped(),
-                line("menu-unsave", "star", "保存した検索を解除", None, None, Command::Unsave(query.into())),
+                line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, Command::EditSearch(query.into(), filter.clone())).grouped(),
+                line("menu-unsave", "star", "保存した検索を解除", None, None, Command::Unsave(query.into(), filter)),
             ];
         }
         let one = entries.len() == 1;
@@ -144,22 +163,29 @@ impl Colet {
                 self.show_shell_menu(window, cx);
                 return;
             }
-            Command::EditSearch(query) => self.open_edit(&query, window, cx),
-            Command::Unsave(query) => self.toggle_saved(&query, cx),
+            Command::EditSearch(query, filter) => self.open_edit(&query, filter.as_deref(), window, cx),
+            Command::Unsave(query, filter) => self.toggle_saved(&query, filter, cx),
             Command::Sort(by) => self.set_sort(by, cx),
             Command::Direction(descending) => self.set_direction(descending, cx),
+            Command::SearchFilter(name) => self.choose_filter(name, cx),
+            Command::EditFilters => self.open_filters(window, cx),
         }
         // What the line opened, a dialog, takes the keys; otherwise they go back to the column.
         let to_column = self.dialog.is_none();
         self.close_menus(to_column, window, cx);
     }
 
-    /// Closes whichever menu is open, handing the keys back to the column when `to_column`.
+    /// Closes whichever menu is open, handing the keys back to the column when `to_column`; the filters'
+    /// menu hands them back to the search field, when it had them.
     pub fn close_menus(&mut self, to_column: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let to_search = self.filter_open && self.filter_from_search;
         self.menu = None;
         self.sort_open = false;
+        self.filter_open = false;
         self.menu_cursor = None;
-        if to_column {
+        if to_column && to_search {
+            self.search.update(cx, |input, cx| input.focus(window, cx));
+        } else if to_column {
             let handle = if self.state.active == 0 { &self.home_focus } else { &self.columns_focus };
             handle.focus(window, cx);
         }
@@ -170,6 +196,7 @@ impl Colet {
     pub fn open_crumb_menu(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
         self.sort_open = false;
+        self.filter_open = false;
         self.crumb_menu_open = true;
         self.crumb_cursor = keyboard.then_some(0);
         self.menu_focus.focus(window, cx);
@@ -203,8 +230,23 @@ impl Colet {
     pub fn open_sort(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
         self.crumb_menu_open = false;
+        self.filter_open = false;
         self.sort_open = true;
         self.menu_cursor = keyboard.then(|| Sort::ALL.iter().position(|s| *s == self.settings.sort.by).unwrap_or(0));
+        self.menu_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Opens the search filters' menu; from the keys, with the filter in use lit.
+    pub fn open_filter_menu(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.filter_open {
+            self.filter_from_search = self.search_focused;
+        }
+        self.menu = None;
+        self.crumb_menu_open = false;
+        self.sort_open = false;
+        self.filter_open = true;
+        self.menu_cursor = keyboard.then(|| self.menu_lines().iter().position(|line| line.chosen).unwrap_or(0));
         self.menu_focus.focus(window, cx);
         cx.notify();
     }
@@ -248,7 +290,7 @@ impl Colet {
                 div()
                     .id(line.id)
                     .role(Role::MenuItem)
-                    .aria_label(line.text)
+                    .aria_label(line.text.clone())
                     .h(px(28.))
                     .px(px(10.))
                     .flex()

@@ -11,6 +11,7 @@ use gpui_kit::*;
 
 use crate::{
     app::{Colet, Engine, Tone, WidthOf},
+    search_filters::FilterEdit,
     settings::{Placement, SavedSearch, Settings, Theme, written},
     state::{Kind, saved_query, search_key},
 };
@@ -18,8 +19,11 @@ use crate::{
 pub enum Dialog {
     /// A rename's new name, or a new folder's: the request it sends, its name taken from `input`.
     Name { request: colet_core::operations::Request, input: Entity<InputState>, tried: bool },
-    /// A saved search's name and query, found by the query it had as the dialog opened.
-    EditSearch { original: String, name: Entity<InputState>, query: Entity<InputState> },
+    /// A saved search's name, query and filter, found by the query and filter it had as the dialog opened.
+    EditSearch { original: (String, Option<String>), name: Entity<InputState>, query: Entity<InputState>, filter: Option<String> },
+    /// The search filters, to add to, put in order, edit or delete: one at a time, in `edit`, or the one
+    /// asked about before it goes.
+    Filters { edit: Option<FilterEdit>, deleting: Option<String> },
     /// The theme, the connection to Everything, and the keys.
     Preferences,
 }
@@ -29,10 +33,10 @@ pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
     let favorites = settings.favorites.iter().map(|path| Entry::folder(path, folder_name(path)));
     let searches = settings.saved_searches.iter().map(|s| Entry {
         directory: false,
-        ..Entry::folder(&search_key(&s.query), s.label())
+        ..Entry::folder(&search_key(&s.query, s.filter.as_deref()), s.label())
     });
     let mut seen = std::collections::HashSet::new();
-    // A place is one whatever its case; a saved search is its query exactly.
+    // A place is one whatever its case; a saved search is its query and filter exactly.
     let key = |e: &Entry| if saved_query(&e.path).is_some() { e.path.clone() } else { path_key(&e.path) };
     favorites.chain(searches).chain(drives).filter(|e| seen.insert(key(e))).collect()
 }
@@ -169,18 +173,19 @@ impl Colet {
         );
     }
 
-    /// Saved with no name of its own, so home shows the query until one is given.
-    pub fn toggle_saved(&mut self, query: &str, cx: &mut Context<Self>) {
+    /// Saved with no name of its own, so home shows the query until one is given; with the filter it runs
+    /// within, a search apart from the same query with another.
+    pub fn toggle_saved(&mut self, query: &str, filter: Option<String>, cx: &mut Context<Self>) {
         if query.trim().is_empty() {
             self.notify("検索語を入力すると保存できます", Tone::Info, cx);
             return;
         }
-        let found = self.settings.saved(query).cloned();
+        let found = self.settings.saved(query, filter.as_deref()).cloned();
         let query = query.to_owned();
         self.update_settings(
             |s| match &found {
-                Some(_) => s.saved_searches.retain(|saved| saved.query != query),
-                None => s.saved_searches.push(SavedSearch { name: String::new(), query }),
+                Some(_) => s.saved_searches.retain(|saved| saved.query != query || saved.filter != filter),
+                None => s.saved_searches.push(SavedSearch { name: String::new(), query, filter }),
             },
             cx,
         );
@@ -194,8 +199,8 @@ impl Colet {
     pub fn save_current(&mut self, cx: &mut Context<Self>) {
         let active = &self.state.columns[self.state.active];
         if self.search_focused || active.kind == Kind::Search {
-            let query = self.state.query.clone();
-            self.toggle_saved(&query, cx);
+            let (query, filter) = (self.state.query.clone(), self.state.search_filter.clone());
+            self.toggle_saved(&query, filter, cx);
         } else if active.kind == Kind::Folder {
             let path = active.path.clone();
             self.toggle_favorite(&path, cx);
@@ -204,8 +209,8 @@ impl Colet {
         }
     }
 
-    pub fn open_edit(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(found) = self.settings.saved(query).cloned() else { return };
+    pub fn open_edit(&mut self, query: &str, filter: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(found) = self.settings.saved(query, filter).cloned() else { return };
         self.menu = None;
         let name = cx.new(|cx| InputState::new(window, cx).placeholder(found.query.clone()).default_value(found.name.clone()));
         let query = cx.new(|cx| InputState::new(window, cx).default_value(found.query.clone()));
@@ -218,17 +223,27 @@ impl Colet {
             self.palette.style_input(input, cx);
         }
         name.update(cx, |input, cx| input.focus(window, cx));
-        self.dialog = Some(Dialog::EditSearch { original: found.query, name, query });
+        let filter = found.filter.clone();
+        self.dialog = Some(Dialog::EditSearch { original: (found.query, found.filter), name, query, filter });
         cx.notify();
+    }
+
+    /// The filter the edited search is to run within.
+    pub fn pick_edit_filter(&mut self, chosen: Option<String>, cx: &mut Context<Self>) {
+        if let Some(Dialog::EditSearch { filter, .. }) = &mut self.dialog {
+            *filter = chosen;
+            cx.notify();
+        }
     }
 
     /// Why the edited search cannot be saved as it stands, if it cannot.
     pub fn edit_problem(&self, cx: &App) -> Option<&'static str> {
-        let Some(Dialog::EditSearch { original, query, .. }) = &self.dialog else { return None };
+        let Some(Dialog::EditSearch { original, query, filter, .. }) = &self.dialog else { return None };
         let query = query.read(cx).value();
+        let same = (query.as_ref(), filter.as_deref()) == (original.0.as_str(), original.1.as_deref());
         if query.trim().is_empty() {
             Some("")
-        } else if query.as_ref() != original && self.settings.saved(&query).is_some() {
+        } else if !same && self.settings.saved(&query, filter.as_deref()).is_some() {
             Some("この検索は既に保存しています")
         } else {
             None
@@ -239,22 +254,24 @@ impl Colet {
         if self.edit_problem(cx).is_some() {
             return;
         }
-        let Some(Dialog::EditSearch { original, name, query }) = &self.dialog else { return };
-        let original = original.clone();
+        let Some(Dialog::EditSearch { original, name, query, filter }) = &self.dialog else { return };
+        let (original, filter) = (original.clone(), filter.clone());
         let name = name.read(cx).value().trim().to_owned();
         let query = query.read(cx).value().to_string();
+        let edited = SavedSearch { name, query: query.clone(), filter: filter.clone() };
         self.update_settings(
             |s| {
-                if let Some(saved) = s.saved_searches.iter_mut().find(|saved| saved.query == original) {
-                    *saved = SavedSearch { name, query: query.clone() };
+                if let Some(saved) = s.saved_searches.iter_mut().find(|saved| (&saved.query, &saved.filter) == (&original.0, &original.1)) {
+                    *saved = edited;
                 }
             },
             cx,
         );
         self.close_dialog(window, cx);
-        // The search showing follows its new query.
-        if self.state.query == original && query != original {
-            self.search_for(&query, window, cx);
+        // The search showing follows its new query and filter.
+        let showing = self.state.pinned() && (&self.state.query, &self.state.search_filter) == (&original.0, &original.1);
+        if showing && (&query, &filter) != (&original.0, &original.1) {
+            self.search_for(&query, filter, window, cx);
             self.focus_active(window, cx);
         }
     }
@@ -333,18 +350,21 @@ mod tests {
     fn lists_favorites_then_saved_searches_then_drives_each_once() {
         let settings = Settings {
             favorites: vec![r"D:\Work".into(), r"C:\".into()],
-            saved_searches: vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into() }],
+            saved_searches: vec![
+                SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None },
+                SavedSearch { name: "猫".into(), query: "cat".into(), filter: Some("画像".into()) },
+            ],
             ..Settings::default()
         };
         let entries = home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)"), Entry::folder(r"D:\", "D:")]);
         let rows: Vec<(&str, &str)> = entries.iter().map(|e| (e.path.as_str(), e.name.as_str())).collect();
-        assert_eq!(rows, [(r"D:\Work", "Work"), (r"C:\", "C:"), ("search:ext:pdf", "PDF"), (r"D:\", "D:")]);
+        assert_eq!(rows, [(r"D:\Work", "Work"), (r"C:\", "C:"), ("search:ext:pdf", "PDF"), ("search:cat\0画像", "猫"), (r"D:\", "D:")]);
         assert!(!entries[2].directory);
     }
 
     #[test]
     fn takes_a_place_in_another_case_as_the_same_but_not_a_query() {
-        let search = |query: &str| SavedSearch { name: String::new(), query: query.into() };
+        let search = |query: &str| SavedSearch { name: String::new(), query: query.into(), filter: None };
         let settings = Settings {
             favorites: vec![r"c:\".into()],
             saved_searches: vec![search("ext:PDF"), search("ext:pdf")],
