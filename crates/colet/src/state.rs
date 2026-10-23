@@ -934,12 +934,15 @@ impl State {
         let paths: HashSet<&str> = c.entries.iter().map(|e| e.path.as_str()).collect();
         // The rows the keys were on that are gone; the row now in the topmost one's place takes over, or
         // at the end, the last before it.
+        // Looked up rather than searched for: a refresh with thousands picked would compare each with each.
+        let picked: HashSet<&str> = c.selected.iter().map(String::as_str).collect();
         let lost: Vec<usize> = (0..old.len())
             .filter(|&i| {
                 let path = &old[i].path;
-                !paths.contains(path.as_str()) && (c.selected.contains(path) || c.focused.as_ref() == Some(path))
+                !paths.contains(path.as_str()) && (picked.contains(path.as_str()) || c.focused.as_ref() == Some(path))
             })
             .collect();
+        drop(picked);
         let heir = lost.first().and_then(|&at| {
             old[at..]
                 .iter()
@@ -1056,6 +1059,22 @@ mod tests {
             s.page(id, 2, vec![], 0, 0, &HashSet::new());
             assert!(s.columns[0].selected.is_empty());
         }
+    }
+
+    #[test]
+    fn a_refresh_with_thousands_picked_hands_what_colet_sent_away_to_the_next_row() {
+        let entries: Vec<Entry> = (0..20_000).map(|i| file(&format!(r"D:\work\{i:05}"))).collect();
+        let mut s = State::new();
+        let mut c = s.column(Kind::Folder, r"D:\work", None);
+        c.entries = entries.clone();
+        c.selected = entries[..10_000].iter().map(|e| e.path.clone()).collect();
+        c.request = 2;
+        let id = c.id;
+        s.columns = vec![c];
+        // Pair by pair, these would be 200 million comparisons on the UI thread.
+        let departed: HashSet<String> = entries[..10_000].iter().map(|e| path_key(&e.path)).collect();
+        s.page(id, 2, entries[10_000..].to_vec(), 10_000, 0, &departed);
+        assert_eq!(s.columns[0].selected, one(&entries[10_000].path));
     }
 
     #[test]

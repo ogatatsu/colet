@@ -1,5 +1,6 @@
 //! File operations as Colet asks for them: a paste from the clipboard, sending to the Recycle Bin or
 //! deleting outright, a rename, a new folder. Checked here, carried out by the shell with its own dialogs.
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -125,7 +126,8 @@ fn normalized(path: &Path) -> Result<String, String> {
 }
 
 /// Drops paths given twice and those inside another given, so nothing is acted on twice. Compares the
-/// paths as written: their targets may not exist, as for a broken junction.
+/// paths as written: their targets may not exist, as for a broken junction. Each path's folders are looked
+/// up among the others, so a selection of thousands is not compared pair by pair.
 fn collapse(paths: Vec<String>) -> Result<Vec<String>, String> {
     let keys = paths
         .iter()
@@ -134,15 +136,16 @@ fn collapse(paths: Vec<String>) -> Result<Vec<String>, String> {
             Ok(path.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_lowercase())
         })
         .collect::<Result<Vec<String>, String>>()?;
+    let all: HashSet<&str> = keys.iter().map(String::as_str).collect();
+    let mut seen = HashSet::new();
     Ok(paths
         .into_iter()
-        .enumerate()
-        .filter(|(i, _)| {
-            !keys.iter().enumerate().any(|(j, other)| {
-                j != *i && (keys[*i].starts_with(&format!("{other}\\")) || (j < *i && keys[*i] == *other))
-            })
+        .zip(&keys)
+        .filter(|(_, key)| {
+            let inside = key.match_indices('\\').any(|(at, _)| at > 0 && all.contains(&key[..at]));
+            !inside && seen.insert(key.as_str())
         })
-        .map(|(_, p)| p)
+        .map(|(p, _)| p)
         .collect())
 }
 
@@ -378,6 +381,21 @@ mod tests {
     fn collapses_duplicates_and_what_lies_inside_another() {
         let paths = [r"D:\parent\child", r"D:\parent", r"d:/PARENT/", r"D:\parent-other", r"D:\sibling\..\parent"];
         assert_eq!(collapse(paths.iter().map(|p| p.to_string()).collect()).unwrap(), [r"D:\parent", r"D:\parent-other"]);
+        let shares = [r"\\server\share\a\b", r"\\SERVER\share\a", r"\\server\share-other\a", r"D:\", r"D:\anything"];
+        assert_eq!(
+            collapse(shares.iter().map(|p| p.to_string()).collect()).unwrap(),
+            [r"\\SERVER\share\a", r"\\server\share-other\a", r"D:\"]
+        );
+    }
+
+    #[test]
+    fn collapses_a_selection_of_thousands_at_once() {
+        // Pair by pair, these would be 400 million comparisons before the shell is asked anything.
+        let siblings: Vec<String> = (0..20_000).map(|i| format!(r"D:\folder\{i:05}.txt")).collect();
+        assert_eq!(collapse(siblings.clone()).unwrap().len(), 20_000);
+        let mut inside = siblings;
+        inside.push(r"D:\folder".into());
+        assert_eq!(collapse(inside).unwrap(), [r"D:\folder"]);
     }
 
     #[test]

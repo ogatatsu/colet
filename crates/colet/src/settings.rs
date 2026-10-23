@@ -42,9 +42,15 @@ pub struct SearchFilter {
 pub fn everything_query(query: &str, filter: Option<&str>) -> String {
     match filter {
         None => query.to_owned(),
-        Some(filter) if query.trim().is_empty() => format!("<{filter}>"),
-        Some(filter) => format!("<{filter}> <{query}>"),
+        Some(filter) if query.trim().is_empty() => format!("<{}>", closed(filter)),
+        Some(filter) => format!("<{}> <{}>", closed(filter), closed(query)),
     }
+}
+
+/// `text` with a quote left open closed, as Everything closes it at the end of the text: inside `< >` it
+/// would run on over the `>` and take it for a letter, finding nothing while `"my doc` is being typed.
+fn closed(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.matches('"').count() % 2 == 1 { format!("{text}\"").into() } else { text.into() }
 }
 
 /// The colors Colet takes: Windows's setting, or one of its own whatever Windows says.
@@ -440,6 +446,16 @@ mod tests {
         assert_eq!(everything_query("cat", None), "cat");
         assert_eq!(everything_query("cat | dog", Some("ext:jpg;png")), "<ext:jpg;png> <cat | dog>");
         assert_eq!(everything_query(" ", Some("ext:jpg")), "<ext:jpg>");
+    }
+
+    #[test]
+    fn closes_a_quote_left_open_inside_its_group() {
+        assert_eq!(everything_query("\"my doc", Some("ext:txt")), "<ext:txt> <\"my doc\">");
+        assert_eq!(everything_query("\"my doc\"", Some("ext:txt")), "<ext:txt> <\"my doc\">");
+        assert_eq!(everything_query("cat", Some("path:\"D:\\My Pictures")), "<path:\"D:\\My Pictures\"> <cat>");
+        assert_eq!(everything_query("", Some("path:\"D:\\a")), "<path:\"D:\\a\">");
+        // Without a filter Everything is asked what was typed, and closes the quote itself.
+        assert_eq!(everything_query("\"my doc", None), "\"my doc");
     }
 
     #[test]
