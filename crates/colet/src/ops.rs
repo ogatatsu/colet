@@ -369,18 +369,20 @@ impl Colet {
             input.focus(window, cx);
             input.set_selected_range(0..select_end, cx);
         });
-        self.dialog = Some(Dialog::Name { request, input, tried: false });
+        self.dialog = Some(Dialog::Name { request, input, tried: false, taken: None });
         cx.notify();
     }
 
     /// Why the name in the dialog cannot be used, as it stands.
     pub fn name_problem(&self, cx: &App) -> Option<&'static str> {
-        let Some(Dialog::Name { input, tried, .. }) = &self.dialog else { return None };
-        colet_core::operations::name_problem(&input.read(cx).value(), *tried)
+        let Some(Dialog::Name { input, tried, taken, .. }) = &self.dialog else { return None };
+        let name = input.read(cx).value();
+        colet_core::operations::name_problem(&name, *tried)
+            .or(taken.as_deref().filter(|&taken| taken == name.as_ref()).map(|_| "同じ名前の項目があります"))
     }
 
     pub fn submit_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialog::Name { request, input, tried }) = &mut self.dialog else { return };
+        let Some(Dialog::Name { request, input, tried, taken }) = &mut self.dialog else { return };
         let name = input.read(cx).value().to_string();
         if name.trim().is_empty() {
             return;
@@ -393,6 +395,17 @@ impl Colet {
         // Say what the name still lacks rather than send it.
         if colet_core::operations::name_problem(&name, true).is_some() {
             *tried = true;
+            cx.notify();
+            return;
+        }
+        // Nor a name its folder already has, unless it is the item's own in another case.
+        if request.kind == Kind::Rename
+            && let Some(path) = request.paths.first()
+            && folder_name(path).to_lowercase() != name.to_lowercase()
+            && let Some(parent) = ancestors(path).into_iter().rev().nth(1)
+            && self.backend.path_kind(&child(&parent, &name)).is_some()
+        {
+            *taken = Some(name);
             cx.notify();
             return;
         }

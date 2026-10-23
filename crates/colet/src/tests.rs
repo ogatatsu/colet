@@ -1411,6 +1411,28 @@ fn renames_from_f2_refusing_a_name_windows_would_reject(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+fn refuses_a_rename_to_a_name_its_folder_has_but_not_its_own_in_another_case(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "f2");
+    let input = ui.read(cx, |v| match &v.dialog {
+        Some(crate::places::Dialog::Name { input, .. }) => input.clone(),
+        _ => panic!("no dialog"),
+    });
+    ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("b.txt", window, cx)));
+    assert_eq!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)), None);
+    ui.click(cx, "submit-name");
+    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    assert_eq!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)), Some("同じ名前の項目があります"));
+    assert!(fake.operations.lock().unwrap().is_empty());
+    // Typing again lifts it until the next try.
+    ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("A.txt", window, cx)));
+    assert_eq!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)), None);
+    ui.click(cx, "submit-name");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert_eq!(fake.operations.lock().unwrap()[0].name, "A.txt");
+}
+
+#[gpui_kit::test]
 fn makes_a_folder_and_picks_it(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-shift-n");
