@@ -2081,6 +2081,26 @@ fn with_filters(fake: Fake) -> Fake {
     fake
 }
 
+#[gpui_kit::test]
+fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) {
+    let fake = drive_d();
+    {
+        let mut settings = fake.settings.lock().unwrap();
+        settings.filters = vec![SearchFilter { name: "去年の夏に撮ったとても大きな写真".into(), query: "ext:jpg".into() }];
+        settings.filter = Some("去年の夏に撮ったとても大きな写真".into());
+    }
+    let ui = open(cx, Arc::new(fake));
+    let (width, height) = crate::app::MIN_WINDOW;
+    cx.simulate_window_resize(ui.window, size(px(width), px(height)));
+    let (field, filter, last) = ui.act(cx, |window, _| {
+        (window.find("search-box").bounds(), window.find("search-filter").bounds(), window.find("preferences").bounds())
+    });
+    assert!(field.size.width >= px(crate::app::SEARCH_FIELD_MIN - 6.), "{field:?}");
+    // The filter's name gave way, and nothing is pushed past the window's edge.
+    assert!(filter.size.width < px(200.), "{filter:?}");
+    assert!(last.right() <= px(width), "{last:?}");
+}
+
 impl Ui {
     fn search_field_focused(&self, cx: &mut TestAppContext) -> bool {
         let view = self.view.clone();

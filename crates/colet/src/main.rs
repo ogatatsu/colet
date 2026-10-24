@@ -76,6 +76,7 @@ fn main() {
         open_window(
             WindowOptions {
                 window_bounds: Some(window_bounds),
+                window_min_size: Some(size(px(app::MIN_WINDOW.0), px(app::MIN_WINDOW.1))),
                 display_id,
                 titlebar: Some(TitlebarOptions { title: Some("Colet".into()), ..Default::default() }),
                 ..Default::default()

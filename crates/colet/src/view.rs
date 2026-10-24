@@ -1044,8 +1044,9 @@ impl Colet {
             .items_center()
             .gap_2()
             .child(
-                // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row.
-                frame(p, focused).flex_1().min_w_0().m(px(-3.)).child(
+                // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row. However
+                // narrow the window, it keeps room to type in.
+                frame(p, focused).flex_1().min_w(px(SEARCH_FIELD_MIN)).m(px(-3.)).child(
                     div()
                         .id("search-box")
                         .w_full()
@@ -1093,7 +1094,8 @@ impl Colet {
                                         this.search.update(cx, |input, cx| input.focus(window, cx));
                                     })),
                             )
-                        }),
+                        })
+                        .test_support(),
                 ),
             )
             .child(filter_button)
@@ -1194,12 +1196,16 @@ impl Colet {
         let lines = if self.filter_open { self.render_lines(cx) } else { Vec::new() };
         let on = chosen.is_some();
         let label = format!("検索フィルター: {}", chosen.as_deref().unwrap_or("なし"));
+        // In a narrow window its name gives way to the search field, down to the funnel and the chevron;
+        // the tip still names it.
         div()
             .relative()
+            .min_w_0()
             .child(
-                frame(p, keyed(&focus, window)).m(px(-3.)).child(
+                frame(p, keyed(&focus, window)).min_w_0().m(px(-3.)).child(
                     div()
                         .id("search-filter")
+                        .min_w_0()
                         .track_focus(&focus)
                         .key_context(SORT)
                         .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_filter_menu(true, window, cx)))

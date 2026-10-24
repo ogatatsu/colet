@@ -77,7 +77,7 @@ pub fn home_groups<'a>(settings: &Settings, entries: &'a [Entry]) -> Vec<(&'stat
 
 /// Where the window opens again: on the display holding the middle of where it was left, which the window
 /// must name or it opens on the primary one; otherwise centered on `primary`, as after that display was
-/// unplugged. Either way it is kept within the display it opens on.
+/// unplugged. Either way it is kept within the display it opens on, and no smaller than the window goes.
 pub fn restore_bounds(
     placement: Placement,
     displays: &[(DisplayId, Bounds<Pixels>)],
@@ -89,7 +89,11 @@ pub fn restore_bounds(
     else {
         return (None, saved);
     };
-    let size = size(saved.size.width.min(display.size.width), saved.size.height.min(display.size.height));
+    let (min_width, min_height) = crate::app::MIN_WINDOW;
+    let size = size(
+        saved.size.width.max(px(min_width)).min(display.size.width),
+        saved.size.height.max(px(min_height)).min(display.size.height),
+    );
     let origin = if held.is_some() {
         point(
             saved.origin.x.clamp(display.left(), display.right() - size.width),
@@ -364,6 +368,11 @@ mod tests {
         assert_eq!(
             restore_bounds(at(2000., 50., 800., 600.), &[primary], Some(primary.0)),
             (Some(primary.0), bounds(560., 240., 800., 600.))
+        );
+        // Left smaller than the window now goes, it opens at the least it goes, where it was.
+        assert_eq!(
+            restore_bounds(at(100., 100., 400., 300.), &[primary], Some(primary.0)),
+            (Some(primary.0), bounds(100., 100., 720., 480.))
         );
     }
 
