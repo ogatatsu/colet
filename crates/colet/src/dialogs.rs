@@ -618,7 +618,7 @@ impl Colet {
             .child(action("rename", "pencil-line", "名前を変更", "F2", reasons.rename).on_click(cx.listener(|this, _, window, cx| this.ask_rename(window, cx))).test_support())
             .child(action("new-folder", "folder-plus", "新規フォルダー", "Ctrl+Shift+N", reasons.paste).on_click(cx.listener(|this, _, window, cx| this.ask_new_folder(window, cx))).test_support())
             // With Shift held it deletes outright, as Explorer's Delete does.
-            .child(crate::view::keep_focus(action("recycle", "trash", "ごみ箱へ移動", "Delete", reasons.delete)).on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))).test_support());
+            .child(crate::view::keep_focus(action("recycle", "trash", "ごみ箱へ移動", "Delete／Shift+クリックで完全に削除", reasons.delete)).on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))).test_support());
         (7. * 30. + 13. + 16., row.into_any_element())
     }
 
