@@ -99,14 +99,20 @@ pub fn name_problem(name: &str, tried: bool) -> Option<&'static str> {
     if name.ends_with(['.', ' ']) {
         return Some("末尾にピリオドや空白は使えません");
     }
-    let stem = name.trim().split('.').next().unwrap_or("").to_uppercase();
-    let numbered = stem.len() == 4
-        && (stem.starts_with("COM") || stem.starts_with("LPT"))
-        && matches!(stem.as_bytes()[3], b'1'..=b'9');
-    if ["CON", "PRN", "AUX", "NUL"].contains(&stem.as_str()) || numbered {
+    if is_device_name(name) {
         return Some("Windowsで予約された名前は使えません");
     }
     None
+}
+
+/// A device's name, which the shell refuses as an item's whole name. As Explorer on Windows 11 does, one
+/// with an extension passes (`con.txt`, `COM1.log`), though Windows 10 still took it for the device.
+fn is_device_name(name: &str) -> bool {
+    let name = name.to_uppercase();
+    let numbered = |prefix: &str| {
+        name.strip_prefix(prefix).is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"))
+    };
+    ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].contains(&name.as_str()) || numbered("COM") || numbered("LPT")
 }
 
 fn valid_name(name: &str) -> bool {
@@ -429,7 +435,7 @@ mod tests {
         let p = dir.path().display().to_string();
         assert!(prepare(request(Kind::Paste, vec![], &child, ""), files(vec![p.clone()], false)).is_err());
         assert!(prepare(request(Kind::Recycle, vec![r"C:\".into()], dir.path(), ""), files(vec![], false)).is_err());
-        for name in ["..", "CON.txt", "a/b", "a ", "a.", "LPT1", "a:b", ""] {
+        for name in ["..", "CON", "a/b", "a ", "a.", "LPT1", "a:b", ""] {
             assert!(prepare(request(Kind::NewFolder, vec![], dir.path(), name), files(vec![], false)).is_err(), "{name}");
         }
         assert!(prepare(request(Kind::NewFolder, vec![], dir.path(), "日本語 folder"), files(vec![], false)).is_ok());
@@ -441,10 +447,24 @@ mod tests {
         assert!(name_problem("a:b", false).is_some());
         assert_eq!(name_problem("report.", false), None);
         assert!(name_problem("report.", true).is_some());
-        assert!(name_problem("con", true).is_some());
-        assert!(name_problem("COM1.txt", true).is_some());
-        assert_eq!(name_problem("COM0", true), None);
         assert_eq!(name_problem("config", true), None);
+    }
+
+    /// As Explorer's rename took them on Windows 11 (26300): a device's name refused as the whole name,
+    /// but not with an extension, nor COM0, LPT0 or CLOCK$.
+    #[test]
+    fn refuses_a_device_name_as_the_whole_name_as_the_shell_does() {
+        for name in ["CON", "con", "PRN", "AUX", "NUL", "COM1", "COM9", "lpt9", "COM¹", "LPT²", "LPT³", "CONIN$", "conout$"] {
+            assert_eq!(name_problem(name, true), Some("Windowsで予約された名前は使えません"), "{name}");
+            // Not yet a problem while it is typed: "CON" passes through on the way to "CONTRACT".
+            assert_eq!(name_problem(name, false), None, "{name}");
+        }
+        for name in ["con.txt", "nul.txt", "NUL.tar.gz", "COM1.txt", "COM¹.txt", "LPT³.txt", "CONIN$.txt", "CON .txt", "COM0", "LPT0", "COM10", "CLOCK$"] {
+            assert_eq!(name_problem(name, true), None, "{name}");
+        }
+        // Ending in a dot or a space, the shell would trim it to the device's name: refused as such.
+        assert!(name_problem("CON.", true).is_some());
+        assert!(name_problem("CON ", true).is_some());
     }
 
     #[test]
