@@ -2105,6 +2105,14 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
     // The filter's name gave way, down to the funnel and the chevron; nothing is pushed past the edge.
     assert!(filter.size.width < px(200.) && filter.size.width >= px(60.), "{filter:?}");
     assert!(last.right() <= px(width), "{last:?}");
+    // The hints where to start stay within the side beside home, clear of its padding.
+    let (main, hints) = ui.act(cx, |window, _| {
+        let hints: Vec<_> = ["ext:pdf", "dm:today", "size:>1gb"].map(|id| window.find(id).bounds()).into();
+        (window.find("columns-scroll").bounds(), hints)
+    });
+    for hint in hints {
+        assert!(hint.left() >= main.left() + px(24.) && hint.right() <= main.right() - px(24.), "{hint:?} in {main:?}");
+    }
     // Wide again, the pane is as wide as it was dragged.
     cx.simulate_window_resize(ui.window, size(px(1200.), px(800.)));
     assert_eq!(ui.act(cx, |window, _| window.find("sidebar").bounds().size.width), px(480.));
