@@ -1487,6 +1487,23 @@ fn leaves_no_trace_of_a_deletion_turned_down_at_the_shells_question(cx: &mut Tes
 }
 
 #[gpui_kit::test]
+fn offers_the_explorer_menu_only_for_items_in_one_folder(cx: &mut TestAppContext) {
+    let results = vec![file(r"D:\a\x.txt"), file(r"D:\a\y.txt"), file(r"D:\b\z.txt"), file(r"\\nas\share\w.txt")];
+    let fake = Arc::new(Fake::default().with_results(results));
+    let ui = open(cx, fake);
+    ui.input(cx, "x");
+    ui.press(cx, "enter");
+    let reasons = |cx: &mut TestAppContext| ui.read(cx, |v| (v.reasons().shell, v.reasons().copy));
+    assert_eq!(ui.selected(cx, 1), [r"D:\a\x.txt"]);
+    assert_eq!(reasons(cx), (None, None));
+    ui.press(cx, "shift-down");
+    assert_eq!(ui.selected(cx, 1), [r"D:\a\x.txt", r"D:\a\y.txt"]);
+    assert_eq!(reasons(cx), (None, None));
+    ui.press(cx, "ctrl-a");
+    assert_eq!(reasons(cx), (Some("同じフォルダーの項目を選んだときに使えます"), None));
+}
+
+#[gpui_kit::test]
 fn never_sends_a_drive_at_home_to_the_bin(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake { roots: vec![Entry::folder(r"D:\", "D:")], ..Fake::default().with_folders(&[(r"D:\", vec![])]) });
     let ui = open(cx, fake.clone());

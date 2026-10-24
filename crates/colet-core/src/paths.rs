@@ -17,6 +17,18 @@ pub fn ancestors(path: &str) -> Vec<String> {
     paths
 }
 
+/// The folder holding `path`, as [`ancestors`] names it but read from the path itself, with nothing made:
+/// `None` for a root (`D:\`, `\\server\share`) or nothing. A drive's own folders name it `D:` here, where
+/// `ancestors` gives `D:\`; one or the other alike stands for it.
+pub fn parent_folder(path: &str) -> Option<&str> {
+    let trimmed = path.trim_end_matches('\\');
+    let root = if path.starts_with("\\\\") { 4 } else { 1 };
+    if path.is_empty() || trimmed.split('\\').nth(root).is_none() {
+        return None;
+    }
+    trimmed.rsplit_once('\\').map(|(parent, _)| parent)
+}
+
 /// A path compared without case or the drive root's trailing backslash.
 pub fn path_key(path: &str) -> String {
     path.trim_end_matches('\\').to_lowercase()
@@ -46,6 +58,25 @@ mod tests {
         assert_eq!(ancestors(r"D:\"), [r"D:\"]);
         assert_eq!(ancestors(r"\\server\share\a"), [r"\\server\share", r"\\server\share\a"]);
         assert!(ancestors("").is_empty());
+    }
+
+    #[test]
+    fn finds_the_parent_where_ancestors_would_without_making_them() {
+        let paths = [
+            r"D:\", "D:", r"D:\a", r"D:\a\", r"D:\a\b", r"\\server\share", r"\\server\share\", r"\\server",
+            r"\\server\share\a", r"\\server\share\a\b", "", "search:ext:pdf", r"search:a\b",
+        ];
+        for path in paths {
+            let made = ancestors(path);
+            // A root, or nothing, has no folder above it.
+            assert_eq!(parent_folder(path).is_none(), made.len() < 2, "{path}");
+            if let Some(parent) = parent_folder(path) {
+                assert_eq!(parent.trim_end_matches('\\'), made[made.len() - 2].trim_end_matches('\\'), "{path}");
+            }
+        }
+        assert_eq!(parent_folder(r"D:\a\b"), Some(r"D:\a"));
+        assert_eq!(parent_folder(r"D:\a"), Some("D:"));
+        assert_eq!(parent_folder(r"\\server\share\a"), Some(r"\\server\share"));
     }
 
     #[test]

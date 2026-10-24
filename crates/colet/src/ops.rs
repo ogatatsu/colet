@@ -9,7 +9,7 @@ use std::{
 use colet_core::{
     entry::Entry,
     operations::{CANCELLED, Event, Kind, Request},
-    paths::{ancestors, child, folder_name, path_key},
+    paths::{ancestors, child, folder_name, parent_folder, path_key},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -210,10 +210,15 @@ impl Colet {
 
     /// What the file actions work on: the selection, or while the menu is open, what it was opened on.
     pub fn picked(&self) -> Vec<String> {
-        let Some(column) = self.action_column() else { return Vec::new() };
+        self.picked_paths().to_vec()
+    }
+
+    /// [`picked`](Self::picked), lent rather than copied, for what is asked each frame.
+    fn picked_paths(&self) -> &[String] {
+        let Some(column) = self.action_column() else { return &[] };
         match &self.menu {
-            Some(Menu { paths: Some(paths), .. }) => paths.clone(),
-            _ => column.selected.clone(),
+            Some(Menu { paths: Some(paths), .. }) => paths,
+            _ => &column.selected,
         }
     }
 
@@ -229,8 +234,10 @@ impl Colet {
         (c.kind == ColumnKind::Folder).then(|| c.path.clone())
     }
 
+    /// Asked as the buttons are drawn, each frame: it walks the selection, which may be thousands, without
+    /// making a string, and stops at the first answer.
     pub fn reasons(&self) -> Reasons {
-        let picked = self.picked();
+        let picked = self.picked_paths();
         let at_home = self.action_column().is_none_or(|c| c.kind == ColumnKind::Home);
         let search = picked.iter().any(|p| saved_query(p).is_some());
         let none = picked.is_empty();
@@ -238,14 +245,14 @@ impl Colet {
         let busy = self.running.is_some().then_some(BUSY);
         let folder = busy.or(self.destination().is_none().then_some(NEEDS_FOLDER));
         let saved_pick = picked.len() == 1 && search;
-        let parents: HashSet<String> =
-            picked.iter().map(|p| ancestors(p).iter().rev().nth(1).cloned().unwrap_or_default()).collect();
+        let first = picked.first().map(|p| parent_folder(p).unwrap_or_default());
+        let apart = first.is_some_and(|first| picked.iter().any(|p| parent_folder(p).unwrap_or_default() != first));
         Reasons {
             copy: if none {
                 Some(NEEDS_SELECTION)
             } else if search {
                 Some("保存した検索はコピーできません")
-            } else if picked.iter().any(|p| ancestors(p).len() == 1) {
+            } else if picked.iter().any(|p| !p.is_empty() && parent_folder(p).is_none()) {
                 Some("ドライブはコピーできません")
             } else {
                 None
@@ -259,7 +266,7 @@ impl Colet {
                 Some("保存した検索には使えません")
             } else if none {
                 self.destination().is_none().then_some(NEEDS_FOLDER)
-            } else if parents.len() > 1 {
+            } else if apart {
                 Some("同じフォルダーの項目を選んだときに使えます")
             } else {
                 None
