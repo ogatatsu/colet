@@ -6,7 +6,7 @@ use gpui_kit::*;
 
 use crate::{
     app::Colet,
-    ops::{NEEDS_FILE, NEEDS_FOLDER, ONE_ITEM},
+    ops::{NEEDS_FILE, ONE_ITEM},
     state::saved_query,
     theme::Palette,
 };
@@ -117,11 +117,9 @@ impl Colet {
             1 => None,
             _ => entries.iter().all(|e| e.directory).then_some(NEEDS_FILE),
         };
-        // With nothing picked, the folder column's own folder.
-        let explorer_off = if some { (!one).then_some(ONE_ITEM) } else { self.destination().is_none().then_some(NEEDS_FOLDER) };
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), open_off, Command::Open),
-            line("menu-explorer", "folder-open", "Explorerで表示", None, explorer_off, Command::Explorer),
+            line("menu-explorer", "folder-open", "Explorerで表示", None, reasons.explorer, Command::Explorer),
             line("menu-copy", "copy", "コピー", Some("Ctrl+C"), quiet(reasons.copy), Command::Copy).grouped(),
             line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), Command::Cut),
             line("menu-paste", "clipboard-paste", "貼り付け", Some("Ctrl+V"), reasons.paste, Command::Paste),

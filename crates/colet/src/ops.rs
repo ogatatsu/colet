@@ -183,6 +183,7 @@ pub struct Reasons {
     pub paste: Option<&'static str>,
     pub rename: Option<&'static str>,
     pub delete: Option<&'static str>,
+    pub explorer: Option<&'static str>,
     pub shell: Option<&'static str>,
     pub copy_path: Option<&'static str>,
 }
@@ -193,6 +194,7 @@ const BUSY: &str = "ファイル操作の完了後に使えます";
 const NOT_AT_HOME: &str = "ホームでは使えません";
 pub const ONE_ITEM: &str = "1項目を選択したときに使えます";
 pub const NEEDS_FILE: &str = "ファイルを選択したときに使えます";
+pub const SAME_FOLDER: &str = "同じフォルダーの項目を選んだときに使えます";
 /// The fewest files opened together that are asked about first, as Explorer stops offering to open them
 /// past 15.
 pub const ASK_TO_OPEN: usize = 16;
@@ -264,12 +266,22 @@ impl Colet {
             paste: folder,
             rename: if saved_pick { None } else { busy.or(item).or((picked.len() != 1).then_some(ONE_ITEM)) },
             delete: busy.or(item),
+            // With nothing picked, the folder column's own folder.
+            explorer: if none {
+                self.destination().is_none().then_some(NEEDS_FOLDER)
+            } else if at_home && picked.len() > 1 {
+                Some(ONE_ITEM)
+            } else if apart {
+                Some(SAME_FOLDER)
+            } else {
+                None
+            },
             shell: if search {
                 Some("保存した検索には使えません")
             } else if none {
                 self.destination().is_none().then_some(NEEDS_FOLDER)
             } else if apart {
-                Some("同じフォルダーの項目を選んだときに使えます")
+                Some(SAME_FOLDER)
             } else {
                 None
             },
@@ -533,20 +545,23 @@ impl Colet {
         );
     }
 
-    /// Shows the picked item selected in its folder; with nothing picked, the folder column's own folder,
-    /// open on what it holds.
+    /// Shows the picked items, all in one folder, selected together in it; with nothing picked, the folder
+    /// column's own folder, open on what it holds.
     pub fn reveal_in_explorer(&mut self, cx: &mut Context<Self>) {
-        let (picked, folder) = (self.picked_entries(), self.destination());
+        let (picked, folder, refused) = (self.picked_entries(), self.destination(), self.reasons().explorer);
         self.menu = None;
+        if refused.is_some() {
+            return;
+        }
         let backend = self.backend.clone();
-        match (picked.as_slice(), folder) {
-            ([entry], _) => {
-                let path = entry.path.clone();
-                self.in_background(move || backend.reveal(&path), None, cx);
-            }
-            ([], Some(folder)) => {
+        match folder {
+            Some(folder) if picked.is_empty() => {
                 let owner = self.owner;
                 self.in_background(move || backend.open(&folder, owner).map_err(|error| format!("開けません: {error}")), None, cx);
+            }
+            _ if !picked.is_empty() => {
+                let paths: Vec<String> = picked.into_iter().map(|e| e.path).collect();
+                self.in_background(move || backend.reveal(&paths), None, cx);
             }
             _ => {}
         }

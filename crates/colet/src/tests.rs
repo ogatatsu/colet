@@ -65,6 +65,8 @@ struct Fake {
     opened: Mutex<Vec<String>>,
     /// Paths that Windows has no app to open with.
     unopenable: Mutex<Vec<String>>,
+    /// What each Explorer window was asked to show selected.
+    revealed: Mutex<Vec<Vec<String>>>,
     menus: Mutex<Vec<(Vec<String>, String)>>,
     /// Told of every clipboard change, as the real watcher is.
     watcher: Mutex<Option<Box<dyn Fn() + Send>>>,
@@ -230,7 +232,8 @@ impl Backend for Fake {
         Ok(())
     }
 
-    fn reveal(&self, _: &str) -> Result<(), String> {
+    fn reveal(&self, paths: &[String]) -> Result<(), String> {
+        self.revealed.lock().unwrap().push(paths.to_vec());
         Ok(())
     }
 
@@ -1651,6 +1654,45 @@ fn shows_a_folder_columns_own_folder_in_explorer_from_its_empty_space(cx: &mut T
     ui.act(cx, |window, cx| window.right_click(("column", results), cx));
     settle(cx);
     assert_eq!(explorer(&ui, cx), Some(crate::ops::NEEDS_FOLDER));
+}
+
+#[gpui_kit::test]
+fn shows_several_picked_in_one_folder_together_in_explorer(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "ctrl-a");
+    ui.press(cx, "shift-f10");
+    let explorer = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.menu_lines()[1].off);
+    assert_eq!(explorer(&ui, cx), None);
+    ui.click(cx, "menu-explorer");
+    assert_eq!(*fake.revealed.lock().unwrap(), [vec![r"D:\work\a.txt".to_owned(), r"D:\work\b.txt".into(), r"D:\work\c.txt".into()]]);
+}
+
+#[gpui_kit::test]
+fn shows_several_in_explorer_only_from_one_folder_and_not_in_home(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:"), Entry::folder(r"E:\", "E:")],
+        ..Fake::default().with_results(vec![file(r"D:\a\x.txt"), file(r"D:\b\y.txt")])
+    });
+    let ui = open(cx, fake.clone());
+    let explorer = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.menu_lines()[1].off);
+    // Results from two folders.
+    ui.input(cx, "x");
+    ui.press(cx, "down");
+    ui.press(cx, "ctrl-a");
+    assert_eq!(ui.selected(cx, 1).len(), 2);
+    ui.press(cx, "shift-f10");
+    assert_eq!(explorer(&ui, cx), Some(crate::ops::SAME_FOLDER));
+    ui.press(cx, "escape");
+    // Two drives in home.
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "escape");
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "left");
+    ui.press(cx, "ctrl-a");
+    assert!(ui.selected(cx, 0).len() > 1);
+    ui.press(cx, "shift-f10");
+    assert_eq!(explorer(&ui, cx), Some(crate::ops::ONE_ITEM));
+    assert!(fake.revealed.lock().unwrap().is_empty());
 }
 
 #[gpui_kit::test]

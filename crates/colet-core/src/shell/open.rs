@@ -1,12 +1,13 @@
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{E_INVALIDARG, HWND};
+use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    ILCreateFromPathW, ILFree, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems,
-    ShellExecuteExW,
+    ILClone, ILCreateFromPathW, ILFindLastID, ILFree, ILRemoveLastID, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC,
+    SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems, ShellExecuteExW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{Error, Result, w};
 
-use super::{Apartment, Owner, Wide};
+use super::{Apartment, Owner, Pidls, Wide, parse};
 
 /// Opens `path` with the app Windows associates with it.
 pub fn open(path: &str, owner: Owner) -> Result<()> {
@@ -24,15 +25,26 @@ pub fn open(path: &str, owner: Owner) -> Result<()> {
     unsafe { ShellExecuteExW(&mut info) }
 }
 
-/// Shows `path` selected in an Explorer window of its folder.
-pub fn reveal(path: &str) -> Result<()> {
+/// Shows `paths`, all in one folder, selected together in an Explorer window of it.
+pub fn reveal(paths: &[String]) -> Result<()> {
     let _apartment = Apartment::enter();
-    let file = Wide::new(path);
-    let pidl = unsafe { ILCreateFromPathW(file.get()) };
-    if pidl.is_null() {
-        return Err(Error::from_thread());
+    if let [path] = paths {
+        let file = Wide::new(path);
+        let pidl = unsafe { ILCreateFromPathW(file.get()) };
+        if pidl.is_null() {
+            return Err(Error::from_thread());
+        }
+        let result = unsafe { SHOpenFolderAndSelectItems(pidl, None, 0) };
+        unsafe { ILFree(Some(pidl)) };
+        return result;
     }
-    let result = unsafe { SHOpenFolderAndSelectItems(pidl, None, 0) };
-    unsafe { ILFree(Some(pidl)) };
-    result
+    let items = Pidls(paths.iter().map(|path| parse(path)).collect::<Result<_>>()?);
+    let Some(&first) = items.0.first() else { return Ok(()) };
+    let folder = Pidls(vec![unsafe { ILClone(first) }]);
+    if folder.0[0].is_null() || !unsafe { ILRemoveLastID(Some(folder.0[0])) }.as_bool() {
+        return Err(Error::from_hresult(E_INVALIDARG));
+    }
+    // Each named by its last ID, under the folder it shares.
+    let children: Vec<*const ITEMIDLIST> = items.0.iter().map(|item| unsafe { ILFindLastID(*item) } as *const _).collect();
+    unsafe { SHOpenFolderAndSelectItems(folder.0[0], Some(&children), 0) }
 }

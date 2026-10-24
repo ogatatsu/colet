@@ -48,8 +48,8 @@ pub trait Backend: Send + Sync + 'static {
     fn watch_clipboard(&self, changed: Box<dyn Fn() + Send>);
     /// Opens a file in the app Windows associates with it.
     fn open(&self, path: &str, owner: Owner) -> Result<(), String>;
-    /// Shows it selected in an Explorer window.
-    fn reveal(&self, path: &str) -> Result<(), String>;
+    /// Shows them, all in one folder, selected together in an Explorer window.
+    fn reveal(&self, paths: &[String]) -> Result<(), String>;
     /// Whether `path` is a folder, a file, or gone. It touches the disk, which a share can keep waiting for
     /// seconds: never ask it on the UI thread.
     fn path_kind(&self, path: &str) -> Option<bool>;
@@ -145,8 +145,8 @@ impl Backend for Live {
         shell::open(path, owner).map_err(said)
     }
 
-    fn reveal(&self, path: &str) -> Result<(), String> {
-        shell::reveal(path).map_err(said)
+    fn reveal(&self, paths: &[String]) -> Result<(), String> {
+        shell::reveal(paths).map_err(said)
     }
 
     fn path_kind(&self, path: &str) -> Option<bool> {
