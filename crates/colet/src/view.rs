@@ -288,9 +288,10 @@ fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
 }
 
-/// `text` with what a search matched in it on a marker, in `ink` when given.
-fn with_marks(text: &str, marks: &[Range<usize>], mark: Hsla, ink: Option<Hsla>) -> StyledText {
-    let style = HighlightStyle { background_color: Some(mark), color: ink, ..Default::default() };
+/// `text` with what a search matched in it underlined, in the ink of the text around it.
+fn with_marks(text: &str, marks: &[Range<usize>]) -> StyledText {
+    let underline = UnderlineStyle { thickness: px(1.), ..Default::default() };
+    let style = HighlightStyle { underline: Some(underline), ..Default::default() };
     StyledText::new(text.to_owned()).with_highlights(marks.iter().map(|range| (range.clone(), style)))
 }
 
@@ -499,7 +500,7 @@ impl Colet {
         let image = self.icons.get(entry, cx);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
         let by = self.settings.sort.by;
-        let (mark, ink) = if lit { (p.mark_on_fill, p.on_accent) } else { (p.mark, p.text) };
+        let ink = if lit { p.on_accent } else { p.text };
         let path = entry.path.clone();
         // A favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
         let drag = (kind == Kind::Home)
@@ -586,7 +587,7 @@ impl Colet {
                                     .min_w_0()
                                     .truncate()
                                     .when(barred && highlighted, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
-                                    .child(with_marks(&entry.name, &entry.marks.name, mark, None)),
+                                    .child(with_marks(&entry.name, &entry.marks.name)),
                             )
                             // A badge, tinted with the row's own ink so it shows on any of its fills.
                             .when_some(within, |d, filter| {
@@ -608,7 +609,7 @@ impl Colet {
                             }),
                     )
                     .when(kind == Kind::Search, |d| {
-                        d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(with_marks(&entry.parent, &entry.marks.parent, mark, Some(ink))))
+                        d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(with_marks(&entry.parent, &entry.marks.parent)))
                     }),
             )
             // Out of the name, so type-ahead stays the file's own: a fade alone would read as hidden.

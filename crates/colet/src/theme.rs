@@ -44,10 +44,6 @@ pub struct Palette {
     pub on_accent: Hsla,
     /// Secondary text on the accent fill.
     pub on_accent_muted: Hsla,
-    /// Behind the part of a result's name and folder the search matched, laid over the row.
-    pub mark: Hsla,
-    /// The same on the selection's fill, under its light text.
-    pub mark_on_fill: Hsla,
     /// Behind the edge columns are hidden past.
     pub shade: Hsla,
 }
@@ -78,8 +74,6 @@ impl Palette {
             selection: hsl(184., 42., 28.),
             on_accent: hsl(0., 0., 100.),
             on_accent_muted: hsla(0., 0., 1., 0.85),
-            mark: hsla(38. / 360., 0.65, 0.22, 0.8),
-            mark_on_fill: hsla(0., 0., 0., 0.35),
             shade: hsla(210. / 360., 0.3, 0.03, 0.55),
         }
     }
@@ -109,8 +103,6 @@ impl Palette {
             selection: hsl(184., 50., 80.),
             on_accent: hsl(0., 0., 100.),
             on_accent_muted: hsla(0., 0., 1., 0.85),
-            mark: hsla(48. / 360., 1., 0.5, 0.25),
-            mark_on_fill: hsla(0., 0., 0., 0.3),
             shade: hsla(210. / 360., 0.3, 0.2, 0.18),
         }
     }
@@ -181,38 +173,6 @@ mod tests {
             let paths = contrast(palette.text_muted, palette.bg);
             assert!(paths >= 4.5, "paths {paths}, dark: {dark}");
             assert!(palette.bg != palette.raised, "the paths' ground stands off the dialog, dark: {dark}");
-        }
-    }
-
-    /// How far apart two colors lie in RGB: a marker can stand out by its hue alone, as yellow on white.
-    fn distance(a: Hsla, b: Hsla) -> f32 {
-        let (a, b) = (gpui_kit::Rgba::from(a), gpui_kit::Rgba::from(b));
-        ((a.r - b.r).powi(2) + (a.g - b.g).powi(2) + (a.b - b.b).powi(2)).sqrt()
-    }
-
-    /// `top` laid over the opaque `ground`.
-    fn over(top: Hsla, ground: Hsla) -> Hsla {
-        let (t, g) = (gpui_kit::Rgba::from(top), gpui_kit::Rgba::from(ground));
-        let mix = |a: f32, b: f32| a * t.a + b * (1. - t.a);
-        Hsla::from(gpui_kit::Rgba { r: mix(t.r, g.r), g: mix(t.g, g.g), b: mix(t.b, g.b), a: 1. })
-    }
-
-    #[test]
-    fn a_match_stands_out_of_its_row_and_its_text_still_reads() {
-        for (palette, dark) in [(Palette::light(), false), (Palette::dark(), true)] {
-            // The matched part, of the folder too, takes the row's full ink.
-            for row in [palette.surface, palette.hover, palette.highlight, palette.selected_inactive] {
-                let marked = over(palette.mark, row);
-                let ink = contrast(palette.text, marked);
-                let apart = distance(marked, row);
-                assert!(ink >= 4.5, "ink {ink}, dark: {dark}");
-                assert!(apart >= 0.12, "the mark against its row {apart}, dark: {dark}");
-            }
-            let marked = over(palette.mark_on_fill, palette.accent_fill);
-            let ink = contrast(palette.on_accent, marked);
-            let apart = distance(marked, palette.accent_fill);
-            assert!(ink >= 4.5, "ink on the fill {ink}, dark: {dark}");
-            assert!(apart >= 0.12, "the mark against the fill {apart}, dark: {dark}");
         }
     }
 
