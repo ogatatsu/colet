@@ -5,6 +5,7 @@ mod backend;
 mod crumbs;
 mod dialogs;
 mod icons;
+mod instance;
 mod menus;
 mod ops;
 mod places;
@@ -20,6 +21,7 @@ mod view;
 use std::borrow::Cow;
 
 use gpui_kit::*;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 gpui_kit::assets::icon_assets!(ExtraIcons, [
         X,
@@ -58,6 +60,7 @@ impl AssetSource for AppAssets {
 }
 
 fn main() {
+    let Some(instance) = instance::claim() else { return };
     application().with_assets(AppAssets).run(|cx| {
         init(cx);
         app::bind_keys(cx);
@@ -82,7 +85,12 @@ fn main() {
                 ..Default::default()
             },
             cx,
-            |window, cx| cx.new(|cx| app::Colet::new(live, settings, window, cx)),
+            |window, cx| {
+                if let Ok(RawWindowHandle::Win32(handle)) = HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
+                    instance.answer(handle.hwnd.get());
+                }
+                cx.new(|cx| app::Colet::new(live, settings, window, cx))
+            },
         )
         .expect("failed to open window");
         cx.activate(true);
