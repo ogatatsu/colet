@@ -576,6 +576,7 @@ impl Colet {
                         div()
                             .w_full()
                             .flex()
+                            .items_center()
                             .gap_2()
                             .child(
                                 div()
@@ -584,8 +585,23 @@ impl Colet {
                                     .when(barred && highlighted, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
                                     .child(with_marks(&entry.name, &entry.marks.name, mark, None)),
                             )
+                            // A badge, tinted with the row's own ink so it shows on any of its fills.
                             .when_some(within, |d, filter| {
-                                d.child(div().flex_shrink_0().max_w(px(96.)).truncate().text_size(px(12.)).text_color(muted).child(filter))
+                                d.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .max_w(px(96.))
+                                        .px(px(6.))
+                                        .rounded(px(4.))
+                                        .border_1()
+                                        .border_color(ink.opacity(0.3))
+                                        .bg(ink.opacity(0.1))
+                                        .truncate()
+                                        .text_size(px(11.))
+                                        .line_height(px(16.))
+                                        .text_color(ink)
+                                        .child(filter),
+                                )
                             }),
                     )
                     .when(kind == Kind::Search, |d| {
