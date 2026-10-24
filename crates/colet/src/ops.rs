@@ -188,7 +188,7 @@ pub struct Reasons {
 }
 
 const NEEDS_SELECTION: &str = "項目を選択すると使えます";
-const NEEDS_FOLDER: &str = "フォルダーのカラムで使えます";
+pub const NEEDS_FOLDER: &str = "フォルダーのカラムで使えます";
 const BUSY: &str = "ファイル操作の完了後に使えます";
 const NOT_AT_HOME: &str = "ホームでは使えません";
 pub const ONE_ITEM: &str = "1項目を選択したときに使えます";
@@ -533,12 +533,23 @@ impl Colet {
         );
     }
 
+    /// Shows the picked item selected in its folder; with nothing picked, the folder column's own folder,
+    /// open on what it holds.
     pub fn reveal_in_explorer(&mut self, cx: &mut Context<Self>) {
-        let picked = self.picked_entries();
+        let (picked, folder) = (self.picked_entries(), self.destination());
         self.menu = None;
-        let [entry] = picked.as_slice() else { return };
-        let (backend, path) = (self.backend.clone(), entry.path.clone());
-        self.in_background(move || backend.reveal(&path), None, cx);
+        let backend = self.backend.clone();
+        match (picked.as_slice(), folder) {
+            ([entry], _) => {
+                let path = entry.path.clone();
+                self.in_background(move || backend.reveal(&path), None, cx);
+            }
+            ([], Some(folder)) => {
+                let owner = self.owner;
+                self.in_background(move || backend.open(&folder, owner).map_err(|error| format!("開けません: {error}")), None, cx);
+            }
+            _ => {}
+        }
     }
 
     /// The Windows (Explorer) menu, where this one was opened. Dismisses Colet's menu and returns its

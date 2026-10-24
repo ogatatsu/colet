@@ -1634,6 +1634,26 @@ fn acts_from_the_menu_on_the_row_right_clicked_leaving_the_selection(cx: &mut Te
 }
 
 #[gpui_kit::test]
+fn shows_a_folder_columns_own_folder_in_explorer_from_its_empty_space(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.act(cx, |window, cx| window.right_click(("column", work), cx));
+    settle(cx);
+    let explorer = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.menu_lines()[1].off);
+    assert_eq!(explorer(&ui, cx), None);
+    ui.click(cx, "menu-explorer");
+    assert_eq!(*fake.opened.lock().unwrap(), [r"D:\work"]);
+    // The results stand in no folder: it is off, and says why.
+    ui.press(cx, "ctrl-f");
+    ui.input(cx, "a");
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].kind), crate::state::Kind::Search);
+    let results = ui.read(cx, |v| v.state.columns[1].id);
+    ui.act(cx, |window, cx| window.right_click(("column", results), cx));
+    settle(cx);
+    assert_eq!(explorer(&ui, cx), Some(crate::ops::NEEDS_FOLDER));
+}
+
+#[gpui_kit::test]
 fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     let dialog_paths = |ui: &Ui, cx: &mut TestAppContext| {
