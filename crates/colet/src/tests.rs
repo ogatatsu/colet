@@ -1433,6 +1433,81 @@ fn refuses_a_rename_to_a_name_its_folder_has_but_not_its_own_in_another_case(cx:
 }
 
 #[gpui_kit::test]
+fn asks_the_folder_about_a_new_name_off_the_ui_thread_and_lets_go_of_an_answer_overtaken(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "f2");
+    let input = ui.read(cx, |v| match &v.dialog {
+        Some(Dialog::Name { input, .. }) => input.clone(),
+        _ => panic!("no dialog"),
+    });
+    ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("e.txt", window, cx)));
+    settle(cx);
+    let checking = |v: &Colet| match &v.dialog {
+        Some(Dialog::Name { checking, .. }) => checking.clone(),
+        _ => None,
+    };
+    ui.act(cx, |window, cx| {
+        ui.view.update(cx, |v, cx| v.submit_name(window, cx));
+        // Pressed, the dialog waits for the folder to answer rather than the window for the disk.
+        assert_eq!(checking(ui.view.read(cx)).as_deref(), Some("e.txt"));
+        // Typed on before it answers, as the user types: setting the value says nothing of a change.
+        window.input("d", cx);
+    });
+    settle(cx);
+    // The answer, that "e.txt" is free, was about a name no longer there: nothing is sent.
+    assert_eq!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)), None);
+    assert!(ui.read(cx, |v| v.dialog.is_some() && checking(v).is_none()));
+    assert!(fake.operations.lock().unwrap().is_empty());
+    // Pressed again while the folder is asked, it is sent once, once the folder answers.
+    ui.act(cx, |window, cx| {
+        ui.view.update(cx, |v, cx| v.submit_name(window, cx));
+        ui.view.update(cx, |v, cx| v.submit_name(window, cx));
+    });
+    settle(cx);
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    let names: Vec<String> = fake.operations.lock().unwrap().iter().map(|r| r.name.clone()).collect();
+    assert_eq!(names, ["e.txtd"]);
+}
+
+#[gpui_kit::test]
+fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the_last_pressed(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let highlight = |cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns.last().unwrap().highlight.clone());
+    ui.act(cx, |window, cx| {
+        ui.view.update(cx, |v, cx| {
+            v.show_history(true, None, window, cx);
+            v.reveal_from_history(r"D:\work\a.txt".into(), window, cx);
+            v.reveal_from_history(r"D:\work\c.txt".into(), window, cx);
+            // The history stays up while the disk is asked.
+            assert!(v.history_open);
+        });
+    });
+    settle(cx);
+    assert!(ui.read(cx, |v| !v.history_open));
+    assert_eq!(highlight(cx).as_deref(), Some(r"D:\work\c.txt"));
+    // Closed before the answer came, the history has moved on from it.
+    ui.act(cx, |window, cx| {
+        ui.view.update(cx, |v, cx| {
+            v.show_history(true, None, window, cx);
+            v.reveal_from_history(r"D:\work\b.txt".into(), window, cx);
+            v.show_history(false, None, window, cx);
+        });
+    });
+    settle(cx);
+    assert_eq!(highlight(cx).as_deref(), Some(r"D:\work\c.txt"));
+    // Gone since, it says so and the history stays open.
+    ui.act(cx, |window, cx| {
+        ui.view.update(cx, |v, cx| {
+            v.show_history(true, None, window, cx);
+            v.reveal_from_history(r"D:\work\gone.txt".into(), window, cx);
+        });
+    });
+    settle(cx);
+    assert!(ui.read(cx, |v| v.history_open));
+    assert!(ui.toasts(cx).iter().any(|t| t == "「gone.txt」はもうありません"), "{:?}", ui.toasts(cx));
+}
+
+#[gpui_kit::test]
 fn makes_a_folder_and_picks_it(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-shift-n");

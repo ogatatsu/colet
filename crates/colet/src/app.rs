@@ -309,6 +309,8 @@ pub struct Colet {
     /// Operations with problems since the history was last opened.
     pub unseen: usize,
     pub history_open: bool,
+    /// The item last pressed in the history, while the disk is asked whether it is still there.
+    pub(crate) revealing: Option<String>,
     /// The operations the history shows opened.
     pub expanded: HashSet<u64>,
     /// The files on the clipboard, marked in their rows until it changes.
@@ -449,6 +451,7 @@ impl Colet {
             history: Vec::new(),
             unseen: 0,
             history_open: false,
+            revealing: None,
             expanded: HashSet::new(),
             clipboard: ClipboardFiles::default(),
             held: HashSet::new(),

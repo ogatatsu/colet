@@ -50,7 +50,8 @@ pub trait Backend: Send + Sync + 'static {
     fn open(&self, path: &str, owner: Owner) -> Result<(), String>;
     /// Shows it selected in an Explorer window.
     fn reveal(&self, path: &str) -> Result<(), String>;
-    /// Whether `path` is a folder, a file, or gone.
+    /// Whether `path` is a folder, a file, or gone. It touches the disk, which a share can keep waiting for
+    /// seconds: never ask it on the UI thread.
     fn path_kind(&self, path: &str) -> Option<bool>;
     /// The Windows context menu at screen point `at`, for `paths` or the folder `background`.
     fn shell_menu(&self, paths: Vec<String>, background: String, at: (i32, i32), owner: Owner) -> Result<(), String>;
@@ -149,7 +150,12 @@ impl Backend for Live {
     }
 
     fn path_kind(&self, path: &str) -> Option<bool> {
-        std::fs::symlink_metadata(path).ok().map(|_| std::path::Path::new(path).is_dir())
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        // Asked once, of the item itself: a junction or link to a folder is one, even when what it points
+        // to is gone, and a share slow to answer is waited on once rather than twice.
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        Some(metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0)
     }
 
     fn shell_menu(&self, paths: Vec<String>, background: String, at: (i32, i32), owner: Owner) -> Result<(), String> {
@@ -176,3 +182,31 @@ impl Backend for Live {
 }
 
 pub type Shared = Arc<dyn Backend>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tells_a_folder_from_a_file_and_a_junction_to_one_gone_from_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (folder, file, junction) = (dir.path().join("folder"), dir.path().join("a.txt"), dir.path().join("link"));
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(&file, "a").unwrap();
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&folder)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        std::fs::remove_dir(&folder).unwrap();
+        let live = Live::default();
+        let kind = |path: &std::path::Path| live.path_kind(&path.display().to_string());
+        assert_eq!(kind(&file), Some(false));
+        assert_eq!(kind(dir.path()), Some(true));
+        // Still there, and still a folder, though what it points to is gone.
+        assert_eq!(kind(&junction), Some(true));
+        assert_eq!(kind(&folder), None);
+    }
+}

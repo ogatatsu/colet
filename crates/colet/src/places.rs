@@ -18,8 +18,15 @@ use crate::{
 
 pub enum Dialog {
     /// A rename's new name, or a new folder's: the request it sends, its name taken from `input`. `taken`: the
-    /// name tried last that the rename's folder already has.
-    Name { request: colet_core::operations::Request, input: Entity<InputState>, tried: bool, taken: Option<String> },
+    /// name tried last that the rename's folder already has. `checking`: the name tried whose folder is being
+    /// asked, off the UI thread, whether it has it already; typing lets go of it.
+    Name {
+        request: colet_core::operations::Request,
+        input: Entity<InputState>,
+        tried: bool,
+        taken: Option<String>,
+        checking: Option<String>,
+    },
     /// A saved search's name, query and filter, found by the query and filter it had as the dialog opened.
     EditSearch { original: (String, Option<String>), name: Entity<InputState>, query: Entity<InputState>, filter: Option<String> },
     /// The search filters, to add to, put in order, edit or delete: one at a time, in `edit`, or the one

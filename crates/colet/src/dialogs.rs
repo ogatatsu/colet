@@ -149,7 +149,8 @@ impl Colet {
         let tools: Vec<[FocusHandle; 4]> =
             names.iter().map(|name| ["up", "down", "edit", "delete"].map(|what| self.stop(format!("filter-{what}:{name}"), cx))).collect();
         let (content, buttons) = match self.dialog.as_ref()? {
-            Dialog::Name { request: Request { kind, paths, destination, .. }, input, .. } => {
+            Dialog::Name { request: Request { kind, paths, destination, .. }, input, checking, .. } => {
+                let checking = checking.is_some();
                 let problem = self.name_problem(cx);
                 let empty = input.read(cx).value().trim().is_empty();
                 // Where the name goes: a rename may come from the results, far from its folder.
@@ -176,7 +177,8 @@ impl Colet {
                         .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
                         .test_support()
                         .into_any_element(),
-                    button(p, "submit-name", submit, true, !empty && problem.is_none())
+                    // While the folder is asked whether the name is free, the press is in and waits.
+                    button(p, "submit-name", if checking { "確認中…" } else { submit }, true, !empty && problem.is_none() && !checking)
                         .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx)))
                         .test_support()
                         .into_any_element(),

@@ -363,8 +363,10 @@ impl Colet {
         let subscription = cx.subscribe_in(&input, window, |this: &mut Self, _, event, window, cx| match event {
             InputEvent::PressEnter { .. } => this.submit_name(window, cx),
             InputEvent::Change => {
-                if let Some(Dialog::Name { tried, .. }) = &mut this.dialog {
+                if let Some(Dialog::Name { tried, checking, .. }) = &mut this.dialog {
                     *tried = false;
+                    // The answer on its way is about a name no longer there.
+                    *checking = None;
                 }
                 cx.notify();
             }
@@ -376,7 +378,7 @@ impl Colet {
             input.focus(window, cx);
             input.set_selected_range(0..select_end, cx);
         });
-        self.dialog = Some(Dialog::Name { request, input, tried: false, taken: None });
+        self.dialog = Some(Dialog::Name { request, input, tried: false, taken: None, checking: None });
         cx.notify();
     }
 
@@ -389,9 +391,10 @@ impl Colet {
     }
 
     pub fn submit_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialog::Name { request, input, tried, taken }) = &mut self.dialog else { return };
+        let Some(Dialog::Name { request, input, tried, checking, .. }) = &mut self.dialog else { return };
         let name = input.read(cx).value().to_string();
-        if name.trim().is_empty() {
+        // Pressed again while the folder is asked about this very name: the answer sends it.
+        if name.trim().is_empty() || checking.as_deref() == Some(name.as_str()) {
             return;
         }
         // Like Explorer, an unchanged name just closes the dialog.
@@ -405,17 +408,46 @@ impl Colet {
             cx.notify();
             return;
         }
-        // Nor a name its folder already has, unless it is the item's own in another case.
+        // Nor a name its folder already has, unless it is the item's own in another case. The folder is asked
+        // off the UI thread, as a share can keep it waiting; the dialog stays up until it answers.
         if request.kind == Kind::Rename
             && let Some(path) = request.paths.first()
             && folder_name(path).to_lowercase() != name.to_lowercase()
             && let Some(parent) = ancestors(path).into_iter().rev().nth(1)
-            && self.backend.path_kind(&child(&parent, &name)).is_some()
         {
+            let target = child(&parent, &name);
+            *checking = Some(name.clone());
+            let (backend, dialog) = (self.backend.clone(), input.entity_id());
+            let asked = cx.background_executor().spawn(async move { backend.path_kind(&target).is_some() });
+            cx.spawn_in(window, async move |this, cx| {
+                let exists = asked.await;
+                this.update_in(cx, |this, window, cx| this.name_checked(dialog, name, exists, window, cx)).ok();
+            })
+            .detach();
+            cx.notify();
+            return;
+        }
+        self.send_name(name, window, cx);
+    }
+
+    /// The folder answered whether it has `name`: taken, the dialog says so; free, it is sent. Only while the
+    /// same dialog still waits on that name: closed, or typed on since, the answer is about nothing shown.
+    fn name_checked(&mut self, dialog: EntityId, name: String, exists: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Dialog::Name { input, taken, checking, .. }) = &mut self.dialog else { return };
+        if input.entity_id() != dialog || checking.as_deref() != Some(name.as_str()) {
+            return;
+        }
+        *checking = None;
+        if exists {
             *taken = Some(name);
             cx.notify();
             return;
         }
+        self.send_name(name, window, cx);
+    }
+
+    fn send_name(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Dialog::Name { request, .. }) = &self.dialog else { return };
         let request = Request { name, ..request.clone() };
         self.close_dialog(window, cx);
         self.run(request, cx);
@@ -639,9 +671,33 @@ impl Colet {
         cx.notify();
     }
 
-    /// Only what is still there: an item moved on or deleted since says so.
+    /// Only what is still there: an item moved on or deleted since says so. Whether it is, is asked off the UI
+    /// thread, as a share can keep it waiting.
     pub fn reveal_from_history(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
-        match self.backend.path_kind(&path) {
+        self.revealing = Some(path.clone());
+        let backend = self.backend.clone();
+        let asked = {
+            let path = path.clone();
+            cx.background_executor().spawn(async move { backend.path_kind(&path) })
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            let kind = asked.await;
+            this.update_in(cx, |this, window, cx| this.history_item_found(path, kind, window, cx)).ok();
+        })
+        .detach();
+    }
+
+    /// The answer for the item last pressed in the history, while the history is still open: another pressed
+    /// since, or the history closed, has moved on from it.
+    fn history_item_found(&mut self, path: String, kind: Option<bool>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.revealing.as_ref() != Some(&path) {
+            return;
+        }
+        self.revealing = None;
+        if !self.history_open {
+            return;
+        }
+        match kind {
             None => self.notify(format!("「{}」はもうありません", folder_name(&path)), Tone::Info, cx),
             Some(directory) => {
                 self.show_history(false, None, window, cx);
