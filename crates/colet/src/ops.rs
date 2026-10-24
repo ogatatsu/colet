@@ -183,7 +183,6 @@ pub struct Reasons {
     pub paste: Option<&'static str>,
     pub rename: Option<&'static str>,
     pub delete: Option<&'static str>,
-    pub open: Option<&'static str>,
     pub shell: Option<&'static str>,
     pub copy_path: Option<&'static str>,
 }
@@ -192,7 +191,11 @@ const NEEDS_SELECTION: &str = "項目を選択すると使えます";
 const NEEDS_FOLDER: &str = "フォルダーのカラムで使えます";
 const BUSY: &str = "ファイル操作の完了後に使えます";
 const NOT_AT_HOME: &str = "ホームでは使えません";
-const ONE_ITEM: &str = "1項目を選択したときに使えます";
+pub const ONE_ITEM: &str = "1項目を選択したときに使えます";
+pub const NEEDS_FILE: &str = "ファイルを選択したときに使えます";
+/// The fewest files opened together that are asked about first, as Explorer stops offering to open them
+/// past 15.
+pub const ASK_TO_OPEN: usize = 16;
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
@@ -261,7 +264,6 @@ impl Colet {
             paste: folder,
             rename: if saved_pick { None } else { busy.or(item).or((picked.len() != 1).then_some(ONE_ITEM)) },
             delete: busy.or(item),
-            open: (picked.len() > 1).then_some(ONE_ITEM),
             shell: if search {
                 Some("保存した検索には使えません")
             } else if none {
@@ -476,14 +478,59 @@ impl Colet {
         self.run(Request { kind, paths: picked, destination: String::new(), name: String::new() }, cx);
     }
 
-    /// Opens the picked item: a folder beside it, a file in its app.
+    /// Opens the picked item: a folder beside it, a file in its app. Of several, the files each open in
+    /// their apps and the folders are passed over.
     pub fn open_picked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let index = self.action_column().and_then(|c| self.state.index_of(c.id));
         let picked = self.picked_entries();
         self.menu = None;
-        if let (Some(index), [entry]) = (index, picked.as_slice()) {
-            self.open(index, &entry.path, window, cx);
+        match (index, picked.as_slice()) {
+            (Some(index), [entry]) => self.open(index, &entry.path, window, cx),
+            _ => {
+                let files: Vec<String> = picked.into_iter().filter(|e| !e.directory).map(|e| e.path).collect();
+                if files.len() >= ASK_TO_OPEN {
+                    self.dialog_subscriptions.clear();
+                    self.dialog = Some(Dialog::Open { paths: files });
+                    self.stop("confirm-open", cx).focus(window, cx);
+                    cx.notify();
+                } else {
+                    self.open_files(files, cx);
+                }
+            }
         }
+    }
+
+    /// Opens the files asked about.
+    pub fn confirm_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Dialog::Open { paths }) = self.dialog.take() else { return };
+        self.close_dialog(window, cx);
+        self.open_files(paths, cx);
+    }
+
+    /// Opens `paths` one after another in their apps, in the order given; one that fails leaves the rest to
+    /// open, and those that failed are told of together.
+    fn open_files(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
+        if paths.is_empty() {
+            return;
+        }
+        let (backend, owner) = (self.backend.clone(), self.owner);
+        self.in_background(
+            move || {
+                let failed: Vec<(&str, String)> =
+                    paths.iter().filter_map(|path| backend.open(path, owner).err().map(|error| (folder_name(path), error))).collect();
+                match failed.as_slice() {
+                    [] => Ok(()),
+                    [(name, error)] => Err(format!("「{name}」を開けません: {error}")),
+                    [(_, error), ..] => {
+                        let names: Vec<String> = failed.iter().take(3).map(|(name, _)| format!("「{name}」")).collect();
+                        let more = if failed.len() > 3 { format!("ほか {} 項目", failed.len() - 3) } else { String::new() };
+                        Err(format!("{} 項目を開けません: {}{more}（{error}）", failed.len(), names.join("")))
+                    }
+                }
+            },
+            None,
+            cx,
+        );
     }
 
     pub fn reveal_in_explorer(&mut self, cx: &mut Context<Self>) {

@@ -500,7 +500,7 @@ impl Colet {
             Some(Dialog::Name { input, .. }) => inputs.push(input.clone()),
             Some(Dialog::EditSearch { name, query, .. }) => inputs.extend([name.clone(), query.clone()]),
             Some(Dialog::Filters { edit: Some(edit), .. }) => inputs.extend([edit.name.clone(), edit.query.clone()]),
-            Some(Dialog::Filters { .. } | Dialog::Preferences) | None => {}
+            Some(Dialog::Filters { .. } | Dialog::Preferences | Dialog::Open { .. }) | None => {}
         }
         for input in &inputs {
             self.palette.style_input(input, cx);

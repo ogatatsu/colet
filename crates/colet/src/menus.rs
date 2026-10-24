@@ -4,7 +4,12 @@ use colet_core::entry::{Sort, direction_label};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-use crate::{app::Colet, state::saved_query, theme::Palette};
+use crate::{
+    app::Colet,
+    ops::{NEEDS_FILE, ONE_ITEM},
+    state::saved_query,
+    theme::Palette,
+};
 
 /// What a line of a menu does.
 #[derive(Clone, Debug, PartialEq)]
@@ -103,13 +108,18 @@ impl Colet {
             ];
         }
         let one = entries.len() == 1;
-        let open_off = (!one).then_some(reasons.open.unwrap_or("1項目を選択したときに使えます"));
         // From empty space nothing is picked, and the actions on items need no word.
         let some = !picked.is_empty();
         let quiet = |reason: Option<&'static str>| if some { reason } else { reason.map(|_| "") };
+        // Several open as files in their apps, the folders among them passed over.
+        let open_off = match entries.len() {
+            0 => quiet(Some(ONE_ITEM)),
+            1 => None,
+            _ => entries.iter().all(|e| e.directory).then_some(NEEDS_FILE),
+        };
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), open_off, Command::Open),
-            line("menu-explorer", "folder-open", "Explorerで表示", None, open_off, Command::Explorer),
+            line("menu-explorer", "folder-open", "Explorerで表示", None, (!one).then_some(ONE_ITEM), Command::Explorer),
             line("menu-copy", "copy", "コピー", Some("Ctrl+C"), quiet(reasons.copy), Command::Copy).grouped(),
             line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), Command::Cut),
             line("menu-paste", "clipboard-paste", "貼り付け", Some("Ctrl+V"), reasons.paste, Command::Paste),

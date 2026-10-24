@@ -132,7 +132,9 @@ impl Colet {
             Dialog::Filters { deleting: Some(_), .. } => "フィルターを削除",
             Dialog::Filters { .. } => "検索フィルター",
             Dialog::Preferences { .. } => "設定",
+            Dialog::Open { .. } => "開く",
         };
+        let confirm_open = self.stop("confirm-open", cx);
         // Each theme a stop for Tab, kept across frames.
         let themes: Vec<(Theme, FocusHandle)> =
             Theme::ALL.into_iter().map(|theme| (theme, self.stop(format!("theme:{theme:?}"), cx))).collect();
@@ -454,6 +456,33 @@ impl Colet {
                 ];
                 (content, buttons)
             }
+            Dialog::Open { paths } => {
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .text_size(px(13.))
+                    .child(format!("{} 項目を開きますか？", paths.len()))
+                    .child(div().text_size(px(12.)).text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"));
+                let buttons = vec![
+                    button(p, "cancel", "キャンセル", false, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                        .test_support()
+                        .into_any_element(),
+                    // It takes the keys as the dialog opens, so Enter goes on as it was pressed to open them.
+                    crate::view::frame(p, crate::view::keyed(&confirm_open, window))
+                        .child(
+                            button(p, "confirm-open", "開く", true, true)
+                                .track_focus(&confirm_open)
+                                .role(Role::Button)
+                                .aria_label("開く")
+                                .on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx)))
+                                .test_support(),
+                        )
+                        .into_any_element(),
+                ];
+                (content, buttons)
+            }
         };
         Some(
             div()
@@ -509,7 +538,7 @@ impl Colet {
                                 )
                                 .child(div().absolute().inset_0().child(crate::view::scrollbar(gpui_kit::base::Scrollbar::vertical(&self.dialog_scroll), p))),
                         )
-                        .child(div().flex_none().pr(px(MARGIN)).flex().justify_end().gap_2().children(buttons))
+                        .child(div().flex_none().pr(px(MARGIN)).flex().items_center().justify_end().gap_2().children(buttons))
                         .test_support(),
                 )
                 .into_any_element(),

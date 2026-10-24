@@ -434,7 +434,10 @@ impl Colet {
             }))
             .on_action(cx.listener(|this, _: &OpenItem, window, cx| {
                 let index = this.state.active;
-                if let Some(path) = this.state.columns[index].focused.clone() {
+                // Several picked open together, as the menu's 開く does.
+                if this.state.columns[index].selected.len() > 1 {
+                    this.open_picked(window, cx);
+                } else if let Some(path) = this.state.columns[index].focused.clone() {
                     this.open(index, &path, window, cx);
                 }
             }))

@@ -34,6 +34,8 @@ pub enum Dialog {
     Filters { edit: Option<FilterEdit>, deleting: Option<String> },
     /// The theme, the connection to Everything, and the keys.
     Preferences,
+    /// The files to open together, asked about first when they are many.
+    Open { paths: Vec<String> },
 }
 
 /// The places home lists: the drives in letter order, then the other folders Everything's index starts

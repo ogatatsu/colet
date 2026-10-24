@@ -63,6 +63,8 @@ struct Fake {
     /// The shell's question on deleting is turned down.
     declined: AtomicBool,
     opened: Mutex<Vec<String>>,
+    /// Paths that Windows has no app to open with.
+    unopenable: Mutex<Vec<String>>,
     menus: Mutex<Vec<(Vec<String>, String)>>,
     /// Told of every clipboard change, as the real watcher is.
     watcher: Mutex<Option<Box<dyn Fn() + Send>>>,
@@ -221,6 +223,9 @@ impl Backend for Fake {
     }
 
     fn open(&self, path: &str, _: Owner) -> Result<(), String> {
+        if self.unopenable.lock().unwrap().iter().any(|p| p == path) {
+            return Err("関連付けられたアプリがありません".into());
+        }
         self.opened.lock().unwrap().push(path.into());
         Ok(())
     }
@@ -1683,6 +1688,77 @@ fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) 
     ui.press(cx, "up");
     let last = ui.read(cx, |v| v.menu_lines().iter().rposition(|l| l.off.is_none()));
     assert_eq!(ui.read(cx, |v| v.menu_cursor), last);
+}
+
+#[gpui_kit::test]
+fn opens_the_picked_files_together_from_enter_and_the_menu_passing_over_folders(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\other"), folder(r"D:\work")]),
+            (r"D:\work", vec![folder(r"D:\work\sub"), file(r"D:\work\a.txt"), file(r"D:\work\b.txt")]),
+            (r"D:\work\sub", vec![]),
+            (r"D:\other", vec![]),
+        ])
+    });
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "down");
+    ui.press(cx, "right");
+    ui.press(cx, "ctrl-a");
+    assert_eq!(ui.selected(cx, 2).len(), 3);
+    // Enter opens each file in its app, in the order listed; the folder among them is passed over.
+    ui.press(cx, "enter");
+    assert_eq!(*fake.opened.lock().unwrap(), [r"D:\work\a.txt", r"D:\work\b.txt"]);
+    assert_eq!(ui.selected(cx, 2).len(), 3);
+    // The menu's 開く does the same.
+    ui.press(cx, "shift-f10");
+    assert_eq!(ui.read(cx, |v| v.menu_lines()[0].off), None);
+    ui.press(cx, "enter");
+    assert_eq!(fake.opened.lock().unwrap().len(), 4);
+    // Those that fail leave the rest to open, and are told of together.
+    *fake.unopenable.lock().unwrap() = vec![r"D:\work\a.txt".into()];
+    ui.press(cx, "enter");
+    assert_eq!(fake.opened.lock().unwrap().last().map(String::as_str), Some(r"D:\work\b.txt"));
+    assert!(ui.toasts(cx).iter().any(|t| t.contains("「a.txt」を開けません")));
+    // Folders alone have nothing to open: 開く is off, and Enter does nothing.
+    ui.press(cx, "left");
+    ui.press(cx, "ctrl-a");
+    assert_eq!(ui.selected(cx, 1).len(), 2);
+    let opened = fake.opened.lock().unwrap().len();
+    ui.press(cx, "enter");
+    assert_eq!(fake.opened.lock().unwrap().len(), opened);
+    assert_eq!(ui.selected(cx, 1).len(), 2);
+    ui.press(cx, "shift-f10");
+    assert_eq!(ui.read(cx, |v| v.menu_lines()[0].off), Some(crate::ops::NEEDS_FILE));
+}
+
+#[gpui_kit::test]
+fn asks_before_opening_many_files_together(cx: &mut TestAppContext) {
+    let files: Vec<Entry> = (0..crate::ops::ASK_TO_OPEN).map(|i| file(&format!(r"D:\work\{i:02}.txt"))).collect();
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\work")]), (r"D:\work", files)])
+    });
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    ui.press(cx, "ctrl-a");
+    ui.press(cx, "enter");
+    assert!(ui.read(cx, |v| matches!(&v.dialog, Some(Dialog::Open { paths }) if paths.len() == crate::ops::ASK_TO_OPEN)));
+    assert!(fake.opened.lock().unwrap().is_empty());
+    // Turned down, nothing opens and the keys go back to the column.
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.columns_focused(cx));
+    assert!(fake.opened.lock().unwrap().is_empty());
+    // The dialog's 開く takes the keys, so Enter again opens them all.
+    ui.press(cx, "enter");
+    ui.press(cx, "enter");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert_eq!(fake.opened.lock().unwrap().len(), crate::ops::ASK_TO_OPEN);
 }
 
 #[gpui_kit::test]
