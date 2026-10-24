@@ -7,3 +7,4 @@ pub mod operations;
 pub mod shell;
 pub mod time;
 pub mod watch;
+mod wide;

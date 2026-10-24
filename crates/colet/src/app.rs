@@ -12,7 +12,7 @@ use std::{
 use colet_core::{
     entry::{Entry, Order, Sort},
     everything::PAGE,
-    paths::path_key,
+    paths::{parent_folder, path_key},
     shell,
     watch::{Changes, FolderWatcher},
 };
@@ -25,7 +25,8 @@ use colet_core::shell::clipboard::ClipboardFiles;
 use crate::{
     backend::{self, Search},
     icons::Icons,
-    ops::{HistoryEntry, Menu, Running},
+    menus::Popup,
+    ops::{HistoryEntry, Running},
     places::{Dialog, HomeDrag, HomeRows, Landing, home_entries, home_groups, places},
     settings::{LoadError, Saver, Settings, everything_query},
     state::{ColumnId, Kind, State},
@@ -233,14 +234,6 @@ pub struct Colet {
     pub engine: Engine,
     pub toasts: Vec<Toast>,
     next_toast: u64,
-    pub sort_open: bool,
-    /// The search filters' menu, beside the search field.
-    pub filter_open: bool,
-    /// The search field had the keys as the filters' menu opened, and has them back as it closes.
-    pub(crate) filter_from_search: bool,
-    pub crumb_menu_open: bool,
-    /// The line of the trail's menu ↑↓ have lit; none when the mouse opened it.
-    pub crumb_cursor: Option<usize>,
     pub resizing: Option<Resize>,
     pub lists: HashMap<ColumnId, UniformListScrollHandle>,
     scrolled_to: HashMap<ColumnId, String>,
@@ -302,13 +295,13 @@ pub struct Colet {
     pub history_focus: FocusHandle,
     /// The keys are in the column worked in: its focused row is ringed.
     pub keys_in_column: bool,
-    pub menu: Option<Menu>,
+    pub popup: Option<Popup>,
     /// Takes the keys while a menu is open.
     pub menu_focus: FocusHandle,
     /// The sort order's button, a stop for Tab.
     pub sort_focus: FocusHandle,
-    /// The line of the open menu the keys are on.
-    pub menu_cursor: Option<usize>,
+    /// The line of the open menu the keys are on; none when the mouse opened it.
+    pub cursor: Option<usize>,
     /// Where each crumb was drawn, by its column, and the row they stand in: the bar under them follows
     /// the columns on screen.
     pub crumb_bounds: std::rc::Rc<std::cell::RefCell<HashMap<usize, Bounds<Pixels>>>>,
@@ -415,11 +408,6 @@ impl Colet {
             engine: Engine::Unknown,
             toasts: Vec::new(),
             next_toast: 0,
-            sort_open: false,
-            filter_open: false,
-            filter_from_search: false,
-            crumb_menu_open: false,
-            crumb_cursor: None,
             resizing: None,
             lists: HashMap::new(),
             scrolled_to: HashMap::new(),
@@ -459,10 +447,10 @@ impl Colet {
             stops: HashMap::new(),
             history_focus: cx.focus_handle().tab_stop(true),
             keys_in_column: false,
-            menu: None,
+            popup: None,
             menu_focus: cx.focus_handle(),
             sort_focus: cx.focus_handle().tab_stop(true),
-            menu_cursor: None,
+            cursor: None,
             focused_row: Default::default(),
             crumb_bounds: Default::default(),
             crumbs_row: Default::default(),
@@ -543,9 +531,8 @@ impl Colet {
 
     fn sync(&mut self, cx: &mut Context<Self>) {
         let live: HashSet<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
-        if self.menu.as_ref().is_some_and(|menu| !live.contains(&menu.column)) {
-            self.menu = None;
-            self.menu_cursor = None;
+        if self.menu().is_some_and(|menu| !live.contains(&menu.column)) {
+            self.take_menu();
             let view = cx.weak_entity();
             let id = cx.entity_id();
             // Restore the keys after this update, before drawing, only if they are still in the
@@ -553,7 +540,7 @@ impl Colet {
             cx.defer(move |cx| {
                 cx.with_window(id, |window, cx| {
                     view.update(cx, |this, cx| {
-                        if this.menu.is_none() && !this.sort_open && !this.filter_open && this.menu_focus.is_focused(window) {
+                        if this.popup.is_none() && this.menu_focus.is_focused(window) {
                             this.close_menus(true, window, cx);
                         }
                     }).ok();
@@ -768,7 +755,9 @@ impl Colet {
     }
 
     fn set_order(&mut self, order: Order, cx: &mut Context<Self>) {
-        self.sort_open = false;
+        if self.sort_open() {
+            self.popup = None;
+        }
         if order != self.settings.sort {
             self.update_settings(|s| s.sort = order, cx);
             self.refresh(cx);
@@ -893,7 +882,7 @@ impl Colet {
             .iter()
             .flat_map(|path| {
                 let key = path_key(path);
-                let parent = key.rfind('\\').map(|i| key[..i].to_owned()).unwrap_or_default();
+                let parent = parent_folder(&key).unwrap_or_default().to_owned();
                 [key, parent]
             })
             .collect();
@@ -946,10 +935,14 @@ impl Colet {
 
     // ---- Keys and picks ----
 
+    /// What takes the keys for the column at `index`: home's pane, or the columns beside it.
+    pub fn column_focus(&self, index: usize) -> &FocusHandle {
+        if index == 0 { &self.home_focus } else { &self.columns_focus }
+    }
+
     /// The keys go to the active column: home's pane or the columns beside it.
     pub fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let handle = if self.state.active == 0 { &self.home_focus } else { &self.columns_focus };
-        handle.focus(window, cx);
+        self.column_focus(self.state.active).focus(window, cx);
         self.state.enter();
         self.changed(cx);
     }
@@ -981,8 +974,7 @@ impl Colet {
     pub fn pick(&mut self, index: usize, path: String, window: &mut Window, cx: &mut Context<Self>) {
         self.state.select(index, vec![path]);
         self.state.set_active(index);
-        let handle = if index == 0 { &self.home_focus } else { &self.columns_focus };
-        handle.focus(window, cx);
+        self.column_focus(index).focus(window, cx);
         // A place picked in home leaves the search.
         self.sync_search_field(window, cx);
     }
@@ -1007,8 +999,7 @@ impl Colet {
     /// goes there: nothing in it is picked, as a press in the column picks nothing.
     pub fn go_to(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.state.set_active(index);
-        let handle = if index == 0 { &self.home_focus } else { &self.columns_focus };
-        handle.focus(window, cx);
+        self.column_focus(index).focus(window, cx);
         self.changed(cx);
     }
 

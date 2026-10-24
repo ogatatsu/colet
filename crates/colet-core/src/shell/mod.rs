@@ -16,7 +16,9 @@ use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUn
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{ILFree, SHParseDisplayName};
-use windows::core::{HRESULT, PCWSTR};
+use windows::core::HRESULT;
+
+use crate::wide::Wide;
 
 /// A window that owns the shell's dialogs, as its raw `HWND`.
 pub type Owner = isize;
@@ -72,18 +74,6 @@ fn parse(path: &str) -> windows::core::Result<*mut ITEMIDLIST> {
     let mut pidl = std::ptr::null_mut();
     unsafe { SHParseDisplayName(path.get(), None, &mut pidl, 0, None)? };
     Ok(pidl)
-}
-
-/// A NUL-terminated UTF-16 copy of `text`, kept alive while a `PCWSTR` points into it.
-struct Wide(Vec<u16>);
-
-impl Wide {
-    fn new(text: &str) -> Self {
-        Self(text.encode_utf16().chain([0]).collect())
-    }
-    fn get(&self) -> PCWSTR {
-        PCWSTR(self.0.as_ptr())
-    }
 }
 
 #[cfg(test)]

@@ -600,7 +600,7 @@ fn sorts_from_the_menu_reloading_what_is_open(cx: &mut TestAppContext) {
     ui.click(cx, "サイズ");
     assert_eq!(ui.read(cx, |v| v.settings.sort), Order { by: Sort::Size, descending: false });
     assert_eq!(fake.queries().len(), before + 1);
-    assert!(!ui.read(cx, |v| v.sort_open));
+    assert!(!ui.read(cx, |v| v.sort_open()));
 }
 
 #[gpui_kit::test]
@@ -613,7 +613,7 @@ fn turns_the_sort_round_from_the_menu_and_keeps_it_for_another_sort(cx: &mut Tes
     ui.click(cx, "降順");
     assert_eq!(ui.read(cx, |v| v.settings.sort), Order { by: Sort::Name, descending: true });
     assert_eq!(fake.queries().len(), before + 1);
-    assert!(!ui.read(cx, |v| v.sort_open));
+    assert!(!ui.read(cx, |v| v.sort_open()));
     ui.click(cx, "sort");
     ui.click(cx, "更新日時");
     assert_eq!(ui.read(cx, |v| v.settings.sort), Order { by: Sort::Modified, descending: true });
@@ -770,7 +770,7 @@ fn makes_a_folder_a_favorite_with_its_star_and_ctrl_d_and_lists_it_at_home(cx: &
     settle(cx);
     ui.click(cx, "menu-favorite");
     assert!(fake.settings.lock().unwrap().favorites.is_empty());
-    assert!(ui.read(cx, |v| v.menu.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none()));
 }
 
 #[gpui_kit::test]
@@ -1622,11 +1622,11 @@ fn acts_from_the_menu_on_the_row_right_clicked_leaving_the_selection(cx: &mut Te
     let (fake, ui) = in_work(cx);
     ui.act(cx, |window, cx| window.right_click(row(r"D:\work\c.txt"), cx));
     settle(cx);
-    assert!(ui.read(cx, |v| v.menu.is_some()));
+    assert!(ui.read(cx, |v| v.menu().is_some()));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
     ui.click(cx, "menu-copy");
     assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\c.txt"]);
-    assert!(ui.read(cx, |v| v.menu.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none()));
     // The Windows menu for the folder itself, from its empty space.
     let work = ui.read(cx, |v| v.state.columns[2].id);
     ui.act(cx, |window, cx| window.right_click(("column", work), cx));
@@ -1732,24 +1732,24 @@ fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &m
 fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "shift-f10");
-    assert!(ui.read(cx, |v| v.menu.is_some()));
+    assert!(ui.read(cx, |v| v.menu().is_some()));
     // From the keys, the first line is lit; ↓ passes over those that are off.
-    assert_eq!(ui.read(cx, |v| v.menu_cursor), Some(0));
+    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "enter");
     assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\a.txt"]);
-    assert!(ui.read(cx, |v| v.menu.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none()));
     assert!(ui.columns_focused(cx));
     ui.press(cx, "shift-f10");
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.menu.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none()));
     assert!(ui.columns_focused(cx));
     // ↑ goes round to the last line that is on.
     ui.press(cx, "shift-f10");
     ui.press(cx, "up");
     let last = ui.read(cx, |v| v.menu_lines().iter().rposition(|l| l.off.is_none()));
-    assert_eq!(ui.read(cx, |v| v.menu_cursor), last);
+    assert_eq!(ui.read(cx, |v| v.cursor), last);
 }
 
 #[gpui_kit::test]
@@ -1831,15 +1831,15 @@ fn picks_the_sort_order_by_keys(cx: &mut TestAppContext) {
     ui.press(cx, "down");
     ui.press(cx, "enter");
     assert_eq!(ui.read(cx, |v| v.settings.sort), Order { by: Sort::Size, descending: false });
-    assert!(!ui.read(cx, |v| v.sort_open));
+    assert!(!ui.read(cx, |v| v.sort_open()));
     assert!(ui.columns_focused(cx));
     // From the button itself, the sort in use is lit.
     let sort = ui.read(cx, |v| v.sort_focus.clone());
     ui.act(cx, |window, cx| sort.focus(window, cx));
     ui.press(cx, "enter");
-    assert_eq!(ui.read(cx, |v| v.menu_cursor), Some(1));
+    assert_eq!(ui.read(cx, |v| v.cursor), Some(1));
     ui.press(cx, "escape");
-    assert!(!ui.read(cx, |v| v.sort_open));
+    assert!(!ui.read(cx, |v| v.sort_open()));
 }
 
 #[gpui_kit::test]
@@ -2049,7 +2049,7 @@ fn closes_the_menu_and_returns_the_keys_when_its_column_vanishes(cx: &mut TestAp
     settle(cx);
     ui.act(cx, |_, _| ());
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
-    assert!(ui.read(cx, |v| v.menu.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none()));
     assert!(ui.columns_focused(cx));
     assert!(fake.menus.lock().unwrap().is_empty());
 }
@@ -2061,8 +2061,8 @@ fn dismisses_a_removed_columns_menu_before_another_frame(cx: &mut TestAppContext
     ui.view.update(cx, |v, cx| {
         v.state.select(1, vec![r"D:\other".into()]);
         v.changed(cx);
-        assert!(v.menu.is_none());
-        assert!(v.menu_cursor.is_none());
+        assert!(v.menu().is_none());
+        assert!(v.cursor.is_none());
     });
     assert!(cx.update_window(ui.window, |_, window, cx| ui.view.read(cx).columns_focus.is_focused(window)).unwrap());
 }
@@ -2079,7 +2079,7 @@ fn dismissing_a_removed_columns_menu_keeps_focus_given_to_a_field(cx: &mut TestA
     assert!(cx.update_window(ui.window, |_, window, cx| {
         ui.view.read(cx).search.read(cx).focus_handle(cx).is_focused(window)
     }).unwrap());
-    assert!(ui.read(cx, |v| v.menu.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none()));
 }
 
 #[gpui_kit::test]
@@ -2087,13 +2087,13 @@ fn refuses_a_stale_menu_even_when_another_column_takes_its_index(cx: &mut TestAp
     let (fake, ui) = in_work(cx);
     ui.press(cx, "shift-f10");
     ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| {
-        let column = v.menu.as_ref().unwrap().column;
+        let column = v.menu().unwrap().column;
         v.state.select(1, vec![r"D:\other".into()]);
         assert_ne!(v.state.columns[2].id, column);
         v.show_shell_menu(window, cx);
     }));
     assert!(fake.menus.lock().unwrap().is_empty());
-    assert!(ui.read(cx, |v| v.menu.is_none() && v.menu_cursor.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none() && v.cursor.is_none()));
     assert!(ui.columns_focused(cx));
 }
 
@@ -2104,7 +2104,7 @@ fn showing_the_shell_menu_directly_returns_the_keys_to_its_column(cx: &mut TestA
     ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.show_shell_menu(window, cx)));
     settle(cx);
     assert_eq!(fake.menus.lock().unwrap().len(), 1);
-    assert!(ui.read(cx, |v| v.menu.is_none() && v.menu_cursor.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none() && v.cursor.is_none()));
     assert!(ui.columns_focused(cx));
 }
 
@@ -2196,12 +2196,12 @@ fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut
     ui.act(cx, |window, cx| fold.focus(window, cx));
     // Enter opens it with its first line lit; ↓ moves on, Esc hands the keys back to the button.
     ui.press(cx, "enter");
-    assert!(ui.read(cx, |v| v.crumb_menu_open));
-    assert_eq!(ui.read(cx, |v| v.crumb_cursor), Some(0));
+    assert!(ui.read(cx, |v| v.crumbs_open()));
+    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
     ui.press(cx, "down");
-    assert_eq!(ui.read(cx, |v| v.crumb_cursor), Some(1));
+    assert_eq!(ui.read(cx, |v| v.cursor), Some(1));
     ui.press(cx, "escape");
-    assert!(!ui.read(cx, |v| v.crumb_menu_open));
+    assert!(!ui.read(cx, |v| v.crumbs_open()));
     assert!(ui.act(cx, |window, _| fold.is_focused(window)));
     // Space opens it too; the second line lit, Enter goes to its column, the keys with it.
     ui.press(cx, "space");
@@ -2209,7 +2209,7 @@ fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut
     // The trail starts at the drive: its second line is the first folder.
     let target = ui.read(cx, |v| v.state.columns.iter().position(|c| c.path == chain[0]).unwrap());
     ui.press(cx, "enter");
-    assert!(!ui.read(cx, |v| v.crumb_menu_open));
+    assert!(!ui.read(cx, |v| v.crumbs_open()));
     assert_eq!(ui.active(cx), target);
     assert!(ui.columns_focused(cx));
 }
@@ -2418,9 +2418,9 @@ fn searches_within_the_filter_chosen_with_nothing_typed_too(cx: &mut TestAppCont
     let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\a.jpg")])));
     let ui = open(cx, fake.clone());
     ui.click(cx, "search-filter");
-    assert!(ui.read(cx, |v| v.filter_open));
+    assert!(ui.read(cx, |v| v.filter_open()));
     ui.click(cx, ("filter", 0usize));
-    assert!(!ui.read(cx, |v| v.filter_open));
+    assert!(!ui.read(cx, |v| v.filter_open()));
     assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("画像"));
     assert_eq!(last_query(&fake), "<ext:jpg;png>");
     assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 1);
@@ -2447,18 +2447,18 @@ fn chooses_a_filter_from_the_keys_and_hands_them_back_to_the_field(cx: &mut Test
     let ui = open(cx, fake.clone());
     assert!(ui.search_field_focused(cx));
     ui.press(cx, "ctrl-shift-f");
-    assert!(ui.read(cx, |v| v.filter_open));
+    assert!(ui.read(cx, |v| v.filter_open()));
     // The filter in use is lit: none yet.
-    assert_eq!(ui.read(cx, |v| v.menu_cursor), Some(0));
+    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "enter");
     assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
     assert!(ui.search_field_focused(cx));
     ui.press(cx, "ctrl-shift-f");
-    assert_eq!(ui.read(cx, |v| v.menu_cursor), Some(2));
+    assert_eq!(ui.read(cx, |v| v.cursor), Some(2));
     ui.press(cx, "escape");
-    assert!(!ui.read(cx, |v| v.filter_open));
+    assert!(!ui.read(cx, |v| v.filter_open()));
     assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
 }
 

@@ -5,9 +5,11 @@ use std::{
 };
 
 use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW};
-use windows::core::PCWSTR;
 
-use crate::entry::{Entry, Marks, Order, is_hidden, sort_entries};
+use crate::{
+    entry::{Entry, Marks, Order, is_hidden, sort_entries},
+    wide::Wide,
+};
 
 /// What a listing that a newer one, or its column's removal, made unnecessary fails with.
 pub const STALE: &str = "古いフォルダー要求です";
@@ -72,21 +74,17 @@ pub fn list(path: &str, order: Order, cancelled: &AtomicBool) -> Result<Vec<Entr
     Ok(entries)
 }
 
-fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().chain(Some(0)).collect()
-}
-
 /// The volume label, as Explorer shows it beside the letter. Asked only of local disks: a disconnected
 /// network drive or an empty optical drive can keep the call waiting for seconds.
 fn volume_label(root: &str) -> Option<String> {
     const DRIVE_REMOVABLE: u32 = 2;
     const DRIVE_FIXED: u32 = 3;
-    let root = wide(root);
-    if !matches!(unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) }, DRIVE_REMOVABLE | DRIVE_FIXED) {
+    let root = Wide::new(root);
+    if !matches!(unsafe { GetDriveTypeW(root.get()) }, DRIVE_REMOVABLE | DRIVE_FIXED) {
         return None;
     }
     let mut label = [0u16; 261];
-    unsafe { GetVolumeInformationW(PCWSTR(root.as_ptr()), Some(&mut label), None, None, None, None) }.ok()?;
+    unsafe { GetVolumeInformationW(root.get(), Some(&mut label), None, None, None, None) }.ok()?;
     let len = label.iter().position(|&c| c == 0).unwrap_or(label.len());
     let label = String::from_utf16_lossy(&label[..len]);
     (!label.trim().is_empty()).then_some(label)

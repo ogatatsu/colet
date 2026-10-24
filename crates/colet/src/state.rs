@@ -4,7 +4,7 @@ use std::{collections::HashSet, ops::Range};
 
 use colet_core::{
     entry::{Entry, Marks},
-    paths::{ancestors, folder_name, path_key},
+    paths::{ancestors, folder_name, parent_folder, path_key},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -680,11 +680,10 @@ impl State {
     /// Shows an item where it lives, as from the history, leaving the search; the column pointing at
     /// it takes the keys.
     pub fn reveal(&mut self, path: &str, directory: bool) {
-        let chain = ancestors(path);
         let entry = Entry {
             path: path.into(),
             name: folder_name(path).into(),
-            parent: chain.len().checked_sub(2).map(|i| chain[i].clone()).unwrap_or_default(),
+            parent: parent_folder(path).unwrap_or_default().into(),
             directory,
             size: None,
             modified: None,

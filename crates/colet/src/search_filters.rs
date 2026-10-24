@@ -26,7 +26,7 @@ impl Colet {
     }
 
     pub fn open_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu = None;
+        self.take_menu();
         self.back_to_filters(window, cx);
     }
 

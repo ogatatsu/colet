@@ -8,7 +8,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::entry::{Entry, Marks, Order, Sort, marked};
+use crate::{
+    entry::{Entry, Marks, Order, Sort, marked},
+    wide::Wide,
+};
 
 type Handle = *mut c_void;
 
@@ -71,15 +74,11 @@ pub struct Page {
     pub offset: usize,
 }
 
-fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().chain(Some(0)).collect()
-}
-
 /// Connect to the unnamed instance, or to `instance` when given. The SDK waits out a busy pipe itself,
 /// for up to 30 seconds.
 unsafe fn open(instance: Option<&str>) -> Handle {
-    let name = instance.map(wide);
-    unsafe { Everything3_ConnectW(name.as_ref().map_or(ptr::null(), |n| n.as_ptr())) }
+    let name = instance.map(Wide::new);
+    unsafe { Everything3_ConnectW(name.as_ref().map_or(ptr::null(), |n| n.get().0)) }
 }
 
 /// The most index roots it reads.
@@ -108,7 +107,7 @@ unsafe fn indexed_roots(client: Handle) -> Result<Vec<String>, String> {
         if state.is_null() {
             return Err("検索状態を作成できません".into());
         }
-        Everything3_SetSearchTextW(state, wide("root:").as_ptr());
+        Everything3_SetSearchTextW(state, Wide::new("root:").get().0);
         Everything3_AddSearchPropertyRequest(state, FULL_PATH);
         Everything3_SetSearchViewportCount(state, ROOTS);
         let result = Everything3_Search(client, state);
@@ -374,7 +373,7 @@ impl SearchSession {
             if self.state.is_null() {
                 return Err("検索状態を作成できません".into());
             }
-            Everything3_SetSearchTextW(self.state, wide(query).as_ptr());
+            Everything3_SetSearchTextW(self.state, Wide::new(query).get().0);
             // Not attributes: Everything rarely indexes them, and reads each result's from the disk
             // instead, stalling the search as it is typed.
             for property in [FULL_PATH, SIZE, DATE_MODIFIED] {

@@ -9,6 +9,7 @@ use gpui_kit::*;
 
 use crate::{
     app::*,
+    menus::Popup,
     places::{HomeDrag, movable},
     state::saved_query,
     reveal::{Cell, on_screen, refit, reveal_target},
@@ -71,17 +72,20 @@ pub struct Tips {
     /// The press is still down: GPUI reads a pressed element as not hovered while the pointer moves.
     held: bool,
     /// Which of the dialog, menus and panels are open.
-    open: u8,
+    open: Open,
     /// Counts their opening and closing: a tip up from before goes.
     epoch: u64,
 }
+
+/// Whether the dialog is open, which menu is, and whether the history is.
+type Open = (bool, Option<std::mem::Discriminant<Popup>>, bool);
 
 impl Global for Tips {}
 
 impl Tips {
     /// Notes which of the dialog, menus and panels are open, taking down the tips up when that changes.
-    pub fn set_open(open: u8, cx: &mut App) {
-        if cx.try_global::<Tips>().map_or(0, |t| t.open) != open {
+    pub fn set_open(open: Open, cx: &mut App) {
+        if cx.try_global::<Tips>().map_or(Open::default(), |t| t.open) != open {
             let tips = cx.default_global::<Tips>();
             tips.open = open;
             tips.epoch += 1;
@@ -487,15 +491,14 @@ impl Colet {
         let focused = marked && self.keys_in_column && c.focused.as_ref() == Some(&entry.path);
         // What a right-click opened the menu on, which it leaves unselected: ringed, as in Finder, until it closes.
         let target = self
-            .menu
-            .as_ref()
+            .menu()
             .is_some_and(|m| m.column == c.id && m.paths.as_deref() == Some(std::slice::from_ref(&entry.path)));
         // The item a search result or favorite points at: a bar, which wins over the selection but not
         // over the one in the column worked in. Home marks its pick so while the columns are worked in.
         let barred = (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked);
         // The menu acts on a row outside the selection, or the folder itself: the selection steps back, so
         // only what the menu acts on stands out.
-        let aside = self.menu.as_ref().is_some_and(|m| m.column == c.id && m.paths.is_some());
+        let aside = self.menu().is_some_and(|m| m.column == c.id && m.paths.is_some());
         let lit = selected && marked && !aside;
         let image = self.icons.get(entry, cx);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
@@ -1143,7 +1146,7 @@ impl Colet {
         let has_query = !self.state.query.is_empty();
         let sort = self.settings.sort;
         let clear_focus = self.stop("clear-search", cx);
-        let sort_lines = if self.sort_open { self.render_lines(cx) } else { Vec::new() };
+        let sort_lines = if self.sort_open() { self.render_lines(cx) } else { Vec::new() };
         let sort_keyed = keyed(&self.sort_focus, window);
         let filter_button = self.filter_button(window, cx);
         div()
@@ -1221,7 +1224,7 @@ impl Colet {
                                 .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(true, window, cx)))
                                 .role(Role::Button)
                                 .aria_label(format!("並び順: {}", sort.label()))
-                                .aria_expanded(self.sort_open)
+                                .aria_expanded(self.sort_open())
                                 .h(px(32.))
                                 .pl(px(10.))
                                 .pr_2()
@@ -1239,7 +1242,7 @@ impl Colet {
                                 .child(sort.label())
                                 .child(icon("chevron-down", 14., p.text_faint))
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    if this.sort_open {
+                                    if this.sort_open() {
                                         this.close_menus(true, window, cx);
                                     } else {
                                         this.open_sort(false, window, cx);
@@ -1248,7 +1251,7 @@ impl Colet {
                                 .test_support(),
                         ),
                     )
-                    .when(self.sort_open, |d| {
+                    .when(self.sort_open(), |d| {
                         d.child(
                             deferred(
                                 div()
@@ -1303,7 +1306,7 @@ impl Colet {
         let p = self.palette;
         let focus = self.stop("search-filter", cx);
         let chosen = self.settings.filter.clone();
-        let lines = if self.filter_open { self.render_lines(cx) } else { Vec::new() };
+        let lines = if self.filter_open() { self.render_lines(cx) } else { Vec::new() };
         let on = chosen.is_some();
         let label = format!("検索フィルター: {}", chosen.as_deref().unwrap_or("なし"));
         // In a narrow window its name gives way to the search field, down to the funnel and the chevron;
@@ -1322,7 +1325,7 @@ impl Colet {
                         .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_filter_menu(true, window, cx)))
                         .role(Role::Button)
                         .aria_label(label.clone())
-                        .aria_expanded(self.filter_open)
+                        .aria_expanded(self.filter_open())
                         .h(px(32.))
                         .max_w(px(200.))
                         .pl(px(10.))
@@ -1343,7 +1346,7 @@ impl Colet {
                         .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| "フィルター".into())))
                         .child(icon("chevron-down", 14., p.text_faint))
                         .on_click(cx.listener(|this, _, window, cx| {
-                            if this.filter_open {
+                            if this.filter_open() {
                                 this.close_menus(true, window, cx);
                             } else {
                                 this.open_filter_menu(false, window, cx);
@@ -1352,7 +1355,7 @@ impl Colet {
                         .test_support(),
                 ),
             )
-            .when(self.filter_open, |d| {
+            .when(self.filter_open(), |d| {
                 d.child(
                     deferred(
                         div()
@@ -1435,8 +1438,8 @@ impl Colet {
         let menu: Vec<(usize, String, String)> = crumbs[..folded].to_vec();
         let shown: Vec<(usize, String, String)> = crumbs[folded..].to_vec();
         let menu_current = menu.iter().any(|(index, ..)| *index == active);
-        let crumb_menu_open = self.crumb_menu_open;
-        let crumb_cursor = self.crumb_cursor;
+        let crumb_menu_open = self.crumbs_open();
+        let crumb_cursor = self.cursor;
         let fold_focus = self.stop("crumb-fold", cx);
         // Where ↑↓ and Enter take the menu: the columns its lines go to.
         let menu_targets: Vec<usize> = menu.iter().map(|(index, ..)| *index).collect();
@@ -1495,7 +1498,7 @@ impl Colet {
                                         .tip(p, "上の階層")
                                         .child(icon("ellipsis", 14., if menu_current { p.text } else { p.text_muted }))
                                         .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                                            if this.crumb_menu_open {
+                                            if this.crumbs_open() {
                                                 this.close_crumb_menu(event.is_keyboard(), window, cx);
                                             } else {
                                                 this.open_crumb_menu(event.is_keyboard(), window, cx);
@@ -1521,7 +1524,7 @@ impl Colet {
                                                     cx.listener(move |this, _: &MenuDown, _, cx| this.move_crumb_cursor(1, count, cx))
                                                 })
                                                 .on_action(cx.listener(move |this, _: &MenuConfirm, window, cx| {
-                                                    if let Some(&index) = this.crumb_cursor.and_then(|c| menu_targets.get(c)) {
+                                                    if let Some(&index) = this.cursor.and_then(|c| menu_targets.get(c)) {
                                                         this.close_crumb_menu(false, window, cx);
                                                         this.go_to(index, window, cx);
                                                     }
@@ -2076,9 +2079,7 @@ impl Render for Colet {
             self.end_home_drag();
         }
         self.follow_focus(window, cx);
-        let open =
-            [self.dialog.is_some(), self.menu.is_some(), self.sort_open || self.filter_open, self.history_open, self.crumb_menu_open];
-        Tips::set_open(open.iter().enumerate().fold(0, |bits, (i, &o)| bits | u8::from(o) << i), cx);
+        Tips::set_open((self.dialog.is_some(), self.popup.as_ref().map(std::mem::discriminant), self.history_open), cx);
         self.scroll_rows();
         self.reveal(window);
         let p = self.palette;

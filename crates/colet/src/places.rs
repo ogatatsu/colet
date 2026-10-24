@@ -398,7 +398,7 @@ impl Colet {
 
     pub fn open_edit(&mut self, query: &str, filter: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(found) = self.settings.saved(query, filter).cloned() else { return };
-        self.menu = None;
+        self.take_menu();
         let name = cx.new(|cx| InputState::new(window, cx).placeholder(found.query.clone()).default_value(found.name.clone()));
         let query = cx.new(|cx| InputState::new(window, cx).default_value(found.query.clone()));
         for input in [&name, &query] {
@@ -499,8 +499,7 @@ impl Colet {
         self.dialog_subscriptions.clear();
         // The next dialog starts at its top.
         self.dialog_scroll = ScrollHandle::new();
-        let handle = if self.state.active == 0 { &self.home_focus } else { &self.columns_focus };
-        handle.focus(window, cx);
+        self.column_focus(self.state.active).focus(window, cx);
         cx.notify();
     }
 }

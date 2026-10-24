@@ -9,7 +9,7 @@ use std::{
 use colet_core::{
     entry::Entry,
     operations::{CANCELLED, Event, Kind, Request},
-    paths::{ancestors, child, folder_name, parent_folder, path_key},
+    paths::{child, folder_name, parent_folder, path_key},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -206,7 +206,7 @@ fn now() -> u64 {
 impl Colet {
     /// A menu keeps the column it opened on even if another column takes its place in the chain.
     fn action_column(&self) -> Option<&Column> {
-        let index = match &self.menu {
+        let index = match self.menu() {
             Some(menu) => self.state.index_of(menu.column)?,
             None => self.state.active,
         };
@@ -221,7 +221,7 @@ impl Colet {
     /// [`picked`](Self::picked), lent rather than copied, for what is asked each frame.
     fn picked_paths(&self) -> &[String] {
         let Some(column) = self.action_column() else { return &[] };
-        match &self.menu {
+        match self.menu() {
             Some(Menu { paths: Some(paths), .. }) => paths,
             _ => &column.selected,
         }
@@ -297,7 +297,7 @@ impl Colet {
     pub fn copy(&mut self, cut: bool, cx: &mut Context<Self>) {
         // What the menu was opened on, read before it closes: after, the selection would stand in.
         let (picked, reasons) = (self.picked(), self.reasons());
-        self.menu = None;
+        self.take_menu();
         if picked.is_empty() {
             return;
         }
@@ -313,7 +313,7 @@ impl Colet {
     /// The paths as text, one a line; a saved search's is the query it runs.
     pub fn copy_paths(&mut self, cx: &mut Context<Self>) {
         let picked = self.picked();
-        self.menu = None;
+        self.take_menu();
         if picked.is_empty() {
             return;
         }
@@ -324,7 +324,7 @@ impl Colet {
     }
 
     pub fn paste(&mut self, cx: &mut Context<Self>) {
-        self.menu = None;
+        self.take_menu();
         match self.reasons().paste {
             Some(reason) => self.refuse("貼り付け", reason, cx),
             None => {
@@ -337,7 +337,7 @@ impl Colet {
     /// F2: a rename, or for a saved search in home, its edit.
     pub fn ask_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (picked, reasons, entries) = (self.picked(), self.reasons(), self.picked_entries());
-        self.menu = None;
+        self.take_menu();
         if let [path] = picked.as_slice()
             && let Some((query, filter)) = saved_query(path)
         {
@@ -360,7 +360,7 @@ impl Colet {
     }
 
     pub fn ask_new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu = None;
+        self.take_menu();
         if let Some(reason) = self.reasons().paste {
             self.refuse("新規フォルダー", reason, cx);
             return;
@@ -427,9 +427,9 @@ impl Colet {
         if request.kind == Kind::Rename
             && let Some(path) = request.paths.first()
             && folder_name(path).to_lowercase() != name.to_lowercase()
-            && let Some(parent) = ancestors(path).into_iter().rev().nth(1)
+            && let Some(parent) = parent_folder(path)
         {
-            let target = child(&parent, &name);
+            let target = child(parent, &name);
             *checking = Some(name.clone());
             let (backend, dialog) = (self.backend.clone(), input.entity_id());
             let asked = cx.background_executor().spawn(async move { backend.path_kind(&target).is_some() });
@@ -471,7 +471,7 @@ impl Colet {
     /// first, and what to do with an item the bin cannot take, is the shell's.
     pub fn delete_picked(&mut self, permanent: bool, cx: &mut Context<Self>) {
         let (picked, reasons) = (self.picked(), self.reasons());
-        self.menu = None;
+        self.take_menu();
         if picked.is_empty() {
             return;
         }
@@ -495,7 +495,7 @@ impl Colet {
     pub fn open_picked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let index = self.action_column().and_then(|c| self.state.index_of(c.id));
         let picked = self.picked_entries();
-        self.menu = None;
+        self.take_menu();
         match (index, picked.as_slice()) {
             (Some(index), [entry]) => self.open(index, &entry.path, window, cx),
             _ => {
@@ -549,7 +549,7 @@ impl Colet {
     /// column's own folder, open on what it holds.
     pub fn reveal_in_explorer(&mut self, cx: &mut Context<Self>) {
         let (picked, folder, refused) = (self.picked_entries(), self.destination(), self.reasons().explorer);
-        self.menu = None;
+        self.take_menu();
         if refused.is_some() {
             return;
         }
@@ -572,7 +572,7 @@ impl Colet {
     pub fn show_shell_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Read while the menu is open: its column and paths are what the reasons are for.
         let refused = self.reasons().shell;
-        let Some(menu) = self.menu.take() else { return };
+        let Some(menu) = self.take_menu() else { return };
         let index = self.state.index_of(menu.column);
         if let Some(index) = index {
             self.state.set_active(index);
@@ -673,7 +673,7 @@ impl Colet {
             Err(error) => (false, Some(error.clone())),
         };
         let renamed = (kind == Kind::Rename && result.is_ok())
-            .then(|| paths.first().map(|p| child(ancestors(p).iter().rev().nth(1).map_or("", |s| s), &name)))
+            .then(|| paths.first().map(|p| child(parent_folder(p).unwrap_or_default(), &name)))
             .flatten();
         if let Some(to) = &renamed {
             // Carry the selection over to the new name before the listing drops the old one.
@@ -738,8 +738,7 @@ impl Colet {
         if open {
             self.unseen = 0;
         } else {
-            let handle = if self.state.active == 0 { &self.home_focus } else { &self.columns_focus };
-            handle.focus(window, cx);
+            self.column_focus(self.state.active).focus(window, cx);
         }
         cx.notify();
     }

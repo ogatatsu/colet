@@ -1,7 +1,9 @@
 //! An item as a column lists it, and the orders they come in.
 use std::{cmp::Ordering, ops::Range, os::windows::fs::MetadataExt, path::Path, time::UNIX_EPOCH};
 
-use windows::{Win32::UI::Shell::StrCmpLogicalW, core::PCWSTR};
+use windows::Win32::UI::Shell::StrCmpLogicalW;
+
+use crate::wide::Wide;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -138,17 +140,11 @@ pub fn direction_label(descending: bool) -> &'static str {
 }
 
 /// A name ordered as Explorer orders it: without case, and numbers by their value.
-struct ExplorerName(Vec<u16>);
-
-impl ExplorerName {
-    fn new(name: &str) -> Self {
-        Self(name.encode_utf16().chain([0]).collect())
-    }
-}
+struct ExplorerName(Wide);
 
 impl Ord for ExplorerName {
     fn cmp(&self, other: &Self) -> Ordering {
-        unsafe { StrCmpLogicalW(PCWSTR(self.0.as_ptr()), PCWSTR(other.0.as_ptr())) }.cmp(&0)
+        unsafe { StrCmpLogicalW(self.0.get(), other.0.get()) }.cmp(&0)
     }
 }
 
@@ -218,7 +214,7 @@ pub fn sort_entries(entries: &mut [Entry], order: Order) {
             Sort::Size => e.size,
             Sort::Modified => e.modified,
         },
-        name: ExplorerName::new(&e.name),
+        name: ExplorerName(Wide::new(&e.name)),
         path: e.path.to_lowercase(),
     });
 }

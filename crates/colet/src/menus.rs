@@ -6,7 +6,7 @@ use gpui_kit::*;
 
 use crate::{
     app::Colet,
-    ops::{NEEDS_FILE, ONE_ITEM},
+    ops::{Menu, NEEDS_FILE, ONE_ITEM},
     state::saved_query,
     theme::Palette,
 };
@@ -68,10 +68,56 @@ impl Line {
     }
 }
 
+/// The one menu open at a time, if any.
+pub enum Popup {
+    /// The file menu, opened by a right-click or the menu key.
+    File(Menu),
+    Sort,
+    /// The search filters'; `from_search` when the search field had the keys as it opened, to have them
+    /// back as it closes.
+    Filters { from_search: bool },
+    /// The folders folded off the trail.
+    Crumbs,
+}
+
 impl Colet {
+    /// The file menu, while it is open.
+    pub fn menu(&self) -> Option<&Menu> {
+        match &self.popup {
+            Some(Popup::File(menu)) => Some(menu),
+            _ => None,
+        }
+    }
+
+    /// Closes the file menu, giving back what it was opened on; any other menu stays.
+    pub fn take_menu(&mut self) -> Option<Menu> {
+        match self.popup.take() {
+            Some(Popup::File(menu)) => {
+                self.cursor = None;
+                Some(menu)
+            }
+            other => {
+                self.popup = other;
+                None
+            }
+        }
+    }
+
+    pub fn sort_open(&self) -> bool {
+        matches!(self.popup, Some(Popup::Sort))
+    }
+
+    pub fn filter_open(&self) -> bool {
+        matches!(self.popup, Some(Popup::Filters { .. }))
+    }
+
+    pub fn crumbs_open(&self) -> bool {
+        matches!(self.popup, Some(Popup::Crumbs))
+    }
+
     /// The lines of the open menu: the sort order's, the search filters', or the file menu's.
     pub fn menu_lines(&self) -> Vec<Line> {
-        if self.sort_open {
+        if self.sort_open() {
             let sort = self.settings.sort;
             let mut lines: Vec<Line> =
                 Sort::ALL.map(|by| choice(by.label(), by.label(), Command::Sort(by), by == sort.by)).into();
@@ -82,7 +128,7 @@ impl Colet {
             lines[Sort::ALL.len()].group = true;
             return lines;
         }
-        if self.filter_open {
+        if self.filter_open() {
             let chosen = self.settings.filter.as_deref();
             let mut lines = vec![choice("filter-none", "なし", Command::SearchFilter(None), chosen.is_none())];
             lines.extend(self.settings.filters.iter().enumerate().map(|(i, f)| {
@@ -91,7 +137,7 @@ impl Colet {
             lines.push(line("edit-filters", "pencil-line", "フィルターを編集…", None, None, Command::EditFilters).grouped());
             return lines;
         }
-        if self.menu.is_none() {
+        if self.menu().is_none() {
             return Vec::new();
         }
         let reasons = self.reasons();
@@ -148,8 +194,8 @@ impl Colet {
     }
 
     pub fn run_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(menu) = &self.menu {
-            let Some(index) = self.state.index_of(menu.column) else {
+        if let Some(column) = self.menu().map(|menu| menu.column) {
+            let Some(index) = self.state.index_of(column) else {
                 self.close_menus(true, window, cx);
                 return;
             };
@@ -188,35 +234,31 @@ impl Colet {
     /// Closes whichever menu is open, handing the keys back to the column when `to_column`; the filters'
     /// menu hands them back to the search field, when it had them.
     pub fn close_menus(&mut self, to_column: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let to_search = self.filter_open && self.filter_from_search;
-        self.menu = None;
-        self.sort_open = false;
-        self.filter_open = false;
-        self.menu_cursor = None;
+        let to_search = matches!(self.popup, Some(Popup::Filters { from_search: true }));
+        self.popup = None;
+        self.cursor = None;
         if to_column && to_search {
             self.search.update(cx, |input, cx| input.focus(window, cx));
         } else if to_column {
-            let handle = if self.state.active == 0 { &self.home_focus } else { &self.columns_focus };
-            handle.focus(window, cx);
+            self.column_focus(self.state.active).focus(window, cx);
         }
         cx.notify();
     }
 
     /// Opens the menu of the folders folded off the trail; from the keys, with its first line lit.
     pub fn open_crumb_menu(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu = None;
-        self.sort_open = false;
-        self.filter_open = false;
-        self.crumb_menu_open = true;
-        self.crumb_cursor = keyboard.then_some(0);
+        self.popup = Some(Popup::Crumbs);
+        self.cursor = keyboard.then_some(0);
         self.menu_focus.focus(window, cx);
         cx.notify();
     }
 
     /// Closes the trail's menu; `to_button` hands the keys back to the button that opened it.
     pub fn close_crumb_menu(&mut self, to_button: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.crumb_menu_open = false;
-        self.crumb_cursor = None;
+        if self.crumbs_open() {
+            self.popup = None;
+            self.cursor = None;
+        }
         if to_button {
             self.stop("crumb-fold", cx).focus(window, cx);
         }
@@ -225,38 +267,25 @@ impl Colet {
 
     /// ↑ or ↓ in the trail's menu of `count` lines, round the ends.
     pub fn move_crumb_cursor(&mut self, by: isize, count: usize, cx: &mut Context<Self>) {
-        if count == 0 {
-            return;
-        }
-        self.crumb_cursor = Some(match self.crumb_cursor {
-            Some(at) => (at as isize + by).rem_euclid(count as isize) as usize,
-            None if by > 0 => 0,
-            None => count - 1,
-        });
-        cx.notify();
+        self.step_cursor(by, &(0..count).collect::<Vec<_>>(), cx);
     }
 
     /// Opens the sort order's menu; from the keys, with the sort in use lit.
     pub fn open_sort(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu = None;
-        self.crumb_menu_open = false;
-        self.filter_open = false;
-        self.sort_open = true;
-        self.menu_cursor = keyboard.then(|| Sort::ALL.iter().position(|s| *s == self.settings.sort.by).unwrap_or(0));
+        self.popup = Some(Popup::Sort);
+        self.cursor = keyboard.then(|| Sort::ALL.iter().position(|s| *s == self.settings.sort.by).unwrap_or(0));
         self.menu_focus.focus(window, cx);
         cx.notify();
     }
 
     /// Opens the search filters' menu; from the keys, with the filter in use lit.
     pub fn open_filter_menu(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.filter_open {
-            self.filter_from_search = self.search_focused;
-        }
-        self.menu = None;
-        self.crumb_menu_open = false;
-        self.sort_open = false;
-        self.filter_open = true;
-        self.menu_cursor = keyboard.then(|| self.menu_lines().iter().position(|line| line.chosen).unwrap_or(0));
+        let from_search = match self.popup {
+            Some(Popup::Filters { from_search }) => from_search,
+            _ => self.search_focused,
+        };
+        self.popup = Some(Popup::Filters { from_search });
+        self.cursor = keyboard.then(|| self.menu_lines().iter().position(|line| line.chosen).unwrap_or(0));
         self.menu_focus.focus(window, cx);
         cx.notify();
     }
@@ -265,22 +294,27 @@ impl Colet {
     pub fn move_cursor(&mut self, by: isize, cx: &mut Context<Self>) {
         let lines = self.menu_lines();
         let on: Vec<usize> = (0..lines.len()).filter(|&i| lines[i].off.is_none()).collect();
+        self.step_cursor(by, &on, cx);
+    }
+
+    /// Moves the cursor `by` among the lines `on`, round the ends; with none lit yet, to the first or the last.
+    fn step_cursor(&mut self, by: isize, on: &[usize], cx: &mut Context<Self>) {
         if on.is_empty() {
             return;
         }
-        let at = self.menu_cursor.and_then(|c| on.iter().position(|&i| i == c));
+        let at = self.cursor.and_then(|c| on.iter().position(|&i| i == c));
         let next = match at {
             Some(at) => (at as isize + by).rem_euclid(on.len() as isize) as usize,
             None if by > 0 => 0,
             None => on.len() - 1,
         };
-        self.menu_cursor = Some(on[next]);
+        self.cursor = Some(on[next]);
         cx.notify();
     }
 
     pub fn confirm_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let lines = self.menu_lines();
-        if let Some(line) = self.menu_cursor.and_then(|c| lines.into_iter().nth(c)).filter(|l| l.off.is_none()) {
+        if let Some(line) = self.cursor.and_then(|c| lines.into_iter().nth(c)).filter(|l| l.off.is_none()) {
             self.run_command(line.command, window, cx);
         }
     }
@@ -288,7 +322,7 @@ impl Colet {
     /// The lines, drawn alike for both menus.
     pub fn render_lines(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let p: Palette = self.palette;
-        let cursor = self.menu_cursor;
+        let cursor = self.cursor;
         let mut out = Vec::new();
         for (i, line) in self.menu_lines().into_iter().enumerate() {
             if line.group {

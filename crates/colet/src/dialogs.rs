@@ -9,6 +9,7 @@ use gpui_kit::*;
 
 use crate::{
     app::{CloseDialog, Colet, DIALOG},
+    menus::Popup,
     ops::{ItemStatus, Menu, Status},
     places::Dialog,
     search_filters::FilterEdit,
@@ -553,8 +554,7 @@ impl Colet {
         }
         let Some(column) = self.state.columns.get(index).map(|c| c.id) else { return };
         self.state.set_active(index);
-        let handle = if index == 0 { &self.home_focus } else { &self.columns_focus };
-        handle.focus(window, cx);
+        self.column_focus(index).focus(window, cx);
         let scale = window.scale_factor();
         let mut point = windows::Win32::Foundation::POINT {
             x: (f32::from(at.x) * scale) as i32,
@@ -563,18 +563,15 @@ impl Colet {
         let _ = unsafe {
             windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point)
         };
-        self.menu = Some(Menu { column, paths, at, screen: (point.x, point.y) });
-        self.crumb_menu_open = false;
-        self.sort_open = false;
-        self.filter_open = false;
-        self.menu_cursor = None;
+        self.popup = Some(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
+        self.cursor = None;
         self.menu_focus.focus(window, cx);
         cx.notify();
     }
 
     pub fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = self.palette;
-        let at = self.menu.as_ref()?.at;
+        let at = self.menu()?.at;
         let lines = self.render_lines(cx);
         Some(
             deferred(
