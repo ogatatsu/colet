@@ -897,7 +897,7 @@ impl State {
             f.text
         });
         let waiting = c.pick.is_some();
-        self.list(index, request, entries, total, offset, departed);
+        self.list(index, entries, total, offset, departed);
         let Some(text) = text else { return };
         let c = &mut self.columns[index];
         // What was just pasted here shows picked, as a new folder does: the filter goes when it hides any.
@@ -909,19 +909,9 @@ impl State {
         self.narrow(index);
     }
 
-    fn list(
-        &mut self,
-        index: usize,
-        request: u64,
-        entries: Vec<Entry>,
-        total: usize,
-        offset: usize,
-        departed: &HashSet<String>,
-    ) {
+    /// What [`page`](Self::page) does with a listing that is the one the column waits for.
+    fn list(&mut self, index: usize, entries: Vec<Entry>, total: usize, offset: usize, departed: &HashSet<String>) {
         let c = &mut self.columns[index];
-        if c.request != request {
-            return;
-        }
         let old = std::mem::take(&mut c.entries);
         if offset > 0 {
             let known: HashSet<&String> = old.iter().map(|e| &e.path).collect();

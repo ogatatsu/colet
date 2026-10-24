@@ -201,7 +201,8 @@ pub struct SearchSession {
     key: Option<(String, Order)>,
     /// The connected Everything's, as 1.5.0.1424.
     version: String,
-    /// The instance the watch connects to; only tests name one, to make it fail.
+    /// The instance the watch connects to, named to make it fail.
+    #[cfg(test)]
     watch_instance: Option<String>,
     watch_retry_at: Option<Instant>,
     /// What it is connected to, as the status bar names it.
@@ -215,7 +216,9 @@ impl Default for SearchSession {
     fn default() -> Self {
         Self {
             client: ptr::null_mut(), watch: None, state: ptr::null_mut(), key: None,
-            version: String::new(), watch_instance: None, watch_retry_at: None, connection: String::new(),
+            version: String::new(), watch_retry_at: None, connection: String::new(),
+            #[cfg(test)]
+            watch_instance: None,
         }
     }
 }
@@ -341,7 +344,11 @@ impl SearchSession {
         if failed && self.watch_retry_at.is_some_and(|at| Instant::now() < at) {
             return;
         }
-        let client = unsafe { open(self.watch_instance.as_deref()) };
+        #[cfg(test)]
+        let instance = self.watch_instance.as_deref();
+        #[cfg(not(test))]
+        let instance = None;
+        let client = unsafe { open(instance) };
         self.watch = if client.is_null() { None } else { unsafe { Watch::start(client, self.state) } };
         if self.watch.is_some() {
             self.watch_retry_at = None;

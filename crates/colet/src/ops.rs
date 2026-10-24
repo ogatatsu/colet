@@ -143,6 +143,18 @@ impl HistoryEntry {
         if self.status == Status::Running {
             return "処理中".into();
         }
+        let mut parts = self.item_problems();
+        if self.status == Status::Cancelled {
+            parts.push("キャンセル".into());
+        }
+        if self.status == Status::Error && self.count(ItemStatus::Failed) == 0 {
+            parts.push("失敗".into());
+        }
+        if parts.is_empty() { "完了".into() } else { parts.join("・") }
+    }
+
+    /// How many of its items failed and how many were skipped, those there were: `1 件失敗`, `1 件スキップ`.
+    fn item_problems(&self) -> Vec<String> {
         let (failed, skipped) = (self.count(ItemStatus::Failed), self.count(ItemStatus::Skipped));
         let mut parts = Vec::new();
         if failed > 0 {
@@ -151,13 +163,7 @@ impl HistoryEntry {
         if skipped > 0 {
             parts.push(format!("{skipped} 件スキップ"));
         }
-        if self.status == Status::Cancelled {
-            parts.push("キャンセル".into());
-        }
-        if self.status == Status::Error && failed == 0 {
-            parts.push("失敗".into());
-        }
-        if parts.is_empty() { "完了".into() } else { parts.join("・") }
+        parts
     }
 
     pub fn has_problems(&self) -> bool {
@@ -685,7 +691,7 @@ impl Colet {
         }
         let Some(index) = self.history.iter().position(|e| e.id == id) else { return };
         let entry = &mut self.history[index];
-        let (failed, skipped) = (entry.count(ItemStatus::Failed), entry.count(ItemStatus::Skipped));
+        let counts = entry.item_problems();
         // A cut pasted where it already was moved nothing, and a deletion turned down at the shell's
         // question deleted nothing: no trace, as in Explorer.
         let moved_nothing = kind == Kind::Paste && problem.is_none() && !cancelled && entry.items.is_empty() && entry.more == 0;
@@ -709,14 +715,7 @@ impl Colet {
                 Status::Done
             };
             // The items say more than the summary the operation adds for them.
-            entry.error = if failed + skipped > 0 { None } else { problem.clone() };
-        }
-        let mut counts = Vec::new();
-        if failed > 0 {
-            counts.push(format!("{failed} 件失敗"));
-        }
-        if skipped > 0 {
-            counts.push(format!("{skipped} 件スキップ"));
+            entry.error = if counts.is_empty() { problem.clone() } else { None };
         }
         let problem = if counts.is_empty() { problem } else { Some(counts.join("・")) };
         if let Some(problem) = problem {

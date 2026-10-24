@@ -268,24 +268,23 @@ fn verb(menu: &IContextMenu, popup: HMENU, position: i32) -> Option<String> {
 }
 
 #[cfg(test)]
-/// The verbs the menu for `paths` (or `background`) would offer, without showing it.
-pub fn verbs(paths: &[String], background: &str) -> Result<Vec<String>> {
-    let apartment = Apartment::enter();
-    apartment.result()?;
-    let menu = context_menu(HWND::default(), paths, background)?;
-    let popup = unsafe { CreatePopupMenu()? };
-    let result = fill(&menu, popup).map(|()| {
-        (0..unsafe { GetMenuItemCount(Some(popup)) }).filter_map(|i| verb(&menu, popup, i)).collect()
-    });
-    unsafe {
-        let _ = DestroyMenu(popup);
-    }
-    result
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The verbs the menu for `paths` (or `background`) would offer, without showing it.
+    fn verbs(paths: &[String], background: &str) -> Result<Vec<String>> {
+        let apartment = Apartment::enter();
+        apartment.result()?;
+        let menu = context_menu(HWND::default(), paths, background)?;
+        let popup = unsafe { CreatePopupMenu()? };
+        let result = fill(&menu, popup).map(|()| {
+            (0..unsafe { GetMenuItemCount(Some(popup)) }).filter_map(|i| verb(&menu, popup, i)).collect()
+        });
+        unsafe {
+            let _ = DestroyMenu(popup);
+        }
+        result
+    }
 
     #[test]
     fn offers_the_shell_verbs_less_rename() {

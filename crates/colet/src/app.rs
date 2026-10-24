@@ -219,6 +219,13 @@ pub struct FilterField {
     _changes: Subscription,
 }
 
+/// What type-ahead has typed so far, when the last key came, and in which column.
+struct TypeAhead {
+    text: String,
+    at: Instant,
+    column: ColumnId,
+}
+
 pub struct Colet {
     pub state: State,
     pub widths: Widths,
@@ -262,8 +269,7 @@ pub struct Colet {
     missed: Arc<Mutex<Vec<String>>>,
     searched_at: Option<Instant>,
     search_refresh: bool,
-    /// What type-ahead has typed so far, when, and in which column.
-    typed: (String, Instant, ColumnId),
+    typed: TypeAhead,
     pub settings: Settings,
     /// Writes the settings; none when the file read at start could not be read and is still there, so
     /// it is never written over this session.
@@ -429,7 +435,7 @@ impl Colet {
             missed: Arc::default(),
             searched_at: None,
             search_refresh: false,
-            typed: (String::new(), Instant::now(), 0),
+            typed: TypeAhead { text: String::new(), at: Instant::now(), column: 0 },
             settings,
             settings_saver,
             settings_changes: 0,
@@ -1021,15 +1027,16 @@ impl Colet {
     pub fn type_ahead(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         let index = self.state.active;
         let column = self.state.columns[index].id;
-        if self.typed.1.elapsed() > Duration::from_secs(1) || self.typed.2 != column {
-            self.typed.0.clear();
+        let typed = &mut self.typed;
+        if typed.at.elapsed() > Duration::from_secs(1) || typed.column != column {
+            typed.text.clear();
         }
-        self.typed.0.push_str(&text.to_lowercase());
-        self.typed.1 = Instant::now();
-        self.typed.2 = column;
+        typed.text.push_str(&text.to_lowercase());
+        typed.at = Instant::now();
+        typed.column = column;
         let c = &self.state.columns[index];
         let start = c.focused.as_ref().and_then(|f| c.entries.iter().position(|e| &e.path == f)).unwrap_or(0);
-        let typed = &self.typed.0;
+        let typed = &self.typed.text;
         // A run of one letter steps through the names starting with it.
         let repeat = typed.chars().count() > 1 && typed.chars().all(|ch| typed.starts_with(ch));
         let (needle, skip) = if repeat { (&typed[..typed.chars().next().unwrap().len_utf8()], 1) } else { (typed.as_str(), 0) };
