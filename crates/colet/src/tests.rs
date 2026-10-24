@@ -1768,6 +1768,139 @@ fn brings_homes_focused_row_into_view_across_all_three_headings(cx: &mut TestApp
     assert!(ui.home_focused(cx));
 }
 
+/// Home with three favorites and two saved searches.
+fn ordered_home(cx: &mut TestAppContext) -> (Arc<Fake>, Ui) {
+    let fake = Arc::new(Fake {
+        roots: vec![folder(r"D:\")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![]), (r"D:\a", vec![]), (r"D:\b", vec![]), (r"D:\c", vec![])])
+    });
+    {
+        let mut settings = fake.settings.lock().unwrap();
+        settings.favorites = vec![r"D:\a".into(), r"D:\b".into(), r"D:\c".into()];
+        settings.saved_searches = ["one", "two"].map(|q| SavedSearch { name: String::new(), query: q.into(), filter: None }).to_vec();
+    }
+    let ui = open(cx, fake.clone());
+    (fake, ui)
+}
+
+impl Ui {
+    fn home_row(&self, cx: &mut TestAppContext, path: &str) -> Bounds<gpui_kit::Pixels> {
+        self.act(cx, |window, _| window.within("home-rows").find(row(path)).bounds())
+    }
+
+    /// Picks up what is at `from` and holds it at `to`, without letting go.
+    fn hold_drag(&self, cx: &mut TestAppContext, from: gpui_kit::Point<gpui_kit::Pixels>, to: gpui_kit::Point<gpui_kit::Pixels>) {
+        use gpui_kit::{InputEvent as _, MouseButton, MouseDownEvent, MouseMoveEvent};
+        self.act(cx, |window, cx| {
+            let modifiers = window.modifiers();
+            window.dispatch_event(MouseMoveEvent { position: from, pressed_button: None, modifiers }.to_platform_input(), cx);
+            window.render_frame(cx);
+            let down = MouseDownEvent { button: MouseButton::Left, position: from, modifiers, click_count: 1, first_mouse: false };
+            window.dispatch_event(down.to_platform_input(), cx);
+            window.render_frame(cx);
+            for step in 1..=4 {
+                let position = point(from.x + (to.x - from.x) * (step as f32 / 4.), from.y + (to.y - from.y) * (step as f32 / 4.));
+                window.dispatch_event(MouseMoveEvent { position, pressed_button: Some(MouseButton::Left), modifiers }.to_platform_input(), cx);
+                window.render_frame(cx);
+            }
+        });
+    }
+
+    fn let_go(&self, cx: &mut TestAppContext, at: gpui_kit::Point<gpui_kit::Pixels>) {
+        use gpui_kit::{InputEvent as _, MouseButton, MouseUpEvent};
+        self.act(cx, |window, cx| {
+            let modifiers = window.modifiers();
+            window.dispatch_event(MouseUpEvent { button: MouseButton::Left, position: at, modifiers, click_count: 1 }.to_platform_input(), cx);
+            window.render_frame(cx);
+        });
+        settle(cx);
+    }
+}
+
+/// A row's upper or lower half.
+fn upper(b: Bounds<gpui_kit::Pixels>) -> gpui_kit::Point<gpui_kit::Pixels> {
+    point(b.center().x, b.top() + b.size.height / 4.)
+}
+
+fn lower(b: Bounds<gpui_kit::Pixels>) -> gpui_kit::Point<gpui_kit::Pixels> {
+    point(b.center().x, b.bottom() - b.size.height / 4.)
+}
+
+#[gpui_kit::test]
+fn drags_a_favorite_to_a_new_place_among_the_favorites(cx: &mut TestAppContext) {
+    let (fake, ui) = ordered_home(cx);
+    let (a, c) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, r"D:\c"));
+    ui.hold_drag(cx, c.center(), upper(a));
+    // The line goes above the row it would go before; the row carried fades.
+    assert_eq!(ui.read(cx, |v| v.landing.clone().and_then(|l| l.before)).as_deref(), Some(r"D:\a"));
+    ui.let_go(cx, upper(a));
+    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\c", r"D:\a", r"D:\b"]);
+    let home: Vec<String> = ui.read(cx, |v| v.state.columns[0].entries.iter().take(3).map(|e| e.path.clone()).collect());
+    assert_eq!(home, [r"D:\c", r"D:\a", r"D:\b"]);
+    // Neither picked nor opened.
+    assert!(ui.selected(cx, 0).is_empty());
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 1);
+    assert!(ui.read(cx, |v| v.home_drag.is_none() && v.landing.is_none()));
+}
+
+#[gpui_kit::test]
+fn drags_a_saved_search_below_the_last_without_running_it(cx: &mut TestAppContext) {
+    let (fake, ui) = ordered_home(cx);
+    let (one, two) = (ui.home_row(cx, "search:one"), ui.home_row(cx, "search:two"));
+    ui.hold_drag(cx, one.center(), lower(two));
+    assert_eq!(ui.read(cx, |v| v.landing.clone()), Some(crate::places::Landing { before: None }));
+    ui.let_go(cx, lower(two));
+    let queries: Vec<String> = fake.settings.lock().unwrap().saved_searches.iter().map(|s| s.query.clone()).collect();
+    assert_eq!(queries, ["two", "one"]);
+    assert!(fake.queries().is_empty());
+}
+
+#[gpui_kit::test]
+fn leaves_the_order_as_it_was_when_let_go_outside_its_own_kind(cx: &mut TestAppContext) {
+    let (fake, ui) = ordered_home(cx);
+    let (a, one) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, "search:one"));
+    ui.hold_drag(cx, a.center(), upper(one));
+    assert_eq!(ui.read(cx, |v| v.landing.clone()), None);
+    ui.let_go(cx, upper(one));
+    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\a", r"D:\b", r"D:\c"]);
+    // Nor over the columns.
+    let (c, columns) = (ui.home_row(cx, r"D:\c"), point(px(900.), px(300.)));
+    ui.hold_drag(cx, c.center(), columns);
+    ui.let_go(cx, columns);
+    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\a", r"D:\b", r"D:\c"]);
+    assert!(ui.read(cx, |v| v.home_drag.is_none()));
+}
+
+#[gpui_kit::test]
+fn puts_down_a_drag_in_home_with_escape(cx: &mut TestAppContext) {
+    let (fake, ui) = ordered_home(cx);
+    let (a, c) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, r"D:\c"));
+    ui.hold_drag(cx, c.center(), upper(a));
+    assert!(ui.read(cx, |v| v.landing.is_some()));
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.home_drag.is_none() && v.landing.is_none()));
+    ui.let_go(cx, upper(a));
+    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\a", r"D:\b", r"D:\c"]);
+}
+
+#[gpui_kit::test]
+fn scrolls_home_while_a_drag_is_held_at_its_bottom_edge(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake { roots: vec![folder(r"D:\")], ..Fake::default().with_folders(&[(r"D:\", vec![])]) });
+    fake.settings.lock().unwrap().saved_searches =
+        (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None }).collect();
+    let ui = open(cx, fake.clone());
+    let list = ui.act(cx, |window, _| window.find("home-rows").bounds());
+    let first = ui.home_row(cx, "search:query0");
+    let edge = point(first.center().x, list.bottom() - px(4.));
+    ui.hold_drag(cx, first.center(), edge);
+    cx.executor().advance_clock(Duration::from_millis(500));
+    cx.run_until_parked();
+    assert!(ui.read(cx, |v| v.home_scroll.offset().y < px(0.)));
+    // Let go there, it lands among the rows scrolled to.
+    ui.let_go(cx, edge);
+    assert_ne!(fake.settings.lock().unwrap().saved_searches[0].query, "query0");
+}
+
 #[gpui_kit::test]
 fn closes_the_menu_and_returns_the_keys_when_its_column_vanishes(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);

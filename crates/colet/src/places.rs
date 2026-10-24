@@ -75,6 +75,59 @@ pub fn home_groups<'a>(settings: &Settings, entries: &'a [Entry]) -> Vec<(&'stat
     .collect()
 }
 
+/// A favorite or saved search dragged in home, to a new place among its own kind.
+#[derive(Clone)]
+pub struct HomeDrag {
+    pub path: String,
+    pub search: bool,
+}
+
+/// Where a drag in home would put what it carries: before the row `before`, or after the last of its kind.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Landing {
+    pub before: Option<String>,
+}
+
+/// Where each of home's favorites and saved searches was drawn, by its path.
+pub type HomeRows = std::rc::Rc<std::cell::RefCell<Vec<(String, Bounds<Pixels>)>>>;
+
+/// Which of home's kinds that are put in order by dragging `path` is: a saved search, a favorite, or
+/// neither, as a place is.
+pub fn movable(settings: &Settings, path: &str) -> Option<bool> {
+    if saved_query(path).is_some() {
+        Some(true)
+    } else {
+        settings.is_favorite(path).then_some(false)
+    }
+}
+
+/// Moves the item `is` finds by `path` to just before the one it finds by `before`, or to the end.
+fn move_before<T>(items: &mut Vec<T>, is: impl Fn(&T, &str) -> bool, path: &str, before: Option<&str>) {
+    let Some(from) = items.iter().position(|item| is(item, path)) else { return };
+    if before.is_some_and(|before| is(&items[from], before)) {
+        return;
+    }
+    let item = items.remove(from);
+    let to = before.and_then(|before| items.iter().position(|item| is(item, before))).unwrap_or(items.len());
+    items.insert(to, item);
+}
+
+/// How near the top or bottom of home's list a drag scrolls it.
+const DRAG_EDGE: f32 = 24.;
+
+/// Which way home's list scrolls with a drag held at `at`: up at its top edge, down at its bottom.
+fn drag_edge(at: Point<Pixels>, list: Bounds<Pixels>) -> Option<f32> {
+    if at.x < list.left() || at.x >= list.right() {
+        None
+    } else if at.y < list.top() + px(DRAG_EDGE) {
+        Some(-1.)
+    } else if at.y >= list.bottom() - px(DRAG_EDGE) {
+        Some(1.)
+    } else {
+        None
+    }
+}
+
 /// Where the window opens again: on the display holding the middle of where it was left, which the window
 /// must name or it opens on the primary one; otherwise centered on `primary`, as after that display was
 /// unplugged. Either way it is kept within the display it opens on, and no smaller than the window goes.
@@ -196,6 +249,113 @@ impl Colet {
             },
             cx,
         );
+    }
+
+    /// A favorite or saved search is picked up in home: its row fades where it was.
+    pub fn start_home_drag(&mut self, drag: &HomeDrag, cx: &mut Context<Self>) {
+        self.home_drag = Some(drag.clone());
+        self.landing = None;
+        cx.notify();
+    }
+
+    /// The pointer moved in a drag in home, with home's list drawn at `list`.
+    pub fn drag_home(&mut self, at: Point<Pixels>, list: Bounds<Pixels>, cx: &mut Context<Self>) {
+        if self.home_drag.is_none() {
+            return;
+        }
+        self.home_pointer = Some((at, list));
+        self.aim_home_drag(cx);
+        if drag_edge(at, list).is_some() {
+            self.keep_home_scrolling(cx);
+        }
+    }
+
+    /// Where the drag would land: between two rows of its own kind, by the half of the row it is over;
+    /// nowhere outside them.
+    fn aim_home_drag(&mut self, cx: &mut Context<Self>) {
+        let (Some(drag), Some((at, list))) = (&self.home_drag, self.home_pointer) else { return };
+        let landing = {
+            let rows = self.home_rows.borrow();
+            let own: Vec<_> = rows.iter().filter(|(path, _)| movable(&self.settings, path) == Some(drag.search)).collect();
+            match (own.first(), own.last()) {
+                (Some(first), Some(last)) if list.contains(&at) && at.y >= first.1.top() && at.y < last.1.bottom() => {
+                    let over = own.iter().position(|(_, bounds)| at.y < bounds.bottom()).unwrap_or(own.len() - 1);
+                    let (path, bounds) = own[over];
+                    let before = if at.y < bounds.center().y { Some(path.clone()) } else { own.get(over + 1).map(|(path, _)| path.clone()) };
+                    Some(Landing { before })
+                }
+                _ => None,
+            }
+        };
+        if self.landing != landing {
+            self.landing = landing;
+            cx.notify();
+        }
+    }
+
+    /// Scrolls home's list while a drag is held at its edge, a step a frame.
+    fn keep_home_scrolling(&mut self, cx: &mut Context<Self>) {
+        if self.home_scrolling {
+            return;
+        }
+        self.home_scrolling = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(16)).await;
+                let more = this.update(cx, |this, cx| this.scroll_home_drag(cx)).unwrap_or(false);
+                if !more {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// One step toward the edge the drag is held at; false once it is let go of, moved off the edge, or
+    /// the list is as far as it goes.
+    fn scroll_home_drag(&mut self, cx: &mut Context<Self>) -> bool {
+        let way = self.home_drag.as_ref().and(self.home_pointer).and_then(|(at, list)| drag_edge(at, list));
+        let offset = self.home_scroll.offset();
+        let max = f32::from(self.home_scroll.max_offset().y);
+        let to = way.map(|way| (f32::from(offset.y) - way * 8.).clamp(-max, 0.));
+        match to {
+            Some(y) if y != f32::from(offset.y) => {
+                self.home_scroll.set_offset(point(offset.x, px(y)));
+                self.aim_home_drag(cx);
+                cx.notify();
+                true
+            }
+            _ => {
+                self.home_scrolling = false;
+                false
+            }
+        }
+    }
+
+    /// The drag is let go of over home's list: what it carries goes where it would land, if anywhere.
+    pub fn drop_home(&mut self, drag: &HomeDrag, cx: &mut Context<Self>) {
+        let landing = self.landing.take();
+        self.end_home_drag();
+        cx.notify();
+        let Some(Landing { before }) = landing else { return };
+        let (path, before) = (drag.path.as_str(), before.as_deref());
+        self.update_settings(
+            |s| {
+                if drag.search {
+                    move_before(&mut s.saved_searches, |s, key| search_key(&s.query, s.filter.as_deref()) == key, path, before);
+                } else {
+                    move_before(&mut s.favorites, |f, key| path_key(f) == path_key(key), path, before);
+                }
+            },
+            cx,
+        );
+    }
+
+    /// The drag in home is over, dropped or not: nothing has moved.
+    pub fn end_home_drag(&mut self) {
+        self.home_drag = None;
+        self.landing = None;
+        self.home_pointer = None;
     }
 
     /// Saved with no name of its own, so home shows the query until one is given; with the filter it runs
@@ -345,7 +505,7 @@ impl Colet {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Placement, SavedSearch, Settings, home_entries, places, restore_bounds};
+    use super::{Entry, Placement, SavedSearch, Settings, home_entries, move_before, places, restore_bounds};
     use gpui_kit::{Bounds, DisplayId, point, px, size};
 
     #[test]
@@ -416,5 +576,22 @@ mod tests {
         let entries = home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)")]);
         let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(paths, [r"c:\", "search:ext:PDF", "search:ext:pdf"]);
+    }
+
+    #[test]
+    fn moves_an_item_before_another_or_to_the_end() {
+        let moved = |path: &str, before: Option<&str>| {
+            let mut items = vec!["a", "b", "c", "d"];
+            move_before(&mut items, |item, key| *item == key, path, before);
+            items
+        };
+        assert_eq!(moved("c", Some("a")), ["c", "a", "b", "d"]);
+        assert_eq!(moved("a", Some("c")), ["b", "a", "c", "d"]);
+        assert_eq!(moved("b", None), ["a", "c", "d", "b"]);
+        // Before itself, or before the one after it: where it was.
+        assert_eq!(moved("b", Some("b")), ["a", "b", "c", "d"]);
+        assert_eq!(moved("b", Some("c")), ["a", "b", "c", "d"]);
+        // Not there to move.
+        assert_eq!(moved("x", Some("a")), ["a", "b", "c", "d"]);
     }
 }

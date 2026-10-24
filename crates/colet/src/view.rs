@@ -9,6 +9,7 @@ use gpui_kit::*;
 
 use crate::{
     app::*,
+    places::{HomeDrag, movable},
     state::saved_query,
     reveal::{Cell, on_screen, refit, reveal_target},
     state::{Column, Kind},
@@ -22,6 +23,43 @@ pub struct Tip {
     owner: Option<ElementId>,
     /// [`Tips::epoch`] when it came up.
     epoch: u64,
+}
+
+/// What follows the pointer as a favorite or saved search is dragged in home: its row, faint.
+pub struct HomeGhost {
+    name: String,
+    search: bool,
+    image: Option<std::sync::Arc<RenderImage>>,
+    width: Pixels,
+    palette: crate::theme::Palette,
+}
+
+impl Render for HomeGhost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let p = self.palette;
+        let picture = match (self.search, self.image.clone()) {
+            (true, _) => icon("search", 16., p.text_muted).into_any_element(),
+            (false, Some(image)) => img(image).size(px(16.)).flex_none().into_any_element(),
+            (false, None) => div().size(px(16.)).flex_none().into_any_element(),
+        };
+        div()
+            .w(self.width)
+            .h(px(row_height(Kind::Home)))
+            .px_2()
+            .flex()
+            .items_center()
+            .gap_2()
+            .rounded(px(4.))
+            .border_1()
+            .border_color(p.border_strong)
+            .bg(p.raised)
+            .opacity(0.8)
+            .font_family("Segoe UI")
+            .text_size(px(13.))
+            .text_color(p.text)
+            .child(picture)
+            .child(div().min_w_0().truncate().child(self.name.clone()))
+    }
 }
 
 /// When tips keep away. GPUI keeps a tooltip up through a press, and over the dialog, menu or panel
@@ -460,6 +498,13 @@ impl Colet {
         let by = self.settings.sort.by;
         let (mark, ink) = if lit { (p.mark_on_fill, p.on_accent) } else { (p.mark, p.text) };
         let path = entry.path.clone();
+        // A favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
+        let drag = (kind == Kind::Home)
+            .then(|| movable(&self.settings, &entry.path))
+            .flatten()
+            .map(|search| (HomeDrag { path: entry.path.clone(), search }, image.clone(), self.home_rows.clone(), cx.entity().downgrade()));
+        let dragged = kind == Kind::Home && self.home_drag.as_ref().is_some_and(|d| d.path == entry.path);
+        let name = entry.name.clone();
         let picture = match (saved, image) {
             (Some(_), _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
             (None, Some(image)) => img(image).size(px(16.)).flex_none().into_any_element(),
@@ -484,6 +529,18 @@ impl Colet {
             .when_some(focused_row, |r, cell| {
                 r.child(canvas(move |bounds, _, _| cell.set(Some(bounds)), |_, _, _, _| {}).absolute().size_full())
             })
+            .when_some(drag, |r, (drag, image, rows, view)| {
+                let drawn = rows.clone();
+                let path = drag.path.clone();
+                r.child(canvas(move |bounds, _, _| drawn.borrow_mut().push((path.clone(), bounds)), |_, _, _, _| {}).absolute().size_full())
+                    .on_drag(drag, move |drag, _, _, cx| {
+                        view.update(cx, |this, cx| this.start_home_drag(drag, cx)).ok();
+                        let width = rows.borrow().iter().find(|(path, _)| *path == drag.path).map_or(px(200.), |(_, b)| b.size.width);
+                        let (name, search, image) = (name.clone(), drag.search, image.clone());
+                        cx.new(|_| HomeGhost { name, search, image, width, palette: p })
+                    })
+            })
+            .when(dragged, |r| r.opacity(0.4))
             .h(px(row_height(kind)))
             .w_full()
             .px_2()
@@ -690,13 +747,22 @@ impl Colet {
             // read as one list.
             let entries = c.entries.clone();
             let groups = crate::places::home_groups(&self.settings, &entries);
+            // Drawn afresh below, for a drag to find its place.
+            self.home_rows.borrow_mut().clear();
+            // The line where a drag would land: above the row it goes before, or below its kind's last.
+            let landing = self.home_drag.as_ref().zip(self.landing.as_ref()).map(|(d, l)| (d.search, l.before.clone()));
             let mut rows = div()
                 .id("home-rows")
                 .role(Role::ListBox)
                 .aria_label("ホーム")
                 .size_full()
                 .overflow_y_scroll()
-                .track_scroll(&self.home_scroll);
+                .track_scroll(&self.home_scroll)
+                .on_drag_move(cx.listener(|this, event: &DragMoveEvent<HomeDrag>, _, cx| {
+                    this.drag_home(event.event.position, event.bounds, cx)
+                }))
+                .on_drop(cx.listener(|this, drag: &HomeDrag, _, cx| this.drop_home(drag, cx)))
+                .test_support();
             for (title, items) in groups {
                 rows = rows.child(
                     div()
@@ -710,8 +776,24 @@ impl Colet {
                         .text_color(p.text_muted)
                         .child(title),
                 );
-                for entry in &items {
-                    rows = rows.child(div().px_1().child(self.row(0, entry, marked, cx)));
+                for (i, entry) in items.iter().enumerate() {
+                    let line = landing.as_ref().and_then(|(search, before)| match before {
+                        Some(before) => (*before == entry.path).then_some(true),
+                        None => (i + 1 == items.len() && movable(&self.settings, &entry.path) == Some(*search)).then_some(false),
+                    });
+                    rows = rows.child(div().px_1().relative().child(self.row(0, entry, marked, cx)).when_some(line, |d, above| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .left(px(6.))
+                                .right(px(6.))
+                                .h(px(2.))
+                                .rounded(px(1.))
+                                .bg(p.accent)
+                                .when(above, |l| l.top(px(-1.)))
+                                .when(!above, |l| l.bottom(px(-1.))),
+                        )
+                    }));
                 }
             }
             return div()
@@ -1969,6 +2051,10 @@ impl Colet {
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.search_focused = self.search.read(cx).focus_handle(cx).is_focused(window);
+        // A drag in home let go of anywhere but its list.
+        if self.home_drag.is_some() && !cx.has_active_drag() {
+            self.end_home_drag();
+        }
         self.follow_focus(window, cx);
         let open =
             [self.dialog.is_some(), self.menu.is_some(), self.sort_open || self.filter_open, self.history_open, self.crumb_menu_open];
@@ -1998,6 +2084,15 @@ impl Render for Colet {
             .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| {
                 if this.dialog.is_none() {
                     this.open_filter_menu(true, window, cx);
+                }
+            }))
+            // Esc puts down a drag in home, before the keys reach anything else.
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.home_drag.is_some() && event.keystroke.key == "escape" {
+                    cx.stop_active_drag(window);
+                    this.end_home_drag();
+                    cx.notify();
+                    cx.stop_propagation();
                 }
             }))
             .on_action(cx.listener(|this, _: &RefreshAll, _, cx| this.refresh(cx)))
