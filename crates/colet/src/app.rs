@@ -139,9 +139,11 @@ pub const COLUMN_WIDTHS: (f32, f32) = (192., 640.);
 pub const SIDEBAR_WIDTHS: (f32, f32) = (160., 480.);
 /// The strip that brings out the folders folded away above a search result: room for two digits.
 pub const FOLD_WIDTH: f32 = 28.;
-/// The smallest the window goes: home's pane at its usual width, and beside it the toolbar with the search
+/// What home's pane leaves beside it, narrowing in a narrow window to do so: the toolbar with the search
 /// field at its least, the trail's buttons, and the pinned results with a fold strip.
-pub const MIN_WINDOW: (f32, f32) = (720., 480.);
+pub const MAIN_MIN: f32 = 480.;
+/// The smallest the window goes: home's pane at its usual width, and the rest.
+pub const MIN_WINDOW: (f32, f32) = (240. + MAIN_MIN, 480.);
 /// The least the search field narrows to, the search filter's name giving way first.
 pub const SEARCH_FIELD_MIN: f32 = 160.;
 

@@ -281,6 +281,13 @@ impl OnScreen {
 }
 
 impl Colet {
+    /// Home's pane as drawn: as wide as dragged, but narrower in a narrow window, down to its least, so
+    /// the rest keeps [`MAIN_MIN`]. The width kept stays as dragged, and comes back as the window widens.
+    pub fn sidebar_width(&self, window: &Window) -> f32 {
+        let room = f32::from(window.viewport_size().width) - MAIN_MIN;
+        self.widths.sidebar.min(room.max(SIDEBAR_WIDTHS.0))
+    }
+
     pub fn on_screen(&self) -> OnScreen {
         let first = if self.state.pinned() { 2 } else { 1 } + self.state.folded_away();
         let count = self.state.columns.len().saturating_sub(first);
@@ -381,7 +388,7 @@ impl Colet {
                 // Under the focused row, as from the keyboard; or the column's top.
                 let at = match this.focused_row.get() {
                     Some(row) => point(row.left() + px(16.), row.bottom()),
-                    None => point(px(this.widths.sidebar) + px(24.), px(140.)),
+                    None => point(px(this.sidebar_width(window)) + px(24.), px(140.)),
                 };
                 this.open_menu(this.state.active, None, at, window, cx);
                 // From the keys, the first line is lit.
@@ -986,7 +993,7 @@ impl Colet {
         let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());
         let marked = self.state.active == 0 && !self.search_focused;
         let body = self.column_body(0, marked, window, cx);
-        let width = self.widths.sidebar;
+        let width = self.sidebar_width(window);
         let keys = div().id("home").track_focus(&self.home_focus).flex_1().min_h_0().flex().flex_col().child(body);
         let keys = self.column_keys(keys, cx);
         div()
@@ -1024,6 +1031,7 @@ impl Colet {
             )
             .child(keys)
             .child(self.resizer("sidebar-resizer", WidthOf::Sidebar, width, cx))
+            .test_support()
             .into_any_element()
     }
 
@@ -1200,12 +1208,13 @@ impl Colet {
         // the tip still names it.
         div()
             .relative()
-            .min_w_0()
+            // The funnel and the chevron with their padding, gaps and border: the button never goes under
+            // the sort order's.
+            .min_w(px(60.))
             .child(
                 frame(p, keyed(&focus, window)).min_w_0().m(px(-3.)).child(
                     div()
                         .id("search-filter")
-                        .min_w_0()
                         .track_focus(&focus)
                         .key_context(SORT)
                         .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_filter_menu(true, window, cx)))
@@ -1312,7 +1321,7 @@ impl Colet {
         // The room the bar was last drawn with; before the first frame, what the window leaves it.
         let room = match self.crumbs_row.get() {
             Some(row) => f32::from(row.size.width),
-            None => f32::from(window.viewport_size().width) - self.widths.sidebar - 26. - 16. - file_actions.0,
+            None => f32::from(window.viewport_size().width) - self.sidebar_width(window) - 26. - 16. - file_actions.0,
         };
         self.crumbs_room.set(room);
         let folded = crate::crumbs::folded(&widths, room);

@@ -2088,17 +2088,26 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
         let mut settings = fake.settings.lock().unwrap();
         settings.filters = vec![SearchFilter { name: "去年の夏に撮ったとても大きな写真".into(), query: "ext:jpg".into() }];
         settings.filter = Some("去年の夏に撮ったとても大きな写真".into());
+        // Home's pane dragged as wide as it goes.
+        settings.sidebar_width = 480.;
     }
     let ui = open(cx, Arc::new(fake));
     let (width, height) = crate::app::MIN_WINDOW;
     cx.simulate_window_resize(ui.window, size(px(width), px(height)));
-    let (field, filter, last) = ui.act(cx, |window, _| {
-        (window.find("search-box").bounds(), window.find("search-filter").bounds(), window.find("preferences").bounds())
+    let (sidebar, field, filter, last) = ui.act(cx, |window, _| {
+        let find = |id: &str| window.find(SharedString::from(id.to_owned())).bounds();
+        (find("sidebar"), find("search-box"), find("search-filter"), find("preferences"))
     });
+    // Home's pane gave way to its usual width, keeping the width it was dragged to.
+    assert_eq!(sidebar.size.width, px(width - crate::app::MAIN_MIN));
+    assert_eq!(ui.read(cx, |v| v.widths.sidebar), 480.);
     assert!(field.size.width >= px(crate::app::SEARCH_FIELD_MIN - 6.), "{field:?}");
-    // The filter's name gave way, and nothing is pushed past the window's edge.
-    assert!(filter.size.width < px(200.), "{filter:?}");
+    // The filter's name gave way, down to the funnel and the chevron; nothing is pushed past the edge.
+    assert!(filter.size.width < px(200.) && filter.size.width >= px(60.), "{filter:?}");
     assert!(last.right() <= px(width), "{last:?}");
+    // Wide again, the pane is as wide as it was dragged.
+    cx.simulate_window_resize(ui.window, size(px(1200.), px(800.)));
+    assert_eq!(ui.act(cx, |window, _| window.find("sidebar").bounds().size.width), px(480.));
 }
 
 impl Ui {
