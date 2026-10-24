@@ -52,6 +52,9 @@ const SIZE: u32 = 2;
 const DATE_MODIFIED: u32 = 5;
 const FULL_PATH: u32 = 240;
 
+/// `EVERYTHING3_SEARCH_FOLDERS_FIRST_ALWAYS`.
+const FOLDERS_FIRST_ALWAYS: u32 = 1;
+
 /// How many results a page holds.
 pub const PAGE: usize = 500;
 
@@ -381,9 +384,8 @@ impl SearchSession {
             for property in [NAME, PATH] {
                 Everything3_AddSearchPropertyRequestHighlighted(self.state, property);
             }
-            // Folders first only when ascending, so descending turns the whole listing round as Explorer
-            // does.
-            Everything3_SetSearchFoldersFirst(self.state, 0);
+            // Folders first descending too, as the columns order them, unlike Explorer.
+            Everything3_SetSearchFoldersFirst(self.state, FOLDERS_FIRST_ALWAYS);
             let property = match order.by {
                 Sort::Name => NAME,
                 Sort::Size => SIZE,
@@ -637,6 +639,27 @@ mod tests {
         assert_eq!(&entry.name[entry.marks.name[0].clone()], "rep");
         // Outside a search, nothing is marked.
         assert_eq!(Entry::folder(r"C:\", "C:").marks, Marks::default());
+    }
+
+    #[test]
+    #[ignore = "needs a running Everything 1.5 that indexes the temporary folder"]
+    fn puts_folders_first_descending_too() {
+        let _alone = alone();
+        let fixture = tempfile::Builder::new().prefix("colet-sdk-folders-").tempdir().unwrap();
+        std::fs::write(fixture.path().join("a"), b"x").unwrap();
+        std::fs::create_dir(fixture.path().join("z")).unwrap();
+        let query = format!("parent:\"{}\"", fixture.path().display());
+        let mut session = SearchSession::default();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        for by in Sort::ALL {
+            let entries = loop {
+                let page = session.search(&query, Order { by, descending: true }, 0, PAGE, true).unwrap();
+                if page.entries.len() == 2 { break page.entries; }
+                assert!(Instant::now() < deadline, "Everything did not index the fixture");
+                std::thread::sleep(Duration::from_millis(100));
+            };
+            assert!(entries[0].directory, "{by:?}: {entries:?}");
+        }
     }
 
     #[test]

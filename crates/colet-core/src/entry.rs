@@ -176,14 +176,18 @@ struct Key {
 
 impl Ord for Key {
     fn cmp(&self, other: &Self) -> Ordering {
-        let mut by = (self.file, self.rank).cmp(&(other.file, other.rank));
+        let mut by = self.rank.cmp(&other.rank);
         if self.order.by == Sort::Name {
             by = by.then_with(|| self.name.cmp(&other.name));
         }
         if self.order.descending {
             by = by.reverse();
         }
-        by.then_with(|| self.name.cmp(&other.name)).then_with(|| self.path.cmp(&other.path))
+        self.file
+            .cmp(&other.file)
+            .then(by)
+            .then_with(|| self.name.cmp(&other.name))
+            .then_with(|| self.path.cmp(&other.path))
     }
 }
 
@@ -201,8 +205,8 @@ impl PartialEq for Key {
 
 impl Eq for Key {}
 
-/// Folders first, then by the sort, all turned round when descending; ties broken by name as Explorer
-/// orders it and then by path.
+/// Folders first either way, unlike Explorer's descending; within each, by the sort, turned round when
+/// descending; ties broken by name as Explorer orders it and then by path.
 pub fn sort_entries(entries: &mut [Entry], order: Order) {
     // Keyed once per entry: converting names inside the comparison would allocate on every one of its
     // n log n calls.
@@ -238,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn directories_precede_files_ascending_and_follow_them_descending() {
+    fn directories_precede_files_either_way() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a"), "data").unwrap();
         std::fs::create_dir(dir.path().join("z")).unwrap();
@@ -250,7 +254,7 @@ mod tests {
             sort_entries(&mut entries, Order { by, descending: false });
             assert!(entries[0].directory);
             sort_entries(&mut entries, Order { by, descending: true });
-            assert!(entries[1].directory);
+            assert!(entries[0].directory);
         }
     }
 
