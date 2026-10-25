@@ -30,6 +30,13 @@ pub fn reveal_target(from: f32, view: f32, cells: &[Cell], active: Option<usize>
     flush
 }
 
+/// The scroll offset to rest at once the folders folded above a column come out by their strip: as far
+/// left as keeps column `keep` whole at the right edge, so as many of them as fit show beside it.
+pub fn uncover_target(view: f32, cells: &[Cell], keep: usize) -> f32 {
+    let Some(cell) = cells.get(keep) else { return 0. };
+    (cell.start + cell.width - view).clamp(0., cell.start)
+}
+
 /// Where columns resting at `from` go once the view or their width changes under them, as the window is
 /// resized or a width dragged: `was` and `was_end` are the view and the columns' end they rested over.
 /// The last column in sight before stays flush with the right edge, unless that would push the active
@@ -123,6 +130,24 @@ mod tests {
     #[test]
     fn goes_back_to_the_start_once_nothing_scrolls() {
         assert_eq!(reveal_target(480., 480., &[], None), 0.);
+    }
+
+    #[test]
+    fn uncovers_as_many_folders_as_fit_beside_the_column_kept_at_the_right_edge() {
+        assert_eq!(uncover_target(480., &cells(4), 3), 480.);
+        assert_eq!(uncover_target(600., &cells(4), 2), 120.);
+        // Columns past it go off on the right.
+        assert_eq!(uncover_target(480., &cells(4), 1), 0.);
+    }
+
+    #[test]
+    fn uncovers_them_all_when_they_fit() {
+        assert_eq!(uncover_target(1200., &cells(4), 3), 0.);
+    }
+
+    #[test]
+    fn keeps_the_column_kept_whole_from_the_left_when_it_is_wider_than_the_view() {
+        assert_eq!(uncover_target(200., &cells(4), 3), 720.);
     }
 
     #[test]

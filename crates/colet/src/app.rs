@@ -206,6 +206,8 @@ pub struct Slide {
     pub target: f32,
     pub velocity: f32,
     pub time: Option<Instant>,
+    /// Folders brought out by their strip: the column held at the right edge as they slide in.
+    pub keep: Option<usize>,
 }
 
 /// What a listing came back with: the entries, how many in all, and for a search what answered it.
@@ -253,6 +255,8 @@ pub struct Colet {
     pub hold: f32,
     /// The view's width and the columns' that the columns were last brought to rest, or set sliding, for.
     pub fitted: (f32, f32),
+    /// The anchor of the fold last drawn, and how many folders it held away, to tell when they come out.
+    pub drawn_fold: Option<(ColumnId, usize)>,
     pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
     request: u64,
@@ -422,6 +426,7 @@ impl Colet {
             reveal_pending: None,
             hold: 0.,
             fitted: (0., 0.),
+            drawn_fold: None,
             owner,
             backend,
             request: 0,

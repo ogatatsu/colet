@@ -12,7 +12,7 @@ use crate::{
     menus::Popup,
     places::{HomeDrag, movable},
     state::saved_query,
-    reveal::{Cell, on_screen, refit, reveal_target},
+    reveal::{Cell, on_screen, refit, reveal_target, uncover_target},
     state::{Column, Kind},
 };
 
@@ -1981,7 +1981,38 @@ impl Colet {
     /// Slides the columns toward where they should rest, a frame at a time.
     fn reveal(&mut self, window: &mut Window) {
         let view = f32::from(self.columns_scroll.bounds().size.width);
-        let from = -f32::from(self.columns_scroll.offset().x);
+        let mut from = -f32::from(self.columns_scroll.offset().x);
+        let fold = self.state.fold.map(|f| (f.anchor, self.state.folded_away()));
+        let came_out = match (self.drawn_fold, fold) {
+            (Some((was, away)), Some((anchor, 0))) if was == anchor && away > 0 => Some(away),
+            _ => None,
+        };
+        self.drawn_fold = fold;
+        let mut keep = None;
+        if let Some(away) = came_out
+            && view > 0.
+        {
+            // The columns on screen stay where they are drawn: the folders come out ahead of them, in the
+            // room of the strip and past the left edge, and slide in from there.
+            let shift = away as f32 * self.widths.column - FOLD_WIDTH;
+            from += shift;
+            self.columns_scroll.set_offset(point(px(-from), px(0.)));
+            self.hold = self.hold.max(from);
+            if let Some(slide) = &mut self.slide {
+                slide.origin += shift;
+                slide.position += shift;
+                slide.target += shift;
+            }
+            // Brought out by the strip rather than by going into one of them, as many as fit stand beside
+            // the column worked in, or the anchor while the results or home are.
+            if let Some(f) = self.state.folded()
+                && !(f.from..f.to).contains(&self.state.active)
+            {
+                let first = if self.state.pinned() { 2 } else { 1 };
+                keep = Some(self.state.active.max(f.to) - first);
+            }
+            self.reveal_pending.get_or_insert(true);
+        }
         if let Some(smooth) = self.reveal_pending.take() {
             if view <= 0. {
                 // Not laid out yet: ask again next frame.
@@ -1991,7 +2022,10 @@ impl Colet {
             }
             let (cells, active) = self.scrolling();
             let start = self.slide.as_ref().map_or(from, |s| s.target);
-            let target = reveal_target(start, view, &cells, active);
+            let target = match keep {
+                Some(keep) => uncover_target(view, &cells, keep),
+                None => reveal_target(start, view, &cells, active),
+            };
             self.hold = target.max(from);
             self.fitted = (view, self.widths.column);
             if (target - from).abs() >= 0.5 {
@@ -1999,9 +2033,10 @@ impl Colet {
                     Some(slide) => {
                         slide.origin = start;
                         slide.target = target;
+                        slide.keep = keep;
                     }
                     None => {
-                        self.slide = Some(Slide { origin: start, position: from, target, velocity: 0., time: None })
+                        self.slide = Some(Slide { origin: start, position: from, target, velocity: 0., time: None, keep })
                     }
                 }
             }
@@ -2057,7 +2092,10 @@ impl Colet {
         let (cells, active) = self.scrolling();
         match &mut self.slide {
             Some(slide) => {
-                slide.target = reveal_target(slide.origin, view, &cells, active);
+                slide.target = match slide.keep {
+                    Some(keep) => uncover_target(view, &cells, keep),
+                    None => reveal_target(slide.origin, view, &cells, active),
+                };
                 self.hold = slide.target.max(slide.position);
             }
             None => {

@@ -1081,6 +1081,71 @@ fn leaves_no_room_past_the_last_column_once_the_folders_folded_away_come_out(cx:
     assert!(room.abs() < 1., "{room}");
 }
 
+/// A file four folders down, found and picked: its folder opens with those above it folded away.
+fn folded_deep(cx: &mut TestAppContext) -> Ui {
+    let deep = file(r"D:\a\b\c\d\zeta.txt");
+    let fake = Arc::new(Fake::default().with_results(vec![deep.clone()]).with_folders(&[
+        (r"D:\", vec![folder(r"D:\a")]),
+        (r"D:\a", vec![folder(r"D:\a\b")]),
+        (r"D:\a\b", vec![folder(r"D:\a\b\c")]),
+        (r"D:\a\b\c", vec![folder(r"D:\a\b\c\d")]),
+        (r"D:\a\b\c\d", vec![deep.clone()]),
+    ]));
+    let ui = open(cx, fake);
+    ui.input(cx, "zeta");
+    ui.click(cx, row(&deep.path));
+    rest(&ui, cx);
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 4);
+    ui
+}
+
+/// Where column `index` starts and ends on screen.
+fn column_edges(ui: &Ui, cx: &mut TestAppContext, index: usize) -> (f32, f32) {
+    let id = ui.read(cx, |v| v.state.columns[index].id);
+    ui.act(cx, |window, _| {
+        let bounds = window.find(("column", id)).bounds();
+        (f32::from(bounds.left()), f32::from(bounds.right()))
+    })
+}
+
+#[gpui_kit::test]
+fn slides_the_folders_brought_out_by_their_strip_in_from_the_left_as_far_as_the_anchor_allows(cx: &mut TestAppContext) {
+    let ui = folded_deep(cx);
+    let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
+    let (before, _) = column_edges(&ui, cx, anchor);
+    ui.click(cx, "unfold");
+    // The anchor stays where it was drawn rather than leap aside for the folders: it has moved only as
+    // far as the slide has gone.
+    let (moved, _) = column_edges(&ui, cx, anchor);
+    let gone = ui.read(cx, |v| v.slide.as_ref().map(|s| s.origin - s.position)).expect("they slide");
+    assert!((moved - before - gone).abs() < 1., "{before} {moved} {gone}");
+    rest(&ui, cx);
+    let (after, right) = column_edges(&ui, cx, anchor);
+    assert!(after > moved, "the folders push the anchor right as they come in");
+    // At rest the anchor ends at the right edge, with the folders above it in the room on its left.
+    let edge = ui.act(cx, |window, _| f32::from(window.find("columns-scroll").bounds().right()));
+    assert!((edge - right).abs() < 1., "{edge} {right}");
+    assert!(ui.read(cx, |v| v.columns_scroll.offset().x) < px(0.), "they do not all fit");
+}
+
+#[gpui_kit::test]
+fn slides_a_folded_crumb_picked_in_from_the_left_until_it_is_on_screen(cx: &mut TestAppContext) {
+    let ui = folded_deep(cx);
+    let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
+    let (before, _) = column_edges(&ui, cx, anchor);
+    ui.click(cx, ("crumb", 3usize));
+    assert_eq!(ui.active(cx), 3);
+    let (moved, _) = column_edges(&ui, cx, anchor);
+    let gone = ui.read(cx, |v| v.slide.as_ref().map(|s| s.origin - s.position)).expect("they slide");
+    assert!((moved - before - gone).abs() < 1., "{before} {moved} {gone}");
+    rest(&ui, cx);
+    // Only as far as shows the column gone into, whole; the drive's stays out on the left.
+    let (left, _) = column_edges(&ui, cx, 3);
+    let edge = ui.act(cx, |window, _| f32::from(window.find("columns-scroll").bounds().left()));
+    assert!(left >= edge - 1., "{left} {edge}");
+    assert!(ui.read(cx, |v| v.on_screen().hidden_left()));
+}
+
 #[gpui_kit::test]
 fn turns_the_wheel_with_shift_to_send_the_columns_sideways_leaving_the_rows_under_it(cx: &mut TestAppContext) {
     let chain: Vec<String> = (1..=8).map(|n| format!(r"D:\{}", (1..=n).map(|k| format!("d{k}")).collect::<Vec<_>>().join(r"\"))).collect();
