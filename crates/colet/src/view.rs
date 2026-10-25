@@ -387,9 +387,9 @@ impl Colet {
         )
     }
 
-    fn icon_button(&mut self, id: &'static str, name: &'static str, label: &'static str, enabled: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn icon_button(&mut self, id: &'static str, name: &'static str, label: &'static str, enabled: bool, window: &mut Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let p = self.palette;
-        let focus = self.stop(id, cx);
+        let focus = self.stop_while(id, enabled, window, cx);
         ring(div().id(id).track_focus(&focus), p)
             .role(Role::Button)
             .aria_label(label)
@@ -401,7 +401,8 @@ impl Colet {
             .rounded(px(6.))
             .child(icon(name, 16., p.text_muted))
             .when(enabled, |b| b.cursor_pointer().hover(|b| b.bg(p.hover)))
-            .when(!enabled, |b| b.opacity(0.35))
+            // Off, a press leaves the keys where they are, as Tab passes it by.
+            .when(!enabled, |b| keep_focus(b.opacity(0.35)))
     }
 
     /// The keys that move through a column and between them, for home's pane and the columns alike.
@@ -1111,7 +1112,7 @@ impl Colet {
             .into_any_element()
     }
 
-    fn render_sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());
         let marked = self.state.active == 0 && !self.search_focused;
@@ -1140,13 +1141,13 @@ impl Colet {
                     .items_center()
                     .gap(px(2.))
                     .child(
-                        self.icon_button("back", "arrow-left", "戻る", back, cx)
+                        self.icon_button("back", "arrow-left", "戻る", back, window, cx)
                             .tip(p, "戻る（Alt+←）")
                             .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)))
                             .test_support(),
                     )
                     .child(
-                        self.icon_button("forward", "arrow-right", "進む", forward, cx)
+                        self.icon_button("forward", "arrow-right", "進む", forward, window, cx)
                             .tip(p, "進む（Alt+→）")
                             .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx)))
                             .test_support(),
@@ -1304,13 +1305,13 @@ impl Colet {
                     .flex_none()
                     .gap(px(2.))
                     .child(
-                        keep_focus(self.icon_button("refresh", "refresh-cw", "更新", true, cx))
+                        keep_focus(self.icon_button("refresh", "refresh-cw", "更新", true, window, cx))
                             .tip(p, "更新（F5）")
                             .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
                             .test_support(),
                     )
                     .child(
-                        self.icon_button("preferences", "sliders-horizontal", "設定", true, cx)
+                        self.icon_button("preferences", "sliders-horizontal", "設定", true, window, cx)
                             .tip(p, "設定")
                             .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
                             .test_support(),
@@ -1410,7 +1411,7 @@ impl Colet {
     /// The trail from the search or the drive down to the deepest folder; when it outgrows the bar, the
     /// crumbs furthest from the deepest fold into a menu so the nearest stay readable.
     fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let file_actions = self.render_actions(cx);
+        let file_actions = self.render_actions(window, cx);
         let p = self.palette;
         let results = self.state.pinned();
         let mut crumbs: Vec<(usize, String, String)> = Vec::new();

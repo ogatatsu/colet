@@ -1507,6 +1507,39 @@ fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    // Three picked: one name cannot be changed for them all.
+    ui.press(cx, "ctrl-a");
+    let [copy_path, new_folder] = ui.read(cx, |v| [v.stops["copy-path"].clone(), v.stops["new-folder"].clone()]);
+    ui.act(cx, |window, cx| copy_path.focus(window, cx));
+    ui.press(cx, "tab");
+    assert!(ui.act(cx, |window, _| new_folder.is_focused(window)), "Tab goes past rename to the next");
+    ui.press(cx, "shift-tab");
+    assert!(ui.act(cx, |window, _| copy_path.is_focused(window)), "and Shift+Tab back past it");
+    // Pressed by the mouse, it does nothing and takes nothing.
+    let view = ui.view.clone();
+    ui.act(cx, |window, cx| view.read(cx).columns_focus.clone().focus(window, cx));
+    ui.click(cx, "rename");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.columns_focused(cx));
+}
+
+#[gpui_kit::test]
+fn the_keys_on_a_button_that_goes_off_go_on_to_the_next(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(with_filters(Fake::default())));
+    ui.click(cx, "search-filter");
+    ui.click(cx, "edit-filters");
+    let up = ui.read(cx, |v| v.stops["filter-up:動画"].clone());
+    ui.act(cx, |window, cx| up.focus(window, cx));
+    // At the top it can go no higher: the keys go on to its own way down.
+    ui.press(cx, "enter");
+    assert_eq!(ui.read(cx, |v| v.settings.filters.iter().map(|f| f.name.clone()).collect::<Vec<_>>()), ["動画", "画像"]);
+    let down = ui.read(cx, |v| v.stops["filter-down:動画"].clone());
+    assert!(ui.act(cx, |window, _| down.is_focused(window)));
+}
+
+#[gpui_kit::test]
 fn marks_the_rows_the_clipboard_holds(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-x");

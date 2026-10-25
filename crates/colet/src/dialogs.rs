@@ -116,7 +116,8 @@ fn tool(p: Palette, id: ElementId, focus: &FocusHandle, glyph: &'static str, lab
         .rounded(px(4.))
         .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).text_color(p.text_muted))
         .when(enabled, |d| d.cursor_pointer().hover(|d| d.bg(p.raised_hover)).tip(p, label))
-        .when(!enabled, |d| d.opacity(0.35))
+        // Off, a press leaves the keys where they are, as Tab passes it by.
+        .when(!enabled, |d| crate::view::keep_focus(d.opacity(0.35)))
 }
 
 /// A choice among the filters, a stop for Tab, checked as a radio button is.
@@ -156,8 +157,16 @@ impl Colet {
                 (choice, focus)
             })
             .collect();
-        let tools: Vec<[FocusHandle; 4]> =
-            names.iter().map(|name| ["up", "down", "edit", "delete"].map(|what| self.stop(format!("filter-{what}:{name}"), cx))).collect();
+        // The first goes no higher and the last no lower: those buttons are off.
+        let last = names.len().saturating_sub(1);
+        let tools: Vec<[FocusHandle; 4]> = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                [("up", i > 0), ("down", i < last), ("edit", true), ("delete", true)]
+                    .map(|(what, on)| self.stop_while(format!("filter-{what}:{name}"), on, window, cx))
+            })
+            .collect();
         let (content, buttons) = match self.dialog.as_ref()? {
             Dialog::Name { request: Request { kind, paths, destination, .. }, input, checking, .. } => {
                 let checking = checking.is_some();
@@ -616,13 +625,20 @@ impl Colet {
     }
 
     /// The file actions beside the trail, and the room they take.
-    pub fn render_actions(&mut self, cx: &mut Context<Self>) -> (f32, AnyElement) {
+    pub fn render_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) -> (f32, AnyElement) {
         let p = self.palette;
         let reasons = self.reasons();
-        let stops: std::collections::HashMap<&'static str, FocusHandle> = ["copy", "cut", "paste", "copy-path", "rename", "new-folder", "recycle"]
-            .into_iter()
-            .map(|id| (id, self.stop(id, cx)))
-            .collect();
+        let offs = [
+            ("copy", reasons.copy),
+            ("cut", reasons.cut),
+            ("paste", reasons.paste),
+            ("copy-path", reasons.copy_path),
+            ("rename", reasons.rename),
+            ("new-folder", reasons.paste),
+            ("recycle", reasons.delete),
+        ];
+        let stops: std::collections::HashMap<&'static str, FocusHandle> =
+            offs.into_iter().map(|(id, off)| (id, self.stop_while(id, off.is_none(), window, cx))).collect();
         let action = |id: &'static str, glyph: &'static str, label: &'static str, key: &'static str, off: Option<&'static str>| {
             let tip = match off {
                 Some(why) => format!("{label}（{why}）"),
@@ -640,7 +656,8 @@ impl Colet {
                 .child(svg().path(format!("icons/{glyph}.svg")).size(px(15.)).text_color(p.text_muted))
                 .map(|d| if off.is_some() { d.steady_tip(p, tip) } else { d.tip(p, tip) })
                 .when(off.is_none(), |d| d.cursor_pointer().hover(|d| d.bg(p.hover)))
-                .when(off.is_some(), |d| d.opacity(0.35))
+                // Off, a press leaves the keys where they are, as Tab passes it by.
+                .when(off.is_some(), |d| crate::view::keep_focus(d.opacity(0.35)))
         };
         let row = div()
             .flex()

@@ -530,6 +530,16 @@ impl Colet {
         self.stops.entry(id.into()).or_insert_with(|| cx.focus_handle().tab_stop(true)).clone()
     }
 
+    /// The focus of a button that may be off: while off, Tab passes it by, and keys on it as it went off go
+    /// on to the next stop, as Tab would take them.
+    pub fn stop_while(&mut self, id: impl Into<String>, on: bool, window: &mut Window, cx: &mut Context<Self>) -> FocusHandle {
+        let focus = self.stop(id, cx).tab_stop(on);
+        if !on && focus.is_focused(window) {
+            window.defer(cx, |window, cx| window.focus_next(cx));
+        }
+        focus
+    }
+
     /// Tab moves the keys between home's pane and the columns: the column worked in follows them. Into the
     /// columns they land where → would, past the folders folded above a favorite.
     /// What landing there opens, a folder picked as → would, is listed as → would list it.
