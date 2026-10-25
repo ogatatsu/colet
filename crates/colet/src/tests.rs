@@ -422,6 +422,22 @@ fn moves_from_the_search_field_into_the_results_with_down(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn moves_from_the_empty_search_field_into_home_with_down_picking_its_row(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(drive_d()));
+    ui.press(cx, "down");
+    assert!(ui.home_focused(cx));
+    assert_eq!(ui.selected(cx, 0), [r"D:\"]);
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].path.clone()), r"D:\");
+    // The drive picked again leaves the folders open beside it be.
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "down");
+    assert!(ui.home_focused(cx));
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().path.clone()), r"D:\work");
+}
+
+#[gpui_kit::test]
 fn opens_a_deep_search_file_on_its_own_folder_and_right_jumps_to_it(cx: &mut TestAppContext) {
     let deep = file(r"D:\a\b\zeta.txt");
     let fake = Arc::new(
@@ -1959,8 +1975,16 @@ fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_she
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
     fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None }];
     let ui = open(cx, fake.clone());
+    // ↓ from the field picks it in home, which runs it.
     ui.press(cx, "down");
-    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "");
+    assert_eq!(ui.field(cx), "ext:pdf");
+    // ← from other results lands on it unpicked; ↵ runs it.
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "ctrl-a");
+    ui.input(cx, "a");
+    ui.press(cx, "down");
+    ui.press(cx, "left");
+    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "a");
     ui.press(cx, "enter");
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
     assert_eq!(ui.field(cx), "ext:pdf");

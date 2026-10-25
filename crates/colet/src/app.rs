@@ -969,10 +969,18 @@ impl Colet {
         self.changed(cx);
     }
 
-    /// Into the results, as from a search field in Explorer, or home with nothing searched.
+    /// Into the results, as from a search field in Explorer, or home with nothing searched, picking the
+    /// row the keys land on there too unless it already is.
     pub fn leave_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.state.set_active(if self.state.pinned() { 1 } else { 0 });
+        let pinned = self.state.pinned();
+        self.state.set_active(if pinned { 1 } else { 0 });
         self.focus_active(window, cx);
+        let home = &self.state.columns[0];
+        if !pinned && let Some(path) = home.focused.clone().filter(|path| !home.selected.contains(path)) {
+            self.state.select(0, vec![path]);
+            // A saved search picked runs, which the field shows.
+            self.sync_search_field(window, cx);
+        }
     }
 
     /// Empties the field; the filter chosen, if any, still shows all it lets through.
