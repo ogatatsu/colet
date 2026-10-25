@@ -1,12 +1,15 @@
-//! The menus, the file menu, the sort order's and the search filters', as lines that the mouse and the
-//! keys pick alike: ↑↓ move, Enter picks, Esc closes, and the keys go back to where they were.
+//! The menus, the file menu, a text field's, the sort order's and the search filters', as lines that the
+//! mouse and the keys pick alike: ↑↓ move, Enter picks, Esc closes, and the keys go back to where they were.
 use colet_core::entry::{Sort, direction_label};
+use gpui_kit::base::input::{self, InputState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
     app::Colet,
     ops::{Menu, NEEDS_FILE, ONE_ITEM},
+    places::Dialog,
+    search_filters::FilterEdit,
     state::saved_query,
     theme::Palette,
 };
@@ -35,6 +38,44 @@ pub enum Command {
     /// The search filter to search within, or none.
     SearchFilter(Option<String>),
     EditFilters,
+    /// An edit of a text field's text.
+    Edit(Edit),
+}
+
+/// What a text field's menu does to its text, as the field's own keys do.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Edit {
+    Undo,
+    Cut,
+    Copy,
+    Paste,
+    Delete,
+    SelectAll,
+}
+
+impl Edit {
+    fn action(self) -> Box<dyn Action> {
+        match self {
+            Edit::Undo => Box::new(input::Undo),
+            Edit::Cut => Box::new(input::Cut),
+            Edit::Copy => Box::new(input::Copy),
+            Edit::Paste => Box::new(input::Paste),
+            Edit::Delete => Box::new(input::Delete),
+            Edit::SelectAll => Box::new(input::SelectAll),
+        }
+    }
+}
+
+/// A text field's menu: the field, where it opened, and what its text allowed as it did.
+pub struct TextMenu {
+    pub input: Entity<InputState>,
+    pub at: Point<Pixels>,
+    editable: bool,
+    selection: bool,
+    copyable: bool,
+    /// The clipboard held text.
+    paste: bool,
+    empty: bool,
 }
 
 pub struct Line {
@@ -54,6 +95,11 @@ pub struct Line {
 
 fn line(id: &'static str, glyph: &'static str, text: &'static str, hint: Option<&'static str>, off: Option<&'static str>, command: Command) -> Line {
     Line { id: id.into(), glyph: Some(glyph), text: text.into(), hint, off, command, group: false, chosen: false }
+}
+
+/// A line with no glyph, off without a word unless `on`.
+fn plain(id: &'static str, text: &'static str, hint: &'static str, on: bool, command: Command) -> Line {
+    Line { id: id.into(), glyph: None, text: text.into(), hint: Some(hint), off: (!on).then_some(""), command, group: false, chosen: false }
 }
 
 /// A line to choose, checked when it is the one in use.
@@ -78,6 +124,8 @@ pub enum Popup {
     Filters { from_search: bool },
     /// The folders folded off the trail.
     Crumbs,
+    /// A text field's, opened by a right-click in it or the menu key.
+    Text(TextMenu),
 }
 
 impl Colet {
@@ -103,6 +151,89 @@ impl Colet {
         }
     }
 
+    /// The text field's menu, while it is open.
+    pub fn text_menu(&self) -> Option<&TextMenu> {
+        match &self.popup {
+            Some(Popup::Text(menu)) => Some(menu),
+            _ => None,
+        }
+    }
+
+    /// The field has the keys, or its menu has them for it.
+    pub fn has_keys(&self, input: &Entity<InputState>, window: &Window, cx: &App) -> bool {
+        input.read(cx).focus_handle(cx).is_focused(window) || self.text_menu().is_some_and(|menu| menu.input == *input)
+    }
+
+    /// For the element round `input`, ahead of the field: a right press opens its menu with the keys in it,
+    /// leaving what is picked and where the caret is, as Windows' own fields do. The field never sees the
+    /// press, which would move its caret there. The menu key opens it through [`Colet::open_focused_text_menu`].
+    pub fn right_press_menu(input: &Entity<InputState>, cx: &Context<Self>) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
+        let field = input.downgrade();
+        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+            if event.button != MouseButton::Right {
+                return;
+            }
+            let Some(input) = field.upgrade() else { return };
+            cx.stop_propagation();
+            input.update(cx, |input, cx| input.focus(window, cx));
+            this.open_text_menu(input, event.position, false, window, cx);
+        })
+    }
+
+    /// Opens `input`'s menu at `at`; from the keys, with its first line that is on lit. The text picked stays
+    /// lit while the menu has the keys.
+    pub fn open_text_menu(&mut self, input: Entity<InputState>, at: Point<Pixels>, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let paste = cx.read_from_clipboard().and_then(|item| item.text()).is_some_and(|text| !text.is_empty());
+        let menu = {
+            let field = input.read(cx);
+            let can = field.context_menu_capabilities();
+            TextMenu {
+                input: input.clone(),
+                at,
+                editable: can.is_editable(),
+                selection: can.has_selection(),
+                copyable: can.is_copyable(),
+                paste,
+                empty: field.value().is_empty(),
+            }
+        };
+        self.popup = Some(Popup::Text(menu));
+        self.cursor = None;
+        self.menu_focus.focus(window, cx);
+        let focus = self.menu_focus.clone();
+        input.update(cx, |input, cx| input.set_selection_focus(Some(focus), cx));
+        if keyboard {
+            self.move_cursor(1, cx);
+        }
+        cx.notify();
+    }
+
+    /// The menu key in a text field opens its menu under the caret.
+    pub fn open_focused_text_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(input) = self.text_fields().into_iter().find(|input| input.read(cx).focus_handle(cx).is_focused(window)) else {
+            return;
+        };
+        let at = {
+            let field = input.read(cx);
+            field.cursor_layout().map_or_else(|| field.input_bounds().bottom_left(), |(caret, _)| caret.bottom_left())
+        };
+        self.open_text_menu(input, at, true, window, cx);
+    }
+
+    /// The text fields there are: the search's, the folder columns', and the open dialog's.
+    fn text_fields(&self) -> Vec<Entity<InputState>> {
+        let mut fields = vec![self.search.clone()];
+        fields.extend(self.filters.values().map(|field| field.input.clone()));
+        match &self.dialog {
+            Some(Dialog::Name { input, .. }) => fields.push(input.clone()),
+            Some(Dialog::EditSearch { name, query, .. } | Dialog::Filters { edit: Some(FilterEdit { name, query, .. }), .. }) => {
+                fields.extend([name.clone(), query.clone()])
+            }
+            _ => {}
+        }
+        fields
+    }
+
     pub fn sort_open(&self) -> bool {
         matches!(self.popup, Some(Popup::Sort))
     }
@@ -115,8 +246,19 @@ impl Colet {
         matches!(self.popup, Some(Popup::Crumbs))
     }
 
-    /// The lines of the open menu: the sort order's, the search filters', or the file menu's.
+    /// The lines of the open menu: a text field's, the sort order's, the search filters', or the file menu's.
     pub fn menu_lines(&self) -> Vec<Line> {
+        if let Some(menu) = self.text_menu() {
+            let edit = menu.editable;
+            return vec![
+                plain("text-undo", "元に戻す", "Ctrl+Z", edit, Command::Edit(Edit::Undo)),
+                plain("text-cut", "切り取り", "Ctrl+X", edit && menu.copyable, Command::Edit(Edit::Cut)).grouped(),
+                plain("text-copy", "コピー", "Ctrl+C", menu.copyable, Command::Edit(Edit::Copy)),
+                plain("text-paste", "貼り付け", "Ctrl+V", edit && menu.paste, Command::Edit(Edit::Paste)),
+                plain("text-delete", "削除", "Delete", edit && menu.selection, Command::Edit(Edit::Delete)),
+                plain("text-select-all", "すべて選択", "Ctrl+A", !menu.empty, Command::Edit(Edit::SelectAll)).grouped(),
+            ];
+        }
         if self.sort_open() {
             let sort = self.settings.sort;
             let mut lines: Vec<Line> =
@@ -194,6 +336,12 @@ impl Colet {
     }
 
     pub fn run_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
+        // Done by the field itself, with the keys back in it.
+        if let Command::Edit(edit) = command {
+            self.close_menus(true, window, cx);
+            window.dispatch_action(edit.action(), cx);
+            return;
+        }
         if let Some(column) = self.menu().map(|menu| menu.column) {
             let Some(index) = self.state.index_of(column) else {
                 self.close_menus(true, window, cx);
@@ -225,22 +373,28 @@ impl Colet {
             Command::Direction(descending) => self.set_direction(descending, cx),
             Command::SearchFilter(name) => self.choose_filter(name, cx),
             Command::EditFilters => self.open_filters(window, cx),
+            Command::Edit(_) => unreachable!("a field's edit is done above"),
         }
         // What the line opened, a dialog, takes the keys; otherwise they go back to the column.
         let to_column = self.dialog.is_none();
         self.close_menus(to_column, window, cx);
     }
 
-    /// Closes whichever menu is open, handing the keys back to the column when `to_column`; the filters'
-    /// menu hands them back to the search field, when it had them.
+    /// Closes whichever menu is open, handing the keys back to the column when `to_column`; a text field's
+    /// menu hands them back to its field, and the filters' menu to the search field, when it had them.
     pub fn close_menus(&mut self, to_column: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let to_search = matches!(self.popup, Some(Popup::Filters { from_search: true }));
-        self.popup = None;
+        let popup = self.popup.take();
         self.cursor = None;
-        if to_column && to_search {
-            self.search.update(cx, |input, cx| input.focus(window, cx));
-        } else if to_column {
-            self.column_focus(self.state.active).focus(window, cx);
+        match popup {
+            Some(Popup::Text(menu)) => menu.input.update(cx, |input, cx| {
+                input.set_selection_focus(None, cx);
+                if to_column {
+                    input.focus(window, cx);
+                }
+            }),
+            Some(Popup::Filters { from_search: true }) if to_column => self.search.update(cx, |input, cx| input.focus(window, cx)),
+            _ if to_column => self.column_focus(self.state.active).focus(window, cx),
+            _ => {}
         }
         cx.notify();
     }
@@ -358,7 +512,9 @@ impl Colet {
                             .child(div().flex_1().child(line.text)),
                     )
                     .when(line.chosen, |d| d.child(svg().path("icons/check.svg").size(px(14.)).text_color(if lit { p.on_accent } else { p.accent })))
-                    .when_some(line.off, |d, why| d.child(div().text_color(p.text_muted).child(why)))
+                    .when_some(line.off.filter(|why| !why.is_empty()), |d, why| d.child(div().text_color(p.text_muted).child(why)))
+                    // Off with no word, its key fades with it.
+                    .when(line.off == Some(""), |d| d.when_some(line.hint, |d, key| d.child(div().opacity(0.45).text_color(p.text_faint).child(key))))
                     .when(line.off.is_none(), |d| {
                         d.cursor_pointer()
                             .hover(|d| d.bg(p.accent_fill).text_color(p.on_accent))

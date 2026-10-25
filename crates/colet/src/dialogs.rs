@@ -56,9 +56,14 @@ fn clock(unix_ms: u64) -> String {
 /// How much of a dialog's right margin is its rows' own: where its scrollbar lies, clear of them.
 const MARGIN: f32 = 14.;
 
-fn field(p: Palette, input: &Entity<gpui_kit::base::input::InputState>, window: &Window, cx: &App) -> Div {
+/// A field, ringed while it has the keys (`focused`), or its menu has them for it; `menu` opens that.
+fn field(
+    p: Palette,
+    input: &Entity<gpui_kit::base::input::InputState>,
+    focused: bool,
+    menu: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> Div {
     // The ring, two pixels in the focus color a pixel off the field, as the old app's outline.
-    let focused = input.read(cx).focus_handle(cx).is_focused(window);
     crate::view::frame(p, focused).child(
         div()
             .h(px(32.))
@@ -69,6 +74,8 @@ fn field(p: Palette, input: &Entity<gpui_kit::base::input::InputState>, window: 
             .border_1()
             .border_color(p.border_strong)
             .rounded(px(6.))
+            // Its padding too, round the text.
+            .capture_any_mouse_down(menu)
             .child(div().flex_1().min_w_0().child(Input::new(input))),
     )
 }
@@ -172,7 +179,7 @@ impl Colet {
                             .flex_col()
                             .gap_1()
                             .child(label(p, "名前"))
-                            .child(field(p, input, window, cx))
+                            .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
                             .when_some(problem, |d, problem| d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))),
                     );
                 let buttons = vec![
@@ -201,7 +208,7 @@ impl Colet {
                             .flex_col()
                             .gap_1()
                             .child(label(p, "名前"))
-                            .child(field(p, name, window, cx))
+                            .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
                             .child(div().text_size(px(12.)).text_color(p.text_faint).child("空欄なら検索文字列をそのまま表示します")),
                     )
                     .child(
@@ -210,7 +217,7 @@ impl Colet {
                             .flex_col()
                             .gap_1()
                             .child(label(p, "検索文字列"))
-                            .child(field(p, query, window, cx))
+                            .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
                             .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                                 d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
                             }),
@@ -258,7 +265,7 @@ impl Colet {
                             .flex_col()
                             .gap_1()
                             .child(label(p, "名前"))
-                            .child(field(p, name, window, cx))
+                            .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
                             .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                                 d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
                             }),
@@ -269,7 +276,7 @@ impl Colet {
                             .flex_col()
                             .gap_1()
                             .child(label(p, "検索文字列"))
-                            .child(field(p, query, window, cx))
+                            .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
                             .child(div().text_size(px(12.)).text_color(p.text_faint).child(
                                 "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
                             )),
@@ -569,24 +576,29 @@ impl Colet {
         cx.notify();
     }
 
+    /// The file menu, or a text field's, where it was opened; over a dialog too, for its fields'.
     pub fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = self.palette;
-        let at = self.menu()?.at;
+        let (at, id, label, width) = match self.popup.as_ref()? {
+            Popup::File(menu) => (menu.at, "menu", "ファイル操作", 240.),
+            Popup::Text(menu) => (menu.at, "text-menu", "編集", 200.),
+            _ => return None,
+        };
         let lines = self.render_lines(cx);
         Some(
             deferred(
                 anchored().position(at).snap_to_window_with_margin(px(8.)).child(
                     div()
-                        .id("menu")
+                        .id(id)
                         .role(Role::Menu)
-                        .aria_label("ファイル操作")
+                        .aria_label(label)
                         .track_focus(&self.menu_focus)
                         .key_context(crate::app::MENU)
                         .on_action(cx.listener(|this, _: &crate::app::MenuUp, _, cx| this.move_cursor(-1, cx)))
                         .on_action(cx.listener(|this, _: &crate::app::MenuDown, _, cx| this.move_cursor(1, cx)))
                         .on_action(cx.listener(|this, _: &crate::app::MenuConfirm, window, cx| this.confirm_cursor(window, cx)))
                         .on_action(cx.listener(|this, _: &crate::app::CloseMenu, window, cx| this.close_menus(true, window, cx)))
-                        .min_w(px(240.))
+                        .min_w(px(width))
                         .p_1()
                         .bg(p.raised)
                         .border_1()

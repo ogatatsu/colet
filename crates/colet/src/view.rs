@@ -1018,7 +1018,7 @@ impl Colet {
                     .test_support(),
             )
             .when_some(field, |d, input| {
-                let focused = input.read(cx).focus_handle(cx).is_focused(window);
+                let focused = self.has_keys(&input, window, cx);
                 let has_text = !input.read(cx).value().is_empty();
                 d.child(
                     div().flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(
@@ -1039,7 +1039,7 @@ impl Colet {
                                 .rounded(px(6.))
                                 // Accented while it has the keys, or narrows the rows from out of them.
                                 .child(icon("funnel", 13., if focused || filtering { p.accent } else { p.text_muted }))
-                                .child(div().flex_1().min_w_0().child(Input::new(&input)))
+                                .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(&input, cx)).child(Input::new(&input)))
                                 // ↓ goes into the rows it lets through; Esc clears it, then goes there too.
                                 .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
                                     cx.stop_propagation();
@@ -1174,7 +1174,7 @@ impl Colet {
                         .border_color(p.border_strong)
                         .rounded(px(6.))
                         .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
-                        .child(div().flex_1().min_w_0().child(Input::new(&self.search)))
+                        .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(&self.search, cx)).child(Input::new(&self.search)))
                         // ↓ goes into the results, as from a search field in Explorer; Esc clears the search.
                         .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {
                             cx.stop_propagation();
@@ -2111,7 +2111,7 @@ impl Colet {
 
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.search_focused = self.search.read(cx).focus_handle(cx).is_focused(window);
+        self.search_focused = self.has_keys(&self.search, window, cx);
         // A drag in home let go of anywhere but its list.
         if self.home_drag.is_some() && !cx.has_active_drag() {
             self.end_home_drag();
@@ -2140,6 +2140,7 @@ impl Render for Colet {
                     input.select_all(window, cx);
                 });
             }))
+            .on_action(cx.listener(|this, _: &OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| {
                 if this.dialog.is_none() {
                     this.open_filter_menu(true, window, cx);

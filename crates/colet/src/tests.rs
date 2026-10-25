@@ -2631,3 +2631,149 @@ fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAp
     ui.press(cx, "escape");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
 }
+
+impl Ui {
+    /// Right-clicks `input` near its right end, past its text and so past what is picked in it.
+    fn right_click_field(&self, cx: &mut TestAppContext, input: &Entity<gpui_kit::base::input::InputState>) {
+        use gpui_kit::{InputEvent as _, MouseButton, MouseDownEvent, MouseUpEvent};
+        let input = input.clone();
+        self.act(cx, |window, cx| {
+            let bounds = input.read(cx).input_bounds();
+            let position = point(bounds.right() - px(4.), bounds.center().y);
+            let modifiers = window.modifiers();
+            let down = MouseDownEvent { button: MouseButton::Right, position, modifiers, click_count: 1, first_mouse: false };
+            window.dispatch_event(down.to_platform_input(), cx);
+            window.dispatch_event(MouseUpEvent { button: MouseButton::Right, position, modifiers, click_count: 1 }.to_platform_input(), cx);
+            window.render_frame(cx);
+        });
+        settle(cx);
+    }
+
+    /// The lines of the open menu that are on.
+    fn lines_on(&self, cx: &mut TestAppContext) -> Vec<String> {
+        self.read(cx, |v| v.menu_lines().into_iter().filter(|l| l.off.is_none()).map(|l| l.text.to_string()).collect())
+    }
+
+    fn has_focus(&self, cx: &mut TestAppContext, input: &Entity<gpui_kit::base::input::InputState>) -> bool {
+        let input = input.clone();
+        self.act(cx, |window, cx| input.read(cx).focus_handle(cx).is_focused(window))
+    }
+}
+
+fn clipboard_text(cx: &mut TestAppContext) -> Option<String> {
+    cx.read_from_clipboard().and_then(|item| item.text())
+}
+
+#[gpui_kit::test]
+fn edits_the_search_field_from_its_menu(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(Fake::default().with_results(vec![])));
+    let search = ui.read(cx, |v| v.search.clone());
+    // Empty, and nothing on the clipboard: only undoing is on. Esc gives the keys back to the field.
+    ui.right_click_field(cx, &search);
+    assert!(ui.read(cx, |v| v.text_menu().is_some()));
+    assert_eq!(ui.lines_on(cx), ["元に戻す"]);
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.popup.is_none()));
+    assert!(ui.has_focus(cx, &search));
+    ui.input(cx, "cat");
+    ui.press(cx, "ctrl-a");
+    ui.right_click_field(cx, &search);
+    assert_eq!(ui.lines_on(cx), ["元に戻す", "切り取り", "コピー", "削除", "すべて選択"]);
+    // The field still counts as having the keys, its text picked, while its menu has them.
+    assert!(ui.read(cx, |v| v.search_focused));
+    assert_eq!(search.read_with(cx, |input, _| input.selected_range()), 0..3);
+    ui.click(cx, "text-cut");
+    assert_eq!(ui.field(cx), "");
+    assert_eq!(clipboard_text(cx).as_deref(), Some("cat"));
+    assert!(ui.has_focus(cx, &search));
+    // What is on the clipboard now pastes.
+    ui.right_click_field(cx, &search);
+    assert!(ui.lines_on(cx).contains(&"貼り付け".to_owned()));
+    ui.click(cx, "text-paste");
+    assert_eq!(ui.field(cx), "cat");
+    ui.right_click_field(cx, &search);
+    ui.click(cx, "text-undo");
+    assert_eq!(ui.field(cx), "");
+}
+
+#[gpui_kit::test]
+fn opens_a_fields_menu_from_the_keys_with_its_first_line_lit(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(Fake::default().with_results(vec![])));
+    let search = ui.read(cx, |v| v.search.clone());
+    ui.input(cx, "cat");
+    ui.press(cx, "shift-f10");
+    assert!(ui.read(cx, |v| v.text_menu().is_some()));
+    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
+    // Down passes over what is off, to picking all.
+    ui.press(cx, "down");
+    ui.press(cx, "enter");
+    assert!(ui.read(cx, |v| v.popup.is_none()));
+    assert!(ui.has_focus(cx, &search));
+    assert_eq!(search.read_with(cx, |input, _| input.selected_range()), 0..3);
+    // Deleting from it takes the text picked.
+    ui.press(cx, "menu");
+    assert!(ui.read(cx, |v| v.text_menu().is_some()));
+    ui.click(cx, "text-delete");
+    assert_eq!(ui.field(cx), "");
+}
+
+#[gpui_kit::test]
+fn copies_from_a_dialogs_field_with_its_menu_over_the_dialog(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "f2");
+    let input = ui.read(cx, |v| match &v.dialog {
+        Some(Dialog::Name { input, .. }) => input.clone(),
+        _ => panic!("no dialog"),
+    });
+    ui.press(cx, "ctrl-a");
+    ui.right_click_field(cx, &input);
+    assert!(ui.read(cx, |v| v.text_menu().is_some_and(|menu| menu.input == input)));
+    ui.click(cx, "text-copy");
+    assert_eq!(clipboard_text(cx).as_deref(), Some("a.txt"));
+    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    assert!(ui.has_focus(cx, &input));
+    // The menu key in the field opens it too, and Esc closes only the menu.
+    ui.press(cx, "shift-f10");
+    assert!(ui.read(cx, |v| v.text_menu().is_some()));
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.popup.is_none() && v.dialog.is_some()));
+    assert!(ui.has_focus(cx, &input));
+}
+
+#[gpui_kit::test]
+fn keeps_what_is_picked_in_a_field_and_its_caret_on_a_right_click_anywhere_in_it(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(Fake::default().with_results(vec![])));
+    let search = ui.read(cx, |v| v.search.clone());
+    ui.input(cx, "cat");
+    ui.press(cx, "home");
+    ui.press(cx, "shift-right");
+    ui.press(cx, "shift-right");
+    // Past the text picked, which a field of Windows' own leaves as it is.
+    ui.right_click_field(cx, &search);
+    assert!(ui.read(cx, |v| v.text_menu().is_some()));
+    assert_eq!(search.read_with(cx, |input, _| input.selected_range()), 0..2);
+    ui.click(cx, "text-copy");
+    assert_eq!(clipboard_text(cx).as_deref(), Some("ca"));
+    // With nothing picked, the caret stays where it was.
+    ui.press(cx, "right");
+    ui.press(cx, "left");
+    ui.right_click_field(cx, &search);
+    ui.press(cx, "escape");
+    assert_eq!(search.read_with(cx, |input, _| input.selected_range()), 1..1);
+}
+
+#[gpui_kit::test]
+fn takes_the_keys_into_a_field_right_clicked_from_elsewhere_with_what_it_had_picked(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let search = ui.read(cx, |v| v.search.clone());
+    ui.press(cx, "ctrl-f");
+    ui.input(cx, "cat");
+    ui.act(cx, |window, cx| search.update(cx, |input, cx| input.select_all(window, cx)));
+    ui.press(cx, "down");
+    assert!(!ui.has_focus(cx, &search));
+    ui.right_click_field(cx, &search);
+    assert!(ui.read(cx, |v| v.text_menu().is_some_and(|menu| menu.input == search)));
+    assert_eq!(search.read_with(cx, |input, _| input.selected_range()), 0..3);
+    ui.press(cx, "escape");
+    assert!(ui.has_focus(cx, &search));
+}

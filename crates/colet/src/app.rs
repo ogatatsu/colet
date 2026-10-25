@@ -63,6 +63,7 @@ actions!(
         ExtendUp,
         ExtendDown,
         OpenMenu,
+        OpenTextMenu,
         MenuUp,
         MenuDown,
         MenuConfirm,
@@ -81,6 +82,9 @@ pub const SORT: &str = "Sort";
 
 /// Where the dialogs take the keys.
 pub const DIALOG: &str = "Dialog";
+
+/// Where a text field takes the keys: GPUI Base's own context for its fields.
+pub const TEXT: &str = "Input";
 
 /// Where the column keys apply: home and the columns beside it.
 pub const COLUMNS: &str = "Columns";
@@ -113,6 +117,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-up", ExtendUp, Some(COLUMNS)),
         KeyBinding::new("shift-down", ExtendDown, Some(COLUMNS)),
         KeyBinding::new("shift-f10", OpenMenu, Some(COLUMNS)),
+        // In a text field, where the field's own keys are.
+        KeyBinding::new("shift-f10", OpenTextMenu, Some(TEXT)),
+        KeyBinding::new("menu", OpenTextMenu, Some(TEXT)),
         KeyBinding::new("f5", RefreshAll, None),
         KeyBinding::new("ctrl-d", SaveCurrent, None),
         KeyBinding::new("escape", CloseDialog, Some(DIALOG)),
