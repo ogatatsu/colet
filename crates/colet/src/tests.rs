@@ -501,6 +501,51 @@ fn walks_folders_by_keys_and_type_ahead_and_goes_back(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn shows_what_type_ahead_matched_until_a_second_after_its_last_key(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\alpha"), folder(r"D:\apple"), file(r"D:\beta.txt")])])
+    });
+    let ui = open(cx, fake);
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    let id = ui.read(cx, |v| v.state.columns[1].id);
+    let mark = |cx: &mut TestAppContext, path: &str, name: &str| ui.read(cx, |v| v.type_ahead_mark(id, path, name));
+    // Keys in quick succession: `settle` would let most of the second go by.
+    let key = |cx: &mut TestAppContext, text: &str| {
+        ui.act(cx, |window, cx| window.input(text, cx));
+        cx.run_until_parked();
+    };
+    let wait = |cx: &mut TestAppContext, ms: u64| {
+        cx.executor().advance_clock(Duration::from_millis(ms));
+        cx.run_until_parked();
+    };
+    key(cx, "a");
+    key(cx, "p");
+    assert_eq!(ui.selected(cx, 1), [r"D:\apple"]);
+    assert_eq!(mark(cx, r"D:\apple", "apple"), Some((2, false)));
+    // A key that finds nothing leaves the row and its match, marked missing; the keys after it add nothing.
+    key(cx, "z");
+    assert_eq!(ui.selected(cx, 1), [r"D:\apple"]);
+    assert_eq!(mark(cx, r"D:\apple", "apple"), Some((2, true)));
+    wait(cx, 600);
+    key(cx, "b");
+    assert_eq!(ui.selected(cx, 1), [r"D:\apple"]);
+    // A second after the miss, however many keys came since, it is over: the next key starts afresh.
+    wait(cx, 500);
+    assert_eq!(mark(cx, r"D:\apple", "apple"), None);
+    key(cx, "b");
+    assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
+    // Moved off the row some other way, the next key starts afresh too, not as "ba".
+    ui.act(cx, |window, cx| window.press("up", cx));
+    ui.act(cx, |window, cx| window.press("up", cx));
+    cx.run_until_parked();
+    key(cx, "a");
+    key(cx, "p");
+    assert_eq!(ui.selected(cx, 1), [r"D:\apple"]);
+}
+
+#[gpui_kit::test]
 fn leaves_the_search_for_a_place_picked_in_home_clearing_the_field(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],

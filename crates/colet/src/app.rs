@@ -232,11 +232,18 @@ pub struct FilterField {
     _changes: Subscription,
 }
 
-/// What type-ahead has typed so far, when the last key came, and in which column.
+/// What type-ahead has typed so far, in which column, and on which row: empty once a second has passed.
 struct TypeAhead {
     text: String,
-    at: Instant,
+    /// Bumped by each key that runs the text on or misses: the second after the last one ends it.
+    serial: u64,
     column: ColumnId,
+    /// The row the keys left focused: the text goes when they are moved off it some other way.
+    path: Option<String>,
+    /// How many chars of that row's name the text matched.
+    matched: usize,
+    /// The last key found nothing: the keys after it add nothing, nor hold off the end.
+    missed: bool,
 }
 
 pub struct Colet {
@@ -451,7 +458,7 @@ impl Colet {
             missed: Arc::default(),
             searched_at: None,
             search_refresh: false,
-            typed: TypeAhead { text: String::new(), at: Instant::now(), column: 0 },
+            typed: TypeAhead { text: String::new(), serial: 0, column: 0, path: None, matched: 0, missed: false },
             settings,
             settings_saver,
             settings_changes: 0,
@@ -1047,20 +1054,21 @@ impl Colet {
     }
 
     /// Typing a name's start picks the first row from the focused one on that starts with it; the typed
-    /// text runs on while keys come within a second of each other in one column.
+    /// text runs on while keys come within a second of each other in one column, on the row they picked.
     pub fn type_ahead(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         let index = self.state.active;
-        let column = self.state.columns[index].id;
-        let typed = &mut self.typed;
-        if typed.at.elapsed() > Duration::from_secs(1) || typed.column != column {
-            typed.text.clear();
-        }
-        typed.text.push_str(&text.to_lowercase());
-        typed.at = Instant::now();
-        typed.column = column;
         let c = &self.state.columns[index];
+        let typed = &mut self.typed;
+        if typed.text.is_empty() || typed.column != c.id || typed.path != c.focused {
+            typed.text.clear();
+            typed.matched = 0;
+            typed.missed = false;
+        } else if typed.missed {
+            return;
+        }
+        typed.column = c.id;
+        let typed = format!("{}{}", self.typed.text, text.to_lowercase());
         let start = c.focused.as_ref().and_then(|f| c.entries.iter().position(|e| &e.path == f)).unwrap_or(0);
-        let typed = &self.typed.text;
         // A run of one letter steps through the names starting with it.
         let repeat = typed.chars().count() > 1 && typed.chars().all(|ch| typed.starts_with(ch));
         let (needle, skip) = if repeat { (&typed[..typed.chars().next().unwrap().len_utf8()], 1) } else { (typed.as_str(), 0) };
@@ -1070,12 +1078,48 @@ impl Colet {
             .find(|&i| c.entries[i].name.to_lowercase().starts_with(needle));
         if let Some(i) = found {
             let path = c.entries[i].path.clone();
+            self.typed.matched = needle.chars().count();
+            self.typed.text = typed;
             if index == 0 {
                 self.state.columns[0].focused = Some(path.clone());
             }
             self.state.select(index, vec![path]);
             self.sync_search_field(window, cx);
+        } else if self.typed.text.is_empty() {
+            // Nothing matched yet, so nothing to show missing: the next key starts afresh.
+            return;
+        } else {
+            self.typed.missed = true;
         }
+        self.typed.path = self.state.columns.get(index).and_then(|c| c.focused.clone());
+        self.typed.serial += 1;
+        let serial = self.typed.serial;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            this.update(cx, |this, cx| {
+                if this.typed.serial == serial {
+                    this.typed.text.clear();
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// How many bytes of the name of `path` in `column` type-ahead has matched, and whether its last key
+    /// found nothing: none where it is not running, or the keys have moved off the row.
+    pub fn type_ahead_mark(&self, column: ColumnId, path: &str, name: &str) -> Option<(usize, bool)> {
+        let typed = &self.typed;
+        if typed.text.is_empty() || typed.column != column || typed.path.as_deref() != Some(path) {
+            return None;
+        }
+        let c = self.state.columns.iter().find(|c| c.id == column)?;
+        if c.focused.as_deref() != Some(path) {
+            return None;
+        }
+        Some((name.char_indices().nth(typed.matched).map_or(name.len(), |(i, _)| i), typed.missed))
     }
 
     // ---- Filters ----

@@ -31,6 +31,8 @@ pub struct Palette {
     /// `hover`, so it never reads as where the pointer is.
     pub highlight: Hsla,
     pub danger: Hsla,
+    /// `danger` on the selection's fill.
+    pub danger_on_fill: Hsla,
     /// Behind the count of problems on the history's button.
     pub danger_fill: Hsla,
     /// The ring around what has the keys.
@@ -67,6 +69,7 @@ impl Palette {
             selected_inactive: hsl(210., 10., 21.),
             highlight: hsl(184., 26., 22.),
             danger: hsl(0., 75., 70.),
+            danger_on_fill: hsl(0., 75., 70.),
             danger_fill: hsl(0., 55., 40.),
             focus: hsl(178., 50., 68.),
             focus_on_fill: hsl(178., 50., 68.),
@@ -96,6 +99,7 @@ impl Palette {
             selected_inactive: hsl(210., 14., 88.),
             highlight: hsl(184., 40., 89.),
             danger: hsl(0., 65., 45.),
+            danger_on_fill: hsl(0., 100., 82.),
             danger_fill: hsl(0., 65., 42.),
             focus: hsl(184., 60., 35.),
             focus_on_fill: hsl(184., 70., 78.),
