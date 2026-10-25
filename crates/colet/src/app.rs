@@ -117,6 +117,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-up", ExtendUp, Some(COLUMNS)),
         KeyBinding::new("shift-down", ExtendDown, Some(COLUMNS)),
         KeyBinding::new("shift-f10", OpenMenu, Some(COLUMNS)),
+        KeyBinding::new("menu", OpenMenu, Some(COLUMNS)),
         // In a text field, where the field's own keys are.
         KeyBinding::new("shift-f10", OpenTextMenu, Some(TEXT)),
         KeyBinding::new("menu", OpenTextMenu, Some(TEXT)),
@@ -128,6 +129,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", MenuConfirm, Some(MENU)),
         KeyBinding::new("space", MenuConfirm, Some(MENU)),
         KeyBinding::new("escape", CloseMenu, Some(MENU)),
+        // The keys that open a menu close it again, as Windows' own menus do.
+        KeyBinding::new("shift-f10", CloseMenu, Some(MENU)),
+        KeyBinding::new("menu", CloseMenu, Some(MENU)),
         KeyBinding::new("enter", OpenSort, Some(SORT)),
         KeyBinding::new("space", OpenSort, Some(SORT)),
         KeyBinding::new("down", OpenSort, Some(SORT)),

@@ -1818,6 +1818,29 @@ fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
+fn opens_the_file_menu_on_the_menu_key_and_closes_it_on_either_menu_key(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "menu");
+    assert!(ui.read(cx, |v| v.menu().is_some()));
+    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
+    ui.press(cx, "menu");
+    assert!(ui.read(cx, |v| v.menu().is_none()));
+    assert!(ui.columns_focused(cx));
+    ui.press(cx, "shift-f10");
+    ui.press(cx, "shift-f10");
+    assert!(ui.read(cx, |v| v.menu().is_none()));
+    assert!(ui.columns_focused(cx));
+    // A field's menu closes on it too.
+    ui.press(cx, "ctrl-f");
+    ui.input(cx, "a");
+    ui.press(cx, "menu");
+    assert!(ui.read(cx, |v| v.text_menu().is_some()));
+    ui.press(cx, "menu");
+    assert!(ui.read(cx, |v| v.popup.is_none()));
+    assert!(ui.search_field_focused(cx));
+}
+
+#[gpui_kit::test]
 fn opens_the_picked_files_together_from_enter_and_the_menu_passing_over_folders(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "D:")],
@@ -1904,6 +1927,9 @@ fn picks_the_sort_order_by_keys(cx: &mut TestAppContext) {
     ui.press(cx, "enter");
     assert_eq!(ui.read(cx, |v| v.cursor), Some(1));
     ui.press(cx, "escape");
+    assert!(!ui.read(cx, |v| v.sort_open()));
+    ui.press(cx, "enter");
+    ui.press(cx, "menu");
     assert!(!ui.read(cx, |v| v.sort_open()));
 }
 
@@ -2525,6 +2551,10 @@ fn chooses_a_filter_from_the_keys_and_hands_them_back_to_the_field(cx: &mut Test
     ui.press(cx, "escape");
     assert!(!ui.read(cx, |v| v.filter_open()));
     assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
+    ui.press(cx, "ctrl-shift-f");
+    ui.press(cx, "shift-f10");
+    assert!(!ui.read(cx, |v| v.filter_open()));
+    assert!(ui.search_field_focused(cx));
 }
 
 #[gpui_kit::test]
