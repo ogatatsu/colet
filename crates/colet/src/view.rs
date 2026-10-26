@@ -4,7 +4,7 @@ use std::{ops::Range, rc::Rc, time::Instant};
 
 use colet_core::{entry::Entry, paths::{folder_name, path_key}, time};
 use gpui_kit::base::input::{self, Input};
-use gpui_kit::component::{button::{Button, ButtonVariants}, Disableable, Sizable};
+use gpui_kit::component::{button::{Button, ButtonVariants}, status_bar::StatusBar, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -1231,14 +1231,12 @@ impl Colet {
         for (index, ..) in &crumbs[folded..] {
             self.stop(format!("crumb:{index}"), cx);
         }
-        let menu: Vec<(usize, String, String)> = crumbs[..folded].to_vec();
         let shown: Vec<(usize, String, String)> = crumbs[folded..].to_vec();
-        let menu_current = menu.iter().any(|(index, ..)| *index == active);
+        let menu_current = crumbs[..folded].iter().any(|(index, ..)| *index == active);
+        self.folded_crumbs = crumbs[..folded].to_vec();
         let crumb_menu_open = self.crumbs_open();
-        let crumb_cursor = self.cursor;
+        let crumb_menu = if crumb_menu_open { self.menu_element("crumb-menu", "上の階層", cx) } else { None };
         let fold_focus = self.stop("crumb-fold", cx);
-        // Where ↑↓ and Enter take the menu: the columns its lines go to.
-        let menu_targets: Vec<usize> = menu.iter().map(|(index, ..)| *index).collect();
         div()
             .h(px(36.))
             .flex_none()
@@ -1297,75 +1295,12 @@ impl Colet {
                                             if this.crumbs_open() {
                                                 this.close_crumb_menu(event.is_keyboard(), window, cx);
                                             } else {
-                                                this.open_crumb_menu(event.is_keyboard(), window, cx);
+                                                this.open_crumb_menu(window, cx);
                                             }
                                         })),
                                 )
-                                .when(crumb_menu_open, |d| {
-                                    d.child(
-                                        deferred(
-                                            div()
-                                                .id("crumb-menu")
-                                                .role(Role::Menu)
-                                                .aria_label("上の階層")
-                                                // ↑↓ move, Enter goes, Esc closes, as in the other menus.
-                                                .track_focus(&self.menu_focus)
-                                                .key_context(MENU)
-                                                .on_action({
-                                                    let count = menu_targets.len();
-                                                    cx.listener(move |this, _: &MenuUp, _, cx| this.move_crumb_cursor(-1, count, cx))
-                                                })
-                                                .on_action({
-                                                    let count = menu_targets.len();
-                                                    cx.listener(move |this, _: &MenuDown, _, cx| this.move_crumb_cursor(1, count, cx))
-                                                })
-                                                .on_action(cx.listener(move |this, _: &MenuConfirm, window, cx| {
-                                                    if let Some(&index) = this.cursor.and_then(|c| menu_targets.get(c)) {
-                                                        this.close_crumb_menu(false, window, cx);
-                                                        this.go_to(index, window, cx);
-                                                    }
-                                                }))
-                                                .on_action(cx.listener(|this, _: &CloseMenu, window, cx| this.close_crumb_menu(true, window, cx)))
-                                                .absolute()
-                                                .top(px(28.))
-                                                .left_0()
-                                                .min_w(px(160.))
-                                                .p_1()
-                                                .bg(p.raised)
-                                                .border_1()
-                                                .border_color(p.border_strong)
-                                                .rounded(px(8.))
-                                                .shadow_lg()
-                                                .occlude()
-                                                .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_crumb_menu(false, window, cx)))
-                                                .children(menu.iter().enumerate().map(|(line, (index, label, path))| {
-                                                    let index = *index;
-                                                    let lit = crumb_cursor == Some(line);
-                                                    div()
-                                                        .id(("crumb-item", index))
-                                                        .role(Role::MenuItem)
-                                                        .aria_label(label.clone())
-                                                        .h(px(28.))
-                                                        .px(px(10.))
-                                                        .flex()
-                                                        .items_center()
-                                                        .gap_2()
-                                                        .rounded(px(4.))
-                                                        .cursor_pointer()
-                                                        .text_color(if index == active { p.text } else { p.text_muted })
-                                                        .hover(|d| d.bg(p.accent_fill).text_color(p.on_accent))
-                                                        .when(lit, |d| d.bg(p.accent_fill).text_color(p.on_accent))
-                                                        .tip(path.clone())
-                                                        .child(icon(if index == 1 && results { "search" } else { "folder" }, 14., p.text_faint))
-                                                        .child(label.clone())
-                                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                                            this.close_crumb_menu(false, window, cx);
-                                                            this.go_to(index, window, cx);
-                                                        }))
-                                                })),
-                                        )
-                                        .with_priority(1),
-                                    )
+                                .when_some(crumb_menu, |d, menu| {
+                                    d.child(deferred(div().absolute().top(px(28.)).left_0().min_w(px(160.)).child(menu)).with_priority(1))
                                 }),
                         )
                     })
@@ -1649,20 +1584,15 @@ impl Colet {
             Engine::Connected(_) => (p.text_faint, Some(p.accent)),
             Engine::Failed(_) => (p.danger, Some(p.danger)),
         };
-        div()
+        StatusBar::new()
             .h(px(26.))
             .flex_none()
             .px_3()
-            .flex()
-            .items_center()
             .gap_4()
             .text_size(px(12.))
-            .text_color(p.text_muted)
-            .border_t_1()
-            .border_color(p.border)
             .child(div().id("place").role(Role::Status).aria_label(place.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis_start().child(place))
-            .child(div().flex_none().child(detail))
-            .child(
+            .right(div().flex_none().child(detail))
+            .right(
                 div()
                     .id("engine")
                     .flex_none()
@@ -1682,7 +1612,7 @@ impl Colet {
                     )
                     .child(div().truncate().child(name)),
             )
-            .child(history)
+            .right(history)
             .into_any_element()
     }
 

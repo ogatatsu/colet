@@ -513,7 +513,6 @@ impl Colet {
             windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point)
         };
         self.popup = Some(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
-        self.cursor = None;
         self.show_menu(window, cx);
     }
 

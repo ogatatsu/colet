@@ -12,6 +12,7 @@ use crate::{
     places::Dialog,
     search_filters::FilterEdit,
     state::saved_query,
+    view::TipExt,
 };
 
 /// What a line of a menu does.
@@ -140,10 +141,7 @@ impl Colet {
     /// Closes the file menu, giving back what it was opened on; any other menu stays.
     pub fn take_menu(&mut self) -> Option<Menu> {
         match self.popup.take() {
-            Some(Popup::File(menu)) => {
-                self.cursor = None;
-                Some(menu)
-            }
+            Some(Popup::File(menu)) => Some(menu),
             other => {
                 self.popup = other;
                 None
@@ -378,7 +376,6 @@ impl Colet {
     /// menu hands them back to its field, and the filters' menu to the search field, when it had them.
     pub fn close_menus(&mut self, to_column: bool, window: &mut Window, cx: &mut Context<Self>) {
         let popup = self.popup.take();
-        self.cursor = None;
         self.menu_view = None;
         match popup {
             Some(Popup::Text(menu)) => menu.input.update(cx, |input, cx| {
@@ -388,35 +385,52 @@ impl Colet {
                 }
             }),
             Some(Popup::Filters { from_search: true }) if to_column => self.search.update(cx, |input, cx| input.focus(window, cx)),
+            // Esc in the trail's menu goes back to the button that opened it.
+            Some(Popup::Crumbs) if to_column => self.stop("crumb-fold", cx).focus(window, cx),
             _ if to_column => self.column_focus(self.state.active).focus(window, cx),
             _ => {}
         }
         cx.notify();
     }
 
-    /// Opens the menu of the folders folded off the trail; from the keys, with its first line lit.
-    pub fn open_crumb_menu(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the menu of the folders folded off the trail, as it was last drawn.
+    pub fn open_crumb_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.popup = Some(Popup::Crumbs);
-        self.cursor = keyboard.then_some(0);
-        self.menu_focus.focus(window, cx);
-        cx.notify();
+        let results = self.state.pinned();
+        let active = self.state.active;
+        let colet = cx.weak_entity();
+        let items = self
+            .folded_crumbs
+            .iter()
+            .map(|(index, label, path)| {
+                let (index, label, path) = (*index, label.clone(), path.clone());
+                let colet = colet.clone();
+                PopupMenuItem::element(move |_, _| div().id(("crumb-item", index)).test_support().tip(path.clone()).child(label.clone()))
+                    .icon(crate::view::glyph(if index == 1 && results { "search" } else { "folder" }))
+                    .checked(index == active)
+                    .on_click(move |_, window, cx| {
+                        colet
+                            .update(cx, |this, cx| {
+                                this.close_crumb_menu(false, window, cx);
+                                this.go_to(index, window, cx);
+                            })
+                            .ok();
+                    })
+            })
+            .collect();
+        self.show_items(items, window, cx);
     }
 
     /// Closes the trail's menu; `to_button` hands the keys back to the button that opened it.
     pub fn close_crumb_menu(&mut self, to_button: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.crumbs_open() {
             self.popup = None;
-            self.cursor = None;
+            self.menu_view = None;
         }
         if to_button {
             self.stop("crumb-fold", cx).focus(window, cx);
         }
         cx.notify();
-    }
-
-    /// ↑ or ↓ in the trail's menu of `count` lines, round the ends.
-    pub fn move_crumb_cursor(&mut self, by: isize, count: usize, cx: &mut Context<Self>) {
-        self.step_cursor(by, &(0..count).collect::<Vec<_>>(), cx);
     }
 
     /// Opens the sort order's menu.
@@ -433,21 +447,6 @@ impl Colet {
         };
         self.popup = Some(Popup::Filters { from_search });
         self.show_menu(window, cx);
-    }
-
-    /// Moves the cursor `by` among the lines `on`, round the ends; with none lit yet, to the first or the last.
-    fn step_cursor(&mut self, by: isize, on: &[usize], cx: &mut Context<Self>) {
-        if on.is_empty() {
-            return;
-        }
-        let at = self.cursor.and_then(|c| on.iter().position(|&i| i == c));
-        let next = match at {
-            Some(at) => (at as isize + by).rem_euclid(on.len() as isize) as usize,
-            None if by > 0 => 0,
-            None => on.len() - 1,
-        };
-        self.cursor = Some(on[next]);
-        cx.notify();
     }
 
     /// Builds the open menu's lines into the component library's menu and gives it the keys: ↑↓ move,
@@ -485,6 +484,11 @@ impl Colet {
                 group.then(PopupMenuItem::separator).into_iter().chain([item])
             })
             .collect();
+        self.show_items(items, window, cx);
+    }
+
+    /// Opens a menu of `items`, giving it the keys; it closes as [`Colet::close_menus`] does.
+    pub fn show_items(&mut self, items: Vec<PopupMenuItem>, window: &mut Window, cx: &mut Context<Self>) {
         let menu = PopupMenu::build(window, cx, |menu, _, _| items.into_iter().fold(menu, |menu, item| menu.item(item)));
         // Closed by Esc or a press outside it; a line picked closes the menu itself first.
         let dismissed = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {

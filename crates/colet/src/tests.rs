@@ -2275,7 +2275,6 @@ fn dismisses_a_removed_columns_menu_before_another_frame(cx: &mut TestAppContext
         v.state.select(1, vec![r"D:\other".into()]);
         v.changed(cx);
         assert!(v.menu().is_none());
-        assert!(v.cursor.is_none());
     });
     assert!(cx.update_window(ui.window, |_, window, cx| ui.view.read(cx).columns_focus.is_focused(window)).unwrap());
 }
@@ -2306,7 +2305,7 @@ fn refuses_a_stale_menu_even_when_another_column_takes_its_index(cx: &mut TestAp
         v.show_shell_menu(window, cx);
     }));
     assert!(fake.menus.lock().unwrap().is_empty());
-    assert!(ui.read(cx, |v| v.menu().is_none() && v.cursor.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none() && v.menu_view.is_none()));
     assert!(ui.columns_focused(cx));
 }
 
@@ -2317,7 +2316,7 @@ fn showing_the_shell_menu_directly_returns_the_keys_to_its_column(cx: &mut TestA
     ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.show_shell_menu(window, cx)));
     settle(cx);
     assert_eq!(fake.menus.lock().unwrap().len(), 1);
-    assert!(ui.read(cx, |v| v.menu().is_none() && v.cursor.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none() && v.menu_view.is_none()));
     assert!(ui.columns_focused(cx));
 }
 
@@ -2406,17 +2405,16 @@ fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut
     }
     let fold = ui.read(cx, |v| v.stops["crumb-fold"].clone());
     ui.act(cx, |window, cx| fold.focus(window, cx));
-    // Enter opens it with its first line lit; ↓ moves on, Esc hands the keys back to the button.
+    // Enter opens it; ↓ lights a line, Esc hands the keys back to the button.
     ui.press(cx, "enter");
     assert!(ui.read(cx, |v| v.crumbs_open()));
-    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
     ui.press(cx, "down");
-    assert_eq!(ui.read(cx, |v| v.cursor), Some(1));
     ui.press(cx, "escape");
     assert!(!ui.read(cx, |v| v.crumbs_open()));
     assert!(ui.act(cx, |window, _| fold.is_focused(window)));
-    // Space opens it too; the second line lit, Enter goes to its column, the keys with it.
+    // Space opens it too; ↓ twice lights the second line, and Enter goes to its column, the keys with it.
     ui.press(cx, "space");
+    ui.press(cx, "down");
     ui.press(cx, "down");
     // The trail starts at the drive: its second line is the first folder.
     let target = ui.read(cx, |v| v.state.columns.iter().position(|c| c.path == chain[0]).unwrap());

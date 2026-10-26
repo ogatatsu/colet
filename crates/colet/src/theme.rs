@@ -174,6 +174,8 @@ impl Palette {
             (&mut colors.scrollbar_thumb, self.scrollbar),
             (&mut colors.scrollbar_thumb_hover, self.text_muted),
             (&mut colors.overlay, self.shade),
+            (&mut colors.status_bar, self.bg),
+            (&mut colors.status_bar_border, self.border),
         ] {
             *role = Some(hex(color).into());
         }

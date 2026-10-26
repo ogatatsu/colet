@@ -68,9 +68,6 @@ actions!(
         ExtendDown,
         OpenMenu,
         OpenTextMenu,
-        MenuUp,
-        MenuDown,
-        MenuConfirm,
         CloseMenu,
         OpenSort,
         FocusFilter,
@@ -124,10 +121,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("menu", OpenTextMenu, Some(TEXT)),
         KeyBinding::new("f5", RefreshAll, None),
         KeyBinding::new("ctrl-d", SaveCurrent, None),
-        KeyBinding::new("up", MenuUp, Some(MENU)),
-        KeyBinding::new("down", MenuDown, Some(MENU)),
-        KeyBinding::new("enter", MenuConfirm, Some(MENU)),
-        KeyBinding::new("space", MenuConfirm, Some(MENU)),
         KeyBinding::new("escape", CloseMenu, Some(MENU)),
         // The keys that open a menu close it again, as Windows' own menus do.
         KeyBinding::new("shift-f10", CloseMenu, Some(MENU)),
@@ -317,14 +310,12 @@ pub struct Colet {
     /// The keys are in the column worked in: its focused row is ringed.
     pub keys_in_column: bool,
     pub popup: Option<Popup>,
-    /// Takes the keys while the trail's menu is open.
-    pub menu_focus: FocusHandle,
     /// The open menu's lines, drawn and picked by the component library, and the closing it tells of.
     pub menu_view: Option<(Entity<gpui_kit::component::menu::PopupMenu>, FocusHandle, Subscription)>,
     /// The sort order's button, a stop for Tab.
     pub sort_focus: FocusHandle,
-    /// The line of the trail's menu the keys are on; none when the mouse opened it.
-    pub cursor: Option<usize>,
+    /// The crumbs folded off the trail as it was last drawn, for its menu: each column's index, name and path.
+    pub folded_crumbs: Vec<(usize, String, String)>,
     /// Where each crumb was drawn, by its column, and the row they stand in: the bar under them follows
     /// the columns on screen.
     pub crumb_bounds: std::rc::Rc<std::cell::RefCell<HashMap<usize, Bounds<Pixels>>>>,
@@ -471,9 +462,8 @@ impl Colet {
             stops: HashMap::new(),
             keys_in_column: false,
             popup: None,
-            menu_focus: cx.focus_handle(),
             sort_focus: cx.focus_handle().tab_stop(true),
-            cursor: None,
+            folded_crumbs: Vec::new(),
             menu_view: None,
             focused_row: Default::default(),
             crumb_bounds: Default::default(),
