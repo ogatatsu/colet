@@ -389,6 +389,24 @@ impl Ui {
         let view = self.view.clone();
         self.act(cx, |window, cx| view.read(cx).columns_focus.is_focused(window))
     }
+
+    /// Whether `id`, a button that keeps its own focus, has the keys.
+    fn has_keys(&self, cx: &mut TestAppContext, id: impl Into<ElementId>) -> bool {
+        let id = id.into();
+        self.act(cx, |window, _| window.try_find(id).and_then(|e| e.focused()) == Some(true))
+    }
+
+    /// Presses Tab until `id` has the keys, as a user would reach it.
+    fn tab_to(&self, cx: &mut TestAppContext, id: impl Into<ElementId>) {
+        let id = id.into();
+        for _ in 0..60 {
+            if self.has_keys(cx, id.clone()) {
+                return;
+            }
+            self.press(cx, "tab");
+        }
+        panic!("Tab never reached {id:?}");
+    }
 }
 
 fn row(path: &str) -> ElementId {
@@ -1519,12 +1537,14 @@ fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &m
     let (_, ui) = in_work(cx);
     // Three picked: one name cannot be changed for them all.
     ui.press(cx, "ctrl-a");
-    let [copy_path, new_folder] = ui.read(cx, |v| [v.stops["copy-path"].clone(), v.stops["new-folder"].clone()]);
-    ui.act(cx, |window, cx| copy_path.focus(window, cx));
-    ui.press(cx, "tab");
-    assert!(ui.act(cx, |window, _| new_folder.is_focused(window)), "Tab goes past rename to the next");
+    // Back from the columns, the way that keeps away from home's pane.
     ui.press(cx, "shift-tab");
-    assert!(ui.act(cx, |window, _| copy_path.is_focused(window)), "and Shift+Tab back past it");
+    ui.press(cx, "shift-tab");
+    assert!(ui.has_keys(cx, "new-folder"));
+    ui.press(cx, "shift-tab");
+    assert!(ui.has_keys(cx, "copy-path"), "Shift+Tab goes past rename to the one before");
+    ui.press(cx, "tab");
+    assert!(ui.has_keys(cx, "new-folder"), "and Tab back past it");
     // Pressed by the mouse, it does nothing and takes nothing.
     let view = ui.view.clone();
     ui.act(cx, |window, cx| view.read(cx).columns_focus.clone().focus(window, cx));
@@ -1534,17 +1554,14 @@ fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &m
 }
 
 #[gpui_kit::test]
-fn the_keys_on_a_button_that_goes_off_go_on_to_the_next(cx: &mut TestAppContext) {
+fn moves_a_filter_up_from_the_keys(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(with_filters(Fake::default())));
     ui.click(cx, "search-filter");
     ui.click(cx, "edit-filters");
-    let up = ui.read(cx, |v| v.stops["filter-up:動画"].clone());
-    ui.act(cx, |window, cx| up.focus(window, cx));
-    // At the top it can go no higher: the keys go on to its own way down.
+    // The second's way up; the first's is off, and Tab passes it by.
+    ui.tab_to(cx, ("filter-up", 1usize));
     ui.press(cx, "enter");
     assert_eq!(ui.read(cx, |v| v.settings.filters.iter().map(|f| f.name.clone()).collect::<Vec<_>>()), ["動画", "画像"]);
-    let down = ui.read(cx, |v| v.stops["filter-down:動画"].clone());
-    assert!(ui.act(cx, |window, _| down.is_focused(window)));
 }
 
 #[gpui_kit::test]

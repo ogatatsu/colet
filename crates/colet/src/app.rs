@@ -321,7 +321,6 @@ pub struct Colet {
     pub home_rows: HomeRows,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
     pub(crate) stops: HashMap<String, FocusHandle>,
-    pub history_focus: FocusHandle,
     /// The keys are in the column worked in: its focused row is ringed.
     pub keys_in_column: bool,
     pub popup: Option<Popup>,
@@ -475,7 +474,6 @@ impl Colet {
             home_scrolling: false,
             home_rows: Default::default(),
             stops: HashMap::new(),
-            history_focus: cx.focus_handle().tab_stop(true),
             keys_in_column: false,
             popup: None,
             menu_focus: cx.focus_handle(),
@@ -531,16 +529,6 @@ impl Colet {
     /// The focus a button keeps, a stop for Tab; Enter or Space presses it.
     pub fn stop(&mut self, id: impl Into<String>, cx: &mut Context<Self>) -> FocusHandle {
         self.stops.entry(id.into()).or_insert_with(|| cx.focus_handle().tab_stop(true)).clone()
-    }
-
-    /// The focus of a button that may be off: while off, Tab passes it by, and keys on it as it went off go
-    /// on to the next stop, as Tab would take them.
-    pub fn stop_while(&mut self, id: impl Into<String>, on: bool, window: &mut Window, cx: &mut Context<Self>) -> FocusHandle {
-        let focus = self.stop(id, cx).tab_stop(on);
-        if !on && focus.is_focused(window) {
-            window.defer(cx, |window, cx| window.focus_next(cx));
-        }
-        focus
     }
 
     /// Tab moves the keys between home's pane and the columns: the column worked in follows them. Into the

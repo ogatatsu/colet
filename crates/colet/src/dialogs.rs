@@ -4,6 +4,7 @@ use colet_core::{
     paths::{ancestors, folder_name},
 };
 use gpui_kit::base::input::Input;
+use gpui_kit::component::{button::{Button, ButtonVariants}, spinner::Spinner, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -84,6 +85,12 @@ fn label(p: Palette, text: &'static str) -> Div {
     div().text_size(px(12.)).text_color(p.text_muted).child(text)
 }
 
+/// A dialog's button: the primary one is what Enter does.
+fn push(id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, enabled: bool) -> Button {
+    Button::new(id).label(text).when(primary, |b| b.primary()).disabled(!enabled)
+}
+
+/// A button drawn as [`push`]'s, for one the keys are sent to, which a [`Button`] keeps to itself.
 fn button(p: Palette, id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, enabled: bool) -> Stateful<Div> {
     let text = text.into();
     div()
@@ -103,30 +110,20 @@ fn button(p: Palette, id: impl Into<ElementId>, text: impl Into<SharedString>, p
         .child(text)
 }
 
-/// A small button with a glyph, a stop for Tab, for each filter in the list.
-fn tool(p: Palette, id: ElementId, focus: &FocusHandle, glyph: &'static str, label: String, enabled: bool) -> Stateful<Div> {
-    crate::view::ring(div().id(id).track_focus(focus), p)
-        .role(Role::Button)
-        .aria_label(label.clone())
-        .size(px(26.))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).text_color(p.text_muted))
-        .when(enabled, |d| d.cursor_pointer().hover(|d| d.bg(p.raised_hover)).tip(p, label))
-        // Off, a press leaves the keys where they are, as Tab passes it by.
-        .when(!enabled, |d| crate::view::keep_focus(d.opacity(0.35)))
+/// A small button with a glyph, for each filter in the list.
+fn tool(id: ElementId, glyph: &'static str, label: String, enabled: bool) -> Button {
+    Button::new(id)
+        .ghost()
+        .small()
+        .icon(crate::view::glyph(glyph))
+        .accessibility_label(label.clone())
+        .tooltip(label)
+        .disabled(!enabled)
 }
 
-/// A choice among the filters, a stop for Tab, checked as a radio button is.
-fn filter_choice(p: Palette, id: ElementId, focus: &FocusHandle, text: &str, chosen: bool) -> Stateful<Div> {
-    button(p, id, text.to_owned(), chosen, true)
-        .track_focus(focus)
-        .role(Role::RadioButton)
-        .aria_label(text.to_owned())
-        .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
+/// A choice among the filters, checked as a radio button is.
+fn filter_choice(id: ElementId, text: &str, chosen: bool) -> Button {
+    push(id, text.to_owned(), chosen, true).role(Role::RadioButton).toggled(chosen)
 }
 
 impl Colet {
@@ -147,26 +144,9 @@ impl Colet {
         // Each theme a stop for Tab, kept across frames.
         let themes: Vec<(Theme, FocusHandle)> =
             Theme::ALL.into_iter().map(|theme| (theme, self.stop(format!("theme:{theme:?}"), cx))).collect();
-        // The saved search's choice of filter, none first, and each filter's buttons in the list: their
-        // stops kept by the filter's name, so the keys move with it.
-        let names: Vec<String> = self.settings.filters.iter().map(|f| f.name.clone()).collect();
-        let choices: Vec<(Option<String>, FocusHandle)> = std::iter::once(None)
-            .chain(names.iter().cloned().map(Some))
-            .map(|choice| {
-                let focus = self.stop(format!("edit-search-filter:{}", choice.as_deref().unwrap_or("")), cx);
-                (choice, focus)
-            })
-            .collect();
-        // The first goes no higher and the last no lower: those buttons are off.
-        let last = names.len().saturating_sub(1);
-        let tools: Vec<[FocusHandle; 4]> = names
-            .iter()
-            .enumerate()
-            .map(|(i, name)| {
-                [("up", i > 0), ("down", i < last), ("edit", true), ("delete", true)]
-                    .map(|(what, on)| self.stop_while(format!("filter-{what}:{name}"), on, window, cx))
-            })
-            .collect();
+        // The saved search's choice of filter, none first.
+        let choices: Vec<Option<String>> =
+            std::iter::once(None).chain(self.settings.filters.iter().map(|f| Some(f.name.clone()))).collect();
         let (content, buttons) = match self.dialog.as_ref()? {
             Dialog::Name { request: Request { kind, paths, destination, .. }, input, checking, .. } => {
                 let checking = checking.is_some();
@@ -192,14 +172,12 @@ impl Colet {
                             .when_some(problem, |d, problem| d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))),
                     );
                 let buttons = vec![
-                    button(p, "cancel", "キャンセル", false, true)
+                    push("cancel", "キャンセル", false, true)
                         .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .test_support()
                         .into_any_element(),
                     // While the folder is asked whether the name is free, the press is in and waits.
-                    button(p, "submit-name", if checking { "確認中…" } else { submit }, true, !empty && problem.is_none() && !checking)
+                    push("submit-name", if checking { "確認中…" } else { submit }, true, !empty && problem.is_none() && !checking)
                         .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx)))
-                        .test_support()
                         .into_any_element(),
                 ];
                 (content, buttons)
@@ -240,24 +218,19 @@ impl Colet {
                                 .gap(px(2.))
                                 .role(Role::RadioGroup)
                                 .aria_label("検索フィルター")
-                                .children(choices.into_iter().enumerate().map(|(i, (choice, focus))| {
+                                .children(choices.into_iter().enumerate().map(|(i, choice)| {
                                     let text = choice.clone().unwrap_or_else(|| "なし".into());
-                                    crate::view::frame(p, crate::view::keyed(&focus, window)).child(
-                                        filter_choice(p, ("edit-search-filter", i).into(), &focus, &text, choice == chosen)
-                                            .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(choice.clone(), cx)))
-                                            .test_support(),
-                                    )
+                                    filter_choice(("edit-search-filter", i).into(), &text, choice == chosen)
+                                        .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(choice.clone(), cx)))
                                 })),
                         ),
                     );
                 let buttons = vec![
-                    button(p, "cancel", "キャンセル", false, true)
+                    push("cancel", "キャンセル", false, true)
                         .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .test_support()
                         .into_any_element(),
-                    button(p, "save-search", "保存", true, problem.is_none())
+                    push("save-search", "保存", true, problem.is_none())
                         .on_click(cx.listener(|this, _, window, cx| this.submit_edit(window, cx)))
-                        .test_support()
                         .into_any_element(),
                 ];
                 (content, buttons)
@@ -291,13 +264,11 @@ impl Colet {
                             )),
                     );
                 let buttons = vec![
-                    button(p, "cancel", "キャンセル", false, true)
+                    push("cancel", "キャンセル", false, true)
                         .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
-                        .test_support()
                         .into_any_element(),
-                    button(p, "save-filter", "保存", true, problem.is_none())
+                    push("save-filter", "保存", true, problem.is_none())
                         .on_click(cx.listener(|this, _, window, cx| this.submit_filter(window, cx)))
-                        .test_support()
                         .into_any_element(),
                 ];
                 (content, buttons)
@@ -316,13 +287,11 @@ impl Colet {
                         )))
                     });
                 let buttons = vec![
-                    button(p, "cancel", "キャンセル", false, true)
+                    push("cancel", "キャンセル", false, true)
                         .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
-                        .test_support()
                         .into_any_element(),
-                    button(p, "delete-filter", "削除", true, true)
+                    push("delete-filter", "削除", true, true)
                         .on_click(cx.listener(|this, _, window, cx| this.delete_filter(window, cx)))
-                        .test_support()
                         .into_any_element(),
                 ];
                 (content, buttons)
@@ -332,9 +301,8 @@ impl Colet {
                 let last = filters.len().saturating_sub(1);
                 let rows: Vec<AnyElement> = filters
                     .into_iter()
-                    .zip(tools)
                     .enumerate()
-                    .map(|(i, (f, [up, down, edit, delete]))| {
+                    .map(|(i, f)| {
                         let name = f.name.clone();
                         let (up_name, down_name, edit_name) = (name.clone(), name.clone(), name.clone());
                         div()
@@ -354,24 +322,20 @@ impl Colet {
                                     .child(div().truncate().text_size(px(12.)).text_color(p.text_muted).font_family("Consolas").child(f.query.clone())),
                             )
                             .child(
-                                tool(p, ("filter-up", i).into(), &up, "arrow-up", format!("「{}」を上へ", f.name), i > 0)
-                                    .when(i > 0, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&up_name, -1, cx))))
-                                    .test_support(),
+                                tool(("filter-up", i).into(), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
+                                    .when(i > 0, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&up_name, -1, cx)))),
                             )
                             .child(
-                                tool(p, ("filter-down", i).into(), &down, "arrow-down", format!("「{}」を下へ", f.name), i < last)
-                                    .when(i < last, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&down_name, 1, cx))))
-                                    .test_support(),
+                                tool(("filter-down", i).into(), "arrow-down", format!("「{}」を下へ", f.name), i < last)
+                                    .when(i < last, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&down_name, 1, cx)))),
                             )
                             .child(
-                                tool(p, ("filter-edit", i).into(), &edit, "pencil-line", format!("「{}」を編集", f.name), true)
-                                    .on_click(cx.listener(move |this, _, window, cx| this.edit_filter(Some(edit_name.clone()), window, cx)))
-                                    .test_support(),
+                                tool(("filter-edit", i).into(), "pencil-line", format!("「{}」を編集", f.name), true)
+                                    .on_click(cx.listener(move |this, _, window, cx| this.edit_filter(Some(edit_name.clone()), window, cx))),
                             )
                             .child(
-                                tool(p, ("filter-delete", i).into(), &delete, "trash", format!("「{}」を削除", f.name), true)
-                                    .on_click(cx.listener(move |this, _, window, cx| this.ask_delete_filter(name.clone(), window, cx)))
-                                    .test_support(),
+                                tool(("filter-delete", i).into(), "trash", format!("「{}」を削除", f.name), true)
+                                    .on_click(cx.listener(move |this, _, window, cx| this.ask_delete_filter(name.clone(), window, cx))),
                             )
                             .into_any_element()
                     })
@@ -389,13 +353,11 @@ impl Colet {
                         div().flex().flex_col().children(rows).into_any_element()
                     });
                 let buttons = vec![
-                    button(p, "add-filter", "追加", false, true)
+                    push("add-filter", "追加", false, true)
                         .on_click(cx.listener(|this, _, window, cx| this.edit_filter(None, window, cx)))
-                        .test_support()
                         .into_any_element(),
-                    button(p, "close-filters", "閉じる", true, true)
+                    push("close-filters", "閉じる", true, true)
                         .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .test_support()
                         .into_any_element(),
                 ];
                 (content, buttons)
@@ -444,13 +406,12 @@ impl Colet {
                                         .text_color(p.text)
                                         .role(Role::Status)
                                         .aria_label(said.clone())
-                                        .tip(p, said)
+                                        .tip(said)
                                         .child(format!("接続先：{engine}")),
                                 )
                                 .child(
-                                    button(p, "reconnect", "再接続", false, true)
-                                        .on_click(cx.listener(|this, _, _, cx| this.reconnect(cx)))
-                                        .test_support(),
+                                    push("reconnect", "再接続", false, true)
+                                        .on_click(cx.listener(|this, _, _, cx| this.reconnect(cx))),
                                 ),
                         ),
                     )
@@ -466,9 +427,8 @@ impl Colet {
                             .child(div().text_color(p.text_muted).child(what))
                     })));
                 let buttons = vec![
-                    button(p, "close-preferences", "閉じる", true, true)
+                    push("close-preferences", "閉じる", true, true)
                         .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .test_support()
                         .into_any_element(),
                 ];
                 (content, buttons)
@@ -482,9 +442,8 @@ impl Colet {
                     .child(format!("{} 項目を開きますか？", paths.len()))
                     .child(div().text_size(px(12.)).text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"));
                 let buttons = vec![
-                    button(p, "cancel", "キャンセル", false, true)
+                    push("cancel", "キャンセル", false, true)
                         .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .test_support()
                         .into_any_element(),
                     // It takes the keys as the dialog opens, so Enter goes on as it was pressed to open them.
                     crate::view::frame(p, crate::view::keyed(&confirm_open, window))
@@ -625,39 +584,20 @@ impl Colet {
     }
 
     /// The file actions beside the trail, and the room they take.
-    pub fn render_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) -> (f32, AnyElement) {
+    pub fn render_actions(&mut self, cx: &mut Context<Self>) -> (f32, AnyElement) {
         let p = self.palette;
         let reasons = self.reasons();
-        let offs = [
-            ("copy", reasons.copy),
-            ("cut", reasons.cut),
-            ("paste", reasons.paste),
-            ("copy-path", reasons.copy_path),
-            ("rename", reasons.rename),
-            ("new-folder", reasons.paste),
-            ("recycle", reasons.delete),
-        ];
-        let stops: std::collections::HashMap<&'static str, FocusHandle> =
-            offs.into_iter().map(|(id, off)| (id, self.stop_while(id, off.is_none(), window, cx))).collect();
         let action = |id: &'static str, glyph: &'static str, label: &'static str, key: &'static str, off: Option<&'static str>| {
             let tip = match off {
                 Some(why) => format!("{label}（{why}）"),
                 None => format!("{label}（{key}）"),
             };
-            crate::view::ring(div().id(id).track_focus(&stops[id]), p)
-                .role(Role::Button)
-                .aria_label(label)
-                .size(px(28.))
-                .flex()
-                .flex_none()
-                .items_center()
-                .justify_center()
-                .rounded(px(6.))
-                .child(svg().path(format!("icons/{glyph}.svg")).size(px(15.)).text_color(p.text_muted))
-                .map(|d| if off.is_some() { d.steady_tip(p, tip) } else { d.tip(p, tip) })
-                .when(off.is_none(), |d| d.cursor_pointer().hover(|d| d.bg(p.hover)))
-                // Off, a press leaves the keys where they are, as Tab passes it by.
-                .when(off.is_some(), |d| crate::view::keep_focus(d.opacity(0.35)))
+            Button::new(id)
+                .ghost()
+                .icon(crate::view::glyph(glyph))
+                .accessibility_label(label)
+                .tooltip(tip)
+                .disabled(off.is_some())
         };
         let row = div()
             .flex()
@@ -665,15 +605,15 @@ impl Colet {
             .items_center()
             .gap(px(2.))
             // Those done on the spot leave the keys where they were; the ones asking in a dialog take them.
-            .child(crate::view::keep_focus(action("copy", "copy", "コピー", "Ctrl+C", reasons.copy)).on_click(cx.listener(|this, _, _, cx| this.copy(false, cx))).test_support())
-            .child(crate::view::keep_focus(action("cut", "scissors", "切り取り", "Ctrl+X", reasons.cut)).on_click(cx.listener(|this, _, _, cx| this.copy(true, cx))).test_support())
-            .child(crate::view::keep_focus(action("paste", "clipboard-paste", "貼り付け", "Ctrl+V", reasons.paste)).on_click(cx.listener(|this, _, _, cx| this.paste(cx))).test_support())
-            .child(crate::view::keep_focus(action("copy-path", "link", "パスをコピー", "Ctrl+Shift+C", reasons.copy_path)).on_click(cx.listener(|this, _, _, cx| this.copy_paths(cx))).test_support())
+            .child(crate::view::keep_focus(action("copy", "copy", "コピー", "Ctrl+C", reasons.copy)).on_click(cx.listener(|this, _, _, cx| this.copy(false, cx))))
+            .child(crate::view::keep_focus(action("cut", "scissors", "切り取り", "Ctrl+X", reasons.cut)).on_click(cx.listener(|this, _, _, cx| this.copy(true, cx))))
+            .child(crate::view::keep_focus(action("paste", "clipboard-paste", "貼り付け", "Ctrl+V", reasons.paste)).on_click(cx.listener(|this, _, _, cx| this.paste(cx))))
+            .child(crate::view::keep_focus(action("copy-path", "link", "パスをコピー", "Ctrl+Shift+C", reasons.copy_path)).on_click(cx.listener(|this, _, _, cx| this.copy_paths(cx))))
             .child(div().mx(px(6.)).w(px(1.)).h(px(16.)).bg(p.border))
-            .child(action("rename", "pencil-line", "名前を変更", "F2", reasons.rename).on_click(cx.listener(|this, _, window, cx| this.ask_rename(window, cx))).test_support())
-            .child(action("new-folder", "folder-plus", "新規フォルダー", "Ctrl+Shift+N", reasons.paste).on_click(cx.listener(|this, _, window, cx| this.ask_new_folder(window, cx))).test_support())
+            .child(action("rename", "pencil-line", "名前を変更", "F2", reasons.rename).on_click(cx.listener(|this, _, window, cx| this.ask_rename(window, cx))))
+            .child(action("new-folder", "folder-plus", "新規フォルダー", "Ctrl+Shift+N", reasons.paste).on_click(cx.listener(|this, _, window, cx| this.ask_new_folder(window, cx))))
             // With Shift held it deletes outright, as Explorer's Delete does.
-            .child(crate::view::keep_focus(action("recycle", "trash", "ごみ箱へ移動", "Delete／Shift+クリックで完全に削除", reasons.delete)).on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))).test_support());
+            .child(crate::view::keep_focus(action("recycle", "trash", "ごみ箱へ移動", "Delete／Shift+クリックで完全に削除", reasons.delete)).on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))));
         (7. * 30. + 13. + 16., row.into_any_element())
     }
 
@@ -683,24 +623,12 @@ impl Colet {
         let p = self.palette;
         let unseen = self.unseen;
         let label = if unseen > 0 { format!("操作履歴（問題のある操作 {unseen} 件）") } else { "操作履歴".to_owned() };
-        let focus = self.history_focus.clone();
-        crate::view::ring(div().id("history-button").track_focus(&focus), p)
-            .role(Role::Button)
-            .aria_label(label.clone())
-            .h(px(22.))
-            .px_1()
-            .flex()
-            .items_center()
-            .gap_1()
-            .rounded(px(4.))
-            .cursor_pointer()
-            .hover(|d| d.bg(p.hover))
-            .tip(p, label.clone())
-            .child(if self.running.is_some() {
-                crate::view::spinner("history-running", 14., p.text_muted).into_any_element()
-            } else {
-                svg().path("icons/clock.svg").size(px(14.)).text_color(p.text_muted).into_any_element()
-            })
+        Button::new("history-button")
+            .ghost()
+            .xsmall()
+            .map(|b| if self.running.is_some() { b.icon(Spinner::new()) } else { b.icon(crate::view::glyph("clock")) })
+            .accessibility_label(label.clone())
+            .tooltip(label)
             .when(unseen > 0, |d| {
                 d.child(
                     div()
@@ -723,7 +651,6 @@ impl Colet {
                 let open = !this.history_open;
                 this.show_history(open, None, window, cx);
             }))
-            .test_support()
             .into_any_element()
     }
 
@@ -733,9 +660,9 @@ impl Colet {
             return None;
         }
         let p = self.palette;
-        // Each row, each item that opens and the clear button a stop for Tab; the mouse leaves the keys
+        // Each row and each item that opens a stop for Tab; the mouse leaves the keys
         // where they are, as before.
-        let mut keys = vec!["clear-history".to_owned()];
+        let mut keys = Vec::new();
         for entry in &self.history {
             keys.push(format!("history-entry:{}", entry.id));
             if self.expanded.contains(&entry.id) {
@@ -865,25 +792,14 @@ impl Colet {
                             .border_color(p.border)
                             .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child("操作履歴"))
                             .child(
-                                crate::view::keep_focus(crate::view::ring(div().id("clear-history").track_focus(&stops["clear-history"]), p))
-                                    .role(Role::Button)
-                                    .aria_label("履歴を消去")
-                                    .px_2()
-                                    .h(px(26.))
-                                    .flex()
-                                    .items_center()
-                                    .rounded(px(4.))
-                                    .text_size(px(12.))
-                                    .when(clearable, |d| d.cursor_pointer().hover(|d| d.bg(p.raised_hover)))
-                                    .when(!clearable, |d| d.opacity(0.35))
-                                    .child("履歴を消去")
-                                    .on_click(cx.listener(|this, _, _, cx| {
+                                crate::view::keep_focus(push("clear-history", "履歴を消去", false, clearable).ghost().small()).on_click(
+                                    cx.listener(|this, _, _, cx| {
                                         this.history.retain(|e| e.status == Status::Running);
                                         // The rows' stops go with them; a running one's comes back as it is drawn.
                                         this.stops.retain(|key, _| !key.starts_with("history-"));
                                         cx.notify();
-                                    }))
-                                    .test_support(),
+                                    }),
+                                ),
                             ),
                     )
                     .child(if entries.is_empty() {

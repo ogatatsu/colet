@@ -4,27 +4,17 @@ use std::{ops::Range, rc::Rc, time::Instant};
 
 use colet_core::{entry::Entry, paths::{folder_name, path_key}, time};
 use gpui_kit::base::input::{self, Input};
+use gpui_kit::component::{button::{Button, ButtonVariants}, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
     app::*,
-    menus::Popup,
     places::{HomeDrag, movable},
     state::saved_query,
     reveal::{Cell, on_screen, refit, reveal_target, uncover_target},
     state::{Column, Kind},
 };
-
-/// A line of text shown while the pointer rests on an element.
-pub struct Tip {
-    pub text: SharedString,
-    pub palette: crate::theme::Palette,
-    /// The element it is on, when a press takes it down.
-    owner: Option<ElementId>,
-    /// [`Tips::epoch`] when it came up.
-    epoch: u64,
-}
 
 /// What follows the pointer as a favorite or saved search is dragged in home: its row, faint.
 pub struct HomeGhost {
@@ -63,103 +53,21 @@ impl Render for HomeGhost {
     }
 }
 
-/// When tips keep away. GPUI keeps a tooltip up through a press, and over the dialog, menu or panel
-/// that opens; Windows takes it down until the pointer leaves what was pressed.
-#[derive(Default)]
-pub struct Tips {
-    /// What was pressed: no tip on it until the pointer leaves it.
-    pressed: Option<ElementId>,
-    /// The press is still down: GPUI reads a pressed element as not hovered while the pointer moves.
-    held: bool,
-    /// Which of the dialog, menus and panels are open.
-    open: Open,
-    /// Counts their opening and closing: a tip up from before goes.
-    epoch: u64,
-}
-
-/// Whether the dialog is open, which menu is, and whether the history is.
-type Open = (bool, Option<std::mem::Discriminant<Popup>>, bool);
-
-impl Global for Tips {}
-
-impl Tips {
-    /// Notes which of the dialog, menus and panels are open, taking down the tips up when that changes.
-    pub fn set_open(open: Open, cx: &mut App) {
-        if cx.try_global::<Tips>().map_or(Open::default(), |t| t.open) != open {
-            let tips = cx.default_global::<Tips>();
-            tips.open = open;
-            tips.epoch += 1;
-        }
-    }
-}
-
-impl Render for Tip {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = self.palette;
-        if cx.try_global::<Tips>().is_some_and(|t| t.epoch != self.epoch || (t.pressed.is_some() && t.pressed == self.owner)) {
-            return div();
-        }
-        div()
-            .px_2()
-            .py_1()
-            .text_size(px(12.))
-            .text_color(p.text)
-            .bg(p.raised)
-            .border_1()
-            .border_color(p.border_strong)
-            .rounded(px(4.))
-            .child(self.text.clone())
-    }
-}
-
 pub trait TipExt {
-    /// A tip a press takes down, until the pointer leaves.
-    fn tip(self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self;
-    /// A tip that stays through a press, on what a press does nothing to, such as a button that is off.
-    fn steady_tip(self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self;
+    /// A line of text shown while the pointer rests on it.
+    fn tip(self, text: impl Into<SharedString>) -> Self;
 }
 
-impl TipExt for Stateful<Div> {
-    fn tip(mut self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self {
-        let Some(owner) = self.interactivity().element_id.clone() else {
-            return self.steady_tip(palette, text);
-        };
+impl<E: StatefulInteractiveElement> TipExt for E {
+    fn tip(self, text: impl Into<SharedString>) -> Self {
         let text = text.into();
-        let released = |_: &MouseUpEvent, _: &mut Window, cx: &mut App| cx.default_global::<Tips>().held = false;
-        self.on_mouse_down(MouseButton::Left, {
-            let owner = owner.clone();
-            move |_, window, cx| {
-                let tips = cx.default_global::<Tips>();
-                tips.pressed = Some(owner.clone());
-                tips.held = true;
-                window.refresh();
-            }
-        })
-        .on_mouse_up(MouseButton::Left, released)
-        .on_mouse_up_out(MouseButton::Left, released)
-        // A key press leaves nothing.
-        .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
-        .on_hover({
-            let owner = owner.clone();
-            move |hovered, _, cx| {
-                let tips = cx.default_global::<Tips>();
-                if !hovered && !tips.held && tips.pressed.as_ref() == Some(&owner) {
-                    tips.pressed = None;
-                }
-            }
-        })
-        .tooltip(move |_, cx| new_tip(text.clone(), palette, Some(owner.clone()), cx))
-    }
-
-    fn steady_tip(self, palette: crate::theme::Palette, text: impl Into<SharedString>) -> Self {
-        let text = text.into();
-        self.tooltip(move |_, cx| new_tip(text.clone(), palette, None, cx))
+        self.tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(text.clone()).build(window, cx))
     }
 }
 
-fn new_tip(text: SharedString, palette: crate::theme::Palette, owner: Option<ElementId>, cx: &mut App) -> AnyView {
-    let epoch = cx.try_global::<Tips>().map_or(0, |t| t.epoch);
-    cx.new(|_| Tip { text, palette, owner, epoch }).into()
+/// The icon named `name` among Colet's, for a button.
+pub fn glyph(name: &str) -> gpui_kit::component::Icon {
+    gpui_kit::component::Icon::empty().path(format!("icons/{name}.svg"))
 }
 
 /// The loading icon, turning once a second.
@@ -284,7 +192,7 @@ pub fn keyed(focus: &FocusHandle, window: &Window) -> bool {
 }
 
 /// A button the mouse presses without taking the keys from where they are; Tab still reaches it.
-pub fn keep_focus(el: Stateful<Div>) -> Stateful<Div> {
+pub fn keep_focus<E: InteractiveElement>(el: E) -> E {
     el.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
 }
 
@@ -391,22 +299,8 @@ impl Colet {
         )
     }
 
-    fn icon_button(&mut self, id: &'static str, name: &'static str, label: &'static str, enabled: bool, window: &mut Window, cx: &mut Context<Self>) -> Stateful<Div> {
-        let p = self.palette;
-        let focus = self.stop_while(id, enabled, window, cx);
-        ring(div().id(id).track_focus(&focus), p)
-            .role(Role::Button)
-            .aria_label(label)
-            .size(px(30.))
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .rounded(px(6.))
-            .child(icon(name, 16., p.text_muted))
-            .when(enabled, |b| b.cursor_pointer().hover(|b| b.bg(p.hover)))
-            // Off, a press leaves the keys where they are, as Tab passes it by.
-            .when(!enabled, |b| keep_focus(b.opacity(0.35)))
+    fn icon_button(id: &'static str, name: &'static str, label: &'static str, tip: &'static str, enabled: bool) -> Button {
+        Button::new(id).ghost().icon(glyph(name)).accessibility_label(label).tooltip(tip).disabled(!enabled)
     }
 
     /// The keys that move through a column and between them, for home's pane and the columns alike.
@@ -642,7 +536,7 @@ impl Colet {
                 r.child(
                     div()
                         .id(SharedString::from(format!("held:{}", entry.path)))
-                        .tip(p, if cut { "切り取り中" } else { "コピー中" })
+                        .tip(if cut { "切り取り中" } else { "コピー中" })
                         .child(icon(if cut { "scissors" } else { "copy" }, 12., if lit { p.on_accent_muted } else if cut { p.text_faint } else { p.accent }))
                         .test_support(),
                 )
@@ -715,65 +609,32 @@ impl Colet {
     }
 
     /// What a column lists, or why it lists nothing.
-    fn column_body(&mut self, index: usize, marked: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    fn column_body(&mut self, index: usize, marked: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let c = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
         if let Some(error) = c.error.clone() {
-            let retry = self.stop(format!("retry:{id}"), cx);
-            let settings = self.stop("search-settings", cx);
-            // Ringed as a field is; the ring lies over the gaps around.
             return self
                 .message("circle-alert", error)
-                .child(frame(p, keyed(&retry, window)).m(px(-3.)).child(
-                    keep_focus(div().id(("retry", id)).track_focus(&retry))
-                        .role(Role::Button)
-                        .aria_label("再試行")
-                        .h(px(30.))
-                        .px_3()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .rounded(px(6.))
-                        .border_1()
-                        .border_color(p.border_strong)
-                        .bg(p.raised)
-                        .cursor_pointer()
-                        .hover(|b| b.bg(p.raised_hover))
-                        .child(icon("refresh-cw", 14., p.text_muted))
-                        .child("再試行")
-                        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                .child(
+                    keep_focus(Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label("再試行")).on_click(cx.listener(
+                        move |this, event: &ClickEvent, window, cx| {
                             // The button goes as the column loads: the keys go back to the columns.
                             if event.is_keyboard() {
                                 this.focus_active(window, cx);
                             }
                             this.load(id, 0, false, cx);
-                        }))
-                        .test_support(),
-                ))
+                        },
+                    )),
+                )
                 .when(kind == Kind::Search, |d| {
-                    d.child(frame(p, keyed(&settings, window)).m(px(-3.)).child(
-                        div()
-                            .id("search-settings")
-                            .track_focus(&settings)
-                            .role(Role::Button)
-                            .aria_label("設定")
-                            .h(px(30.))
-                            .px_3()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .rounded(px(6.))
-                            .border_1()
-                            .border_color(p.border_strong)
-                            .bg(p.raised)
-                            .cursor_pointer()
-                            .hover(|b| b.bg(p.raised_hover))
-                            .child(icon("sliders-horizontal", 14., p.text_muted))
-                            .child("設定")
-                            .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
-                            .test_support(),
-                    ))
+                    d.child(
+                        Button::new("search-settings")
+                            .outline()
+                            .icon(glyph("sliders-horizontal"))
+                            .label("設定")
+                            .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
+                    )
                 })
                 .into_any_element();
         }
@@ -941,9 +802,7 @@ impl Colet {
         let field = self.filters.get(&id).map(|field| field.input.clone());
         let path = c.path.clone();
         let star_path = c.path.clone();
-        let star_focus = self.stop(format!("star:{id}"), cx);
-        let clear_focus = self.stop(format!("clear-filter:{id}"), cx);
-        let body = self.column_body(index, marked, window, cx);
+        let body = self.column_body(index, marked, cx);
         div()
             .id(("column", id))
             .role(Role::Group)
@@ -1001,7 +860,7 @@ impl Colet {
                             .text_size(px(12.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
-                            .when(!path.is_empty(), |d| d.tip(p, path))
+                            .when(!path.is_empty(), |d| d.tip(path))
                             .child(header_title),
                     )
                     .child(div().text_size(px(12.)).text_color(p.text_faint).child(count))
@@ -1016,19 +875,12 @@ impl Colet {
                             (_, true) => "お気に入りを解除（Ctrl+D）",
                             (_, false) => "お気に入りに追加（Ctrl+D）",
                         };
-                        ring(div().id(("star", id)).track_focus(&star_focus), p)
-                            .role(Role::Button)
-                            .aria_label(label)
-                            .size(px(24.))
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(4.))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(p.hover))
-                            .tip(p, label)
-                            .child(icon(if kept { "star-fill" } else { "star" }, 14., if kept { p.accent } else { p.text_muted }))
+                        Button::new(("star", id))
+                            .ghost()
+                            .xsmall()
+                            .icon(if kept { glyph("star-fill").text_color(p.accent) } else { glyph("star") })
+                            .accessibility_label(label)
+                            .tooltip(label)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if kind == Kind::Search {
                                     let (query, filter) = (this.state.query.clone(), this.state.search_filter.clone());
@@ -1037,7 +889,6 @@ impl Colet {
                                     this.toggle_favorite(&star_path, cx);
                                 }
                             }))
-                            .test_support()
                     })
                     .test_support(),
             )
@@ -1080,19 +931,12 @@ impl Colet {
                                 .on_action(|_: &input::Enter, _, cx| cx.stop_propagation())
                                 .when(has_text, |b| {
                                     b.child(
-                                        ring(div().id(("clear-filter", id)).track_focus(&clear_focus), p)
-                                            .role(Role::Button)
-                                            .aria_label("フィルタをクリア")
-                                            .size(px(22.))
-                                            .flex()
-                                            .flex_none()
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded(px(4.))
-                                            .cursor_pointer()
-                                            .hover(|d| d.bg(p.hover))
-                                            .tip(p, "フィルタをクリア（Esc）")
-                                            .child(icon("x", 13., p.text_muted))
+                                        Button::new(("clear-filter", id))
+                                            .ghost()
+                                            .xsmall()
+                                            .icon(glyph("x"))
+                                            .accessibility_label("フィルタをクリア")
+                                            .tooltip("フィルタをクリア（Esc）")
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 if let Some(field) = this.filters.get(&id) {
                                                     let input = field.input.clone();
@@ -1102,8 +946,7 @@ impl Colet {
                                                     });
                                                     this.filter(id, "", cx);
                                                 }
-                                            }))
-                                            .test_support(),
+                                            })),
                                     )
                                 })
                                 .test_support(),
@@ -1121,7 +964,7 @@ impl Colet {
         let p = self.palette;
         let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());
         let marked = self.state.active == 0 && !self.search_focused;
-        let body = self.column_body(0, marked, window, cx);
+        let body = self.column_body(0, marked, cx);
         let width = self.sidebar_width(window);
         let keys = div().id("home").track_focus(&self.home_focus).flex_1().min_h_0().flex().flex_col().child(body);
         let keys = self.column_keys(keys, cx);
@@ -1146,16 +989,12 @@ impl Colet {
                     .items_center()
                     .gap(px(2.))
                     .child(
-                        self.icon_button("back", "arrow-left", "戻る", back, window, cx)
-                            .tip(p, "戻る（Alt+←）")
-                            .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)))
-                            .test_support(),
+                        Self::icon_button("back", "arrow-left", "戻る", "戻る（Alt+←）", back)
+                            .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
                     )
                     .child(
-                        self.icon_button("forward", "arrow-right", "進む", forward, window, cx)
-                            .tip(p, "進む（Alt+→）")
-                            .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx)))
-                            .test_support(),
+                        Self::icon_button("forward", "arrow-right", "進む", "進む（Alt+→）", forward)
+                            .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx))),
                     ),
             )
             .child(keys)
@@ -1169,7 +1008,6 @@ impl Colet {
         let focused = self.search_focused;
         let has_query = !self.state.query.is_empty();
         let sort = self.settings.sort;
-        let clear_focus = self.stop("clear-search", cx);
         let sort_lines = if self.sort_open() { self.render_lines(cx) } else { Vec::new() };
         let sort_keyed = keyed(&self.sort_focus, window);
         let filter_button = self.filter_button(window, cx);
@@ -1214,18 +1052,12 @@ impl Colet {
                         }))
                         .when(has_query, |b| {
                             b.child(
-                                ring(div().id("clear-search").track_focus(&clear_focus), p)
-                                    .role(Role::Button)
-                                    .aria_label("検索をクリア")
-                                    .size(px(24.))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(4.))
-                                    .cursor_pointer()
-                                    .hover(|d| d.bg(p.hover))
-                                    .tip(p, "検索をクリア（Esc）")
-                                    .child(icon("x", 14., p.text_muted))
+                                Button::new("clear-search")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(glyph("x"))
+                                    .accessibility_label("検索をクリア")
+                                    .tooltip("検索をクリア（Esc）")
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.clear_search(window, cx);
                                         this.search.update(cx, |input, cx| input.focus(window, cx));
@@ -1310,16 +1142,12 @@ impl Colet {
                     .flex_none()
                     .gap(px(2.))
                     .child(
-                        keep_focus(self.icon_button("refresh", "refresh-cw", "更新", true, window, cx))
-                            .tip(p, "更新（F5）")
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
-                            .test_support(),
+                        keep_focus(Self::icon_button("refresh", "refresh-cw", "更新", "更新（F5）", true))
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
                     )
                     .child(
-                        self.icon_button("preferences", "sliders-horizontal", "設定", true, window, cx)
-                            .tip(p, "設定")
-                            .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)))
-                            .test_support(),
+                        Self::icon_button("preferences", "sliders-horizontal", "設定", "設定", true)
+                            .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
                     ),
             )
             .into_any_element()
@@ -1365,7 +1193,7 @@ impl Colet {
                         .rounded(px(6.))
                         .cursor_pointer()
                         .hover(|d| d.bg(p.hover))
-                        .tip(p, format!("{label}（Ctrl+Shift+F）"))
+                        .tip(format!("{label}（Ctrl+Shift+F）"))
                         .child(icon("funnel", 14., if on { p.accent } else { p.text_muted }))
                         .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| "フィルター".into())))
                         .child(icon("chevron-down", 14., p.text_faint))
@@ -1416,7 +1244,7 @@ impl Colet {
     /// The trail from the search or the drive down to the deepest folder; when it outgrows the bar, the
     /// crumbs furthest from the deepest fold into a menu so the nearest stay readable.
     fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let file_actions = self.render_actions(window, cx);
+        let file_actions = self.render_actions(cx);
         let p = self.palette;
         let results = self.state.pinned();
         let mut crumbs: Vec<(usize, String, String)> = Vec::new();
@@ -1519,7 +1347,7 @@ impl Colet {
                                         .rounded(px(4.))
                                         .cursor_pointer()
                                         .hover(|d| d.bg(p.hover))
-                                        .tip(p, "上の階層")
+                                        .tip("上の階層")
                                         .child(icon("ellipsis", 14., if menu_current { p.text } else { p.text_muted }))
                                         .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                                             if this.crumbs_open() {
@@ -1583,7 +1411,7 @@ impl Colet {
                                                         .text_color(if index == active { p.text } else { p.text_muted })
                                                         .hover(|d| d.bg(p.accent_fill).text_color(p.on_accent))
                                                         .when(lit, |d| d.bg(p.accent_fill).text_color(p.on_accent))
-                                                        .tip(p, path.clone())
+                                                        .tip(path.clone())
                                                         .child(icon(if index == 1 && results { "search" } else { "folder" }, 14., p.text_faint))
                                                         .child(label.clone())
                                                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -1632,7 +1460,7 @@ impl Colet {
                                     .cursor_pointer()
                                     .text_color(if current { p.text } else { p.text_muted })
                                     .hover(|d| d.bg(p.hover))
-                                    .tip(p, path)
+                                    .tip(path)
                                     .when(query, |d| d.child(icon("search", 12., p.text_faint)))
                                     .child(div().truncate().child(label))
                                     .on_click(cx.listener(move |this, _, window, cx| this.go_to(index, window, cx)))
@@ -1718,7 +1546,7 @@ impl Colet {
                                 .absolute()
                                 .inset_0()
                                 .cursor_pointer()
-                                .tip(p, format!("上の階層を表示（{away}階層）"))
+                                .tip(format!("上の階層を表示（{away}階層）"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.state.unfold();
                                     this.changed(cx);
@@ -1899,7 +1727,7 @@ impl Colet {
                     .items_center()
                     .gap(px(6.))
                     .text_color(color)
-                    .tip(p, title)
+                    .tip(title)
                     .child(
                         div()
                             .size(px(6.))
@@ -2141,7 +1969,6 @@ impl Render for Colet {
             self.end_home_drag();
         }
         self.follow_focus(window, cx);
-        Tips::set_open((self.dialog.is_some(), self.popup.as_ref().map(std::mem::discriminant), self.history_open), cx);
         self.scroll_rows();
         self.reveal(window);
         let p = self.palette;
