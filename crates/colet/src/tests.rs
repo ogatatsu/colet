@@ -381,8 +381,12 @@ impl Ui {
         field.read_with(cx, |input, _| input.value().to_string())
     }
 
+    /// What the notices up in the window say, oldest first.
     fn toasts(&self, cx: &mut TestAppContext) -> Vec<String> {
-        self.read(cx, |v| v.toasts.iter().map(|t| t.text.to_string()).collect())
+        let last = self.read(cx, |v| v.next_toast);
+        self.act(cx, |window, _| {
+            (1..=last).filter_map(|id| window.try_find(("toast", id as usize))).filter_map(|t| t.label().map(str::to_owned)).collect()
+        })
     }
 
     fn columns_focused(&self, cx: &mut TestAppContext) -> bool {
@@ -774,25 +778,19 @@ fn widens_a_column_by_an_edge_astride_its_border_even_past_it(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
-fn closes_a_toast_whose_close_button_lies_over_a_columns_edge(cx: &mut TestAppContext) {
+fn keeps_an_error_up_until_it_is_closed_and_lets_a_notice_go_on_its_own(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(drive_d()));
-    ui.click(cx, row(r"D:\"));
-    ui.press(cx, "right");
-    ui.press(cx, "right");
     ui.view.update(cx, |v, cx| v.notify("失敗しました", crate::app::Tone::Error, cx));
-    let (drive, work) = ui.read(cx, |v| (v.state.columns[1].id, v.state.columns[2].id));
-    // The drive's and the folder's edges brought under the close button.
-    let (left, close) = ui.act(cx, |window, _| (window.find(("column", drive)).bounds().left(), window.find(("close-toast", 1usize)).bounds().center()));
-    ui.view.update(cx, |v, cx| {
-        v.widths.column = (f32::from(close.x - left) / 2.).round();
-        cx.notify();
-    });
+    ui.view.update(cx, |v, cx| v.notify("コピーしました", crate::app::Tone::Info, cx));
     settle(cx);
-    let (edge, close) = ui.act(cx, |window, _| {
-        (window.within(("column", work)).find("column-resizer").bounds(), window.find(("close-toast", 1usize)).bounds().center())
-    });
-    assert!(edge.contains(&close), "{edge:?} {close:?}");
-    ui.click(cx, ("close-toast", 1usize));
+    assert_eq!(ui.toasts(cx), ["失敗しました", "コピーしました"]);
+    cx.executor().advance_clock(Duration::from_secs(10));
+    settle(cx);
+    assert_eq!(ui.toasts(cx), ["失敗しました"]);
+    // Its close button shows while the pointer is on it.
+    ui.act(cx, |window, cx| window.hover(("toast", 1usize), cx));
+    ui.click(cx, "close");
+    settle(cx);
     assert!(ui.toasts(cx).is_empty(), "{:?}", ui.toasts(cx));
 }
 
@@ -1789,8 +1787,8 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     ui.press(cx, "delete");
     assert!(ui.toasts(cx).iter().any(|t| t == "「ごみ箱へ移動」: 1 件失敗"), "{:?}", ui.toasts(cx));
     assert_eq!(ui.read(cx, |v| v.unseen), 1);
-    let toast = ui.read(cx, |v| v.toasts.iter().find(|t| t.entry.is_some()).unwrap().id);
-    ui.click(cx, ("toast-details", toast));
+    let toast = ui.read(cx, |v| v.next_toast);
+    ui.click(cx, ("toast-details", toast as usize));
     assert!(ui.read(cx, |v| v.history_open && v.unseen == 0));
     let entry = ui.read(cx, |v| v.history[0].clone());
     assert!(ui.read(cx, |v| v.expanded.contains(&entry.id)));
@@ -2430,20 +2428,6 @@ fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut
     assert!(!ui.read(cx, |v| v.crumbs_open()));
     assert_eq!(ui.active(cx), target);
     assert!(ui.columns_focused(cx));
-}
-
-#[gpui_kit::test]
-fn closes_a_toast_from_the_keys_handing_them_back_to_where_they_were(cx: &mut TestAppContext) {
-    let ui = open(cx, Arc::new(drive_d()));
-    ui.click(cx, row(r"D:\"));
-    ui.view.update(cx, |v, cx| v.notify("失敗しました", crate::app::Tone::Error, cx));
-    ui.act(cx, |_, _| ());
-    let close = ui.read(cx, |v| v.stops["close-toast:1"].clone());
-    ui.act(cx, |window, cx| close.focus(window, cx));
-    ui.press(cx, "enter");
-    assert!(ui.toasts(cx).is_empty());
-    assert!(ui.home_focused(cx));
-    assert!(ui.read(cx, |v| !v.stops.contains_key("close-toast:1")));
 }
 
 #[gpui_kit::test]

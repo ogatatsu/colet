@@ -17,6 +17,11 @@ use colet_core::{
     watch::{Changes, FolderWatcher},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
+use gpui_kit::component::{
+    WindowExt,
+    button::Button,
+    notification::{Notification, NotificationType},
+};
 use gpui_kit::*;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -202,14 +207,6 @@ pub enum Tone {
     Error,
 }
 
-pub struct Toast {
-    pub id: u64,
-    pub text: SharedString,
-    pub tone: Tone,
-    /// The operation in the history it tells of, which 詳細 opens.
-    pub entry: Option<u64>,
-}
-
 /// The columns sliding to where they should rest; see [`Colet::reveal`].
 pub struct Slide {
     /// Where the target was reckoned from, to reckon it again should the view change under it.
@@ -260,8 +257,9 @@ pub struct Colet {
     pub columns_focus: FocusHandle,
     pub icons: Icons,
     pub engine: Engine,
-    pub toasts: Vec<Toast>,
-    next_toast: u64,
+    /// The window the notices go up in.
+    window: AnyWindowHandle,
+    pub(crate) next_toast: u64,
     pub resizing: Option<Resize>,
     pub lists: HashMap<ColumnId, UniformListScrollHandle>,
     scrolled_to: HashMap<ColumnId, String>,
@@ -434,7 +432,7 @@ impl Colet {
             columns_focus: cx.focus_handle().tab_stop(true),
             icons: Icons::default(),
             engine: Engine::Unknown,
-            toasts: Vec::new(),
+            window: Window::window_handle(window),
             next_toast: 0,
             resizing: None,
             lists: HashMap::new(),
@@ -612,29 +610,57 @@ impl Colet {
 
     /// An error that tells of an operation in the history, with a button to open it there.
     pub fn notify_entry(&mut self, text: impl Into<SharedString>, entry: u64, cx: &mut Context<Self>) {
-        self.notify(text, Tone::Error, cx);
-        if let Some(toast) = self.toasts.last_mut() {
-            toast.entry = Some(entry);
-        }
+        self.push_notice(text.into(), Tone::Error, Some(entry), cx);
     }
 
     pub fn notify(&mut self, text: impl Into<SharedString>, tone: Tone, cx: &mut Context<Self>) {
+        self.push_notice(text.into(), tone, None, cx);
+    }
+
+    /// Puts a notice up in the window, the newest few at a time: errors stay until closed; the rest go on
+    /// their own.
+    fn push_notice(&mut self, text: SharedString, tone: Tone, entry: Option<u64>, cx: &mut Context<Self>) {
         self.next_toast += 1;
         let id = self.next_toast;
-        self.toasts.push(Toast { id, text: text.into(), tone, entry: None });
-        if self.toasts.len() > 3 {
-            let oldest = self.toasts[0].id;
-            self.dismiss(oldest, cx);
-        }
-        // Errors stay until dismissed; the rest fade on their own.
-        if tone == Tone::Info {
-            cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(Duration::from_secs(7)).await;
-                this.update(cx, |this, cx| this.dismiss(id, cx)).ok();
+        let error = tone == Tone::Error;
+        let colet = cx.weak_entity();
+        let mut note = Notification::new()
+            .id1::<Self>(("toast", id))
+            .content(move |_, _, _| {
+                div()
+                    .id(("toast", id))
+                    .test_support()
+                    .role(if error { Role::Alert } else { Role::Status })
+                    .aria_label(text.clone())
+                    .text_sm()
+                    .child(text.clone())
+                    .into_any_element()
             })
-            .detach();
+            .autohide(!error);
+        if error {
+            note = note.with_type(NotificationType::Error);
         }
-        cx.notify();
+        if let Some(entry) = entry {
+            note = note.action(move |_, _, _| {
+                let colet = colet.clone();
+                // The mouse leaves the keys where they are; from the keys, they go on into the history.
+                crate::view::keep_focus(Button::new(("toast-details", id)).label("詳細")).on_click(move |event: &ClickEvent, window, cx| {
+                    window.remove_notification1::<Colet>(("toast", id), cx);
+                    colet
+                        .update(cx, |this, cx| {
+                            this.show_history(true, Some(entry), window, cx);
+                            if event.is_keyboard() {
+                                this.stop(format!("history-entry:{entry}"), cx).focus(window, cx);
+                            }
+                        })
+                        .ok();
+                })
+            });
+        }
+        let window = self.window;
+        cx.defer(move |cx| {
+            window.update(cx, |_, window, cx| window.push_notification(note, cx)).ok();
+        });
     }
 
     /// Runs `work` off the UI thread, then says `done` once it succeeds, or why it failed.
@@ -657,13 +683,6 @@ impl Colet {
         .detach();
     }
 
-    pub fn dismiss(&mut self, id: u64, cx: &mut Context<Self>) {
-        self.toasts.retain(|t| t.id != id);
-        // Its buttons' stops go with it.
-        self.stops.remove(&format!("toast-details:{id}"));
-        self.stops.remove(&format!("close-toast:{id}"));
-        cx.notify();
-    }
 
     // ---- Listings ----
 

@@ -1742,94 +1742,6 @@ impl Colet {
             .into_any_element()
     }
 
-    fn render_toasts(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
-        let ids: Vec<u64> = self.toasts.iter().map(|t| t.id).collect();
-        let stops: Vec<(FocusHandle, FocusHandle)> =
-            ids.into_iter().map(|id| (self.stop(format!("toast-details:{id}"), cx), self.stop(format!("close-toast:{id}"), cx))).collect();
-        // Over the columns' edges, which are drawn over all laid out after them.
-        deferred(div()
-            .absolute()
-            .bottom(px(36.))
-            .right_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .children(self.toasts.iter().zip(stops).map(|(toast, (details, close))| {
-                let id = toast.id;
-                let error = toast.tone == Tone::Error;
-                div()
-                    .id(("toast", id))
-                    .role(if error { Role::Alert } else { Role::Status })
-                    .aria_label(toast.text.clone())
-                    .max_w(px(420.))
-                    .pl_3()
-                    .pr_1()
-                    .py_1()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .text_size(px(12.))
-                    .bg(p.raised)
-                    .border_1()
-                    .border_color(if error { p.danger } else { p.border_strong })
-                    .rounded(px(8.))
-                    .shadow_lg()
-                    .occlude()
-                    .when(error, |d| d.child(icon("circle-alert", 14., p.danger)))
-                    .child(div().flex_1().py_1().child(toast.text.clone()))
-                    .when_some(toast.entry, |d, entry| {
-                        // The mouse leaves the keys where they are; from the keys, they go on into the history.
-                        d.child(
-                            keep_focus(ring(div().id(("toast-details", id)).track_focus(&details), p))
-                                .role(Role::Button)
-                                .aria_label("詳細")
-                                .px_2()
-                                .h(px(24.))
-                                .flex()
-                                .items_center()
-                                .rounded(px(4.))
-                                .text_color(p.accent)
-                                .cursor_pointer()
-                                .hover(|d| d.bg(p.raised_hover))
-                                .child("詳細")
-                                .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                                    this.dismiss(id, cx);
-                                    this.show_history(true, Some(entry), window, cx);
-                                    if event.is_keyboard() {
-                                        this.stop(format!("history-entry:{entry}"), cx).focus(window, cx);
-                                    }
-                                }))
-                                .test_support(),
-                        )
-                    })
-                    .child(
-                        keep_focus(ring(div().id(("close-toast", id)).track_focus(&close), p))
-                            .role(Role::Button)
-                            .aria_label("閉じる")
-                            .size(px(24.))
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(4.))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(p.raised_hover))
-                            .child(icon("x", 14., p.text_muted))
-                            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                                // The button goes with the toast: the keys go back to the columns.
-                                if event.is_keyboard() {
-                                    this.focus_active(window, cx);
-                                }
-                                this.dismiss(id, cx);
-                            }))
-                            .test_support(),
-                    )
-            })))
-            .with_priority(1)
-            .into_any_element()
-    }
-
     /// Slides the columns toward where they should rest, a frame at a time.
     fn reveal(&mut self, window: &mut Window) {
         let view = f32::from(self.columns_scroll.bounds().size.width);
@@ -2059,7 +1971,6 @@ impl Render for Colet {
             .children(self.render_menu(cx))
             .children(self.render_history(cx))
             .children(self.render_dialog(window, cx))
-            .child(self.render_toasts(cx))
     }
 }
 

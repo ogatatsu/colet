@@ -205,6 +205,13 @@ pub fn init(cx: &mut App) {
     gpui_kit::component::Theme::update(cx, |kit| {
         kit.light_theme = light;
         kit.dark_theme = dark;
+        // The notices stand over the status bar's right end, by the history they tell of; the newest
+        // three at most.
+        let notices = &mut kit.notification;
+        notices.placement = gpui_kit::Anchor::BottomRight;
+        notices.margins.bottom = gpui_kit::px(36.);
+        notices.margins.right = gpui_kit::px(12.);
+        notices.max_items = 3;
     });
 }
 
