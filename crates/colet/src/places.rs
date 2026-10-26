@@ -7,6 +7,7 @@ use colet_core::{
     paths::{folder_name, path_key},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
+use gpui_kit::component::WindowExt;
 use gpui_kit::*;
 
 use crate::{
@@ -497,10 +498,31 @@ impl Colet {
     pub fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog = None;
         self.dialog_subscriptions.clear();
-        // The next dialog starts at its top.
-        self.dialog_scroll = ScrollHandle::new();
         self.column_focus(self.state.active).focus(window, cx);
         cx.notify();
+    }
+
+    /// Opens the window's dialog as [`Colet::dialog`] comes, and closes it as that goes; the keys stay where
+    /// Colet put them, in a field of the dialog or back in the columns.
+    pub fn sync_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let open = self.dialog.is_some();
+        if open == self.dialog_shown {
+            return;
+        }
+        self.dialog_shown = open;
+        let focused = window.focused(cx);
+        if open {
+            let colet = cx.weak_entity();
+            window.open_dialog(cx, move |dialog, window, cx| match colet.upgrade() {
+                Some(colet) => colet.update(cx, |this, cx| this.dialog_frame(dialog, window, cx)),
+                None => dialog,
+            });
+        } else {
+            window.close_dialog(cx);
+        }
+        if let Some(focused) = focused {
+            focused.focus(window, cx);
+        }
     }
 }
 

@@ -56,7 +56,6 @@ actions!(
         RefreshAll,
         SaveCurrent,
         RenameItem,
-        CloseDialog,
         CopyItems,
         CutItems,
         PasteItems,
@@ -84,9 +83,6 @@ actions!(
 pub const MENU: &str = "Menu";
 /// The sort order's button, which opens its menu from the keys.
 pub const SORT: &str = "Sort";
-
-/// Where the dialogs take the keys.
-pub const DIALOG: &str = "Dialog";
 
 /// Where a text field takes the keys: GPUI Base's own context for its fields.
 pub const TEXT: &str = "Input";
@@ -128,7 +124,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("menu", OpenTextMenu, Some(TEXT)),
         KeyBinding::new("f5", RefreshAll, None),
         KeyBinding::new("ctrl-d", SaveCurrent, None),
-        KeyBinding::new("escape", CloseDialog, Some(DIALOG)),
         KeyBinding::new("up", MenuUp, Some(MENU)),
         KeyBinding::new("down", MenuDown, Some(MENU)),
         KeyBinding::new("enter", MenuConfirm, Some(MENU)),
@@ -304,8 +299,8 @@ pub struct Colet {
     pub(crate) dialog_subscriptions: Vec<Subscription>,
     /// Takes the keys in a dialog with no field.
     pub dialog_focus: FocusHandle,
-    /// What a dialog holds between its heading and its buttons, scrolled when the window is too low.
-    pub dialog_scroll: ScrollHandle,
+    /// The window's dialog is open for [`Colet::dialog`].
+    pub(crate) dialog_shown: bool,
     /// Home's list, for its scrollbar.
     pub home_scroll: ScrollHandle,
     /// The favorite or saved search being dragged in home, and where it would land; none while outside
@@ -466,7 +461,7 @@ impl Colet {
             dialog: None,
             dialog_subscriptions: Vec::new(),
             dialog_focus: cx.focus_handle(),
-            dialog_scroll: ScrollHandle::new(),
+            dialog_shown: false,
             home_scroll: ScrollHandle::new(),
             home_drag: None,
             landing: None,
@@ -500,6 +495,9 @@ impl Colet {
             this.notify(problem, Tone::Error, cx);
         }
         this.palette.style_input(&this.search, cx);
+        // The window's dialog follows `dialog` as each change to Colet settles.
+        let colet = cx.entity();
+        this._subscriptions.push(cx.observe_in(&colet, window, |this, _, window, cx| this.sync_dialog(window, cx)));
         crate::theme::apply(window, this.settings.theme, cx);
         let changed = this.clipboard_changed.clone();
         this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));

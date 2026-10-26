@@ -295,6 +295,8 @@ fn open(cx: &mut TestAppContext, fake: Arc<Fake>) -> Ui {
     cx.update(|cx| {
         gpui_kit::init(cx);
         crate::theme::init(cx);
+        // What opens shows at once, where a press finds it, as with Windows' animations off.
+        cx.set_reduce_motion(true);
         crate::app::bind_keys(cx);
     });
     let (window, view) = cx
@@ -2361,11 +2363,10 @@ fn keeps_a_dialog_taller_than_the_window_within_it_its_buttons_in_reach(cx: &mut
     let ui = open(cx, Arc::new(Fake::default()));
     cx.simulate_window_resize(ui.window, size(px(1200.), px(500.)));
     ui.click(cx, "preferences");
-    let (dialog, close) = ui.act(cx, |window, _| (window.find("dialog").bounds(), window.find("close-preferences").bounds()));
-    assert!(dialog.top() >= px(0.) && dialog.bottom() <= px(500.), "{dialog:?}");
-    assert!(close.bottom() <= dialog.bottom(), "{close:?} in {dialog:?}");
-    // What does not fit scrolls between the heading and the buttons.
-    assert!(ui.read(cx, |v| v.dialog_scroll.max_offset().y) > px(0.));
+    let (content, close) = ui.act(cx, |window, _| (window.find("dialog-content").bounds(), window.find("close-preferences").bounds()));
+    assert!(close.top() >= px(0.) && close.bottom() <= px(500.), "{close:?}");
+    // What does not fit scrolls between the heading and the buttons: more than the room it has.
+    assert!(content.size.height > close.top() - content.top(), "{content:?} {close:?}");
     ui.click(cx, "close-preferences");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
 }

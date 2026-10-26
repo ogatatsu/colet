@@ -4,12 +4,12 @@ use colet_core::{
     paths::{ancestors, folder_name},
 };
 use gpui_kit::base::input::Input;
-use gpui_kit::component::{button::{Button, ButtonVariants}, spinner::Spinner, Disableable, Sizable};
+use gpui_kit::component::{button::{Button, ButtonVariants}, dialog::Dialog as DialogFrame, spinner::Spinner, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
-    app::{CloseDialog, Colet, DIALOG},
+    app::Colet,
     menus::Popup,
     ops::{ItemStatus, Menu, Status},
     places::Dialog,
@@ -53,9 +53,6 @@ fn clock(unix_ms: u64) -> String {
     colet_core::time::local(unix_ms).map_or_else(String::new, |t| format!("{:02}:{:02}", t.wHour, t.wMinute))
 }
 
-
-/// How much of a dialog's right margin is its rows' own: where its scrollbar lies, clear of them.
-const MARGIN: f32 = 14.;
 
 /// A field, ringed while it has the keys (`focused`), or its menu has them for it; `menu` opens that.
 fn field(
@@ -127,7 +124,7 @@ fn filter_choice(id: ElementId, text: &str, chosen: bool) -> Button {
 }
 
 impl Colet {
-    pub fn render_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn dialog_parts(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(&'static str, Div, Vec<AnyElement>)> {
         let p = self.palette;
         let title = match self.dialog.as_ref()? {
             Dialog::Name { request: Request { kind: Operation::NewFolder, .. }, .. } => "新規フォルダー",
@@ -460,65 +457,42 @@ impl Colet {
                 (content, buttons)
             }
         };
-        Some(
-            div()
-                .id("dialog-overlay")
-                .key_context(DIALOG)
-                .on_action(cx.listener(|this, _: &CloseDialog, window, cx| this.escape_dialog(window, cx)))
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                // Clear of the window's edges, which a dialog too tall for it stops short of.
-                .p_4()
-                .bg(hsla(0., 0., 0., 0.45))
-                .occlude()
-                .child(
-                    div()
-                        .id("dialog")
-                        .role(Role::Dialog)
-                        .aria_label(title)
-                        .track_focus(&self.dialog_focus)
-                        .w(px(440.))
-                        .max_h_full()
-                        // The right margin is mostly the rows' own, so the scrollbar lies in it.
-                        .py_5()
-                        .pl_5()
-                        .pr(px(20. - MARGIN))
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .bg(p.raised)
-                        .border_1()
-                        .border_color(p.border_strong)
-                        .rounded(px(8.))
-                        .shadow_lg()
-                        // The heading and the buttons stay; what lies between scrolls when the window is too low.
-                        .child(div().flex_none().pr(px(MARGIN)).text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(title))
-                        .child(
-                            div()
-                                .relative()
-                                .flex_1()
-                                .min_h_0()
-                                .flex()
-                                .flex_col()
-                                .child(
-                                    div()
-                                        .id("dialog-body")
-                                        .flex_1()
-                                        .min_h_0()
-                                        .overflow_y_scroll()
-                                        .track_scroll(&self.dialog_scroll)
-                                        .child(content.pr(px(MARGIN))),
-                                )
-                                .child(div().absolute().inset_0().child(crate::view::scrollbar(gpui_kit::base::Scrollbar::vertical(&self.dialog_scroll), p))),
-                        )
-                        .child(div().flex_none().pr(px(MARGIN)).flex().items_center().justify_end().gap_2().children(buttons))
-                        .test_support(),
-                )
-                .into_any_element(),
-        )
+        Some((title, content, buttons))
+    }
+
+    /// The dialog as the window draws it: the heading and the buttons stay, and what lies between scrolls
+    /// when the window is too low. Esc steps back as [`Colet::escape_dialog`] does; the dialog closes only as
+    /// [`Colet::dialog`] goes.
+    pub fn dialog_frame(&mut self, dialog: DialogFrame, window: &mut Window, cx: &mut Context<Self>) -> DialogFrame {
+        let Some((title, content, buttons)) = self.dialog_parts(window, cx) else { return dialog };
+        let colet = cx.weak_entity();
+        dialog
+            .w(px(440.))
+            .close_button(false)
+            .overlay_closable(false)
+            .on_cancel(move |_, window, cx| {
+                colet.update(cx, |this, cx| this.escape_dialog(window, cx)).ok();
+                false
+            })
+            // Enter is the fields' and the buttons' own: it goes on to whichever has the keys.
+            .on_ok(|_, _, cx| {
+                cx.propagate();
+                false
+            })
+            .title(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(title))
+            .child(
+                div()
+                    .id("dialog-content")
+                    .test_support()
+                    .aria_label(title)
+                    .track_focus(&self.dialog_focus)
+                    // The window's dialog lies outside Colet's own elements: the menu key in its fields is heard here.
+                    .on_action(cx.listener(|this, _: &crate::app::OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
+                    .child(content),
+            )
+            .footer(div().flex().items_center().justify_end().gap_2().children(buttons))
+            // A field's menu, over the dialog it is in.
+            .children(self.render_menu(cx))
     }
 
     /// Opens the file menu on `paths` (`None` for the selection, empty for the folder itself) in the

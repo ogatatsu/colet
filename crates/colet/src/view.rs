@@ -1912,9 +1912,10 @@ impl Render for Colet {
                     .child(main)
                     .child(self.render_statusbar(cx)),
             )
-            .children(self.render_menu(cx))
+            // Over a dialog, a field's menu is drawn with it.
+            .children(if self.dialog.is_none() { self.render_menu(cx) } else { None })
             .children(self.render_history(cx))
-            .children(self.render_dialog(window, cx))
+
     }
 }
 
