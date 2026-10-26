@@ -110,8 +110,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            column_width: 288.,
-            search_width: 288.,
+            column_width: 320.,
+            search_width: 320.,
             sidebar_width: 240.,
             favorites: Vec::new(),
             saved_searches: Vec::new(),
@@ -391,7 +391,7 @@ mod tests {
     fn keeps_widths_whole_and_within_bounds() {
         let mut settings = Settings { column_width: 9000., search_width: 100.4, sidebar_width: 200.6, ..Settings::default() };
         settings.normalize();
-        assert_eq!((settings.column_width, settings.search_width, settings.sidebar_width), (640., 192., 201.));
+        assert_eq!((settings.column_width, settings.search_width, settings.sidebar_width), (640., 260., 201.));
     }
 
     #[test]

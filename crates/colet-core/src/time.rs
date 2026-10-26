@@ -15,10 +15,10 @@ pub fn local(unix_ms: u64) -> Option<SYSTEMTIME> {
     Some(local)
 }
 
-/// `2026/10/16`, as `toLocaleDateString("ja-JP")` writes it.
-pub fn date(unix_ms: u64) -> Option<String> {
+/// `2026/10/16 9:05`: [`date_time`] without the seconds, for a row.
+pub fn date_minute(unix_ms: u64) -> Option<String> {
     let t = local(unix_ms)?;
-    Some(format!("{}/{}/{}", t.wYear, t.wMonth, t.wDay))
+    Some(format!("{}/{}/{} {}:{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute))
 }
 
 /// `2026/10/16 9:05:03`, as `toLocaleString("ja-JP")` writes it.
@@ -88,6 +88,7 @@ mod tests {
     fn writes_dates_in_local_time() {
         let text = date_time(1_700_000_000_000).unwrap();
         assert!(text.starts_with("2023/11/1"), "{text}");
-        assert!(date(1_700_000_000_000).unwrap().starts_with("2023/11/1"));
+        let minute = date_minute(1_700_000_000_000).unwrap();
+        assert_eq!(format!("{minute}:{}", &text[text.len() - 2..]), text);
     }
 }

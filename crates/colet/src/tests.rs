@@ -780,6 +780,8 @@ fn closes_a_toast_whose_close_button_lies_over_a_columns_edge(cx: &mut TestAppCo
 #[gpui_kit::test]
 fn leaves_the_edge_of_a_column_scrolled_out_of_view_unpressable(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
+    // A width the view holds no whole number of, so an edge falls past its left.
+    fake.settings.lock().unwrap().column_width = 288.;
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {
@@ -1011,6 +1013,8 @@ fn rest(ui: &Ui, cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn slides_a_column_on_screen_once_a_press_in_its_header_or_its_empty_room_is_let_go(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
+    // A width the view holds no whole number of, so the right edge cuts a column.
+    fake.settings.lock().unwrap().column_width = 288.;
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {

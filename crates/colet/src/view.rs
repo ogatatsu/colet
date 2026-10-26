@@ -2,7 +2,7 @@
 //! and the status bar beside it.
 use std::{ops::Range, rc::Rc, time::Instant};
 
-use colet_core::{entry::{Entry, Sort}, paths::{folder_name, path_key}, time};
+use colet_core::{entry::Entry, paths::{folder_name, path_key}, time};
 use gpui_kit::base::input::{self, Input};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -310,6 +310,10 @@ fn with_typed(text: &str, marks: &[Range<usize>], typed: Option<(usize, Hsla)>) 
 }
 
 /// Rows of home and the folders; search results carry their folder on a second line.
+/// The widths a row's size and modified time take: `1023.9 MB` and `2026/12/31 23:59`, at 12px.
+const SIZE_WIDTH: f32 = 56.;
+const MODIFIED_WIDTH: f32 = 96.;
+
 fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
 }
@@ -513,7 +517,6 @@ impl Colet {
         let lit = selected && marked && !aside;
         let image = self.icons.get(entry, cx);
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
-        let by = self.settings.sort.by;
         let ink = if lit { p.on_accent } else { p.text };
         let path = entry.path.clone();
         // A favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
@@ -644,13 +647,15 @@ impl Colet {
                         .test_support(),
                 )
             })
-            // A folder has no size of its own; like Explorer, leave it blank.
-            .when(by != Sort::Name && kind != Kind::Home && !(by == Sort::Size && entry.directory), |r| {
-                let meta = match by {
-                    Sort::Size => time::size(entry.size),
-                    _ => entry.modified.and_then(time::date).unwrap_or_else(|| "—".into()),
+            // Each in a set width, flush right, so they read down the column as a table's would. A folder has
+            // no size of its own; like Explorer, it leaves the cell blank.
+            .when(kind != Kind::Home, |r| {
+                let size = if entry.directory { String::new() } else { time::size(entry.size) };
+                let modified = entry.modified.and_then(time::date_minute).unwrap_or_else(|| "—".into());
+                let cell = |width: f32, text: String| {
+                    div().flex_none().w(px(width)).flex().justify_end().whitespace_nowrap().text_size(px(12.)).text_color(muted).child(text)
                 };
-                r.child(div().flex_none().text_size(px(12.)).text_color(muted).child(meta))
+                r.child(cell(SIZE_WIDTH, size)).child(cell(MODIFIED_WIDTH, modified))
             })
             // A file keeps the chevron's room, so its date lines up with a folder's.
             .when(kind != Kind::Home, |r| {

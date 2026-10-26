@@ -147,7 +147,8 @@ pub struct Widths {
     pub column: f32,
 }
 
-pub const COLUMN_WIDTHS: (f32, f32) = (192., 640.);
+/// At its least a column keeps some of a name beside a row's size and modified time.
+pub const COLUMN_WIDTHS: (f32, f32) = (260., 640.);
 pub const SIDEBAR_WIDTHS: (f32, f32) = (160., 480.);
 /// The strip that brings out the folders folded away above a search result: room for two digits.
 pub const FOLD_WIDTH: f32 = 28.;
