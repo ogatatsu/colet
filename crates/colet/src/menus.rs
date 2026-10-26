@@ -2,6 +2,7 @@
 //! mouse and the keys pick alike: ↑↓ move, Enter picks, Esc closes, and the keys go back to where they were.
 use colet_core::entry::{Sort, direction_label};
 use gpui_kit::base::input::{self, InputState};
+use gpui_kit::component::{ActiveTheme, menu::{PopupMenu, PopupMenuItem}};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -11,7 +12,6 @@ use crate::{
     places::Dialog,
     search_filters::FilterEdit,
     state::saved_query,
-    theme::Palette,
 };
 
 /// What a line of a menu does.
@@ -176,13 +176,12 @@ impl Colet {
             let Some(input) = field.upgrade() else { return };
             cx.stop_propagation();
             input.update(cx, |input, cx| input.focus(window, cx));
-            this.open_text_menu(input, event.position, false, window, cx);
+            this.open_text_menu(input, event.position, window, cx);
         })
     }
 
-    /// Opens `input`'s menu at `at`; from the keys, with its first line that is on lit. The text picked stays
-    /// lit while the menu has the keys.
-    pub fn open_text_menu(&mut self, input: Entity<InputState>, at: Point<Pixels>, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens `input`'s menu at `at`. The text picked stays lit while the menu has the keys.
+    pub fn open_text_menu(&mut self, input: Entity<InputState>, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let paste = cx.read_from_clipboard().and_then(|item| item.text()).is_some_and(|text| !text.is_empty());
         let menu = {
             let field = input.read(cx);
@@ -198,14 +197,9 @@ impl Colet {
             }
         };
         self.popup = Some(Popup::Text(menu));
-        self.cursor = None;
-        self.menu_focus.focus(window, cx);
-        let focus = self.menu_focus.clone();
-        input.update(cx, |input, cx| input.set_selection_focus(Some(focus), cx));
-        if keyboard {
-            self.move_cursor(1, cx);
-        }
-        cx.notify();
+        self.show_menu(window, cx);
+        let focus = self.menu_view.as_ref().map(|(_, focus, _)| focus.clone());
+        input.update(cx, |input, cx| input.set_selection_focus(focus, cx));
     }
 
     /// The menu key in a text field opens its menu under the caret.
@@ -217,7 +211,7 @@ impl Colet {
             let field = input.read(cx);
             field.cursor_layout().map_or_else(|| field.input_bounds().bottom_left(), |(caret, _)| caret.bottom_left())
         };
-        self.open_text_menu(input, at, true, window, cx);
+        self.open_text_menu(input, at, window, cx);
     }
 
     /// The text fields there are: the search's, the folder columns', and the open dialog's.
@@ -385,6 +379,7 @@ impl Colet {
     pub fn close_menus(&mut self, to_column: bool, window: &mut Window, cx: &mut Context<Self>) {
         let popup = self.popup.take();
         self.cursor = None;
+        self.menu_view = None;
         match popup {
             Some(Popup::Text(menu)) => menu.input.update(cx, |input, cx| {
                 input.set_selection_focus(None, cx);
@@ -424,31 +419,20 @@ impl Colet {
         self.step_cursor(by, &(0..count).collect::<Vec<_>>(), cx);
     }
 
-    /// Opens the sort order's menu; from the keys, with the sort in use lit.
-    pub fn open_sort(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the sort order's menu.
+    pub fn open_sort(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.popup = Some(Popup::Sort);
-        self.cursor = keyboard.then(|| Sort::ALL.iter().position(|s| *s == self.settings.sort.by).unwrap_or(0));
-        self.menu_focus.focus(window, cx);
-        cx.notify();
+        self.show_menu(window, cx);
     }
 
-    /// Opens the search filters' menu; from the keys, with the filter in use lit.
-    pub fn open_filter_menu(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the search filters' menu.
+    pub fn open_filter_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let from_search = match self.popup {
             Some(Popup::Filters { from_search }) => from_search,
             _ => self.search_focused,
         };
         self.popup = Some(Popup::Filters { from_search });
-        self.cursor = keyboard.then(|| self.menu_lines().iter().position(|line| line.chosen).unwrap_or(0));
-        self.menu_focus.focus(window, cx);
-        cx.notify();
-    }
-
-    /// ↑ or ↓ in the open menu: the next line that is on, round the ends.
-    pub fn move_cursor(&mut self, by: isize, cx: &mut Context<Self>) {
-        let lines = self.menu_lines();
-        let on: Vec<usize> = (0..lines.len()).filter(|&i| lines[i].off.is_none()).collect();
-        self.step_cursor(by, &on, cx);
+        self.show_menu(window, cx);
     }
 
     /// Moves the cursor `by` among the lines `on`, round the ends; with none lit yet, to the first or the last.
@@ -466,71 +450,70 @@ impl Colet {
         cx.notify();
     }
 
-    pub fn confirm_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let lines = self.menu_lines();
-        if let Some(line) = self.cursor.and_then(|c| lines.into_iter().nth(c)).filter(|l| l.off.is_none()) {
-            self.run_command(line.command, window, cx);
-        }
+    /// Builds the open menu's lines into the component library's menu and gives it the keys: ↑↓ move,
+    /// Enter picks, Esc closes, and the keys go back to where they were.
+    pub fn show_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let colet = cx.weak_entity();
+        let items: Vec<PopupMenuItem> = self
+            .menu_lines()
+            .into_iter()
+            .flat_map(|line| {
+                let Line { id, glyph, text, hint, off, command, group, chosen } = line;
+                let colet = colet.clone();
+                let item = PopupMenuItem::element(move |_, cx| {
+                    div()
+                        .id(id.clone())
+                        .test_support()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .gap_4()
+                        .child(div().flex_1().child(text.clone()))
+                        .when_some(hint, |d, key| d.child(div().text_xs().text_color(cx.theme().muted_foreground).child(key)))
+                })
+                .when_some(glyph, |item, glyph| item.icon(crate::view::glyph(glyph)))
+                .disabled(off.is_some())
+                .checked(chosen)
+                .on_click(move |event: &ClickEvent, window, cx| {
+                    // "ごみ箱へ移動" with Shift held deletes outright, as Explorer's Delete does.
+                    let command = match &command {
+                        Command::Recycle if event.modifiers().shift => Command::Delete,
+                        command => command.clone(),
+                    };
+                    colet.update(cx, |this, cx| this.run_command(command, window, cx)).ok();
+                });
+                group.then(PopupMenuItem::separator).into_iter().chain([item])
+            })
+            .collect();
+        let menu = PopupMenu::build(window, cx, |menu, _, _| items.into_iter().fold(menu, |menu, item| menu.item(item)));
+        // Closed by Esc or a press outside it; a line picked closes the menu itself first.
+        let dismissed = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
+            if this.menu_view.is_some() {
+                this.close_menus(true, window, cx);
+            }
+        });
+        let focus = menu.focus_handle(cx);
+        focus.focus(window, cx);
+        self.menu_view = Some((menu, focus, dismissed));
+        cx.notify();
     }
 
-    /// The lines, drawn alike for both menus.
-    pub fn render_lines(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let p: Palette = self.palette;
-        let cursor = self.cursor;
-        let mut out = Vec::new();
-        for (i, line) in self.menu_lines().into_iter().enumerate() {
-            if line.group {
-                out.push(div().my_1().h(px(1.)).bg(p.border).into_any_element());
-            }
-            let lit = cursor == Some(i);
-            let command = line.command.clone();
-            out.push(
-                div()
-                    .id(line.id)
-                    .role(Role::MenuItem)
-                    .aria_label(line.text.clone())
-                    .h(px(28.))
-                    .px(px(10.))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .rounded(px(4.))
-                    .text_size(px(12.))
-                    .when(line.chosen, |d| d.text_color(p.accent))
-                    .when(lit, |d| d.bg(p.accent_fill).text_color(p.on_accent))
-                    // An item that is off fades; why it is off is there to be read, and does not.
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .when(line.off.is_some(), |d| d.opacity(0.45))
-                            .when_some(line.glyph, |d, glyph| {
-                                d.child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if lit { p.on_accent } else { p.text_muted }))
-                            })
-                            .child(div().flex_1().child(line.text)),
-                    )
-                    .when(line.chosen, |d| d.child(svg().path("icons/check.svg").size(px(14.)).text_color(if lit { p.on_accent } else { p.accent })))
-                    .when_some(line.off.filter(|why| !why.is_empty()), |d, why| d.child(div().text_color(p.text_muted).child(why)))
-                    // Off with no word, its key fades with it.
-                    .when(line.off == Some(""), |d| d.when_some(line.hint, |d, key| d.child(div().opacity(0.45).text_color(p.text_faint).child(key))))
-                    .when(line.off.is_none(), |d| {
-                        d.cursor_pointer()
-                            .hover(|d| d.bg(p.accent_fill).text_color(p.on_accent))
-                            .when_some(line.hint, |d, key| d.child(div().text_color(if lit { p.on_accent_muted } else { p.text_faint }).child(key)))
-                            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                                let command = match &command {
-                                    Command::Recycle if event.modifiers().shift => Command::Delete,
-                                    command => command.clone(),
-                                };
-                                this.run_command(command, window, cx)
-                            }))
-                    })
-                    .test_support()
-                    .into_any_element(),
-            );
-        }
-        out
+    /// The open menu has the keys.
+    pub fn menu_has_keys(&self, window: &Window, cx: &App) -> bool {
+        self.menu_view.as_ref().is_some_and(|(_, focus, _)| focus.contains_focused(window, cx))
+    }
+
+    /// The open menu, to lay out where it opened; Shift+F10 and the menu key close it, as they open it.
+    pub fn menu_element(&self, id: &'static str, label: &'static str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (menu, _, _) = self.menu_view.as_ref()?;
+        Some(
+            div()
+                .id(id)
+                .aria_label(label)
+                .key_context(crate::app::MENU)
+                .on_action(cx.listener(|this, _: &crate::app::CloseMenu, window, cx| this.close_menus(true, window, cx)))
+                .child(menu.clone())
+                .into_any_element(),
+        )
     }
 }

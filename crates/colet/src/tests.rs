@@ -1915,8 +1915,8 @@ fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) 
     let (fake, ui) = in_work(cx);
     ui.press(cx, "shift-f10");
     assert!(ui.read(cx, |v| v.menu().is_some()));
-    // From the keys, the first line is lit; ↓ passes over those that are off.
-    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
+    // ↓ lights the first line, then passes over those that are off.
+    ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "enter");
@@ -1927,11 +1927,6 @@ fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) 
     ui.press(cx, "escape");
     assert!(ui.read(cx, |v| v.menu().is_none()));
     assert!(ui.columns_focused(cx));
-    // ↑ goes round to the last line that is on.
-    ui.press(cx, "shift-f10");
-    ui.press(cx, "up");
-    let last = ui.read(cx, |v| v.menu_lines().iter().rposition(|l| l.off.is_none()));
-    assert_eq!(ui.read(cx, |v| v.cursor), last);
 }
 
 #[gpui_kit::test]
@@ -1939,7 +1934,6 @@ fn opens_the_file_menu_on_the_menu_key_and_closes_it_on_either_menu_key(cx: &mut
     let (_, ui) = in_work(cx);
     ui.press(cx, "menu");
     assert!(ui.read(cx, |v| v.menu().is_some()));
-    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
     ui.press(cx, "menu");
     assert!(ui.read(cx, |v| v.menu().is_none()));
     assert!(ui.columns_focused(cx));
@@ -1982,6 +1976,7 @@ fn opens_the_picked_files_together_from_enter_and_the_menu_passing_over_folders(
     // The menu's 開く does the same.
     ui.press(cx, "shift-f10");
     assert_eq!(ui.read(cx, |v| v.menu_lines()[0].off), None);
+    ui.press(cx, "down");
     ui.press(cx, "enter");
     assert_eq!(fake.opened.lock().unwrap().len(), 4);
     // Those that fail leave the rest to open, and are told of together.
@@ -2038,11 +2033,11 @@ fn picks_the_sort_order_by_keys(cx: &mut TestAppContext) {
     assert_eq!(ui.read(cx, |v| v.settings.sort), Order { by: Sort::Size, descending: false });
     assert!(!ui.read(cx, |v| v.sort_open()));
     assert!(ui.columns_focused(cx));
-    // From the button itself, the sort in use is lit.
+    // From the button itself, Enter opens it.
     let sort = ui.read(cx, |v| v.sort_focus.clone());
     ui.act(cx, |window, cx| sort.focus(window, cx));
     ui.press(cx, "enter");
-    assert_eq!(ui.read(cx, |v| v.cursor), Some(1));
+    assert!(ui.read(cx, |v| v.sort_open()));
     ui.press(cx, "escape");
     assert!(!ui.read(cx, |v| v.sort_open()));
     ui.press(cx, "enter");
@@ -2650,15 +2645,14 @@ fn chooses_a_filter_from_the_keys_and_hands_them_back_to_the_field(cx: &mut Test
     assert!(ui.search_field_focused(cx));
     ui.press(cx, "ctrl-shift-f");
     assert!(ui.read(cx, |v| v.filter_open()));
-    // The filter in use is lit: none yet.
-    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
+    // ↓ lights the first line, none, then goes on down.
+    ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "enter");
     assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
     assert!(ui.search_field_focused(cx));
     ui.press(cx, "ctrl-shift-f");
-    assert_eq!(ui.read(cx, |v| v.cursor), Some(2));
     ui.press(cx, "escape");
     assert!(!ui.read(cx, |v| v.filter_open()));
     assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
@@ -2838,13 +2832,13 @@ fn edits_the_search_field_from_its_menu(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn opens_a_fields_menu_from_the_keys_with_its_first_line_lit(cx: &mut TestAppContext) {
+fn opens_a_fields_menu_from_the_keys(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(Fake::default().with_results(vec![])));
     let search = ui.read(cx, |v| v.search.clone());
     ui.input(cx, "cat");
     ui.press(cx, "shift-f10");
     assert!(ui.read(cx, |v| v.text_menu().is_some()));
-    assert_eq!(ui.read(cx, |v| v.cursor), Some(0));
+    ui.press(cx, "down");
     // Down passes over what is off, to picking all.
     ui.press(cx, "down");
     ui.press(cx, "enter");

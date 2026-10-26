@@ -343,8 +343,6 @@ impl Colet {
                     None => point(px(this.sidebar_width(window)) + px(24.), px(140.)),
                 };
                 this.open_menu(this.state.active, None, at, window, cx);
-                // From the keys, the first line is lit.
-                this.move_cursor(1, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenItem, window, cx| {
                 let index = this.state.active;
@@ -1008,7 +1006,7 @@ impl Colet {
         let focused = self.search_focused;
         let has_query = !self.state.query.is_empty();
         let sort = self.settings.sort;
-        let sort_lines = if self.sort_open() { self.render_lines(cx) } else { Vec::new() };
+
         let sort_keyed = keyed(&self.sort_focus, window);
         let filter_button = self.filter_button(window, cx);
         div()
@@ -1077,7 +1075,7 @@ impl Colet {
                                 .id("sort")
                                 .track_focus(&self.sort_focus)
                                 .key_context(SORT)
-                                .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(true, window, cx)))
+                                .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(window, cx)))
                                 .role(Role::Button)
                                 .aria_label(format!("並び順: {}", sort.label()))
                                 .aria_expanded(self.sort_open())
@@ -1101,39 +1099,14 @@ impl Colet {
                                     if this.sort_open() {
                                         this.close_menus(true, window, cx);
                                     } else {
-                                        this.open_sort(false, window, cx);
+                                        this.open_sort(window, cx);
                                     }
                                 }))
                                 .test_support(),
                         ),
                     )
-                    .when(self.sort_open(), |d| {
-                        d.child(
-                            deferred(
-                                div()
-                                    .id("sort-menu")
-                                    .track_focus(&self.menu_focus)
-                                    .key_context(MENU)
-                                    .on_action(cx.listener(|this, _: &MenuUp, _, cx| this.move_cursor(-1, cx)))
-                                    .on_action(cx.listener(|this, _: &MenuDown, _, cx| this.move_cursor(1, cx)))
-                                    .on_action(cx.listener(|this, _: &MenuConfirm, window, cx| this.confirm_cursor(window, cx)))
-                                    .on_action(cx.listener(|this, _: &CloseMenu, window, cx| this.close_menus(true, window, cx)))
-                                    .absolute()
-                                    .top(px(36.))
-                                    .right_0()
-                                    .w(px(140.))
-                                    .p_1()
-                                    .bg(p.raised)
-                                    .border_1()
-                                    .border_color(p.border_strong)
-                                    .rounded(px(8.))
-                                    .shadow_lg()
-                                    .occlude()
-                                    .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menus(false, window, cx)))
-                                    .children(sort_lines),
-                            )
-                            .with_priority(1),
-                        )
+                    .when_some(self.menu_element("sort-menu", "並び順", cx).filter(|_| self.sort_open()), |d, menu| {
+                        d.child(deferred(div().absolute().top(px(36.)).right_0().w(px(160.)).child(menu)).with_priority(1))
                     }),
             )
             .child(
@@ -1158,7 +1131,6 @@ impl Colet {
         let p = self.palette;
         let focus = self.stop("search-filter", cx);
         let chosen = self.settings.filter.clone();
-        let lines = if self.filter_open() { self.render_lines(cx) } else { Vec::new() };
         let on = chosen.is_some();
         let label = format!("検索フィルター: {}", chosen.as_deref().unwrap_or("なし"));
         // In a narrow window its name gives way to the search field, down to the funnel and the chevron;
@@ -1174,7 +1146,7 @@ impl Colet {
                         .id("search-filter")
                         .track_focus(&focus)
                         .key_context(SORT)
-                        .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_filter_menu(true, window, cx)))
+                        .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_filter_menu(window, cx)))
                         .role(Role::Button)
                         .aria_label(label.clone())
                         .aria_expanded(self.filter_open())
@@ -1201,42 +1173,14 @@ impl Colet {
                             if this.filter_open() {
                                 this.close_menus(true, window, cx);
                             } else {
-                                this.open_filter_menu(false, window, cx);
+                                this.open_filter_menu(window, cx);
                             }
                         }))
                         .test_support(),
                 ),
             )
-            .when(self.filter_open(), |d| {
-                d.child(
-                    deferred(
-                        div()
-                            .id("search-filter-menu")
-                            .role(Role::Menu)
-                            .aria_label("検索フィルター")
-                            .track_focus(&self.menu_focus)
-                            .key_context(MENU)
-                            .on_action(cx.listener(|this, _: &MenuUp, _, cx| this.move_cursor(-1, cx)))
-                            .on_action(cx.listener(|this, _: &MenuDown, _, cx| this.move_cursor(1, cx)))
-                            .on_action(cx.listener(|this, _: &MenuConfirm, window, cx| this.confirm_cursor(window, cx)))
-                            .on_action(cx.listener(|this, _: &CloseMenu, window, cx| this.close_menus(true, window, cx)))
-                            .absolute()
-                            .top(px(36.))
-                            .right_0()
-                            .min_w(px(200.))
-                            .max_w(px(320.))
-                            .p_1()
-                            .bg(p.raised)
-                            .border_1()
-                            .border_color(p.border_strong)
-                            .rounded(px(8.))
-                            .shadow_lg()
-                            .occlude()
-                            .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menus(false, window, cx)))
-                            .children(lines),
-                    )
-                    .with_priority(1),
-                )
+            .when_some(self.menu_element("search-filter-menu", "検索フィルター", cx).filter(|_| self.filter_open()), |d, menu| {
+                d.child(deferred(div().absolute().top(px(36.)).right_0().min_w(px(200.)).max_w(px(320.)).child(menu)).with_priority(1))
             })
             .into_any_element()
     }
@@ -1906,7 +1850,7 @@ impl Render for Colet {
             .on_action(cx.listener(|this, _: &OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| {
                 if this.dialog.is_none() {
-                    this.open_filter_menu(true, window, cx);
+                    this.open_filter_menu(window, cx);
                 }
             }))
             // Esc puts down a drag in home, before the keys reach anything else.

@@ -322,11 +322,13 @@ pub struct Colet {
     /// The keys are in the column worked in: its focused row is ringed.
     pub keys_in_column: bool,
     pub popup: Option<Popup>,
-    /// Takes the keys while a menu is open.
+    /// Takes the keys while the trail's menu is open.
     pub menu_focus: FocusHandle,
+    /// The open menu's lines, drawn and picked by the component library, and the closing it tells of.
+    pub menu_view: Option<(Entity<gpui_kit::component::menu::PopupMenu>, FocusHandle, Subscription)>,
     /// The sort order's button, a stop for Tab.
     pub sort_focus: FocusHandle,
-    /// The line of the open menu the keys are on; none when the mouse opened it.
+    /// The line of the trail's menu the keys are on; none when the mouse opened it.
     pub cursor: Option<usize>,
     /// Where each crumb was drawn, by its column, and the row they stand in: the bar under them follows
     /// the columns on screen.
@@ -477,6 +479,7 @@ impl Colet {
             menu_focus: cx.focus_handle(),
             sort_focus: cx.focus_handle().tab_stop(true),
             cursor: None,
+            menu_view: None,
             focused_row: Default::default(),
             crumb_bounds: Default::default(),
             crumbs_row: Default::default(),
@@ -568,8 +571,9 @@ impl Colet {
             cx.defer(move |cx| {
                 cx.with_window(id, |window, cx| {
                     view.update(cx, |this, cx| {
-                        if this.popup.is_none() && this.menu_focus.is_focused(window) {
-                            this.close_menus(true, window, cx);
+                        if this.popup.is_none() && this.menu_view.is_some() {
+                            let keys = this.menu_has_keys(window, cx);
+                            this.close_menus(keys, window, cx);
                         }
                     }).ok();
                 });

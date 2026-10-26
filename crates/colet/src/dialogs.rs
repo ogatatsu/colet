@@ -540,46 +540,21 @@ impl Colet {
         };
         self.popup = Some(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
         self.cursor = None;
-        self.menu_focus.focus(window, cx);
-        cx.notify();
+        self.show_menu(window, cx);
     }
 
     /// The file menu, or a text field's, where it was opened; over a dialog too, for its fields'.
     pub fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let p = self.palette;
         let (at, id, label, width) = match self.popup.as_ref()? {
             Popup::File(menu) => (menu.at, "menu", "ファイル操作", 240.),
             Popup::Text(menu) => (menu.at, "text-menu", "編集", 200.),
             _ => return None,
         };
-        let lines = self.render_lines(cx);
+        let menu = self.menu_element(id, label, cx)?;
         Some(
-            deferred(
-                anchored().position(at).snap_to_window_with_margin(px(8.)).child(
-                    div()
-                        .id(id)
-                        .role(Role::Menu)
-                        .aria_label(label)
-                        .track_focus(&self.menu_focus)
-                        .key_context(crate::app::MENU)
-                        .on_action(cx.listener(|this, _: &crate::app::MenuUp, _, cx| this.move_cursor(-1, cx)))
-                        .on_action(cx.listener(|this, _: &crate::app::MenuDown, _, cx| this.move_cursor(1, cx)))
-                        .on_action(cx.listener(|this, _: &crate::app::MenuConfirm, window, cx| this.confirm_cursor(window, cx)))
-                        .on_action(cx.listener(|this, _: &crate::app::CloseMenu, window, cx| this.close_menus(true, window, cx)))
-                        .min_w(px(width))
-                        .p_1()
-                        .bg(p.raised)
-                        .border_1()
-                        .border_color(p.border_strong)
-                        .rounded(px(8.))
-                        .shadow_lg()
-                        .occlude()
-                        .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menus(true, window, cx)))
-                        .children(lines),
-                ),
-            )
-            .with_priority(2)
-            .into_any_element(),
+            deferred(anchored().position(at).snap_to_window_with_margin(px(8.)).child(div().min_w(px(width)).child(menu)))
+                .with_priority(2)
+                .into_any_element(),
         )
     }
 
