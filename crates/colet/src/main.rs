@@ -63,6 +63,7 @@ fn main() {
     let Some(instance) = instance::claim() else { return };
     application().with_assets(AppAssets).run(|cx| {
         init(cx);
+        theme::init(cx);
         app::bind_keys(cx);
         let live: backend::Shared = std::sync::Arc::new(backend::Live::default());
         let settings = live.load_settings();

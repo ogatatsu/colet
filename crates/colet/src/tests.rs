@@ -294,6 +294,7 @@ struct Ui {
 fn open(cx: &mut TestAppContext, fake: Arc<Fake>) -> Ui {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        crate::theme::init(cx);
         crate::app::bind_keys(cx);
     });
     let (window, view) = cx
@@ -1396,9 +1397,12 @@ fn fixes_the_theme_from_the_preferences_at_once_and_keeps_it(cx: &mut TestAppCon
     ui.click(cx, "preferences");
     ui.click(cx, ("theme", Theme::Dark as usize));
     assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::dark().bg);
+    // The components draw in it too.
+    assert!(cx.read(|cx| gpui_kit::component::Theme::global(cx).is_dark()));
     assert_eq!(fake.settings.lock().unwrap().theme, Theme::Dark);
     ui.click(cx, ("theme", Theme::Light as usize));
     assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::light().bg);
+    assert!(!cx.read(|cx| gpui_kit::component::Theme::global(cx).is_dark()));
     assert_eq!(fake.settings.lock().unwrap().theme, Theme::Light);
     // Back to following Windows, light here.
     ui.click(cx, ("theme", Theme::Dark as usize));

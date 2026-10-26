@@ -501,6 +501,7 @@ impl Colet {
             this.notify(problem, Tone::Error, cx);
         }
         this.palette.style_input(&this.search, cx);
+        crate::theme::apply(window, this.settings.theme, cx);
         let changed = this.clipboard_changed.clone();
         this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
         this.search.update(cx, |input, cx| input.focus(window, cx));
@@ -512,6 +513,7 @@ impl Colet {
     /// Takes the colors the theme now gives, in the fields too, the dialog's among them.
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
         self.palette = Palette::for_window(window, self.settings.theme);
+        crate::theme::apply(window, self.settings.theme, cx);
         let mut inputs = vec![self.search.clone()];
         inputs.extend(self.filters.values().map(|field| field.input.clone()));
         match &self.dialog {

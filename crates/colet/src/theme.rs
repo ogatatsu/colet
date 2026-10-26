@@ -1,7 +1,10 @@
 //! Colet's colors by role, dark and light, as Windows is set or as the settings fix them. The dark ones
 //! are the old app's; the light ones keep the same roles, hues and contrasts on a light ground.
+use std::rc::Rc;
+
 use gpui_kit::base::input::{InputEditorStyle, InputState};
-use gpui_kit::{App, Entity, Hsla, Window, WindowAppearance, hsla};
+use gpui_kit::component::{ThemeConfig, ThemeConfigColors, ThemeMode};
+use gpui_kit::{App, Entity, Hsla, Rgba, Window, WindowAppearance, hsla};
 
 use crate::settings::Theme;
 
@@ -130,13 +133,85 @@ impl Palette {
 
     /// The colors `theme` gives: its own, or for following Windows, those of the window's appearance.
     pub fn for_window(window: &Window, theme: Theme) -> Self {
-        match (theme, window.appearance()) {
-            (Theme::Light, _) => Self::light(),
-            (Theme::Dark, _) => Self::dark(),
-            (Theme::System, WindowAppearance::Dark | WindowAppearance::VibrantDark) => Self::dark(),
-            (Theme::System, _) => Self::light(),
-        }
+        if is_dark(window, theme) { Self::dark() } else { Self::light() }
     }
+
+    /// These roles as a theme for the component library, its other colors, hovers and presses among them,
+    /// following from these as the library's own do.
+    fn config(self, name: &'static str, mode: ThemeMode) -> ThemeConfig {
+        let mut colors = ThemeConfigColors::default();
+        for (role, color) in [
+            (&mut colors.background, self.bg),
+            (&mut colors.foreground, self.text),
+            (&mut colors.border, self.border),
+            (&mut colors.input, self.border_strong),
+            (&mut colors.muted, self.surface),
+            (&mut colors.muted_foreground, self.text_muted),
+            (&mut colors.accent, self.hover),
+            (&mut colors.accent_foreground, self.text),
+            (&mut colors.primary, self.accent_fill),
+            (&mut colors.primary_foreground, self.on_accent),
+            (&mut colors.secondary, self.raised),
+            (&mut colors.secondary_hover, self.raised_hover),
+            (&mut colors.secondary_foreground, self.text),
+            (&mut colors.danger, self.danger_fill),
+            (&mut colors.danger_foreground, self.on_accent),
+            (&mut colors.ring, self.focus),
+            (&mut colors.selection, self.selection),
+            (&mut colors.caret, self.text),
+            (&mut colors.link, self.accent),
+            (&mut colors.popover, self.raised),
+            (&mut colors.popover_foreground, self.text),
+            (&mut colors.list, self.surface),
+            (&mut colors.list_hover, self.hover),
+            (&mut colors.sidebar, self.sidebar),
+            (&mut colors.sidebar_foreground, self.text),
+            (&mut colors.sidebar_border, self.border),
+            (&mut colors.sidebar_accent, self.hover),
+            (&mut colors.sidebar_accent_foreground, self.text),
+            (&mut colors.sidebar_primary, self.accent_fill),
+            (&mut colors.sidebar_primary_foreground, self.on_accent),
+            (&mut colors.scrollbar_thumb, self.scrollbar),
+            (&mut colors.scrollbar_thumb_hover, self.text_muted),
+            (&mut colors.overlay, self.shade),
+        ] {
+            *role = Some(hex(color).into());
+        }
+        ThemeConfig { name: name.into(), mode, colors, ..Default::default() }
+    }
+}
+
+/// `#RRGGBBAA`, each channel rounded to the nearest of its 256 steps, as a theme file gives a color.
+fn hex(color: Hsla) -> String {
+    let Rgba { r, g, b, a } = color.into();
+    let [r, g, b, a] = [r, g, b, a].map(|channel| (channel * 255.).round() as u8);
+    format!("#{r:02X}{g:02X}{b:02X}{a:02X}")
+}
+
+/// Whether `theme` is dark: as it is set, or for following Windows, as the window's appearance is.
+fn is_dark(window: &Window, theme: Theme) -> bool {
+    match (theme, window.appearance()) {
+        (Theme::Light, _) => false,
+        (Theme::Dark, _) => true,
+        (Theme::System, WindowAppearance::Dark | WindowAppearance::VibrantDark) => true,
+        (Theme::System, _) => false,
+    }
+}
+
+/// Gives the component library Colet's colors, light and dark, so its components draw in them.
+pub fn init(cx: &mut App) {
+    let light = Rc::new(Palette::light().config("Colet Light", ThemeMode::Light));
+    let dark = Rc::new(Palette::dark().config("Colet Dark", ThemeMode::Dark));
+    gpui_kit::component::Theme::update(cx, |kit| {
+        kit.light_theme = light;
+        kit.dark_theme = dark;
+    });
+}
+
+/// Has the component library draw in the colors `theme` gives the window.
+pub fn apply(window: &Window, theme: Theme, cx: &mut App) {
+    let mode = if is_dark(window, theme) { ThemeMode::Dark } else { ThemeMode::Light };
+    gpui_kit::component::Theme::change(mode, None, cx);
 }
 
 #[cfg(test)]
@@ -177,6 +252,25 @@ mod tests {
             let paths = contrast(palette.text_muted, palette.bg);
             assert!(paths >= 4.5, "paths {paths}, dark: {dark}");
             assert!(palette.bg != palette.raised, "the paths' ground stands off the dialog, dark: {dark}");
+        }
+    }
+
+    #[test]
+    fn the_component_theme_takes_each_role_as_it_is() {
+        for (palette, mode) in [(Palette::light(), ThemeMode::Light), (Palette::dark(), ThemeMode::Dark)] {
+            let config = palette.config("test", mode);
+            let colors = &config.colors;
+            for (given, role) in [
+                (&colors.background, palette.bg),
+                (&colors.foreground, palette.text),
+                (&colors.primary, palette.accent_fill),
+                (&colors.ring, palette.focus),
+                (&colors.scrollbar_thumb, palette.scrollbar),
+                (&colors.overlay, palette.shade),
+            ] {
+                let given = gpui_kit::component::try_parse_color(given.as_deref().unwrap()).unwrap();
+                assert_eq!(hex(given), hex(role), "{mode:?}");
+            }
         }
     }
 
