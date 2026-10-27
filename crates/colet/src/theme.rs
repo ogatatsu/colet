@@ -147,7 +147,8 @@ impl Palette {
             (&mut colors.input, self.border_strong),
             (&mut colors.muted, self.surface),
             (&mut colors.muted_foreground, self.text_muted),
-            (&mut colors.accent, self.hover),
+            // The menus light their lines with it, over the popover's raised surface.
+            (&mut colors.accent, self.raised_hover),
             (&mut colors.accent_foreground, self.text),
             (&mut colors.primary, self.accent_fill),
             (&mut colors.primary_foreground, self.on_accent),
