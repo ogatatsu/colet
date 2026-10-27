@@ -1,6 +1,8 @@
 //! File operations as Colet asks for them: a paste from the clipboard, sending to the Recycle Bin or
 //! deleting outright, a rename, a new folder. Checked here, carried out by the shell with its own dialogs.
 use std::collections::HashSet;
+use std::ffi::OsString;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -10,7 +12,7 @@ use std::sync::{
 use windows::Win32::Foundation::E_ABORT;
 use windows::core::HRESULT;
 
-use crate::paths::child;
+use crate::paths::{child, path_key};
 use crate::shell::{self, Dropped, Item, Operation, Owner, clipboard};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,9 +44,9 @@ impl Kind {
 pub struct Request {
     pub kind: Kind,
     /// What it acts on; a paste takes them from the clipboard.
-    pub paths: Vec<String>,
+    pub paths: Vec<PathBuf>,
     /// Where a paste goes, or where a new folder is made.
-    pub destination: String,
+    pub destination: PathBuf,
     /// A rename's new name, or the new folder's.
     pub name: String,
 }
@@ -52,22 +54,22 @@ pub struct Request {
 /// How one item ended, or where a copy or move put it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Done { path: String },
-    Failed { path: String, error: String },
+    Done { path: PathBuf },
+    Failed { path: PathBuf, error: String },
     /// Passed over at the user's word, as from a name clash.
-    Skipped { path: String },
+    Skipped { path: PathBuf },
     /// Stopped at the user's word.
-    Cancelled { path: String },
+    Cancelled { path: PathBuf },
     /// Where the last item went, which a name clash may have renamed.
-    Placed { path: String },
+    Placed { path: PathBuf },
     /// The last item done was deleted outright, not sent to the Recycle Bin.
-    Destroyed { path: String },
+    Destroyed { path: PathBuf },
     /// The last item done is no longer where it was: moved, renamed or deleted. A copy's
     /// source stays, and a new folder was nowhere before.
-    Left { path: String },
+    Left { path: PathBuf },
     /// Handed to the shell, which writes it out on its own and tells nothing back: where it goes by the
     /// name it was given, which a name clash may change.
-    Handed { path: String },
+    Handed { path: PathBuf },
 }
 
 /// What an operation the user stopped fails with.
@@ -119,69 +121,72 @@ fn valid_name(name: &str) -> bool {
     !name.trim().is_empty() && name_problem(name, true).is_none() && name != "." && name != ".."
 }
 
-fn absolute(path: &str) -> Result<PathBuf, String> {
-    if path.contains('\0') || !Path::new(path).is_absolute() {
+fn absolute(path: &Path) -> Result<&Path, String> {
+    if path.as_os_str().as_encoded_bytes().contains(&0) || !path.is_absolute() {
         return Err("絶対パスを指定してください".into());
     }
-    Ok(PathBuf::from(path))
+    Ok(path)
 }
 
 /// The real path, for telling whether a folder lies inside another.
-fn normalized(path: &Path) -> Result<String, String> {
-    Ok(std::fs::canonicalize(path).map_err(|e| e.to_string())?.to_string_lossy().trim_end_matches('\\').to_lowercase())
+fn normalized(path: &Path) -> Result<OsString, String> {
+    Ok(path_key(&std::fs::canonicalize(path).map_err(|e| e.to_string())?))
 }
 
 /// Drops paths given twice and those inside another given, so nothing is acted on twice. Compares the
 /// paths as written: their targets may not exist, as for a broken junction. Each path's folders are looked
 /// up among the others, so a selection of thousands is not compared pair by pair.
-fn collapse(paths: Vec<String>) -> Result<Vec<String>, String> {
+fn collapse(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
     let keys = paths
         .iter()
         .map(|p| {
             let path = std::path::absolute(absolute(p)?).map_err(|e| e.to_string())?;
-            Ok(path.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_lowercase())
+            let separated: Vec<u16> = path.as_os_str().encode_wide().map(|c| if c == u16::from(b'/') { u16::from(b'\\') } else { c }).collect();
+            Ok(path_key(Path::new(&OsString::from_wide(&separated))))
         })
-        .collect::<Result<Vec<String>, String>>()?;
-    let all: HashSet<&str> = keys.iter().map(String::as_str).collect();
+        .collect::<Result<Vec<OsString>, String>>()?;
+    let all: HashSet<&[u8]> = keys.iter().map(|key| key.as_encoded_bytes()).collect();
     let mut seen = HashSet::new();
     Ok(paths
         .into_iter()
         .zip(&keys)
         .filter(|(_, key)| {
-            let inside = key.match_indices('\\').any(|(at, _)| at > 0 && all.contains(&key[..at]));
-            !inside && seen.insert(key.as_str())
+            let key = key.as_encoded_bytes();
+            let inside = key.iter().enumerate().any(|(at, &b)| b == b'\\' && at > 0 && all.contains(&key[..at]));
+            !inside && seen.insert(key)
         })
         .map(|(p, _)| p)
         .collect())
 }
 
 /// A folder cannot go into itself or what it holds.
-fn check_destination(paths: &[String], destination: &str) -> Result<(), String> {
+fn check_destination(paths: &[PathBuf], destination: &Path) -> Result<(), String> {
     let target = absolute(destination)?;
     if !target.is_dir() {
         return Err("貼り付け先がフォルダーではありません".into());
     }
-    let destination = normalized(&target)?;
+    let destination = normalized(target)?;
     for source in paths {
         let path = absolute(source)?;
-        let source = normalized(&path)?;
-        if path.is_dir() && (destination == source || destination.starts_with(&format!("{source}\\"))) {
+        let source = normalized(path)?;
+        let below = destination.as_encoded_bytes().strip_prefix(source.as_encoded_bytes()).is_some_and(|rest| rest.starts_with(b"\\"));
+        if path.is_dir() && (destination == source || below) {
             return Err("フォルダー自身やその子孫にはコピー・移動できません".into());
         }
     }
     Ok(())
 }
 
-fn in_folder(path: &str, folder: &str) -> Result<bool, String> {
+fn in_folder(path: &Path, folder: &Path) -> Result<bool, String> {
     let Some(parent) = absolute(path)?.parent().map(Path::to_path_buf) else { return Ok(false) };
-    Ok(normalized(&parent)? == normalized(&absolute(folder)?)?)
+    Ok(normalized(&parent)? == normalized(absolute(folder)?)?)
 }
 
 /// The request as the shell takes it.
 #[derive(Debug)]
 struct Prepared {
     operation: Operation,
-    paths: Vec<String>,
+    paths: Vec<PathBuf>,
     /// A copy of items into their own folder, which the shell names " - コピー" as Explorer does.
     rename: bool,
     /// A paste of cut files, with the clipboard's sequence number as read.
@@ -272,7 +277,7 @@ pub fn run(request: Request, owner: Owner, report: impl FnMut(Event) + Send + 's
     if let Some(sequence) = prepared.cut
         && result.is_ok()
         && !failed
-        && prepared.paths.iter().all(|p| !Path::new(p).exists())
+        && prepared.paths.iter().all(|p| !p.exists())
     {
         clipboard::complete(sequence);
     }
@@ -282,7 +287,7 @@ pub fn run(request: Request, owner: Owner, report: impl FnMut(Event) + Send + 's
 /// A paste of shell items with no path, as from a ZIP folder or a phone, which the shell reads from the
 /// clipboard itself. A cut is let go of once every item went, as there is no path to look for them by.
 fn paste_items(
-    destination: String,
+    destination: PathBuf,
     files: clipboard::ClipboardFiles,
     owner: Owner,
     report: impl FnMut(Event) + Send + 'static,
@@ -300,7 +305,7 @@ fn paste_items(
 /// A paste of what is given only by its contents, as Outlook's attachments: dropped on the folder for the
 /// shell to write out, as Explorer pastes it. Its items are told only by the names they were given.
 fn paste_contents(
-    destination: String,
+    destination: PathBuf,
     files: clipboard::ClipboardFiles,
     owner: Owner,
     mut report: impl FnMut(Event) + Send + 'static,
@@ -378,33 +383,43 @@ fn outcome(result: windows::core::Result<()>, failed: bool) -> Result<(), String
 mod tests {
     use super::*;
 
-    fn request(kind: Kind, paths: Vec<String>, destination: &Path, name: &str) -> Request {
-        Request { kind, paths, destination: destination.display().to_string(), name: name.into() }
+    fn request(kind: Kind, paths: Vec<PathBuf>, destination: &Path, name: &str) -> Request {
+        Request { kind, paths, destination: destination.to_owned(), name: name.into() }
     }
 
-    fn files(paths: Vec<String>, cut: bool) -> impl FnOnce() -> Result<clipboard::ClipboardFiles, String> {
+    fn files(paths: Vec<PathBuf>, cut: bool) -> impl FnOnce() -> Result<clipboard::ClipboardFiles, String> {
         move || Ok(clipboard::ClipboardFiles { paths, cut, sequence: 1, ..Default::default() })
+    }
+
+    fn all(paths: &[&str]) -> Vec<PathBuf> {
+        paths.iter().map(PathBuf::from).collect()
     }
 
     #[test]
     fn collapses_duplicates_and_what_lies_inside_another() {
         let paths = [r"D:\parent\child", r"D:\parent", r"d:/PARENT/", r"D:\parent-other", r"D:\sibling\..\parent"];
-        assert_eq!(collapse(paths.iter().map(|p| p.to_string()).collect()).unwrap(), [r"D:\parent", r"D:\parent-other"]);
+        assert_eq!(collapse(all(&paths)).unwrap(), all(&[r"D:\parent", r"D:\parent-other"]));
         let shares = [r"\\server\share\a\b", r"\\SERVER\share\a", r"\\server\share-other\a", r"D:\", r"D:\anything"];
-        assert_eq!(
-            collapse(shares.iter().map(|p| p.to_string()).collect()).unwrap(),
-            [r"\\SERVER\share\a", r"\\server\share-other\a", r"D:\"]
-        );
+        assert_eq!(collapse(all(&shares)).unwrap(), all(&[r"\\SERVER\share\a", r"\\server\share-other\a", r"D:\"]));
+    }
+
+    #[test]
+    fn keeps_apart_a_name_that_is_not_text_and_its_replacement() {
+        let folder = Path::new(r"D:\folder");
+        let odd = crate::paths::tests::unpaired(folder, "a");
+        let real = folder.join("a\u{FFFD}X");
+        assert_eq!(collapse(vec![odd.clone(), real.clone()]).unwrap(), [odd.clone(), real]);
+        assert_eq!(collapse(vec![odd.clone(), crate::paths::child(&odd, "inner")]).unwrap(), [odd]);
     }
 
     #[test]
     fn collapses_a_selection_of_thousands_at_once() {
         // Pair by pair, these would be 400 million comparisons before the shell is asked anything.
-        let siblings: Vec<String> = (0..20_000).map(|i| format!(r"D:\folder\{i:05}.txt")).collect();
+        let siblings: Vec<PathBuf> = (0..20_000).map(|i| format!(r"D:\folder\{i:05}.txt").into()).collect();
         assert_eq!(collapse(siblings.clone()).unwrap().len(), 20_000);
         let mut inside = siblings;
         inside.push(r"D:\folder".into());
-        assert_eq!(collapse(inside).unwrap(), [r"D:\folder"]);
+        assert_eq!(collapse(inside).unwrap(), all(&[r"D:\folder"]));
     }
 
     #[test]
@@ -416,8 +431,8 @@ mod tests {
         let (x, y) = (a.join("x.txt"), b.join("y.txt"));
         std::fs::write(&x, "").unwrap();
         std::fs::write(&y, "").unwrap();
-        let p = |p: &Path| p.display().to_string();
-        let paste = |paths: Vec<String>, cut: bool, folder: &Path| {
+        let p = |p: &Path| p.to_owned();
+        let paste = |paths: Vec<PathBuf>, cut: bool, folder: &Path| {
             prepare(request(Kind::Paste, vec![], folder, ""), files(paths, cut)).unwrap()
         };
         assert!(paste(vec![p(&x)], false, &a).rename);
@@ -435,7 +450,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let child = dir.path().join("child");
         std::fs::create_dir(&child).unwrap();
-        let p = dir.path().display().to_string();
+        let p = dir.path().to_owned();
         assert!(prepare(request(Kind::Paste, vec![], &child, ""), files(vec![p.clone()], false)).is_err());
         assert!(prepare(request(Kind::Recycle, vec![r"C:\".into()], dir.path(), ""), files(vec![], false)).is_err());
         for name in ["..", "CON", "a/b", "a ", "a.", "LPT1", "a:b", ""] {
@@ -478,7 +493,7 @@ mod tests {
         shell::fixtures::zip(&archive, "inner.txt", b"zipped");
         let out = dir.path().join("out");
         std::fs::create_dir(&out).unwrap();
-        shell::fixtures::put_on_clipboard(&format!(r"{}\inner.txt", archive.display()));
+        shell::fixtures::put_on_clipboard(&archive.join("inner.txt"));
         // Clipboard history and the like open it as it changes: let them be done with it.
         std::thread::sleep(std::time::Duration::from_millis(500));
         let files = clipboard::read_files().unwrap();
@@ -489,7 +504,7 @@ mod tests {
         assert_eq!(std::fs::read(out.join("inner.txt")).unwrap(), b"zipped");
         let events = events.lock().unwrap();
         assert!(matches!(&events[0], Event::Done { path } if path.ends_with(r"archive.zip\inner.txt")), "{events:?}");
-        assert_eq!(events[1], Event::Placed { path: out.join("inner.txt").display().to_string() });
+        assert_eq!(events[1], Event::Placed { path: out.join("inner.txt") });
         assert_eq!(events.len(), 2, "{events:?}");
     }
 
@@ -506,9 +521,9 @@ mod tests {
             let events = events.lock().unwrap().clone();
             (events, files)
         });
-        assert_eq!((files.paths.len(), files.items, files.contents), (0, false, vec!["添付.txt".to_owned()]));
+        assert_eq!((files.paths.len(), files.items, files.contents), (0, false, vec![OsString::from("添付.txt")]));
         assert_eq!(std::fs::read(dir.path().join("添付.txt")).unwrap(), b"attached");
-        assert_eq!(events, [Event::Handed { path: dir.path().join("添付.txt").display().to_string() }]);
+        assert_eq!(events, [Event::Handed { path: dir.path().join("添付.txt") }]);
     }
 
     #[test]
@@ -521,16 +536,16 @@ mod tests {
         run(request(Kind::NewFolder, vec![], dir.path(), "child"), 0, record.clone()).unwrap();
         let child = dir.path().join("child");
         assert!(child.is_dir());
-        run(request(Kind::Rename, vec![child.display().to_string()], dir.path(), "renamed"), 0, record.clone()).unwrap();
+        run(request(Kind::Rename, vec![child.clone()], dir.path(), "renamed"), 0, record.clone()).unwrap();
         let renamed = dir.path().join("renamed");
         assert!(renamed.is_dir());
-        run(request(Kind::Recycle, vec![renamed.display().to_string()], dir.path(), ""), 0, record).unwrap();
+        run(request(Kind::Recycle, vec![renamed.clone()], dir.path(), ""), 0, record).unwrap();
         assert!(!renamed.exists());
         let events = events.lock().unwrap();
         let done = events.iter().filter(|e| matches!(e, Event::Done { .. })).count();
         let left: Vec<_> = events.iter().filter_map(|e| if let Event::Left { path } = e { Some(path) } else { None }).collect();
         assert_eq!((done, events.len()), (3, 5), "{events:?}");
         // The new folder was nowhere before; the renamed one and the one sent to the bin left.
-        assert_eq!(left, [&child.display().to_string(), &renamed.display().to_string()]);
+        assert_eq!(left, [&child, &renamed]);
     }
 }

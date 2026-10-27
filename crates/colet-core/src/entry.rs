@@ -1,14 +1,25 @@
 //! An item as a column lists it, and the orders they come in.
-use std::{cmp::Ordering, ops::Range, os::windows::fs::MetadataExt, path::Path, time::UNIX_EPOCH};
+use std::{
+    cmp::Ordering,
+    ffi::OsString,
+    ops::Range,
+    os::windows::fs::MetadataExt,
+    path::{Path, PathBuf},
+    time::UNIX_EPOCH,
+};
 
 use windows::Win32::UI::Shell::StrCmpLogicalW;
 
+use crate::paths::{path_key, shown};
 use crate::wide::Wide;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
-    pub path: String,
+    /// The item as the OS names it: what it is found and acted on by.
+    pub path: PathBuf,
+    /// What is shown of its name, and searched and sorted by.
     pub name: String,
+    /// What is shown of the folder it is in.
     pub parent: String,
     pub directory: bool,
     pub size: Option<u64>,
@@ -68,12 +79,12 @@ impl Entry {
 
     pub fn from_metadata(path: &Path, metadata: &std::fs::Metadata) -> Self {
         Self {
-            path: path.to_string_lossy().into_owned(),
+            path: path.to_owned(),
             name: path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.display().to_string()),
-            parent: path.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+                .unwrap_or_else(|| shown(path)),
+            parent: path.parent().map(shown).unwrap_or_default(),
             directory: metadata.is_dir(),
             size: (!metadata.is_dir()).then_some(metadata.len()),
             modified: metadata
@@ -87,7 +98,7 @@ impl Entry {
     }
 
     /// A folder known by its path alone, such as a drive.
-    pub fn folder(path: &str, name: &str) -> Self {
+    pub fn folder(path: impl Into<PathBuf>, name: &str) -> Self {
         Self {
             path: path.into(),
             name: name.into(),
@@ -167,7 +178,7 @@ struct Key {
     file: bool,
     rank: Option<u64>,
     name: ExplorerName,
-    path: String,
+    path: OsString,
 }
 
 impl Ord for Key {
@@ -215,7 +226,7 @@ pub fn sort_entries(entries: &mut [Entry], order: Order) {
             Sort::Modified => e.modified,
         },
         name: ExplorerName(Wide::new(&e.name)),
-        path: e.path.to_lowercase(),
+        path: path_key(&e.path),
     });
 }
 
@@ -288,7 +299,7 @@ mod tests {
     #[test]
     fn names_sort_as_explorer_orders_them_numbers_by_value_and_widths_and_kana_alike() {
         let entry = |name: &str| Entry {
-            path: format!(r"C:\{name}"),
+            path: format!(r"C:\{name}").into(),
             name: name.into(),
             parent: String::new(),
             directory: false,

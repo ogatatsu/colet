@@ -2,7 +2,7 @@
 //! and the status bar beside it.
 use std::{ops::Range, rc::Rc, time::Instant};
 
-use colet_core::{entry::Entry, paths::{folder_name, path_key}, time};
+use colet_core::{entry::Entry, paths::{folder_name, id_text, path_key, shown}, time};
 use gpui_kit::base::input::{self, Input};
 use gpui_kit::component::{button::{Button, ButtonVariants}, status_bar::StatusBar, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -434,7 +434,7 @@ impl Colet {
             })
         });
         div()
-            .id(SharedString::from(entry.path.clone()))
+            .id(SharedString::from(id_text(&entry.path)))
             // Like Finder, the selection stays: the menu acts on the row clicked, or the whole selection if
             // that is part of it.
             .on_mouse_down(
@@ -533,7 +533,7 @@ impl Colet {
             .when(held, |r| {
                 r.child(
                     div()
-                        .id(SharedString::from(format!("held:{}", entry.path)))
+                        .id(SharedString::from(format!("held:{}", id_text(&entry.path))))
                         .tip(if cut { "切り取り中" } else { "コピー中" })
                         .child(icon(if cut { "scissors" } else { "copy" }, 12., if lit { p.on_accent_muted } else if cut { p.text_faint } else { p.accent }))
                         .test_support(),
@@ -734,7 +734,7 @@ impl Colet {
         // Shift and the wheel send the columns sideways; the rows under it stay put. A list has no
         // builder for this, as a div has.
         list.style().restrict_scroll_to_axis = Some(true);
-        let title = self.state.columns[index].title().to_owned();
+        let title = self.state.columns[index].title().into_owned();
         div()
             .id(("rows", id))
             .role(Role::ListBox)
@@ -789,7 +789,7 @@ impl Colet {
             Kind::Search => (self.widths.search, WidthOf::Search),
             _ => (self.widths.column, WidthOf::Column),
         };
-        let title = c.title().to_owned();
+        let title = c.title().into_owned();
         let header_title = title.clone();
         let count = match &c.filter {
             _ if c.error.is_some() || c.unread() => String::new(),
@@ -798,7 +798,7 @@ impl Colet {
         };
         let filtering = c.filter.as_ref().is_some_and(|f| !f.text.is_empty());
         let field = self.filters.get(&id).map(|field| field.input.clone());
-        let path = c.path.clone();
+        let path = shown(&c.path);
         let star_path = c.path.clone();
         let body = self.column_body(index, marked, cx);
         div()
@@ -1199,7 +1199,7 @@ impl Colet {
             crumbs.push((1, "検索結果".into(), searched));
         }
         for (index, c) in self.state.columns.iter().enumerate().filter(|(_, c)| c.kind == Kind::Folder) {
-            crumbs.push((index, folder_name(&c.path).to_owned(), c.path.clone()));
+            crumbs.push((index, shown(folder_name(&c.path)), shown(&c.path)));
         }
         let active = self.state.active;
         // Each crumb's whole width as drawn: its 12px name, padding, the search icon on the results' own,
@@ -1554,7 +1554,7 @@ impl Colet {
         let history = self.history_button(cx);
         let active = &self.state.columns[self.state.active];
         let place = match active.kind {
-            Kind::Folder => active.path.clone(),
+            Kind::Folder => shown(&active.path),
             Kind::Search if active.error.is_some() => "検索できません".into(),
             Kind::Search if active.unread() => "検索中…".into(),
             Kind::Search => "検索結果".into(),

@@ -95,7 +95,8 @@ pub struct Settings {
     pub search_width: f32,
     /// Home's pane on the left.
     pub sidebar_width: f32,
-    pub favorites: Vec<String>,
+    #[serde(with = "favorites")]
+    pub favorites: Vec<PathBuf>,
     pub saved_searches: Vec<SavedSearch>,
     pub filters: Vec<SearchFilter>,
     /// The filter the next search is narrowed by, by name.
@@ -147,7 +148,7 @@ impl Settings {
         let mut seen = std::collections::HashSet::new();
         self.saved_searches.retain(|s| !s.query.trim().is_empty() && seen.insert((s.query.clone(), s.filter.clone())));
         let mut seen = std::collections::HashSet::new();
-        self.favorites.retain(|f| !f.is_empty() && seen.insert(colet_core::paths::path_key(f)));
+        self.favorites.retain(|f| !f.as_os_str().is_empty() && seen.insert(colet_core::paths::path_key(f)));
         if self.window.is_some_and(|w| !(w.width >= 200. && w.height >= 150.)) {
             self.window = None;
         }
@@ -162,9 +163,48 @@ impl Settings {
         self.filters.iter().find(|f| f.name == name).map(|f| f.query.as_str())
     }
 
-    pub fn is_favorite(&self, path: &str) -> bool {
+    pub fn is_favorite(&self, path: &Path) -> bool {
         let key = colet_core::paths::path_key(path);
         self.favorites.iter().any(|f| colet_core::paths::path_key(f) == key)
+    }
+}
+
+/// The favorites, each as its path's text; one whose path is not text (an unpaired surrogate, which
+/// Windows allows in a name) as `{"utf16": [...]}`, the units Windows holds, so it still names that folder
+/// alone. One read neither way (a file edited by hand) is left out alone.
+mod favorites {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    use super::*;
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum Kept {
+        Text(String),
+        Wide { utf16: Vec<u16> },
+    }
+
+    pub fn serialize<S: Serializer>(paths: &[PathBuf], serializer: S) -> Result<S::Ok, S::Error> {
+        let kept: Vec<Kept> = paths
+            .iter()
+            .map(|path| match path.to_str() {
+                Some(text) => Kept::Text(text.to_owned()),
+                None => Kept::Wide { utf16: path.as_os_str().encode_wide().collect() },
+            })
+            .collect();
+        kept.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<PathBuf>, D::Error> {
+        let values = Vec::<serde_json::Value>::deserialize(deserializer)?;
+        Ok(values
+            .into_iter()
+            .filter_map(|value| match serde_json::from_value(value).ok()? {
+                Kept::Text(text) => Some(PathBuf::from(text)),
+                Kept::Wide { utf16 } => Some(OsString::from_wide(&utf16).into()),
+            })
+            .collect())
     }
 }
 
@@ -314,7 +354,7 @@ mod tests {
         let gate = Mutex::new((started, released));
         let target = path.clone();
         let saver = Saver::new(move |settings| {
-            if settings.favorites == ["older"] {
+            if settings.favorites == [PathBuf::from("older")] {
                 let gate = gate.lock().unwrap();
                 gate.0.send(()).unwrap();
                 gate.1.recv().unwrap();
@@ -329,7 +369,7 @@ mod tests {
         release.send(()).unwrap();
         written(older).unwrap();
         written(latest).unwrap();
-        assert_eq!(load_from(&path).unwrap().favorites, ["latest"]);
+        assert_eq!(load_from(&path).unwrap().favorites, [PathBuf::from("latest")]);
     }
 
     #[test]
@@ -337,16 +377,30 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{"column_width":300,"favorites":["D:\\"]}"#).unwrap();
         assert_eq!(settings.column_width, 300.);
         assert_eq!(settings.sidebar_width, 240.);
-        assert_eq!(settings.favorites, [r"D:\"]);
+        assert_eq!(settings.favorites, [PathBuf::from(r"D:\")]);
         assert!(settings.saved_searches.is_empty());
         // One written before the theme could be chosen follows Windows.
         assert_eq!(settings.theme, Theme::System);
     }
 
     #[test]
+    fn keeps_a_favorite_whose_path_is_not_text_as_it_is() {
+        use std::os::windows::ffi::OsStringExt;
+        let wide: Vec<u16> = r"D:\a".encode_utf16().chain([0xD800]).collect();
+        let odd = PathBuf::from(std::ffi::OsString::from_wide(&wide));
+        let settings = Settings { favorites: vec![PathBuf::from(r"D:\b"), odd.clone()], ..Settings::default() };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#""favorites":["D:\\b",{"utf16":[68,58,92,97,55296]}]"#), "{json}");
+        assert_eq!(serde_json::from_str::<Settings>(&json).unwrap().favorites, [PathBuf::from(r"D:\b"), odd]);
+        // One read neither way is left out alone.
+        let settings: Settings = serde_json::from_str(r#"{"favorites":[1,"D:\\c"]}"#).unwrap();
+        assert_eq!(settings.favorites, [PathBuf::from(r"D:\c")]);
+    }
+
+    #[test]
     fn reads_a_file_that_still_names_an_everything_instance() {
         let settings: Settings = serde_json::from_str(r#"{"instance":"1.5a","favorites":["D:\\"]}"#).unwrap();
-        assert_eq!(settings.favorites, [r"D:\"]);
+        assert_eq!(settings.favorites, [PathBuf::from(r"D:\")]);
         assert!(!serde_json::to_string(&settings).unwrap().contains("instance"));
     }
 
@@ -370,7 +424,7 @@ mod tests {
     fn sorts_by_name_from_a_to_z_when_the_file_keeps_no_order() {
         let settings: Settings = serde_json::from_str(r#"{"favorites":["D:\\"]}"#).unwrap();
         assert_eq!(settings.sort, Order::default());
-        assert_eq!(settings.favorites, [r"D:\"]);
+        assert_eq!(settings.favorites, [PathBuf::from(r"D:\")]);
     }
 
     #[test]
@@ -399,12 +453,12 @@ mod tests {
         let search = |name: &str, query: &str| SavedSearch { name: name.into(), query: query.into(), filter: None };
         let mut settings = Settings {
             saved_searches: vec![search("PDF", "ext:pdf"), search("", "  "), search("again", "ext:pdf"), search("", "dm:today")],
-            favorites: vec![r"D:\Work".into(), r"d:\work".into(), String::new()],
+            favorites: vec![r"D:\Work".into(), r"d:\work".into(), PathBuf::new()],
             ..Settings::default()
         };
         settings.normalize();
         assert_eq!(settings.saved_searches, [search("PDF", "ext:pdf"), search("", "dm:today")]);
-        assert_eq!(settings.favorites, [r"D:\Work"]);
+        assert_eq!(settings.favorites, [PathBuf::from(r"D:\Work")]);
         assert_eq!(settings.saved_searches[1].label(), "dm:today");
     }
 

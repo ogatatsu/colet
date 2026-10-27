@@ -1,7 +1,7 @@
 //! Searching through Everything 1.5's SDK, which is compiled in from `vendor/everything-sdk3`.
 use std::{
     ffi::c_void,
-    path::Path,
+    path::PathBuf,
     ptr,
     sync::{Arc, atomic::{AtomicBool, AtomicU32, Ordering}},
     thread::JoinHandle,
@@ -10,6 +10,7 @@ use std::{
 
 use crate::{
     entry::{Entry, Marks, Order, Sort, marked},
+    paths::{from_wide, shown},
     wide::Wide,
 };
 
@@ -86,7 +87,7 @@ const ROOTS: usize = 1000;
 
 /// The folders Everything's index starts from (`root:`): its volumes, as `C:`, and the folders and shares
 /// added to it. Asked on a client of its own and let go, so the last search and its watch are left alone.
-pub fn roots() -> Result<Vec<String>, String> {
+pub fn roots() -> Result<Vec<PathBuf>, String> {
     unsafe {
         let client = open(None);
         if client.is_null() {
@@ -98,7 +99,7 @@ pub fn roots() -> Result<Vec<String>, String> {
     }
 }
 
-unsafe fn indexed_roots(client: Handle) -> Result<Vec<String>, String> {
+unsafe fn indexed_roots(client: Handle) -> Result<Vec<PathBuf>, String> {
     unsafe {
         if Everything3_IsDBLoaded(client) == 0 {
             return Err("Everythingの索引を準備中です".into());
@@ -116,7 +117,7 @@ unsafe fn indexed_roots(client: Handle) -> Result<Vec<String>, String> {
         } else {
             let count = Everything3_GetResultListViewportCount(result);
             let roots = (0..count)
-                .map(|index| text(|buf, size| Everything3_GetResultFullPathNameW(result, index, buf, size)))
+                .map(|index| from_wide(&wide(|buf, size| Everything3_GetResultFullPathNameW(result, index, buf, size))))
                 .collect();
             Everything3_DestroyResultList(result);
             Ok(roots)
@@ -406,13 +407,20 @@ impl SearchSession {
     }
 }
 
-/// A result's text, which the SDK writes as UTF-16 into a buffer it first says the length of.
-unsafe fn text(write: impl Fn(*mut u16, usize) -> usize) -> String {
+/// A result's text as UTF-16, which the SDK writes into a buffer it first says the length of, up to its
+/// NUL.
+unsafe fn wide(write: impl Fn(*mut u16, usize) -> usize) -> Vec<u16> {
     let length = write(ptr::null_mut(), 0);
     let mut buffer = vec![0u16; length + 1];
     write(buffer.as_mut_ptr(), buffer.len());
     let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
-    String::from_utf16_lossy(&buffer[..end])
+    buffer.truncate(end);
+    buffer
+}
+
+/// A result's text, for what is shown.
+unsafe fn text(write: impl Fn(*mut u16, usize) -> usize) -> String {
+    String::from_utf16_lossy(&unsafe { wide(write) })
 }
 
 unsafe fn read(result: Handle, offset: usize) -> Page {
@@ -421,15 +429,15 @@ unsafe fn read(result: Handle, offset: usize) -> Page {
         let count = Everything3_GetResultListViewportCount(result);
         let mut entries = Vec::with_capacity(count);
         for index in 0..count {
-            let path = text(|buf, size| Everything3_GetResultFullPathNameW(result, index, buf, size));
+            let path = from_wide(&wide(|buf, size| Everything3_GetResultFullPathNameW(result, index, buf, size)));
             let highlighted =
                 |property| text(|buf, size| Everything3_GetResultPropertyTextHighlightedW(result, index, property, buf, size));
             let directory = Everything3_IsFolderResult(result, index) != 0;
             let size = Everything3_GetResultSize(result, index);
             let modified = Everything3_GetResultDateModified(result, index);
-            let p = Path::new(&path);
-            let name = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
-            let parent = p.parent().map(|s| s.display().to_string()).unwrap_or_default();
+            let p = path.as_path();
+            let name = p.file_name().map(shown).unwrap_or_else(|| shown(p));
+            let parent = p.parent().map(shown).unwrap_or_default();
             let marks = Marks { name: marked(&highlighted(NAME), &name), parent: marked(&highlighted(PATH), &parent) };
             entries.push(Entry {
                 name,
@@ -479,7 +487,7 @@ mod tests {
     fn names_the_index_roots_with_the_volumes_as_letters() {
         let _alone = alone();
         let roots = roots().unwrap();
-        assert!(roots.iter().any(|r| r.len() == 2 && r.ends_with(':')), "{roots:?}");
+        assert!(roots.iter().any(|r| r.as_os_str().len() == 2 && r.as_os_str().as_encoded_bytes().ends_with(b":")), "{roots:?}");
     }
 
     #[test]

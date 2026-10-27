@@ -1,10 +1,14 @@
 //! The places Colet keeps for the user: favorites and saved searches in home, the widths and the window,
 //! which Everything to ask; and the dialogs that edit them.
-use std::time::Duration;
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use colet_core::{
     entry::Entry,
-    paths::{folder_name, path_key},
+    paths::{child, folder_name, path_key, shown},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::component::WindowExt;
@@ -36,32 +40,35 @@ pub enum Dialog {
     /// The theme, the connection to Everything, and the keys.
     Preferences,
     /// The files to open together, asked about first when they are many.
-    Open { paths: Vec<String> },
+    Open { paths: Vec<PathBuf> },
 }
 
 /// The places home lists: the drives in letter order, then the other folders Everything's index starts
 /// from, by path and named by it. An indexed volume, `C:`, is the drive `C:\`.
-pub fn places(drives: Vec<Entry>, indexed: Vec<String>) -> Vec<Entry> {
-    let mut seen: std::collections::HashSet<String> = drives.iter().map(|e| path_key(&e.path)).collect();
-    let mut others: Vec<String> = indexed
+pub fn places(drives: Vec<Entry>, indexed: Vec<PathBuf>) -> Vec<Entry> {
+    let mut seen: std::collections::HashSet<OsString> = drives.iter().map(|e| path_key(&e.path)).collect();
+    let mut others: Vec<PathBuf> = indexed
         .into_iter()
-        .map(|path| if path.len() == 2 && path.ends_with(':') { format!("{path}\\") } else { path })
+        .map(|path| {
+            let volume = path.as_os_str().len() == 2 && path.as_os_str().as_encoded_bytes().ends_with(b":");
+            if volume { child(&path, "") } else { path }
+        })
         .filter(|path| seen.insert(path_key(path)))
         .collect();
-    others.sort_by_key(|path| path.to_lowercase());
-    drives.into_iter().chain(others.iter().map(|path| Entry::folder(path, path))).collect()
+    others.sort_by_cached_key(|path| path_key(path));
+    drives.into_iter().chain(others.into_iter().map(|path| Entry::folder(&path, &shown(&path)))).collect()
 }
 
 /// Home's rows: the favorites, the saved searches, then the places, each place once.
 pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
-    let favorites = settings.favorites.iter().map(|path| Entry::folder(path, folder_name(path)));
+    let favorites = settings.favorites.iter().map(|path| Entry::folder(path, &shown(folder_name(path))));
     let searches = settings.saved_searches.iter().map(|s| Entry {
         directory: false,
-        ..Entry::folder(&search_key(&s.query, s.filter.as_deref()), s.label())
+        ..Entry::folder(search_key(&s.query, s.filter.as_deref()), s.label())
     });
     let mut seen = std::collections::HashSet::new();
     // A place is one whatever its case; a saved search is its query and filter exactly.
-    let key = |e: &Entry| if saved_query(&e.path).is_some() { e.path.clone() } else { path_key(&e.path) };
+    let key = |e: &Entry| if saved_query(&e.path).is_some() { e.path.as_os_str().to_owned() } else { path_key(&e.path) };
     favorites.chain(searches).chain(drives).filter(|e| seen.insert(key(e))).collect()
 }
 
@@ -81,22 +88,22 @@ pub fn home_groups<'a>(settings: &Settings, entries: &'a [Entry]) -> Vec<(&'stat
 /// A favorite or saved search dragged in home, to a new place among its own kind.
 #[derive(Clone)]
 pub struct HomeDrag {
-    pub path: String,
+    pub path: PathBuf,
     pub search: bool,
 }
 
 /// Where a drag in home would put what it carries: before the row `before`, or after the last of its kind.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Landing {
-    pub before: Option<String>,
+    pub before: Option<PathBuf>,
 }
 
 /// Where each of home's favorites and saved searches was drawn, by its path.
-pub type HomeRows = std::rc::Rc<std::cell::RefCell<Vec<(String, Bounds<Pixels>)>>>;
+pub type HomeRows = std::rc::Rc<std::cell::RefCell<Vec<(PathBuf, Bounds<Pixels>)>>>;
 
 /// Which of home's kinds that are put in order by dragging `path` is: a saved search, a favorite, or
 /// neither, as a place is.
-pub fn movable(settings: &Settings, path: &str) -> Option<bool> {
+pub fn movable(settings: &Settings, path: &Path) -> Option<bool> {
     if saved_query(path).is_some() {
         Some(true)
     } else {
@@ -105,7 +112,7 @@ pub fn movable(settings: &Settings, path: &str) -> Option<bool> {
 }
 
 /// Moves the item `is` finds by `path` to just before the one it finds by `before`, or to the end.
-fn move_before<T>(items: &mut Vec<T>, is: impl Fn(&T, &str) -> bool, path: &str, before: Option<&str>) {
+fn move_before<T>(items: &mut Vec<T>, is: impl Fn(&T, &Path) -> bool, path: &Path, before: Option<&Path>) {
     let Some(from) = items.iter().position(|item| is(item, path)) else { return };
     if before.is_some_and(|before| is(&items[from], before)) {
         return;
@@ -239,7 +246,7 @@ impl Colet {
         );
     }
 
-    pub fn toggle_favorite(&mut self, path: &str, cx: &mut Context<Self>) {
+    pub fn toggle_favorite(&mut self, path: &Path, cx: &mut Context<Self>) {
         let path = path.to_owned();
         self.update_settings(
             |s| {
@@ -341,7 +348,7 @@ impl Colet {
         self.end_home_drag();
         cx.notify();
         let Some(Landing { before }) = landing else { return };
-        let (path, before) = (drag.path.as_str(), before.as_deref());
+        let (path, before) = (drag.path.as_path(), before.as_deref());
         self.update_settings(
             |s| {
                 if drag.search {
@@ -528,7 +535,8 @@ impl Colet {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Placement, SavedSearch, Settings, home_entries, move_before, places, restore_bounds};
+    use super::{Entry, Placement, SavedSearch, Settings, home_entries, move_before, places, restore_bounds, shown};
+    use std::path::Path;
     use gpui_kit::{Bounds, DisplayId, point, px, size};
 
     #[test]
@@ -570,7 +578,7 @@ mod tests {
             ..Settings::default()
         };
         let entries = home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)"), Entry::folder(r"D:\", "D:")]);
-        let rows: Vec<(&str, &str)> = entries.iter().map(|e| (e.path.as_str(), e.name.as_str())).collect();
+        let rows: Vec<(&str, &str)> = entries.iter().map(|e| (e.path.to_str().unwrap(), e.name.as_str())).collect();
         assert_eq!(rows, [(r"D:\Work", "Work"), (r"C:\", "C:"), ("search:ext:pdf", "PDF"), ("search:cat\0画像", "猫"), (r"D:\", "D:")]);
         assert!(!entries[2].directory);
     }
@@ -579,7 +587,7 @@ mod tests {
     fn lists_the_drives_then_the_other_index_roots_by_path_each_once() {
         let drives = vec![Entry::folder(r"C:\", "OS (C:)"), Entry::folder(r"D:\", "データ (D:)")];
         let indexed = vec!["C:".into(), r"\\nas\Share".into(), r"d:\Projects".into(), "E:".into(), r"D:\".into(), r"\\NAS\share".into()];
-        let rows: Vec<(String, String)> = places(drives, indexed).into_iter().map(|e| (e.path, e.name)).collect();
+        let rows: Vec<(String, String)> = places(drives, indexed).into_iter().map(|e| (shown(&e.path), e.name)).collect();
         let at = |path: &str, name: &str| (path.to_string(), name.to_string());
         assert_eq!(
             rows,
@@ -595,18 +603,18 @@ mod tests {
             saved_searches: vec![search("ext:PDF"), search("ext:pdf")],
             ..Settings::default()
         };
-        assert!(settings.is_favorite(r"C:\") && settings.is_favorite(r"C:"));
+        assert!(settings.is_favorite(Path::new(r"C:\")) && settings.is_favorite(Path::new("C:")));
         let entries = home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)")]);
-        let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+        let paths: Vec<&str> = entries.iter().map(|e| e.path.to_str().unwrap()).collect();
         assert_eq!(paths, [r"c:\", "search:ext:PDF", "search:ext:pdf"]);
     }
 
     #[test]
     fn moves_an_item_before_another_or_to_the_end() {
         let moved = |path: &str, before: Option<&str>| {
-            let mut items = vec!["a", "b", "c", "d"];
-            move_before(&mut items, |item, key| *item == key, path, before);
-            items
+            let mut items = vec![Path::new("a"), Path::new("b"), Path::new("c"), Path::new("d")];
+            move_before(&mut items, |item, key| *item == key, Path::new(path), before.map(Path::new));
+            items.into_iter().map(|item| item.to_str().unwrap()).collect::<Vec<_>>()
         };
         assert_eq!(moved("c", Some("a")), ["c", "a", "b", "d"]);
         assert_eq!(moved("a", Some("c")), ["b", "a", "c", "d"]);

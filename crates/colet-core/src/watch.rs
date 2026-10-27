@@ -1,7 +1,8 @@
 //! Telling when what the open folders hold changes.
 use std::{
     collections::{HashMap, HashSet},
-    path::Path,
+    ffi::OsString,
+    path::PathBuf,
     sync::{Arc, Mutex, mpsc},
     thread,
 };
@@ -10,17 +11,20 @@ use notify::{RecursiveMode, Watcher as _};
 
 use crate::paths::path_key;
 
-fn inside(path: &str, folder: &str) -> bool {
-    path == folder || path.strip_prefix(folder).is_some_and(|rest| rest.starts_with('\\'))
+/// Both path keys.
+fn inside(path: &OsString, folder: &OsString) -> bool {
+    let (path, folder) = (path.as_encoded_bytes(), folder.as_encoded_bytes());
+    path == folder || path.strip_prefix(folder).is_some_and(|rest| rest.starts_with(b"\\"))
 }
 
-fn relevant(path: &str, folder: &str) -> bool {
-    inside(folder, path) || path.rsplit_once('\\').is_some_and(|(parent, _)| parent == folder)
+fn relevant(path: &OsString, folder: &OsString) -> bool {
+    inside(folder, path)
+        || path.as_encoded_bytes().iter().rposition(|&b| b == b'\\').is_some_and(|at| &path.as_encoded_bytes()[..at] == folder.as_encoded_bytes())
 }
 
 /// Both arguments already hold path keys. Children change a listing, but only a watched folder or
 /// one of its ancestors can invalidate its directory handle.
-fn repair_paths(paths: &[String], folders: &[String]) -> Vec<String> {
+fn repair_paths(paths: &[OsString], folders: &[OsString]) -> Vec<OsString> {
     paths.iter().filter(|path| folders.iter().any(|folder| inside(folder, path))).cloned().collect()
 }
 
@@ -29,14 +33,14 @@ fn repair_paths(paths: &[String], folders: &[String]) -> Vec<String> {
 pub enum Changes {
     #[default]
     Nothing,
-    Paths(HashSet<String>),
+    Paths(HashSet<PathBuf>),
     /// Anything may have: an unnamed change, which outweighs the named ones around it.
     All,
 }
 
 impl Changes {
     /// An empty `paths` stands for any change.
-    pub fn add(&mut self, paths: Vec<String>) {
+    pub fn add(&mut self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
             *self = Changes::All;
             return;
@@ -64,8 +68,9 @@ pub struct FolderWatcher {
 }
 
 enum WatchCommand {
-    Set(Vec<String>),
-    Repair(Vec<String>),
+    Set(Vec<PathBuf>),
+    /// Path keys.
+    Repair(Vec<OsString>),
     Stop,
 }
 
@@ -81,9 +86,9 @@ impl FolderWatcher {
     /// cannot read is left out, as its column says so. It is called on the watcher's thread.
     pub fn new(
         changes: Arc<Mutex<Changes>>,
-        unwatched: impl Fn(Vec<String>) + Send + 'static,
+        unwatched: impl Fn(Vec<PathBuf>) + Send + 'static,
     ) -> Result<Self, String> {
-        let desired = Arc::new(Mutex::new(Vec::<String>::new()));
+        let desired = Arc::new(Mutex::new(Vec::<OsString>::new()));
         let requested = desired.clone();
         let (wanted, sets) = mpsc::channel::<WatchCommand>();
         let repair = wanted.clone();
@@ -101,8 +106,7 @@ impl FolderWatcher {
                 }
                 Err(error) => (error.paths, true, true),
             };
-            let paths: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-            let keys: Vec<String> = paths.iter().map(|p| path_key(p)).collect();
+            let keys: Vec<OsString> = paths.iter().map(|p| path_key(p)).collect();
             let requested = requested.lock().unwrap();
             if !keys.is_empty() && !keys.iter().any(|p| requested.iter().any(|f| relevant(p, f))) {
                 return;
@@ -120,10 +124,10 @@ impl FolderWatcher {
         thread::Builder::new()
             .name("folder-watch".into())
             .spawn(move || {
-                let mut wanted = HashMap::<String, String>::new();
+                let mut wanted = HashMap::<OsString, PathBuf>::new();
                 // Keep each folder's parent too: a directory handle follows a renamed directory, so
                 // only its parent reports that a new directory has taken the same path.
-                let mut asked = HashMap::<String, (String, bool)>::new();
+                let mut asked = HashMap::<OsString, (PathBuf, bool)>::new();
                 while let Ok(mut command) = sets.recv() {
                     let mut next = None;
                     let mut all = false;
@@ -148,15 +152,15 @@ impl FolderWatcher {
                         *desired.lock().unwrap() = wanted.keys().cloned().collect();
                         let mut needed = wanted.clone();
                         for path in wanted.values() {
-                            if let Some(parent) = Path::new(path).parent() {
-                                let parent = parent.display().to_string();
+                            if let Some(parent) = path.parent() {
+                                let parent = parent.to_owned();
                                 needed.entry(path_key(&parent)).or_insert(parent);
                             }
                         }
                         asked.retain(|key, (path, watched)| {
                             let keep = needed.contains_key(key);
                             if !keep && *watched {
-                                let _ = watcher.unwatch(Path::new(path));
+                                let _ = watcher.unwatch(path);
                             }
                             keep
                         });
@@ -164,7 +168,7 @@ impl FolderWatcher {
                             if asked.contains_key(&key) {
                                 continue;
                             }
-                            let folder = Path::new(&path);
+                            let folder = path.as_path();
                             let watched = watcher.watch(folder, RecursiveMode::NonRecursive).is_ok();
                             checked.insert(key.clone());
                             asked.insert(key, (path, watched));
@@ -176,9 +180,9 @@ impl FolderWatcher {
                             continue;
                         }
                         if *watched {
-                            let _ = watcher.unwatch(Path::new(path));
+                            let _ = watcher.unwatch(path);
                         }
-                        let folder = Path::new(path);
+                        let folder = path.as_path();
                         *watched = watcher.watch(folder, RecursiveMode::NonRecursive).is_ok();
                         checked.insert(key.clone());
                         if wanted.contains_key(key) && *watched {
@@ -187,7 +191,7 @@ impl FolderWatcher {
                     }
                     // A Set and Repair can try the same folder twice. Report its final state once,
                     // and do not report an initial failure that the repair recovered from.
-                    let failed: Vec<String> = checked.into_iter().filter_map(|key| {
+                    let failed: Vec<PathBuf> = checked.into_iter().filter_map(|key| {
                         let (path, watched) = asked.get(&key)?;
                         (!watched && wanted.contains_key(&key) && std::fs::read_dir(path).is_ok()).then(|| path.clone())
                     }).collect();
@@ -206,7 +210,7 @@ impl FolderWatcher {
 
     /// Watches exactly `paths` from now on: the new ones are watched, the ones gone let go. Returns at
     /// once.
-    pub fn set(&self, paths: Vec<String>) {
+    pub fn set(&self, paths: Vec<PathBuf>) {
         let _ = self.wanted.send(WatchCommand::Set(paths));
     }
 }
@@ -214,22 +218,23 @@ impl FolderWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use std::time::Duration;
 
     #[test]
     fn file_changes_reach_the_listing_without_repairing_directory_handles() {
-        let folders = vec![path_key(r"D:\Work\"), path_key(r"D:\Work\Nested")];
-        let files = vec![path_key(r"d:\work\file.txt"), path_key(r"D:\WORK\Nested\another.txt")];
+        let folders = vec![path_key(Path::new(r"D:\Work\")), path_key(Path::new(r"D:\Work\Nested"))];
+        let files = vec![path_key(Path::new(r"d:\work\file.txt")), path_key(Path::new(r"D:\WORK\Nested\another.txt"))];
         assert!(files.iter().all(|p| folders.iter().any(|f| relevant(p, f))));
         assert!(repair_paths(&files, &folders).is_empty());
-        assert!(!relevant(&path_key(r"D:\Work-other\file.txt"), &folders[0]));
+        assert!(!relevant(&path_key(Path::new(r"D:\Work-other\file.txt")), &folders[0]));
     }
 
     #[test]
     fn only_changes_to_watched_folders_and_their_ancestors_repair_handles() {
-        let folders = vec![path_key(r"D:\Work\Nested"), path_key(r"\\server\share\folder")];
-        let paths: Vec<String> = [r"D:\", r"d:\WORK", r"D:\Work\Nested", r"D:\Work\other", r"\\SERVER\share"]
-            .into_iter().map(path_key).collect();
+        let folders = vec![path_key(Path::new(r"D:\Work\Nested")), path_key(Path::new(r"\\server\share\folder"))];
+        let paths: Vec<OsString> = [r"D:\", r"d:\WORK", r"D:\Work\Nested", r"D:\Work\other", r"\\SERVER\share"]
+            .into_iter().map(|p| path_key(Path::new(p))).collect();
         assert_eq!(repair_paths(&paths, &folders), [paths[0].clone(), paths[1].clone(), paths[2].clone(), paths[4].clone()]);
         assert!(paths.iter().take(3).all(|p| relevant(p, &folders[0])));
     }
@@ -260,7 +265,7 @@ mod tests {
 
     /// The paths of the next batch to arrive within `wait`, taken as the window takes them; none named
     /// for any change.
-    fn next(changes: &Mutex<Changes>, wait: Duration) -> Option<Vec<String>> {
+    fn next(changes: &Mutex<Changes>, wait: Duration) -> Option<Vec<PathBuf>> {
         let deadline = std::time::Instant::now() + wait;
         while std::time::Instant::now() < deadline {
             match changes.lock().unwrap().take() {
@@ -282,7 +287,7 @@ mod tests {
     /// is asked to.
     fn reported(dir: &Path, changes: &Mutex<Changes>) -> bool {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let prefix = dir.display().to_string();
+        let prefix = dir.to_owned();
         let mut i = 0;
         while std::time::Instant::now() < deadline {
             i += 1;
@@ -300,7 +305,7 @@ mod tests {
         let changes = Arc::new(Mutex::new(Changes::default()));
         let (missed, unwatched) = mpsc::channel();
         let watcher = FolderWatcher::new(changes.clone(), move |paths| missed.send(paths).unwrap()).unwrap();
-        let path = |dir: &tempfile::TempDir| dir.path().display().to_string();
+        let path = |dir: &tempfile::TempDir| dir.path().to_owned();
         watcher.set(vec![path(&a)]);
         assert!(reported(a.path(), &changes));
         watcher.set(vec![path(&b)]);
@@ -319,7 +324,7 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
         let changes = Arc::new(Mutex::new(Changes::default()));
         let watcher = FolderWatcher::new(changes.clone(), |_| {}).unwrap();
-        watcher.set(vec![path.display().to_string()]);
+        watcher.set(vec![path.clone()]);
         assert!(reported(&path, &changes));
         std::fs::rename(&path, dir.path().join("old")).unwrap();
         std::fs::create_dir(&path).unwrap();

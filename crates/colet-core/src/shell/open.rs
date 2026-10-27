@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use windows::Win32::Foundation::{E_INVALIDARG, HWND};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
@@ -10,7 +12,7 @@ use windows::core::{Error, Result, w};
 use super::{Apartment, Owner, Pidls, Wide};
 
 /// Opens `path` with the app Windows associates with it.
-pub fn open(path: &str, owner: Owner) -> Result<()> {
+pub fn open(path: &Path, owner: Owner) -> Result<()> {
     let _apartment = Apartment::enter();
     let file = Wide::new(path);
     let mut info = SHELLEXECUTEINFOW {
@@ -26,7 +28,7 @@ pub fn open(path: &str, owner: Owner) -> Result<()> {
 }
 
 /// Shows `paths`, all in one folder, selected together in an Explorer window of it.
-pub fn reveal(paths: &[String]) -> Result<()> {
+pub fn reveal(paths: &[PathBuf]) -> Result<()> {
     let _apartment = Apartment::enter();
     if let [path] = paths {
         let file = Wide::new(path);

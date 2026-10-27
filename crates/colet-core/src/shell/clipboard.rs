@@ -2,7 +2,14 @@
 //! or cut here pastes in Explorer and the other way round; and paths as text. Shell items with no path, as
 //! Explorer puts those from a ZIP folder or a phone there, and what is given only by its contents, as
 //! Outlook puts its attachments there, are only noticed: the shell reads them itself.
-use std::{ffi::c_void, mem, ptr, thread, time::Duration};
+use std::{
+    ffi::{OsStr, OsString, c_void},
+    mem,
+    os::windows::ffi::{OsStrExt, OsStringExt},
+    path::PathBuf,
+    ptr, thread,
+    time::Duration,
+};
 
 use windows::Win32::Foundation::{E_CHANGED_STATE, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::IDataObject;
@@ -22,16 +29,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Error, HRESULT, PCWSTR, Result, w};
 
 use super::Owner;
+use crate::paths::from_wide;
 
 /// The files the clipboard holds, put there by Colet or any other app, and whether they were cut.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClipboardFiles {
-    pub paths: Vec<String>,
+    pub paths: Vec<PathBuf>,
     /// With no `paths`: shell items with none, as from a ZIP folder or a phone, which only the shell reads.
     pub items: bool,
     /// With no `paths` or `items`: the names of what is given only by its contents, as Outlook's attachments,
     /// which the shell writes out.
-    pub contents: Vec<String>,
+    pub contents: Vec<OsString>,
     pub cut: bool,
     /// The clipboard's sequence number as read, so a cut is let go of only while it is still there.
     pub sequence: u32,
@@ -80,10 +88,10 @@ impl Drop for Opened {
 }
 
 /// Puts `paths` on the clipboard, cut or copied.
-pub fn write_files(paths: &[String], cut: bool, owner: Owner) -> Result<()> {
+pub fn write_files(paths: &[PathBuf], cut: bool, owner: Owner) -> Result<()> {
     let mut list: Vec<u16> = Vec::new();
     for path in paths {
-        list.extend(path.encode_utf16());
+        list.extend(path.as_os_str().encode_wide());
         list.push(0);
     }
     list.push(0);
@@ -112,8 +120,8 @@ pub fn write_files(paths: &[String], cut: bool, owner: Owner) -> Result<()> {
 }
 
 /// Puts `text` on the clipboard.
-pub fn write_text(text: &str, owner: Owner) -> Result<()> {
-    let bytes: Vec<u8> = text.encode_utf16().chain([0]).flat_map(|c| c.to_le_bytes()).collect();
+pub fn write_text(text: &OsStr, owner: Owner) -> Result<()> {
+    let bytes: Vec<u8> = text.encode_wide().chain([0]).flat_map(|c| c.to_le_bytes()).collect();
     let _clipboard = Opened::new(owner)?;
     unsafe {
         EmptyClipboard()?;
@@ -151,7 +159,7 @@ pub fn read_files() -> Result<ClipboardFiles> {
                 let len = DragQueryFileW(drop, i, None) as usize;
                 let mut buffer = vec![0u16; len + 1];
                 DragQueryFileW(drop, i, Some(&mut buffer));
-                String::from_utf16_lossy(&buffer[..len])
+                from_wide(&buffer[..len])
             })
             .collect();
         Ok(ClipboardFiles { paths, cut, sequence, ..ClipboardFiles::default() })
@@ -160,7 +168,7 @@ pub fn read_files() -> Result<ClipboardFiles> {
 
 /// The names at the top of the open clipboard's file group descriptor, once each: those of what it gives
 /// only by its contents. An item inside a folder it gives is named with the folder's path.
-unsafe fn described() -> Vec<String> {
+unsafe fn described() -> Vec<OsString> {
     let Ok(handle) = (unsafe { GetClipboardData(RegisterClipboardFormatW(w!("FileGroupDescriptorW"))) }) else {
         return Vec::new();
     };
@@ -170,7 +178,7 @@ unsafe fn described() -> Vec<String> {
         return Vec::new();
     }
     let size = unsafe { GlobalSize(handle) };
-    let mut names: Vec<String> = Vec::new();
+    let mut names: Vec<OsString> = Vec::new();
     if size >= mem::size_of::<u32>() {
         let count = unsafe { group.cast::<u32>().read_unaligned() } as usize;
         let room = (size - mem::size_of::<u32>()) / mem::size_of::<FILEDESCRIPTORW>();
@@ -179,8 +187,11 @@ unsafe fn described() -> Vec<String> {
             let descriptor = unsafe { at.cast::<FILEDESCRIPTORW>().read_unaligned() };
             let file_name = descriptor.cFileName;
             let len = file_name.iter().position(|&c| c == 0).unwrap_or(file_name.len());
-            let name = String::from_utf16_lossy(&file_name[..len]);
-            let top = name.trim_start_matches('\\').split('\\').next().unwrap_or_default().to_owned();
+            // The top of what it names, as the OS wrote it, past any leading backslash.
+            let backslash = u16::from(b'\\');
+            let name = &file_name[..len];
+            let name = &name[name.iter().position(|&c| c != backslash).unwrap_or(name.len())..];
+            let top = OsString::from_wide(&name[..name.iter().position(|&c| c == backslash).unwrap_or(name.len())]);
             if !top.is_empty() && !names.contains(&top) {
                 names.push(top);
             }
@@ -308,7 +319,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("切り取り.txt");
         std::fs::write(&file, b"cut").unwrap();
-        let path = file.to_string_lossy().into_owned();
+        let path = file.clone();
         let before = changes.load(Ordering::SeqCst);
         write_files(std::slice::from_ref(&path), true, 0).unwrap();
         wait(before);
@@ -318,14 +329,20 @@ mod tests {
         write_files(std::slice::from_ref(&path), false, 0).unwrap();
         wait(before);
         assert!(!read_files().unwrap().cut);
+        // A name that is not text comes back as it went, not as its replacement.
+        let odd = crate::paths::tests::unpaired(dir.path(), "a");
         let before = changes.load(Ordering::SeqCst);
-        write_text("text", 0).unwrap();
+        write_files(std::slice::from_ref(&odd), false, 0).unwrap();
+        wait(before);
+        assert_eq!(read_files().unwrap().paths, [odd]);
+        let before = changes.load(Ordering::SeqCst);
+        write_text("text".as_ref(), 0).unwrap();
         wait(before);
         assert!(read_files().unwrap().paths.is_empty());
         // Emptied only while it still holds what was read.
         write_files(std::slice::from_ref(&path), true, 0).unwrap();
         let read = read_files().unwrap();
-        write_text("newer", 0).unwrap();
+        write_text("newer".as_ref(), 0).unwrap();
         complete(read.sequence);
         assert!(Opened::new(0).is_ok());
     }

@@ -2,6 +2,7 @@
 //! dropped on the folder, whose drop target writes the files out with the shell's own dialogs. The shell
 //! may go on reading the clipboard's data after the drop returns, so drops happen on a thread kept for the
 //! life of the process, with OLE and a message loop.
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
 use std::thread;
 
@@ -30,7 +31,7 @@ pub enum Dropped {
 
 struct Request {
     sequence: u32,
-    destination: String,
+    destination: PathBuf,
     cut: bool,
     owner: Owner,
     done: mpsc::Sender<Result<Dropped>>,
@@ -49,7 +50,7 @@ const WAKE: u32 = WM_APP;
 /// Drops what the clipboard holds on the folder `destination`, moved if `cut` and its source allows it, so
 /// long as it still holds what was read as `sequence`.
 /// Blocks until the drop returns, which may be before the shell has written everything out.
-pub fn drop_clipboard(destination: &str, cut: bool, sequence: u32, owner: Owner) -> Result<Dropped> {
+pub fn drop_clipboard(destination: &Path, cut: bool, sequence: u32, owner: Owner) -> Result<Dropped> {
     let dropper = dropper()?;
     let (done, result) = mpsc::channel();
     let request = Request { sequence, destination: destination.to_owned(), cut, owner, done };
@@ -107,7 +108,7 @@ fn spawn() -> Result<Dropper> {
 }
 
 /// Drops `data` on the folder `destination`.
-fn drop_on(destination: &str, cut: bool, owner: Owner, data: IDataObject) -> Result<Dropped> {
+fn drop_on(destination: &Path, cut: bool, owner: Owner, data: IDataObject) -> Result<Dropped> {
     let folder = Pidls(vec![parse(destination)?]);
     let parent: IShellFolder = unsafe { SHBindToParent(folder.0[0], None)? };
     let child = unsafe { ILFindLastID(folder.0[0]) } as *const _;
@@ -293,7 +294,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let _ole = Ole::enter().unwrap();
         let data = fixtures::contents("添付.txt", b"attached");
-        let dropped = drop_on(&dir.path().to_string_lossy(), false, 0, data).unwrap();
+        let dropped = drop_on(dir.path(), false, 0, data).unwrap();
         assert_eq!(dropped, Dropped::Copied);
         assert_eq!(std::fs::read(dir.path().join("添付.txt")).unwrap(), b"attached");
     }

@@ -29,7 +29,7 @@ pub enum Command {
     Recycle,
     /// "ごみ箱へ移動" picked with Shift held, as Explorer's Delete deletes outright then.
     Delete,
-    Favorite(String),
+    Favorite(std::path::PathBuf),
     Windows,
     /// A saved search, by its query and filter.
     EditSearch(String, Option<String>),

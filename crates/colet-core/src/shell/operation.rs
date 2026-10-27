@@ -1,6 +1,7 @@
 //! File operations through `IFileOperation`, so name clashes, errors, progress and cancelling are the
 //! shell's own dialogs, owned by our window.
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{E_ABORT, E_INVALIDARG};
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
@@ -16,29 +17,30 @@ use windows::Win32::Foundation::HWND;
 use windows::core::{AsImpl, Error, HRESULT, PCWSTR, Ref, Result, implement};
 
 use super::{Apartment, Ole, Owner, Wide};
+use crate::paths::from_wide;
 
 #[derive(Clone, Debug)]
 pub enum Operation {
-    Copy { destination: String },
-    Move { destination: String },
+    Copy { destination: PathBuf },
+    Move { destination: PathBuf },
     /// To the Recycle Bin, as Explorer's Delete: asked first only as its setting says, and an item the
     /// bin cannot take is deleted outright once the shell has asked.
     Recycle,
     /// Deleted outright, as Explorer's Shift+Delete, once the shell has asked.
     Delete,
     Rename { name: String },
-    NewFolder { parent: String, name: String },
+    NewFolder { parent: PathBuf, name: String },
 }
 
 /// What happened to one item.
 #[derive(Debug, PartialEq)]
 pub enum Item {
     /// How the item ended.
-    Done { path: String, result: HRESULT },
+    Done { path: PathBuf, result: HRESULT },
     /// Where a copy or move put it, which a name clash may have renamed.
-    Placed { path: String },
+    Placed { path: PathBuf },
     /// The item just deleted went for good, not to the Recycle Bin.
-    Destroyed { path: String },
+    Destroyed { path: PathBuf },
 }
 
 /// Carries out `operation` on `paths`, telling `report` how each item ends. `rename`: a copy into its own
@@ -46,7 +48,7 @@ pub enum Item {
 /// Blocks until the shell is done, so never call it from the thread that owns `owner`.
 pub fn operate(
     operation: &Operation,
-    paths: &[String],
+    paths: &[PathBuf],
     rename: bool,
     owner: Owner,
     report: impl FnMut(Item) + 'static,
@@ -133,12 +135,12 @@ fn confirms_recycle() -> bool {
     state._bitfield & 0b100 == 0
 }
 
-fn item(path: &str) -> Result<IShellItem> {
+fn item(path: &Path) -> Result<IShellItem> {
     let path = Wide::new(path);
     unsafe { SHCreateItemFromParsingName(path.get(), None) }
 }
 
-fn queue(op: &IFileOperation, operation: &Operation, paths: &[String], sink: &IFileOperationProgressSink) -> Result<()> {
+fn queue(op: &IFileOperation, operation: &Operation, paths: &[PathBuf], sink: &IFileOperationProgressSink) -> Result<()> {
     let target = match operation {
         Operation::Copy { destination } | Operation::Move { destination } => Some(item(destination)?),
         Operation::NewFolder { parent, name } => {
@@ -192,13 +194,13 @@ impl Sink {
 }
 
 /// The item's path, or for one with none, as in a ZIP folder or on a phone, its name in the address bar.
-fn path(item: Option<&IShellItem>) -> String {
-    let Some(item) = item else { return String::new() };
+fn path(item: Option<&IShellItem>) -> PathBuf {
+    let Some(item) = item else { return PathBuf::new() };
     let named = |form| unsafe { item.GetDisplayName(form) };
     let Ok(name) = named(SIGDN_FILESYSPATH).or_else(|_| named(SIGDN_DESKTOPABSOLUTEEDITING)) else {
-        return String::new();
+        return PathBuf::new();
     };
-    let path = unsafe { name.to_string() }.unwrap_or_default();
+    let path = from_wide(unsafe { name.as_wide() });
     unsafe { CoTaskMemFree(Some(name.0 as _)) };
     path
 }
@@ -333,7 +335,7 @@ pub(crate) mod fixtures {
     }
 
     /// Puts the shell item at `path` on the clipboard as Explorer would, as a copy, replacing what it held.
-    pub fn put_on_clipboard(path: &str) {
+    pub fn put_on_clipboard(path: &Path) {
         use windows::Win32::System::Com::IDataObject;
         use windows::Win32::System::Ole::{OleFlushClipboard, OleSetClipboard};
         use windows::Win32::UI::Shell::BHID_DataObject;
@@ -363,11 +365,11 @@ mod tests {
         fixtures::zip(&archive, "inner.txt", b"zipped");
         let out = dir.path().join("out");
         std::fs::create_dir(&out).unwrap();
-        let inner = format!(r"{}\inner.txt", archive.display());
+        let inner = archive.join("inner.txt");
         let reports = Rc::new(RefCell::new(Vec::new()));
         let seen = reports.clone();
         operate_data(
-            &Operation::Copy { destination: out.to_string_lossy().into_owned() },
+            &Operation::Copy { destination: out.clone() },
             0,
             move |item| seen.borrow_mut().push(item),
             || unsafe { item(&inner)?.BindToHandler(None, &BHID_DataObject) },
@@ -379,7 +381,7 @@ mod tests {
             matches!(&reports[0], Item::Done { path, result } if result.is_ok() && path.ends_with(r"archive.zip\inner.txt")),
             "{reports:?}"
         );
-        assert_eq!(reports[1], Item::Placed { path: out.join("inner.txt").to_string_lossy().into_owned() });
+        assert_eq!(reports[1], Item::Placed { path: out.join("inner.txt") });
     }
 
     #[test]
@@ -387,7 +389,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("a.txt");
         std::fs::write(&file, "a").unwrap();
-        let a = item(&file.to_string_lossy()).unwrap();
+        let a = item(&file).unwrap();
         let reports = Rc::new(RefCell::new(Vec::new()));
         let seen = reports.clone();
         let sink: IFileOperationProgressSink =
@@ -399,7 +401,7 @@ mod tests {
         }
         let reports = reports.borrow();
         assert_eq!(reports.iter().filter(|i| matches!(i, Item::Destroyed { .. })).count(), 1, "{reports:?}");
-        assert_eq!(reports[2], Item::Destroyed { path: file.to_string_lossy().into_owned() });
+        assert_eq!(reports[2], Item::Destroyed { path: file.clone() });
     }
 
     #[test]
@@ -410,8 +412,8 @@ mod tests {
         let reports = Rc::new(RefCell::new(Vec::new()));
         let seen = reports.clone();
         operate(
-            &Operation::Copy { destination: dir.path().to_string_lossy().into_owned() },
-            &[file.to_string_lossy().into_owned()],
+            &Operation::Copy { destination: dir.path().to_owned() },
+            std::slice::from_ref(&file),
             true,
             0,
             move |item| seen.borrow_mut().push(item),
@@ -420,7 +422,7 @@ mod tests {
         let reports = reports.borrow();
         assert!(matches!(&reports[0], Item::Done { result, .. } if result.is_ok()), "{reports:?}");
         let Item::Placed { path } = &reports[1] else { panic!("{reports:?}") };
-        assert_ne!(path, &file.to_string_lossy());
-        assert!(std::path::Path::new(path).exists());
+        assert_ne!(path, &file);
+        assert!(path.exists());
     }
 }

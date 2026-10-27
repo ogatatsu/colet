@@ -1,5 +1,7 @@
 //! Where listings come from (Everything, the file system and the drives) and where the settings are kept.
 //! Tests hand the view their own.
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -28,8 +30,8 @@ pub struct Search {
 pub trait Backend: Send + Sync + 'static {
     fn roots(&self) -> Vec<Entry>;
     /// The folders Everything's index starts from; none while it cannot be asked.
-    fn indexed_roots(&self) -> Vec<String>;
-    fn list(&self, path: &str, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String>;
+    fn indexed_roots(&self) -> Vec<PathBuf>;
+    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String>;
     /// The results and the name of what they came from.
     fn search(&self, search: Search) -> Result<(Page, String), String>;
     /// Whether the last search's results changed; so until it is searched afresh.
@@ -42,19 +44,19 @@ pub trait Backend: Send + Sync + 'static {
     fn operate(&self, request: Request, owner: Owner, report: Box<dyn FnMut(Event) + Send>) -> Result<(), String>;
     /// The files on the clipboard; `None` while another app holds it.
     fn clipboard_files(&self) -> Option<ClipboardFiles>;
-    fn copy_files(&self, paths: &[String], cut: bool, owner: Owner) -> Result<(), String>;
-    fn copy_text(&self, text: &str, owner: Owner) -> Result<(), String>;
+    fn copy_files(&self, paths: &[PathBuf], cut: bool, owner: Owner) -> Result<(), String>;
+    fn copy_text(&self, text: &OsStr, owner: Owner) -> Result<(), String>;
     /// Calls `changed` whenever any app changes the clipboard.
     fn watch_clipboard(&self, changed: Box<dyn Fn() + Send>);
     /// Opens a file in the app Windows associates with it.
-    fn open(&self, path: &str, owner: Owner) -> Result<(), String>;
+    fn open(&self, path: &Path, owner: Owner) -> Result<(), String>;
     /// Shows them, all in one folder, selected together in an Explorer window.
-    fn reveal(&self, paths: &[String]) -> Result<(), String>;
+    fn reveal(&self, paths: &[PathBuf]) -> Result<(), String>;
     /// Whether `path` is a folder, a file, or gone. It touches the disk, which a share can keep waiting for
     /// seconds: never ask it on the UI thread.
-    fn path_kind(&self, path: &str) -> Option<bool>;
+    fn path_kind(&self, path: &Path) -> Option<bool>;
     /// The Windows context menu at screen point `at`, for `paths` or the folder `background`.
-    fn shell_menu(&self, paths: Vec<String>, background: String, at: (i32, i32), owner: Owner) -> Result<(), String>;
+    fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String>;
 }
 
 fn said(error: windows_core::Error) -> String {
@@ -75,13 +77,13 @@ impl Backend for Live {
         folders::roots()
     }
 
-    fn indexed_roots(&self) -> Vec<String> {
+    fn indexed_roots(&self) -> Vec<PathBuf> {
         // Held so it never connects as a search does.
         let Ok(_session) = self.session.lock() else { return Vec::new() };
         everything::roots().unwrap_or_default()
     }
 
-    fn list(&self, path: &str, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
+    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
         folders::list(path, sort, cancelled)
     }
 
@@ -127,11 +129,11 @@ impl Backend for Live {
         clipboard::read_files().ok()
     }
 
-    fn copy_files(&self, paths: &[String], cut: bool, owner: Owner) -> Result<(), String> {
+    fn copy_files(&self, paths: &[PathBuf], cut: bool, owner: Owner) -> Result<(), String> {
         clipboard::write_files(paths, cut, owner).map_err(said)
     }
 
-    fn copy_text(&self, text: &str, owner: Owner) -> Result<(), String> {
+    fn copy_text(&self, text: &OsStr, owner: Owner) -> Result<(), String> {
         clipboard::write_text(text, owner).map_err(said)
     }
 
@@ -141,15 +143,15 @@ impl Backend for Live {
         }
     }
 
-    fn open(&self, path: &str, owner: Owner) -> Result<(), String> {
+    fn open(&self, path: &Path, owner: Owner) -> Result<(), String> {
         shell::open(path, owner).map_err(said)
     }
 
-    fn reveal(&self, paths: &[String]) -> Result<(), String> {
+    fn reveal(&self, paths: &[PathBuf]) -> Result<(), String> {
         shell::reveal(paths).map_err(said)
     }
 
-    fn path_kind(&self, path: &str) -> Option<bool> {
+    fn path_kind(&self, path: &Path) -> Option<bool> {
         use std::os::windows::fs::MetadataExt;
         const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
         // Asked once, of the item itself: a junction or link to a folder is one, even when what it points
@@ -158,7 +160,7 @@ impl Backend for Live {
         Some(metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0)
     }
 
-    fn shell_menu(&self, paths: Vec<String>, background: String, at: (i32, i32), owner: Owner) -> Result<(), String> {
+    fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String> {
         let menu = {
             let mut menu = self.menu.lock().map_err(|e| e.to_string())?;
             if menu.is_none() {
@@ -202,7 +204,7 @@ mod tests {
         assert!(made.status.success(), "{made:?}");
         std::fs::remove_dir(&folder).unwrap();
         let live = Live::default();
-        let kind = |path: &std::path::Path| live.path_kind(&path.display().to_string());
+        let kind = |path: &Path| live.path_kind(path);
         assert_eq!(kind(&file), Some(false));
         assert_eq!(kind(dir.path()), Some(true));
         // Still there, and still a folder, though what it points to is gone.

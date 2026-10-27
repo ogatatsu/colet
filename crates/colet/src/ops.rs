@@ -2,6 +2,8 @@
 //! the Recycle Bin, open; one operation at a time, each kept in the history with how its items ended.
 use std::{
     collections::HashSet,
+    ffi::OsString,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -9,7 +11,7 @@ use std::{
 use colet_core::{
     entry::Entry,
     operations::{CANCELLED, Event, Kind, Request},
-    paths::{child, folder_name, parent_folder, path_key},
+    paths::{child, folder_name, parent_folder, path_key, shown},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -53,9 +55,9 @@ impl ItemStatus {
 #[derive(Clone, Debug, PartialEq)]
 pub struct HistoryItem {
     /// Where it is now; where it was, when it failed or was deleted.
-    pub path: String,
+    pub path: PathBuf,
     /// Where a paste or a rename took it from.
-    pub from: Option<String>,
+    pub from: Option<PathBuf>,
     pub status: ItemStatus,
     pub error: Option<String>,
     /// Sent to the Recycle Bin or deleted outright: nothing to open.
@@ -130,11 +132,11 @@ impl HistoryEntry {
     pub fn target(&self) -> String {
         let Request { kind, paths, destination, name } = &self.request;
         match kind {
-            Kind::Paste => format!("{} 項目 → {}", self.items.len() + self.more, folder_name(destination)),
-            Kind::Recycle | Kind::Delete if paths.len() == 1 => folder_name(&paths[0]).to_owned(),
+            Kind::Paste => format!("{} 項目 → {}", self.items.len() + self.more, shown(folder_name(destination))),
+            Kind::Recycle | Kind::Delete if paths.len() == 1 => shown(folder_name(&paths[0])),
             Kind::Recycle | Kind::Delete => format!("{} 項目", paths.len()),
-            Kind::Rename => format!("{} → {name}", folder_name(paths.first().map_or("", |p| p))),
-            Kind::NewFolder => format!("{name}（{}）", folder_name(destination)),
+            Kind::Rename => format!("{} → {name}", shown(folder_name(paths.first().map_or(Path::new(""), |p| p)))),
+            Kind::NewFolder => format!("{name}（{}）", shown(folder_name(destination))),
         }
     }
 
@@ -175,7 +177,7 @@ impl HistoryEntry {
 pub struct Menu {
     pub column: ColumnId,
     /// `None` for the column's selection; empty from its empty space, for the folder itself.
-    pub paths: Option<Vec<String>>,
+    pub paths: Option<Vec<PathBuf>>,
     /// In the window.
     pub at: Point<Pixels>,
     /// On the screen, for the Windows menu.
@@ -220,12 +222,12 @@ impl Colet {
     }
 
     /// What the file actions work on: the selection, or while the menu is open, what it was opened on.
-    pub fn picked(&self) -> Vec<String> {
+    pub fn picked(&self) -> Vec<PathBuf> {
         self.picked_paths().to_vec()
     }
 
     /// [`picked`](Self::picked), lent rather than copied, for what is asked each frame.
-    fn picked_paths(&self) -> &[String] {
+    fn picked_paths(&self) -> &[PathBuf] {
         let Some(column) = self.action_column() else { return &[] };
         match self.menu() {
             Some(Menu { paths: Some(paths), .. }) => paths,
@@ -235,12 +237,12 @@ impl Colet {
 
     pub fn picked_entries(&self) -> Vec<Entry> {
         let Some(c) = self.action_column() else { return Vec::new() };
-        let picked: HashSet<String> = self.picked().into_iter().collect();
+        let picked: HashSet<PathBuf> = self.picked().into_iter().collect();
         c.entries.iter().filter(|e| picked.contains(&e.path)).cloned().collect()
     }
 
     /// Where a paste or a new folder goes: the folder column worked in.
-    pub fn destination(&self) -> Option<String> {
+    pub fn destination(&self) -> Option<PathBuf> {
         let c = self.action_column()?;
         (c.kind == ColumnKind::Folder).then(|| c.path.clone())
     }
@@ -256,14 +258,14 @@ impl Colet {
         let busy = self.running.is_some().then_some(BUSY);
         let folder = busy.or(self.destination().is_none().then_some(NEEDS_FOLDER));
         let saved_pick = picked.len() == 1 && search;
-        let first = picked.first().map(|p| parent_folder(p).unwrap_or_default());
-        let apart = first.is_some_and(|first| picked.iter().any(|p| parent_folder(p).unwrap_or_default() != first));
+        let first = picked.first().map(|p| parent_folder(p).unwrap_or(Path::new("")));
+        let apart = first.is_some_and(|first| picked.iter().any(|p| parent_folder(p).unwrap_or(Path::new("")) != first));
         Reasons {
             copy: if none {
                 Some(NEEDS_SELECTION)
             } else if search {
                 Some("保存した検索はコピーできません")
-            } else if picked.iter().any(|p| !p.is_empty() && parent_folder(p).is_none()) {
+            } else if picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(p).is_none()) {
                 Some("ドライブはコピーできません")
             } else {
                 None
@@ -367,7 +369,14 @@ impl Colet {
         if picked.is_empty() {
             return;
         }
-        let text = picked.iter().map(|p| saved_query(p).map_or(p.as_str(), |(query, _)| query)).collect::<Vec<_>>().join("\r\n");
+        // As the paths are, even where they are not text: a pasted one still names its item.
+        let mut text = OsString::new();
+        for (i, p) in picked.iter().enumerate() {
+            if i > 0 {
+                text.push("\r\n");
+            }
+            text.push(saved_query(p).map_or(p.as_os_str(), |(query, _)| query.as_ref()));
+        }
         let (backend, owner) = (self.backend.clone(), self.owner);
         let done = format!("{} 項目のパスをコピーしました", picked.len());
         self.write_clipboard(move || backend.copy_text(&text, owner), done, cx);
@@ -409,7 +418,7 @@ impl Colet {
         let Some(entry) = entries.into_iter().next() else { return };
         // Like Explorer, the extension stays out of the selection.
         let end = if entry.directory { entry.name.len() } else { entry.name.rfind('.').filter(|&d| d > 0).unwrap_or(entry.name.len()) };
-        let request = Request { kind: Kind::Rename, paths: vec![entry.path], destination: String::new(), name: entry.name };
+        let request = Request { kind: Kind::Rename, paths: vec![entry.path], destination: PathBuf::new(), name: entry.name };
         self.ask_name(request, end, window, cx);
     }
 
@@ -465,8 +474,9 @@ impl Colet {
         if name.trim().is_empty() || checking.as_deref() == Some(name.as_str()) {
             return;
         }
-        // Like Explorer, an unchanged name just closes the dialog.
-        if request.kind == Kind::Rename && request.paths.first().is_some_and(|p| folder_name(p) == name) {
+        // Like Explorer, an unchanged name just closes the dialog: one that is not all text, as it was
+        // shown, too, rather than renamed to what stood in for what is not.
+        if request.kind == Kind::Rename && request.paths.first().is_some_and(|p| shown(folder_name(p)) == name) {
             self.close_dialog(window, cx);
             return;
         }
@@ -480,7 +490,7 @@ impl Colet {
         // off the UI thread, as a share can keep it waiting; the dialog stays up until it answers.
         if request.kind == Kind::Rename
             && let Some(path) = request.paths.first()
-            && folder_name(path).to_lowercase() != name.to_lowercase()
+            && shown(folder_name(path)).to_lowercase() != name.to_lowercase()
             && let Some(parent) = parent_folder(path)
         {
             let target = child(parent, &name);
@@ -541,7 +551,7 @@ impl Colet {
             self.notify(format!("「{}」は{reason}。{hint}", kind.title()), Tone::Info, cx);
             return;
         }
-        self.run(Request { kind, paths: picked, destination: String::new(), name: String::new() }, cx);
+        self.run(Request { kind, paths: picked, destination: PathBuf::new(), name: String::new() }, cx);
     }
 
     /// Opens the picked item: a folder beside it, a file in its app. Of several, the files each open in
@@ -553,7 +563,7 @@ impl Colet {
         match (index, picked.as_slice()) {
             (Some(index), [entry]) => self.open(index, &entry.path, window, cx),
             _ => {
-                let files: Vec<String> = picked.into_iter().filter(|e| !e.directory).map(|e| e.path).collect();
+                let files: Vec<PathBuf> = picked.into_iter().filter(|e| !e.directory).map(|e| e.path).collect();
                 if files.len() >= ASK_TO_OPEN {
                     self.dialog_subscriptions.clear();
                     self.dialog = Some(Dialog::Open { paths: files });
@@ -575,15 +585,15 @@ impl Colet {
 
     /// Opens `paths` one after another in their apps, in the order given; one that fails leaves the rest to
     /// open, and those that failed are told of together.
-    fn open_files(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
+    fn open_files(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         if paths.is_empty() {
             return;
         }
         let (backend, owner) = (self.backend.clone(), self.owner);
         self.in_background(
             move || {
-                let failed: Vec<(&str, String)> =
-                    paths.iter().filter_map(|path| backend.open(path, owner).err().map(|error| (folder_name(path), error))).collect();
+                let failed: Vec<(String, String)> =
+                    paths.iter().filter_map(|path| backend.open(path, owner).err().map(|error| (shown(folder_name(path)), error))).collect();
                 match failed.as_slice() {
                     [] => Ok(()),
                     [(name, error)] => Err(format!("「{name}」を開けません: {error}")),
@@ -614,7 +624,7 @@ impl Colet {
                 self.in_background(move || backend.open(&folder, owner).map_err(|error| format!("開けません: {error}")), None, cx);
             }
             _ if !picked.is_empty() => {
-                let paths: Vec<String> = picked.into_iter().map(|e| e.path).collect();
+                let paths: Vec<PathBuf> = picked.into_iter().map(|e| e.path).collect();
                 self.in_background(move || backend.reveal(&paths), None, cx);
             }
             _ => {}
@@ -642,7 +652,7 @@ impl Colet {
             Some(paths) => paths.clone(),
             None => self.state.columns[index].selected.clone(),
         };
-        let background = if paths.is_empty() { self.state.columns[index].path.clone() } else { String::new() };
+        let background = if paths.is_empty() { self.state.columns[index].path.clone() } else { PathBuf::new() };
         let (backend, owner, at) = (self.backend.clone(), self.owner, menu.screen);
         let task = cx.background_executor().spawn(async move { backend.shell_menu(paths, background, at, owner) });
         cx.spawn(async move |this, cx| {
@@ -727,7 +737,7 @@ impl Colet {
             Err(error) => (false, Some(error.clone())),
         };
         let renamed = (kind == Kind::Rename && result.is_ok())
-            .then(|| paths.first().map(|p| child(parent_folder(p).unwrap_or_default(), &name)))
+            .then(|| paths.first().map(|p| child(parent_folder(p).unwrap_or(Path::new("")), &name)))
             .flatten();
         if let Some(to) = &renamed {
             // Carry the selection over to the new name before the listing drops the old one.
@@ -792,7 +802,7 @@ impl Colet {
 
     /// Only what is still there: an item moved on or deleted since says so. Whether it is, is asked off the UI
     /// thread, as a share can keep it waiting.
-    pub fn reveal_from_history(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn reveal_from_history(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.revealing = Some(path.clone());
         let backend = self.backend.clone();
         let asked = {
@@ -808,7 +818,7 @@ impl Colet {
 
     /// The answer for the item last pressed in the history, while the history is still open: another pressed
     /// since, or the history closed, has moved on from it.
-    fn history_item_found(&mut self, path: String, kind: Option<bool>, window: &mut Window, cx: &mut Context<Self>) {
+    fn history_item_found(&mut self, path: PathBuf, kind: Option<bool>, window: &mut Window, cx: &mut Context<Self>) {
         if self.revealing.as_ref() != Some(&path) {
             return;
         }
@@ -817,7 +827,7 @@ impl Colet {
             return;
         }
         match kind {
-            None => self.notify(format!("「{}」はもうありません", folder_name(&path)), Tone::Info, cx),
+            None => self.notify(format!("「{}」はもうありません", shown(folder_name(&path))), Tone::Info, cx),
             Some(directory) => {
                 self.show_history(false, None, window, cx);
                 self.state.reveal(&path, directory);
@@ -836,9 +846,9 @@ pub struct Running {
     id: u64,
     events: OperationEvents,
     /// Where its last item ended, as a new folder's.
-    made: Option<String>,
+    made: Option<PathBuf>,
     /// Where its copied or moved items went.
-    placed: Vec<String>,
+    placed: Vec<PathBuf>,
 }
 
 #[cfg(test)]
@@ -864,8 +874,8 @@ mod tests {
         paste.record(Event::Placed { path: r"D:\dest\a.txt".into() });
         paste.record(Event::Failed { path: r"D:\b.txt".into(), error: "アクセスが拒否されました。".into() });
         paste.record(Event::Skipped { path: r"D:\c.txt".into() });
-        assert_eq!(paste.items[0].path, r"D:\dest\a.txt");
-        assert_eq!(paste.items[0].from.as_deref(), Some(r"D:\a.txt"));
+        assert_eq!(paste.items[0].path, std::path::Path::new(r"D:\dest\a.txt"));
+        assert_eq!(paste.items[0].from.as_deref(), Some(std::path::Path::new(r"D:\a.txt")));
         assert_eq!(paste.outcome(), "処理中");
         paste.status = Status::Done;
         assert_eq!(paste.outcome(), "1 件失敗・1 件スキップ");
@@ -878,7 +888,7 @@ mod tests {
     fn lists_what_was_handed_to_the_shell_by_its_name_without_a_problem() {
         let mut paste = entry(Kind::Paste);
         paste.record(Event::Handed { path: r"D:\dest\添付.txt".into() });
-        assert_eq!((paste.items[0].path.as_str(), paste.items[0].status), (r"D:\dest\添付.txt", ItemStatus::Handed));
+        assert_eq!((paste.items[0].path.to_str().unwrap(), paste.items[0].status), (r"D:\dest\添付.txt", ItemStatus::Handed));
         paste.status = Status::Done;
         assert!(!paste.has_problems());
         assert_eq!(paste.target(), "1 項目 → dest");

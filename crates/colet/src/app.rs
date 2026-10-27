@@ -2,6 +2,8 @@
 //! folders, and takes the keys. `view.rs` draws it.
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsString,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -12,7 +14,7 @@ use std::{
 use colet_core::{
     entry::{Entry, Order, Sort},
     everything::PAGE,
-    paths::{parent_folder, path_key},
+    paths::{parent_folder, path_key, shown},
     shell,
     watch::{Changes, FolderWatcher},
 };
@@ -225,7 +227,7 @@ struct TypeAhead {
     serial: u64,
     column: ColumnId,
     /// The row the keys left focused: the text goes when they are moved off it some other way.
-    path: Option<String>,
+    path: Option<PathBuf>,
     /// How many chars of that row's name the text matched.
     matched: usize,
     /// The last key found nothing: the keys after it add nothing, nor hold off the end.
@@ -250,7 +252,7 @@ pub struct Colet {
     pub(crate) next_toast: u64,
     pub resizing: Option<Resize>,
     pub lists: HashMap<ColumnId, UniformListScrollHandle>,
-    scrolled_to: HashMap<ColumnId, String>,
+    scrolled_to: HashMap<ColumnId, PathBuf>,
     pub columns_scroll: ScrollHandle,
     pub slide: Option<Slide>,
     /// Asks the next frame to bring the active column on screen, sliding there when true.
@@ -269,13 +271,13 @@ pub struct Colet {
     pending: HashMap<ColumnId, u64>,
     cancels: HashMap<ColumnId, Arc<AtomicBool>>,
     watcher: Option<FolderWatcher>,
-    watched: Vec<String>,
+    watched: Vec<PathBuf>,
     /// Folders already said to go unwatched, each said once.
-    unwatched: HashSet<String>,
+    unwatched: HashSet<OsString>,
     /// What the watcher saw change, collected until the UI takes it.
     pub(crate) changed: Arc<Mutex<Changes>>,
     /// Folders the watcher could list but not watch, until the UI says so.
-    missed: Arc<Mutex<Vec<String>>>,
+    missed: Arc<Mutex<Vec<PathBuf>>>,
     searched_at: Option<Instant>,
     search_refresh: bool,
     typed: TypeAhead,
@@ -287,7 +289,7 @@ pub struct Colet {
     pub(crate) settings_changes: u64,
     /// What the latest operation sent away, by path key: a listing that finds it gone takes it as
     /// Colet's own doing.
-    pub(crate) departed: HashSet<String>,
+    pub(crate) departed: HashSet<OsString>,
     pub dialog: Option<Dialog>,
     pub(crate) dialog_subscriptions: Vec<Subscription>,
     /// Takes the keys in a dialog with no field.
@@ -332,7 +334,7 @@ pub struct Colet {
     pub(crate) clipboard_tickets: u64,
     pub(crate) clipboard_lane: std::sync::Arc<(std::sync::Mutex<u64>, std::sync::Condvar)>,
     /// A paste asked for while they were, into this folder: run once they are done, so it pastes them.
-    pub(crate) paste_waiting: Option<String>,
+    pub(crate) paste_waiting: Option<PathBuf>,
     /// The settings could not be written as the window closed: the next close goes without them.
     pub(crate) unsaved_close: bool,
     pub(crate) next_operation: u64,
@@ -342,13 +344,13 @@ pub struct Colet {
     pub unseen: usize,
     pub history_open: bool,
     /// The item last pressed in the history, while the disk is asked whether it is still there.
-    pub(crate) revealing: Option<String>,
+    pub(crate) revealing: Option<PathBuf>,
     /// The operations the history shows opened.
     pub expanded: HashSet<u64>,
     /// The files on the clipboard, marked in their rows until it changes.
     pub clipboard: ClipboardFiles,
     /// The clipboard's paths by path key: another app may write them in another case.
-    pub held: HashSet<String>,
+    pub held: HashSet<OsString>,
     clipboard_changed: Arc<AtomicBool>,
     _subscriptions: Vec<Subscription>,
 }
@@ -838,7 +840,7 @@ impl Colet {
     /// Watches the folders the columns could read, one level deep. The watcher opens them on its own
     /// thread, so a share slow to answer never holds up the window.
     fn watch(&mut self, cx: &mut Context<Self>) {
-        let paths: Vec<String> = self
+        let paths: Vec<PathBuf> = self
             .state
             .columns
             .iter()
@@ -868,9 +870,9 @@ impl Colet {
     /// Says which folders the watcher could list but not watch, each once.
     fn take_missed(&mut self, cx: &mut Context<Self>) {
         let missed = std::mem::take(&mut *self.missed.lock().unwrap());
-        let fresh: Vec<String> = missed.into_iter().filter(|p| self.unwatched.insert(path_key(p))).collect();
+        let fresh: Vec<PathBuf> = missed.into_iter().filter(|p| self.unwatched.insert(path_key(p))).collect();
         if !fresh.is_empty() {
-            let names: String = fresh.iter().map(|p| format!("「{}」", colet_core::paths::folder_name(p))).collect();
+            let names: String = fresh.iter().map(|p| format!("「{}」", shown(colet_core::paths::folder_name(p)))).collect();
             self.notify(format!("{names}の変更を監視できません。F5で更新できます。"), Tone::Error, cx);
         }
     }
@@ -946,11 +948,11 @@ impl Colet {
                 return;
             }
         };
-        let folders: HashSet<String> = paths
+        let folders: HashSet<OsString> = paths
             .iter()
             .flat_map(|path| {
                 let key = path_key(path);
-                let parent = parent_folder(&key).unwrap_or_default().to_owned();
+                let parent = parent_folder(Path::new(&key)).unwrap_or(Path::new("")).as_os_str().to_owned();
                 [key, parent]
             })
             .collect();
@@ -1047,7 +1049,7 @@ impl Colet {
         self.changed(cx);
     }
 
-    pub fn pick(&mut self, index: usize, path: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn pick(&mut self, index: usize, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.state.select(index, vec![path]);
         self.state.set_active(index);
         self.column_focus(index).focus(window, cx);
@@ -1056,7 +1058,7 @@ impl Colet {
     }
 
     /// A folder opens beside it, as picking does; a file opens in its app.
-    pub fn open(&mut self, index: usize, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open(&mut self, index: usize, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self.state.columns.get(index).and_then(|c| c.entry(path)).cloned() else { return };
         if crate::state::saved_query(&entry.path).is_some() {
             self.pick(index, entry.path, window, cx);
@@ -1149,7 +1151,7 @@ impl Colet {
 
     /// How many bytes of the name of `path` in `column` type-ahead has matched, and whether its last key
     /// found nothing: none where it is not running, or the keys have moved off the row.
-    pub fn type_ahead_mark(&self, column: ColumnId, path: &str, name: &str) -> Option<(usize, bool)> {
+    pub fn type_ahead_mark(&self, column: ColumnId, path: &Path, name: &str) -> Option<(usize, bool)> {
         let typed = &self.typed;
         if typed.text.is_empty() || typed.column != column || typed.path.as_deref() != Some(path) {
             return None;

@@ -1,8 +1,10 @@
 //! What opens over the window: the dialogs, the file menu, and the history of file operations.
 use colet_core::{
     operations::{Kind as Operation, Request},
-    paths::{ancestors, folder_name},
+    paths::{ancestors, folder_name, shown},
 };
+use std::path::PathBuf;
+
 use gpui_kit::base::input::Input;
 use gpui_kit::component::{button::{Button, ButtonVariants}, dialog::Dialog as DialogFrame, spinner::Spinner, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -151,8 +153,8 @@ impl Colet {
                 let empty = input.read(cx).value().trim().is_empty();
                 // Where the name goes: a rename may come from the results, far from its folder.
                 let (place, submit) = match kind {
-                    Operation::NewFolder => (format!("作成先：{destination}"), "作成"),
-                    _ => (format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).unwrap_or_default()), "保存"),
+                    Operation::NewFolder => (format!("作成先：{}", shown(destination)), "作成"),
+                    _ => (format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).map(shown).unwrap_or_default()), "保存"),
                 };
                 let content = div()
                     .flex()
@@ -497,7 +499,7 @@ impl Colet {
 
     /// Opens the file menu on `paths` (`None` for the selection, empty for the folder itself) in the
     /// column at `index`, at `at` in the window. The keys stay where they were, as the selection does.
-    pub fn open_menu(&mut self, index: usize, paths: Option<Vec<String>>, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_menu(&mut self, index: usize, paths: Option<Vec<PathBuf>>, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         if self.dialog.is_some() {
             return;
         }
@@ -659,7 +661,7 @@ impl Colet {
                         d.when_some(entry.error.clone(), |d, error| d.child(div().px_3().pb_1().text_size(px(12.)).text_color(p.danger).child(error)))
                             .children(entry.items.iter().enumerate().map(|(k, item)| {
                                 let path = item.path.clone();
-                                let name = folder_name(&item.path).to_owned();
+                                let name = shown(folder_name(&item.path));
                                 let color = match item.status {
                                     ItemStatus::Done | ItemStatus::Destroyed | ItemStatus::Handed => p.text_muted,
                                     ItemStatus::Failed => p.danger,
@@ -699,8 +701,8 @@ impl Colet {
                                             .child(div().text_color(color).child(item.status.label())),
                                     )
                                     .child(div().truncate().text_color(p.text_faint).child(match &item.from {
-                                        Some(from) => format!("← {from}"),
-                                        None => item.path.clone(),
+                                        Some(from) => format!("← {}", shown(from)),
+                                        None => shown(&item.path),
                                     }))
                                     .when_some(item.error.clone(), |d, error| d.child(div().text_color(p.danger).child(error)))
                                     .into_any_element()

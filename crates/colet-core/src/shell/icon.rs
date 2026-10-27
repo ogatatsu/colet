@@ -1,4 +1,4 @@
-use std::{ffi::c_void, mem};
+use std::{ffi::c_void, mem, path::PathBuf};
 
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits,
@@ -20,7 +20,7 @@ pub enum IconSource {
     /// The generic folder.
     Folder,
     /// The real item: drives, and files that carry their own icon such as `.exe` and `.lnk`.
-    Item(String),
+    Item(PathBuf),
 }
 
 /// A small shell icon as top-down BGRA rows, premultiplied as the shell hands them out.
@@ -34,7 +34,7 @@ pub struct Icon {
 pub fn icon(source: &IconSource) -> Option<Icon> {
     let _apartment = Apartment::enter();
     let (path, synthetic, directory) = match source {
-        IconSource::Extension(ext) => (format!("file{ext}"), true, false),
+        IconSource::Extension(ext) => (PathBuf::from(format!("file{ext}")), true, false),
         IconSource::Folder => ("folder".into(), true, true),
         IconSource::Item(path) => (path.clone(), false, false),
     };

@@ -1,10 +1,16 @@
 //! Where the user is: the columns on screen, what each lists and has picked, and the way back and forward.
 //! Knows nothing of drawing or of where listings come from.
-use std::{collections::HashSet, ops::Range};
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    ffi::OsString,
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
 use colet_core::{
     entry::{Entry, Marks},
-    paths::{ancestors, folder_name, parent_folder, path_key},
+    paths::{self, ancestors, folder_name, parent_folder, path_key, shown},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,24 +29,24 @@ pub struct Column {
     pub id: ColumnId,
     pub kind: Kind,
     /// The folder a folder column lists; empty for the others.
-    pub path: String,
+    pub path: PathBuf,
     pub entries: Vec<Entry>,
     /// How many there are in all, of which `entries` may be the first pages.
     pub total: usize,
-    pub selected: Vec<String>,
+    pub selected: Vec<PathBuf>,
     /// The row the keys are on.
-    pub focused: Option<String>,
+    pub focused: Option<PathBuf>,
     pub loading: bool,
     pub error: Option<String>,
     /// The listing it waits for; any other that arrives is stale.
     pub request: u64,
     /// The search result or favorite it points at, apart from the selection.
-    pub highlight: Option<String>,
+    pub highlight: Option<PathBuf>,
     /// Where a Shift range starts: the row last picked on its own.
-    pub anchor: Option<String>,
+    pub anchor: Option<PathBuf>,
     /// What to pick once listed, by path key: the items just pasted here, which the listing that shows
     /// them may come after the paste is done.
-    pub pick: Option<Vec<String>>,
+    pub pick: Option<Vec<OsString>>,
     /// A folder column narrowed to some names: `entries` then holds only those.
     pub filter: Option<Filter>,
 }
@@ -88,7 +94,7 @@ fn narrowed(entry: &Entry, text: &str) -> Option<Entry> {
 }
 
 impl Column {
-    fn new(id: ColumnId, kind: Kind, path: &str, highlight: Option<String>) -> Self {
+    fn new(id: ColumnId, kind: Kind, path: &Path, highlight: Option<PathBuf>) -> Self {
         Self {
             id,
             kind,
@@ -112,15 +118,15 @@ impl Column {
         self.loading && self.entries.is_empty()
     }
 
-    pub fn title(&self) -> &str {
+    pub fn title(&self) -> Cow<'_, str> {
         match self.kind {
-            Kind::Home => "ホーム",
-            Kind::Search => "検索結果",
-            Kind::Folder => folder_name(&self.path),
+            Kind::Home => "ホーム".into(),
+            Kind::Search => "検索結果".into(),
+            Kind::Folder => folder_name(&self.path).to_string_lossy(),
         }
     }
 
-    pub fn entry(&self, path: &str) -> Option<&Entry> {
+    pub fn entry(&self, path: &Path) -> Option<&Entry> {
         self.entries.iter().find(|e| e.path == path)
     }
 }
@@ -137,8 +143,8 @@ pub struct Fold<A> {
 struct Location {
     query: String,
     search_filter: Option<String>,
-    folders: Vec<(String, Option<String>)>,
-    selections: Vec<Vec<String>>,
+    folders: Vec<(PathBuf, Option<PathBuf>)>,
+    selections: Vec<Vec<PathBuf>>,
     active: usize,
     /// Its anchor counted among the folders.
     fold: Option<Fold<usize>>,
@@ -156,16 +162,16 @@ pub struct Folded {
 /// can hold; no path starts this way, a drive letter being one character.
 const SEARCH_KEY: &str = "search:";
 
-pub fn search_key(query: &str, filter: Option<&str>) -> String {
+pub fn search_key(query: &str, filter: Option<&str>) -> PathBuf {
     match filter {
-        Some(filter) => format!("{SEARCH_KEY}{query}\0{filter}"),
-        None => format!("{SEARCH_KEY}{query}"),
+        Some(filter) => format!("{SEARCH_KEY}{query}\0{filter}").into(),
+        None => format!("{SEARCH_KEY}{query}").into(),
     }
 }
 
 /// The query a home row runs and the filter it runs within, when it is a saved search.
-pub fn saved_query(path: &str) -> Option<(&str, Option<&str>)> {
-    let key = path.strip_prefix(SEARCH_KEY)?;
+pub fn saved_query(path: &Path) -> Option<(&str, Option<&str>)> {
+    let key = path.to_str()?.strip_prefix(SEARCH_KEY)?;
     Some(match key.split_once('\0') {
         Some((query, filter)) => (query, Some(filter)),
         None => (key, None),
@@ -200,9 +206,9 @@ impl Default for State {
 
 /// A folder column to open to the right of a selection.
 struct Spec {
-    path: String,
-    selected: Option<Vec<String>>,
-    highlight: Option<String>,
+    path: PathBuf,
+    selected: Option<Vec<PathBuf>>,
+    highlight: Option<PathBuf>,
 }
 
 /// The columns that show a search result or favorite where it lives: each ancestor with the next level
@@ -210,7 +216,7 @@ struct Spec {
 /// at in its parent, as a file is, as well as selected there.
 fn reveal_chain(entry: &Entry) -> Vec<Spec> {
     // A folder's chain runs down to the folder itself, to show its contents.
-    let chain = ancestors(if entry.directory { &entry.path } else { &entry.parent });
+    let chain = ancestors(if entry.directory { &entry.path } else { parent_folder(&entry.path).unwrap_or(Path::new("")) });
     let last = chain.len().saturating_sub(1);
     chain
         .iter()
@@ -246,12 +252,12 @@ impl State {
             fold: None,
             next_id: 0,
         };
-        let home = state.column(Kind::Home, "", None);
+        let home = state.column(Kind::Home, Path::new(""), None);
         state.columns.push(home);
         state
     }
 
-    fn column(&mut self, kind: Kind, path: &str, highlight: Option<String>) -> Column {
+    fn column(&mut self, kind: Kind, path: &Path, highlight: Option<PathBuf>) -> Column {
         self.next_id += 1;
         Column::new(self.next_id, kind, path, highlight)
     }
@@ -317,7 +323,7 @@ impl State {
         let home = self.columns.swap_remove(0);
         let mut columns = vec![home];
         if !location.query.is_empty() || location.search_filter.is_some() {
-            columns.push(self.column(Kind::Search, "", None));
+            columns.push(self.column(Kind::Search, Path::new(""), None));
         }
         for (path, highlight) in &location.folders {
             columns.push(self.column(Kind::Folder, path, highlight.clone()));
@@ -363,7 +369,7 @@ impl State {
         home.focused = None;
         self.columns = vec![home];
         if searching {
-            let search = self.column(Kind::Search, "", None);
+            let search = self.column(Kind::Search, Path::new(""), None);
             self.columns.push(search);
         }
         self.query = query.into();
@@ -441,13 +447,13 @@ impl State {
     pub fn reset_search(&mut self) {
         if let Some(index) = self.columns.iter().position(|c| c.kind == Kind::Search) {
             let selected = std::mem::take(&mut self.columns[index].selected);
-            let mut fresh = self.column(Kind::Search, "", None);
+            let mut fresh = self.column(Kind::Search, Path::new(""), None);
             fresh.selected = selected;
             self.columns[index] = fresh;
         }
     }
 
-    pub fn select(&mut self, index: usize, paths: Vec<String>) {
+    pub fn select(&mut self, index: usize, paths: Vec<PathBuf>) {
         let Some(c) = self.columns.get(index) else { return };
         let here = self.snapshot();
         // A saved search in home runs its query beside it. Home keeps the pick and the focus, so the next
@@ -465,7 +471,7 @@ impl State {
             let mut home = self.columns.swap_remove(0);
             home.selected = vec![path.clone()];
             home.focused = Some(path);
-            let search = self.column(Kind::Search, "", None);
+            let search = self.column(Kind::Search, Path::new(""), None);
             self.columns = vec![home, search];
             self.query = query;
             self.search_filter = filter;
@@ -592,7 +598,7 @@ impl State {
     pub fn enter(&mut self) {
         let index = self.active;
         let c = &self.columns[index];
-        let listed = |path: &String| c.entry(path).is_some();
+        let listed = |path: &PathBuf| c.entry(path).is_some();
         if let Some(target) = c.focused.clone().filter(listed).or_else(|| c.highlight.clone().filter(listed)) {
             if c.selected.is_empty() && c.highlight.as_ref() == Some(&target) {
                 self.select(index, vec![target]);
@@ -629,7 +635,7 @@ impl State {
     }
 
     /// Ctrl+click: adds the row to the selection, or takes it out.
-    pub fn toggle(&mut self, index: usize, path: &str) {
+    pub fn toggle(&mut self, index: usize, path: &Path) {
         let Some(c) = self.columns.get(index) else { return };
         let mut selected = c.selected.clone();
         if let Some(at) = selected.iter().position(|p| p == path) {
@@ -644,13 +650,13 @@ impl State {
     }
 
     /// Shift+click: picks the rows from the anchor to `path`, in their order.
-    pub fn extend(&mut self, index: usize, path: &str) {
+    pub fn extend(&mut self, index: usize, path: &Path) {
         let Some(c) = self.columns.get(index) else { return };
-        let position = |p: &String| c.entries.iter().position(|e| &e.path == p);
+        let position = |p: &PathBuf| c.entries.iter().position(|e| &e.path == p);
         let Some(to) = c.entries.iter().position(|e| e.path == path) else { return };
         let anchor = c.anchor.clone().or_else(|| c.focused.clone()).filter(|a| position(a).is_some());
         let from = anchor.as_ref().and_then(position).unwrap_or(to);
-        let range: Vec<String> = c.entries[from.min(to)..=from.max(to)].iter().map(|e| e.path.clone()).collect();
+        let range: Vec<PathBuf> = c.entries[from.min(to)..=from.max(to)].iter().map(|e| e.path.clone()).collect();
         self.select(index, range);
         let c = &mut self.columns[index];
         c.focused = Some(path.to_owned());
@@ -677,7 +683,7 @@ impl State {
     pub fn select_all(&mut self, index: usize) {
         let Some(c) = self.columns.get(index) else { return };
         let focused = c.focused.clone();
-        let all: Vec<String> = c.entries.iter().map(|e| e.path.clone()).collect();
+        let all: Vec<PathBuf> = c.entries.iter().map(|e| e.path.clone()).collect();
         self.select(index, all);
         if focused.is_some() {
             self.columns[index].focused = focused;
@@ -686,11 +692,11 @@ impl State {
 
     /// Shows an item where it lives, as from the history, leaving the search; the column pointing at
     /// it takes the keys.
-    pub fn reveal(&mut self, path: &str, directory: bool) {
+    pub fn reveal(&mut self, path: &Path, directory: bool) {
         let entry = Entry {
             path: path.into(),
-            name: folder_name(path).into(),
-            parent: parent_folder(path).unwrap_or_default().into(),
+            name: shown(folder_name(path)),
+            parent: parent_folder(path).map(shown).unwrap_or_default(),
             directory,
             size: None,
             modified: None,
@@ -719,25 +725,19 @@ impl State {
 
     /// Ahead of the listing that shows it, the renamed item keeps its selection and an open folder its
     /// columns, rather than reading as gone.
-    pub fn renamed(&mut self, from: &str, to: &str) {
-        let moved = |path: &str| -> String {
-            if path == from {
-                to.to_owned()
-            } else if let Some(rest) = path.strip_prefix(from).filter(|rest| rest.starts_with('\\')) {
-                format!("{to}{rest}")
-            } else {
-                path.to_owned()
-            }
-        };
-        let name = folder_name(to).to_owned();
+    pub fn renamed(&mut self, from: &Path, to: &Path) {
+        let moved = |path: &Path| -> PathBuf { paths::moved(path, from, to).unwrap_or_else(|| path.to_owned()) };
+        let name = shown(folder_name(to));
         for c in &mut self.columns {
             c.path = moved(&c.path);
             for e in c.entries.iter_mut().chain(c.filter.iter_mut().flat_map(|f| f.all.iter_mut())) {
                 if e.path == from {
                     e.name = name.clone();
                 }
-                e.path = moved(&e.path);
-                e.parent = moved(&e.parent);
+                if let Some(path) = paths::moved(&e.path, from, to) {
+                    e.parent = path.parent().map(shown).unwrap_or_default();
+                    e.path = path;
+                }
             }
             for p in &mut c.selected {
                 *p = moved(p);
@@ -770,7 +770,7 @@ impl State {
     }
 
     /// Like Explorer, a new folder is picked once made: listed ahead of the listing that sorts it in.
-    pub fn created(&mut self, parent: &str, path: &str) {
+    pub fn created(&mut self, parent: &Path, path: &Path) {
         let Some(index) = self.columns.iter().position(|c| c.kind == Kind::Folder && c.path == parent) else {
             return;
         };
@@ -780,11 +780,11 @@ impl State {
             f.text
         });
         if c.entry(path).is_none() {
-            c.entries.push(Entry { parent: parent.into(), ..Entry::folder(path, folder_name(path)) });
+            c.entries.push(Entry { parent: shown(parent), ..Entry::folder(path, &shown(folder_name(path))) });
             c.total += 1;
         }
         // It shows, to be seen picked, even where the filter would hide it: the filter goes then.
-        if let Some(text) = text.filter(|text| !found(folder_name(path), text).is_empty()) {
+        if let Some(text) = text.filter(|text| !found(&shown(folder_name(path)), text).is_empty()) {
             c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries) });
             self.narrow(index);
         }
@@ -817,24 +817,24 @@ impl State {
         let c = &mut self.columns[index];
         let Some(filter) = &c.filter else { return };
         c.entries = filter.all.iter().filter_map(|e| narrowed(e, &filter.text)).collect();
-        let shown: HashSet<&str> = c.entries.iter().map(|e| e.path.as_str()).collect();
-        if c.focused.as_ref().is_some_and(|f| !shown.contains(f.as_str())) {
+        let shown: HashSet<&Path> = c.entries.iter().map(|e| e.path.as_path()).collect();
+        if c.focused.as_ref().is_some_and(|f| !shown.contains(f.as_path())) {
             c.focused = None;
         }
-        let kept: Vec<String> = c.selected.iter().filter(|p| shown.contains(p.as_str())).cloned().collect();
+        let kept: Vec<PathBuf> = c.selected.iter().filter(|p| shown.contains(p.as_path())).cloned().collect();
         if kept.len() != c.selected.len() {
             self.select(index, kept);
         }
     }
 
     /// Whether the folder column at `index` narrowed to its names, holds `path` but hides it.
-    fn hides(&self, index: usize, path: &str) -> bool {
+    fn hides(&self, index: usize, path: &Path) -> bool {
         let c = &self.columns[index];
         c.filter.as_ref().is_some_and(|f| f.all.iter().any(|e| e.path == path && narrowed(e, &f.text).is_none()))
     }
 
     /// Picked in the folder they went to once it lists them, while it is the column worked in.
-    pub fn pasted(&mut self, parent: &str, paths: &[String]) {
+    pub fn pasted(&mut self, parent: &Path, paths: &[PathBuf]) {
         let Some(index) = self.columns.iter().position(|c| c.kind == Kind::Folder && c.path == parent) else {
             return;
         };
@@ -853,8 +853,8 @@ impl State {
     fn pick_listed(&mut self, index: usize) -> bool {
         let c = &self.columns[index];
         let Some(keys) = &c.pick else { return false };
-        let keys: HashSet<&String> = keys.iter().collect();
-        let paths: Vec<String> = c.entries.iter().filter(|e| keys.contains(&path_key(&e.path))).map(|e| e.path.clone()).collect();
+        let keys: HashSet<&OsString> = keys.iter().collect();
+        let paths: Vec<PathBuf> = c.entries.iter().filter(|e| keys.contains(&path_key(&e.path))).map(|e| e.path.clone()).collect();
         if paths.is_empty() {
             return false;
         }
@@ -891,7 +891,7 @@ impl State {
         entries: Vec<Entry>,
         total: usize,
         offset: usize,
-        departed: &HashSet<String>,
+        departed: &HashSet<OsString>,
     ) {
         let Some(index) = self.index_of(id) else { return };
         let c = &mut self.columns[index];
@@ -917,41 +917,41 @@ impl State {
     }
 
     /// What [`page`](Self::page) does with a listing that is the one the column waits for.
-    fn list(&mut self, index: usize, entries: Vec<Entry>, total: usize, offset: usize, departed: &HashSet<String>) {
+    fn list(&mut self, index: usize, entries: Vec<Entry>, total: usize, offset: usize, departed: &HashSet<OsString>) {
         let c = &mut self.columns[index];
         let old = std::mem::take(&mut c.entries);
         if offset > 0 {
-            let known: HashSet<&String> = old.iter().map(|e| &e.path).collect();
+            let known: HashSet<&PathBuf> = old.iter().map(|e| &e.path).collect();
             let fresh: Vec<Entry> = entries.into_iter().filter(|e| !known.contains(&e.path)).collect();
             c.entries = old.iter().cloned().chain(fresh).collect();
         } else {
             c.entries = entries;
         }
-        let paths: HashSet<&str> = c.entries.iter().map(|e| e.path.as_str()).collect();
+        let paths: HashSet<&Path> = c.entries.iter().map(|e| e.path.as_path()).collect();
         // The rows the keys were on that are gone; the row now in the topmost one's place takes over, or
         // at the end, the last before it.
         // Looked up rather than searched for: a refresh with thousands picked would compare each with each.
-        let picked: HashSet<&str> = c.selected.iter().map(String::as_str).collect();
+        let picked: HashSet<&Path> = c.selected.iter().map(PathBuf::as_path).collect();
         let lost: Vec<usize> = (0..old.len())
             .filter(|&i| {
                 let path = &old[i].path;
-                !paths.contains(path.as_str()) && (picked.contains(path.as_str()) || c.focused.as_ref() == Some(path))
+                !paths.contains(path.as_path()) && (picked.contains(path.as_path()) || c.focused.as_ref() == Some(path))
             })
             .collect();
         drop(picked);
         let heir = lost.first().and_then(|&at| {
             old[at..]
                 .iter()
-                .find(|e| paths.contains(e.path.as_str()))
-                .or_else(|| old[..at].iter().rev().find(|e| paths.contains(e.path.as_str())))
+                .find(|e| paths.contains(e.path.as_path()))
+                .or_else(|| old[..at].iter().rev().find(|e| paths.contains(e.path.as_path())))
                 .map(|e| e.path.clone())
         });
-        let departed_path = |path: &str| ancestors(path).iter().any(|a| departed.contains(&path_key(a)));
+        let departed_path = |path: &Path| ancestors(path).iter().any(|a| departed.contains(&path_key(a)));
         let all_departed = !lost.is_empty() && lost.iter().all(|&i| departed_path(&old[i].path));
-        c.selected.retain(|p| paths.contains(p.as_str()));
+        c.selected.retain(|p| paths.contains(p.as_path()));
         let focused = match (&c.focused, &c.highlight) {
-            (Some(f), _) if paths.contains(f.as_str()) => Some(f.clone()),
-            (_, Some(h)) if paths.contains(h.as_str()) => Some(h.clone()),
+            (Some(f), _) if paths.contains(f.as_path()) => Some(f.clone()),
+            (_, Some(h)) if paths.contains(h.as_path()) => Some(h.clone()),
             _ => None,
         };
         c.focused = focused;
@@ -995,11 +995,11 @@ mod tests {
     use colet_core::paths::ancestors;
 
     fn entry(path: &str, directory: bool) -> Entry {
-        let chain = ancestors(path);
+        let chain = ancestors(Path::new(path));
         Entry {
             path: path.into(),
             name: path.into(),
-            parent: chain.len().checked_sub(2).map(|i| chain[i].clone()).unwrap_or_default(),
+            parent: chain.len().checked_sub(2).map(|i| shown(&chain[i])).unwrap_or_default(),
             directory,
             size: None,
             modified: None,
@@ -1021,20 +1021,24 @@ mod tests {
     }
 
     fn paths(s: &State) -> Vec<&str> {
-        s.columns.iter().map(|c| c.path.as_str()).collect()
+        s.columns.iter().map(|c| c.path.to_str().unwrap()).collect()
     }
 
     /// Each folder column after home: its path, selection and highlight.
-    fn chain(s: &State) -> Vec<(String, Vec<String>, Option<String>)> {
+    fn chain(s: &State) -> Vec<(PathBuf, Vec<PathBuf>, Option<PathBuf>)> {
         s.columns[1..].iter().map(|c| (c.path.clone(), c.selected.clone(), c.highlight.clone())).collect()
     }
 
-    fn link(path: &str, selected: &[&str], highlight: Option<&str>) -> (String, Vec<String>, Option<String>) {
-        (path.into(), selected.iter().map(|s| s.to_string()).collect(), highlight.map(Into::into))
+    fn link(path: &str, selected: &[&str], highlight: Option<&Path>) -> (PathBuf, Vec<PathBuf>, Option<PathBuf>) {
+        (path.into(), selected.iter().map(PathBuf::from).collect(), highlight.map(Into::into))
     }
 
-    fn one(path: &str) -> Vec<String> {
-        vec![path.into()]
+    fn all(paths: &[&str]) -> Vec<PathBuf> {
+        paths.iter().map(PathBuf::from).collect()
+    }
+
+    fn one(path: impl AsRef<Path>) -> Vec<PathBuf> {
+        vec![path.as_ref().to_owned()]
     }
 
     #[test]
@@ -1042,7 +1046,7 @@ mod tests {
         for kind in [Kind::Search, Kind::Home, Kind::Folder] {
             let mut s = State::new();
             let (kept, gone) = (file(r"D:\kept"), file(r"D:\gone"));
-            let mut c = s.column(kind, "", None);
+            let mut c = s.column(kind, Path::new(""), None);
             c.entries = vec![kept.clone(), gone.clone()];
             c.selected = vec![kept.path.clone(), gone.path.clone()];
             c.focused = Some(gone.path.clone());
@@ -1061,14 +1065,14 @@ mod tests {
     fn a_refresh_with_thousands_picked_hands_what_colet_sent_away_to_the_next_row() {
         let entries: Vec<Entry> = (0..20_000).map(|i| file(&format!(r"D:\work\{i:05}"))).collect();
         let mut s = State::new();
-        let mut c = s.column(Kind::Folder, r"D:\work", None);
+        let mut c = s.column(Kind::Folder, Path::new(r"D:\work"), None);
         c.entries = entries.clone();
         c.selected = entries[..10_000].iter().map(|e| e.path.clone()).collect();
         c.request = 2;
         let id = c.id;
         s.columns = vec![c];
         // Pair by pair, these would be 200 million comparisons on the UI thread.
-        let departed: HashSet<String> = entries[..10_000].iter().map(|e| path_key(&e.path)).collect();
+        let departed: HashSet<OsString> = entries[..10_000].iter().map(|e| path_key(&e.path)).collect();
         s.page(id, 2, entries[10_000..].to_vec(), 10_000, 0, &departed);
         assert_eq!(s.columns[0].selected, one(&entries[10_000].path));
     }
@@ -1087,7 +1091,7 @@ mod tests {
         s.page(id, 2, entries[500..].to_vec(), 501, 500, &HashSet::new());
         assert_eq!(s.columns[1].entries.len(), 501);
         assert_eq!(s.columns[1].selected, one(&first));
-        assert_eq!(s.columns[1].focused.as_deref(), Some(first.as_str()));
+        assert_eq!(s.columns[1].focused.as_deref(), Some(first.as_path()));
         s.select(1, vec![first.clone(), last.clone()]);
         // A stale listing changes nothing.
         s.page(id, 1, entries[..500].to_vec(), 501, 0, &HashSet::new());
@@ -1120,7 +1124,7 @@ mod tests {
         with_entries(&mut s, 1, vec![target.clone(), folder(r"D:\other")]);
         s.select(1, one(&target.path));
         assert_eq!(paths(&s), ["", "", r"D:\", r"D:\parent"]);
-        assert_eq!(s.columns[3].highlight.as_deref(), Some(target.path.as_str()));
+        assert_eq!(s.columns[3].highlight.as_deref(), Some(target.path.as_path()));
         with_entries(&mut s, 3, vec![target.clone()]);
         s.select(3, one(&target.path));
         assert_eq!(s.columns.len(), 4);
@@ -1152,7 +1156,7 @@ mod tests {
         s.select(1, one(&target.path));
         assert_eq!(
             chain(&s)[1..],
-            [link(r"D:\", &[r"D:\a"], None), link(r"D:\a", &[r"D:\a\b"], Some(r"D:\a\b")), link(r"D:\a\b", &[], None)]
+            [link(r"D:\", &[r"D:\a"], None), link(r"D:\a", &[r"D:\a\b"], Some(Path::new(r"D:\a\b"))), link(r"D:\a\b", &[], None)]
         );
         // Picking in its parent takes the pointer away, as for a file.
         with_entries(&mut s, 3, vec![target.clone(), folder(r"D:\a\c")]);
@@ -1193,7 +1197,7 @@ mod tests {
         with_entries(&mut s, 1, vec![deep.clone(), top.clone()]);
         s.select(1, one(&deep.path));
         s.select(1, one(&top.path));
-        assert_eq!(chain(&s)[1..], [link(r"D:\", &[r"D:\a"], Some(r"D:\a")), link(r"D:\a", &[], None)]);
+        assert_eq!(chain(&s)[1..], [link(r"D:\", &[r"D:\a"], Some(Path::new(r"D:\a"))), link(r"D:\a", &[], None)]);
     }
 
     #[test]
@@ -1216,10 +1220,10 @@ mod tests {
         assert_eq!(s.past.len(), past + 1);
         // A folder opens on its contents alone; picked afresh, folded again.
         assert_eq!(s.folded(), Some(Folded { from: 2, to: 4, open: false }));
-        assert_eq!(s.columns[4].path, r"D:\a\c");
+        assert_eq!(s.columns[4].path, Path::new(r"D:\a\c"));
         // Gone back to, a place is folded as it was left; going forward too.
         s.back();
-        assert_eq!(s.columns[4].path, r"D:\a\b");
+        assert_eq!(s.columns[4].path, Path::new(r"D:\a\b"));
         assert!(s.folded().unwrap().open);
         s.forward();
         assert!(!s.folded().unwrap().open);
@@ -1254,7 +1258,7 @@ mod tests {
         s.select(0, vec![r"D:\a".into(), r"D:\b".into()]);
         assert_eq!(s.columns.len(), 1);
         assert_eq!(s.columns[0].selected.len(), 2);
-        assert_eq!(s.columns[0].focused.as_deref(), Some(r"D:\b"));
+        assert_eq!(s.columns[0].focused.as_deref(), Some(Path::new(r"D:\b")));
         assert_eq!(s.past.len(), past);
         s.select(0, vec![]);
         assert!(s.columns[0].selected.is_empty());
@@ -1269,10 +1273,10 @@ mod tests {
         s.select(0, one(r"D:\b"));
         s.back();
         assert_eq!(s.columns[0].selected, one(r"D:\a"));
-        assert_eq!(s.columns[0].focused.as_deref(), Some(r"D:\a"));
-        assert_eq!(s.columns.last().unwrap().path, r"D:\a");
+        assert_eq!(s.columns[0].focused.as_deref(), Some(Path::new(r"D:\a")));
+        assert_eq!(s.columns.last().unwrap().path, Path::new(r"D:\a"));
         s.forward();
-        assert_eq!(s.columns.last().unwrap().path, r"D:\b");
+        assert_eq!(s.columns.last().unwrap().path, Path::new(r"D:\b"));
     }
 
     #[test]
@@ -1288,7 +1292,7 @@ mod tests {
         assert_eq!(s.query, "abc");
         assert_eq!(s.columns.iter().map(|c| c.kind).collect::<Vec<_>>(), [Kind::Home, Kind::Search]);
         s.forward();
-        assert_eq!(s.columns.last().unwrap().path, r"D:\a");
+        assert_eq!(s.columns.last().unwrap().path, Path::new(r"D:\a"));
     }
 
     #[test]
@@ -1350,7 +1354,7 @@ mod tests {
         assert_eq!(s.columns[1].selected, one(r"D:\c"));
         s.step(-1);
         assert_eq!(s.columns[1].selected, one(r"D:\b"));
-        assert_eq!(s.columns.last().unwrap().path, r"D:\b");
+        assert_eq!(s.columns.last().unwrap().path, Path::new(r"D:\b"));
     }
 
     #[test]
@@ -1358,7 +1362,7 @@ mod tests {
         let mut s = State::new();
         with_entries(&mut s, 0, vec![folder(r"C:\"), folder(r"D:\")]);
         s.enter();
-        assert_eq!(s.columns[0].focused.as_deref(), Some(r"C:\"));
+        assert_eq!(s.columns[0].focused.as_deref(), Some(Path::new(r"C:\")));
         assert!(s.columns[0].selected.is_empty());
         s.set_query("x");
         with_entries(&mut s, 1, vec![file(r"D:\x.txt")]);
@@ -1412,16 +1416,16 @@ mod tests {
     fn picks_ranges_and_single_rows_by_ctrl_and_shift() {
         let mut s = drive(vec![file(r"D:\a"), file(r"D:\b"), file(r"D:\c"), file(r"D:\d")]);
         s.select(1, one(r"D:\b"));
-        s.extend(1, r"D:\d");
-        assert_eq!(s.columns[1].selected, [r"D:\b", r"D:\c", r"D:\d"]);
-        s.extend(1, r"D:\a");
-        assert_eq!(s.columns[1].selected, [r"D:\a", r"D:\b"]);
-        s.toggle(1, r"D:\d");
-        assert_eq!(s.columns[1].selected, [r"D:\a", r"D:\b", r"D:\d"]);
-        s.toggle(1, r"D:\a");
-        assert_eq!(s.columns[1].selected, [r"D:\b", r"D:\d"]);
+        s.extend(1, Path::new(r"D:\d"));
+        assert_eq!(s.columns[1].selected, all(&[r"D:\b", r"D:\c", r"D:\d"]));
+        s.extend(1, Path::new(r"D:\a"));
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\b"]));
+        s.toggle(1, Path::new(r"D:\d"));
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\b", r"D:\d"]));
+        s.toggle(1, Path::new(r"D:\a"));
+        assert_eq!(s.columns[1].selected, all(&[r"D:\b", r"D:\d"]));
         s.extend_step(-1);
-        assert_eq!(s.columns[1].selected, [r"D:\a"]);
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a"]));
         s.select_all(1);
         assert_eq!(s.columns[1].selected.len(), 4);
     }
@@ -1433,13 +1437,13 @@ mod tests {
         with_entries(&mut s, 2, vec![file(r"D:\work\a.txt")]);
         s.select(2, one(r"D:\work\a.txt"));
         s.set_active(1);
-        s.renamed(r"D:\work", r"D:\projects");
+        s.renamed(Path::new(r"D:\work"), Path::new(r"D:\projects"));
         assert_eq!(s.columns[1].selected, one(r"D:\projects"));
         assert_eq!(s.columns[1].entries[0].name, "projects");
-        assert_eq!(s.columns[2].path, r"D:\projects");
+        assert_eq!(s.columns[2].path, Path::new(r"D:\projects"));
         assert_eq!(s.columns[2].selected, one(r"D:\projects\a.txt"));
         assert_eq!(s.columns[2].entries[0].parent, r"D:\projects");
-        assert_eq!(s.past.last().unwrap().folders.iter().map(|f| f.0.as_str()).collect::<Vec<_>>(), [r"D:\", r"D:\projects"]);
+        assert_eq!(s.past.last().unwrap().folders.iter().map(|f| f.0.to_str().unwrap()).collect::<Vec<_>>(), [r"D:\", r"D:\projects"]);
         // The listing finds it under its new name, so nothing closes.
         let parent = s.columns[1].id;
         s.load(parent, 3, true);
@@ -1451,11 +1455,11 @@ mod tests {
     #[test]
     fn picks_a_new_folder_and_opens_it() {
         let mut s = drive(vec![file(r"D:\notes.txt")]);
-        s.created(r"D:\", r"D:\新しいフォルダー (2)");
+        s.created(Path::new(r"D:\"), Path::new(r"D:\新しいフォルダー (2)"));
         let made = s.columns[1].entries.last().unwrap();
         assert_eq!((made.name.as_str(), made.directory), ("新しいフォルダー (2)", true));
         assert_eq!(s.columns[1].selected, one(r"D:\新しいフォルダー (2)"));
-        assert_eq!(s.columns[2].path, r"D:\新しいフォルダー (2)");
+        assert_eq!(s.columns[2].path, Path::new(r"D:\新しいフォルダー (2)"));
         assert_eq!(s.active, 1);
     }
 
@@ -1463,11 +1467,11 @@ mod tests {
     fn picks_what_was_pasted_once_listed() {
         let mut s = drive(vec![file(r"D:\a")]);
         let id = s.columns[1].id;
-        s.pasted(r"D:\", &[r"D:\a - コピー".into(), r"D:\b".into()]);
+        s.pasted(Path::new(r"D:\"), &[r"D:\a - コピー".into(), r"D:\b".into()]);
         assert!(s.columns[1].selected.is_empty());
         s.load(id, 5, true);
         s.page(id, 5, vec![file(r"D:\a"), file(r"D:\a - コピー"), file(r"D:\b")], 3, 0, &HashSet::new());
-        assert_eq!(s.columns[1].selected, [r"D:\a - コピー", r"D:\b"]);
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a - コピー", r"D:\b"]));
         assert!(s.columns[1].pick.is_none());
     }
 
@@ -1478,7 +1482,7 @@ mod tests {
         s.set_active(1);
         let id = s.columns[1].id;
         s.load(id, 6, true);
-        let departed = HashSet::from([path_key(r"D:\b")]);
+        let departed = HashSet::from([path_key(Path::new(r"D:\b"))]);
         s.page(id, 6, vec![folder(r"D:\a"), file(r"D:\c")], 2, 0, &departed);
         assert_eq!(s.columns[1].selected, one(r"D:\c"));
         assert!(s.notice.is_none());
@@ -1498,16 +1502,16 @@ mod tests {
     fn reveals_an_item_where_it_lives_leaving_the_search() {
         let mut s = State::new();
         s.set_query("x");
-        s.reveal(r"D:\a\b.txt", false);
+        s.reveal(Path::new(r"D:\a\b.txt"), false);
         assert_eq!(s.query, "");
-        assert_eq!(chain(&s), [link(r"D:\", &[r"D:\a"], None), link(r"D:\a", &[], Some(r"D:\a\b.txt"))]);
+        assert_eq!(chain(&s), [link(r"D:\", &[r"D:\a"], None), link(r"D:\a", &[], Some(Path::new(r"D:\a\b.txt")))]);
         assert_eq!(s.active, 2);
         s.back();
         assert_eq!(s.query, "x");
     }
 
     fn names(s: &State, index: usize) -> Vec<&str> {
-        s.columns[index].entries.iter().map(|e| e.path.as_str()).collect()
+        s.columns[index].entries.iter().map(|e| e.path.to_str().unwrap()).collect()
     }
 
     #[test]
@@ -1571,29 +1575,29 @@ mod tests {
     fn lifts_the_filter_for_what_is_made_or_renamed_here_that_it_would_hide() {
         let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
         s.set_filter(1, Some("ta"));
-        s.created(r"D:\", r"D:\data");
+        s.created(Path::new(r"D:\"), Path::new(r"D:\data"));
         assert_eq!(names(&s, 1), [r"D:\beta.txt", r"D:\data"]);
         assert_eq!(s.columns[1].selected, one(r"D:\data"));
-        s.created(r"D:\", r"D:\new");
+        s.created(Path::new(r"D:\"), Path::new(r"D:\new"));
         assert!(s.columns[1].filter.is_none());
         assert_eq!(s.columns[1].selected, one(r"D:\new"));
 
         let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
         s.set_filter(1, Some("ta"));
-        s.renamed(r"D:\beta.txt", r"D:\beta2.txt");
+        s.renamed(Path::new(r"D:\beta.txt"), Path::new(r"D:\beta2.txt"));
         assert_eq!(s.columns[1].entries[0].marks.name, [2..4]);
-        s.renamed(r"D:\beta2.txt", r"D:\b.txt");
+        s.renamed(Path::new(r"D:\beta2.txt"), Path::new(r"D:\b.txt"));
         assert!(s.columns[1].filter.is_none());
 
         // Pasted where it hides them, already listed or listed after.
         let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
         s.set_filter(1, Some("ta"));
-        s.pasted(r"D:\", &[r"D:\gamma".into()]);
+        s.pasted(Path::new(r"D:\"), &[r"D:\gamma".into()]);
         assert!(s.columns[1].filter.is_none());
         assert_eq!(s.columns[1].selected, one(r"D:\gamma"));
         let mut s = drive(vec![file(r"D:\beta.txt")]);
         s.set_filter(1, Some("ta"));
-        s.pasted(r"D:\", &[r"D:\x".into()]);
+        s.pasted(Path::new(r"D:\"), &[r"D:\x".into()]);
         let id = s.columns[1].id;
         s.load(id, 4, true);
         s.page(id, 4, vec![file(r"D:\beta.txt"), file(r"D:\x")], 2, 0, &HashSet::new());

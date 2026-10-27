@@ -16,7 +16,7 @@ const LIMIT: usize = 4096;
 
 /// Files that carry their own icon are asked for by path; everything else by extension.
 pub fn source(entry: &Entry) -> IconSource {
-    let drive = entry.path.len() == 3 && entry.path.ends_with(":\\");
+    let drive = entry.path.as_os_str().len() == 3 && entry.path.as_os_str().as_encoded_bytes().ends_with(b":\\");
     if entry.directory {
         return if drive { IconSource::Item(entry.path.clone()) } else { IconSource::Folder };
     }
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn asks_by_extension_but_by_path_for_self_iconed_files_and_drives() {
-        let file = |name: &str| Entry { name: name.into(), path: format!(r"D:\{name}"), ..Entry::folder("", "") };
+        let file = |name: &str| Entry { name: name.into(), path: format!(r"D:\{name}").into(), ..Entry::folder("", "") };
         let file = |name: &str| Entry { directory: false, ..file(name) };
         assert_eq!(source(&file("a.TXT")), IconSource::Extension(".txt".into()));
         assert_eq!(source(&file("README")), IconSource::Extension(String::new()));

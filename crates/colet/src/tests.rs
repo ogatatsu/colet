@@ -1,6 +1,8 @@
 //! The window driven as the user would: keys, clicks and drags, against listings the test makes up.
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsStr,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -12,7 +14,7 @@ use colet_core::{
     entry::{Entry, Marks, Order, Sort},
     everything::Page,
     operations::{CANCELLED, Event, Kind as Operation, Request},
-    paths::{ancestors, child, folder_name},
+    paths::{ancestors, child, folder_name, id_text, parent_folder},
     shell::{Owner, clipboard::ClipboardFiles},
     watch::Changes,
 };
@@ -73,16 +75,16 @@ struct Fake {
 }
 
 impl Fake {
-    fn remove(&self, path: &str) -> Option<Entry> {
+    fn remove(&self, path: &Path) -> Option<Entry> {
         let parent = ancestors(path).into_iter().rev().nth(1)?;
         let mut folders = self.folders.lock().unwrap();
-        let list = folders.get_mut(&parent)?;
+        let list = folders.get_mut(parent.to_str()?)?;
         let at = list.iter().position(|e| e.path == path)?;
         Some(list.remove(at))
     }
 
-    fn add(&self, parent: &str, entry: Entry) {
-        self.folders.lock().unwrap().entry(parent.into()).or_default().push(entry);
+    fn add(&self, parent: &Path, entry: Entry) {
+        self.folders.lock().unwrap().entry(text(parent)).or_default().push(entry);
     }
 }
 
@@ -91,14 +93,14 @@ impl Backend for Fake {
         self.roots.clone()
     }
 
-    fn indexed_roots(&self) -> Vec<String> {
-        if self.failing.lock().unwrap().is_some() { Vec::new() } else { self.indexed.lock().unwrap().clone() }
+    fn indexed_roots(&self) -> Vec<PathBuf> {
+        if self.failing.lock().unwrap().is_some() { Vec::new() } else { self.indexed.lock().unwrap().iter().map(PathBuf::from).collect() }
     }
 
-    fn list(&self, path: &str, sort: Order, _: &AtomicBool) -> Result<Vec<Entry>, String> {
-        self.lists.lock().unwrap().push(path.into());
+    fn list(&self, path: &Path, sort: Order, _: &AtomicBool) -> Result<Vec<Entry>, String> {
+        self.lists.lock().unwrap().push(text(path));
         self.orders.lock().unwrap().push(sort);
-        self.folders.lock().unwrap().get(path).cloned().ok_or_else(|| "フォルダーを開けません".into())
+        self.folders.lock().unwrap().get(&text(path)).cloned().ok_or_else(|| "フォルダーを開けません".into())
     }
 
     fn search(&self, search: Search) -> Result<(Page, String), String> {
@@ -148,13 +150,13 @@ impl Backend for Fake {
             Operation::Recycle | Operation::Delete => {
                 let unbinnable = self.unbinnable.lock().unwrap().clone();
                 for path in &request.paths {
-                    if stuck.contains(path) {
+                    if stuck.contains(&text(path)) {
                         failed = true;
                         report(Event::Failed { path: path.clone(), error: "アクセスが拒否されました。".into() });
                     } else {
                         self.remove(path);
                         report(Event::Done { path: path.clone() });
-                        if request.kind == Operation::Delete || unbinnable.contains(path) {
+                        if request.kind == Operation::Delete || unbinnable.contains(&text(path)) {
                             report(Event::Destroyed { path: path.clone() });
                         }
                         report(Event::Left { path: path.clone() });
@@ -164,30 +166,31 @@ impl Backend for Fake {
             Operation::Rename => {
                 let from = &request.paths[0];
                 let mut entry = self.remove(from).unwrap();
-                entry.path = child(&entry.parent, &request.name);
+                let parent = parent_folder(from).unwrap().to_owned();
+                entry.path = child(&parent, &request.name);
                 entry.name = request.name.clone();
-                let parent = entry.parent.clone();
+
                 self.add(&parent, entry);
                 report(Event::Done { path: from.clone() });
                 report(Event::Left { path: from.clone() });
             }
             Operation::NewFolder => {
                 let path = child(&request.destination, &request.name);
-                self.add(&request.destination, Entry { parent: request.destination.clone(), ..folder(&path) });
-                self.folders.lock().unwrap().insert(path.clone(), vec![]);
+                self.add(&request.destination, Entry { parent: colet_core::paths::shown(&request.destination), ..folder(&text(&path)) });
+                self.folders.lock().unwrap().insert(text(&path), vec![]);
                 report(Event::Done { path });
             }
             Operation::Paste => {
                 let files = self.clipboard.lock().unwrap().clone();
                 for path in files.paths {
-                    let name = folder_name(&path).to_owned();
+                    let name = colet_core::paths::shown(folder_name(&path));
                     let parent = ancestors(&path).into_iter().rev().nth(1).unwrap();
                     let name = if parent == request.destination { format!("{name} - コピー") } else { name };
                     let made = child(&request.destination, &name);
                     if files.cut {
                         self.remove(&path);
                     }
-                    self.add(&request.destination, file(&made));
+                    self.add(&request.destination, file(&text(&made)));
                     report(Event::Done { path: path.clone() });
                     if files.cut {
                         report(Event::Left { path: path.clone() });
@@ -207,7 +210,7 @@ impl Backend for Fake {
         Some(self.clipboard.lock().unwrap().clone())
     }
 
-    fn copy_files(&self, paths: &[String], cut: bool, _: Owner) -> Result<(), String> {
+    fn copy_files(&self, paths: &[PathBuf], cut: bool, _: Owner) -> Result<(), String> {
         *self.clipboard.lock().unwrap() = ClipboardFiles { paths: paths.to_vec(), cut, sequence: 1, ..Default::default() };
         if let Some(changed) = &*self.watcher.lock().unwrap() {
             changed();
@@ -215,8 +218,8 @@ impl Backend for Fake {
         Ok(())
     }
 
-    fn copy_text(&self, text: &str, _: Owner) -> Result<(), String> {
-        *self.text.lock().unwrap() = text.into();
+    fn copy_text(&self, copied: &OsStr, _: Owner) -> Result<(), String> {
+        *self.text.lock().unwrap() = copied.to_str().unwrap().into();
         Ok(())
     }
 
@@ -224,36 +227,46 @@ impl Backend for Fake {
         *self.watcher.lock().unwrap() = Some(changed);
     }
 
-    fn open(&self, path: &str, _: Owner) -> Result<(), String> {
-        if self.unopenable.lock().unwrap().iter().any(|p| p == path) {
+    fn open(&self, path: &Path, _: Owner) -> Result<(), String> {
+        if self.unopenable.lock().unwrap().iter().any(|p| Path::new(p) == path) {
             return Err("関連付けられたアプリがありません".into());
         }
-        self.opened.lock().unwrap().push(path.into());
+        self.opened.lock().unwrap().push(text(path));
         Ok(())
     }
 
-    fn reveal(&self, paths: &[String]) -> Result<(), String> {
-        self.revealed.lock().unwrap().push(paths.to_vec());
+    fn reveal(&self, paths: &[PathBuf]) -> Result<(), String> {
+        self.revealed.lock().unwrap().push(paths.iter().map(|p| text(p)).collect());
         Ok(())
     }
 
-    fn path_kind(&self, path: &str) -> Option<bool> {
+    fn path_kind(&self, path: &Path) -> Option<bool> {
         let folders = self.folders.lock().unwrap();
         folders.values().flatten().find(|e| e.path == path).map(|e| e.directory)
     }
 
-    fn shell_menu(&self, paths: Vec<String>, background: String, _: (i32, i32), _: Owner) -> Result<(), String> {
-        self.menus.lock().unwrap().push((paths, background));
+    fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, _: (i32, i32), _: Owner) -> Result<(), String> {
+        self.menus.lock().unwrap().push((paths.iter().map(|p| text(p)).collect(), text(&background)));
         Ok(())
     }
 }
 
+/// Paths the tests made, as the fake keeps them.
+fn texts(paths: &[PathBuf]) -> Vec<String> {
+    paths.iter().map(|path| text(path)).collect()
+}
+
+/// A path as the fake keeps it: what is shown of it, the paths the tests make being text.
+fn text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
 fn entry(path: &str, directory: bool) -> Entry {
-    let chain = ancestors(path);
+    let chain = ancestors(Path::new(path));
     Entry {
         path: path.into(),
-        name: colet_core::paths::folder_name(path).into(),
-        parent: chain.len().checked_sub(2).map(|i| chain[i].clone()).unwrap_or_default(),
+        name: colet_core::paths::shown(folder_name(Path::new(path))),
+        parent: chain.len().checked_sub(2).map(|i| colet_core::paths::shown(&chain[i])).unwrap_or_default(),
         directory,
         size: (!directory).then_some(1),
         modified: None,
@@ -366,7 +379,7 @@ impl Ui {
     }
 
     fn selected(&self, cx: &mut TestAppContext, index: usize) -> Vec<String> {
-        self.read(cx, |v| v.state.columns[index].selected.clone())
+        self.read(cx, |v| texts(&v.state.columns[index].selected))
     }
 
     fn active(&self, cx: &mut TestAppContext) -> usize {
@@ -415,8 +428,8 @@ impl Ui {
     }
 }
 
-fn row(path: &str) -> ElementId {
-    ElementId::Name(path.to_owned().into())
+fn row(path: impl AsRef<Path>) -> ElementId {
+    ElementId::Name(id_text(path.as_ref()).into())
 }
 
 #[gpui_kit::test]
@@ -443,7 +456,7 @@ fn moves_from_the_search_field_into_the_results_with_down(cx: &mut TestAppContex
     assert!(ui.columns_focused(cx));
     assert_eq!(ui.selected(cx, 1), [r"D:\alpha.txt"]);
     // Picked, the file shows in its folder.
-    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().highlight.clone()).as_deref(), Some(r"D:\alpha.txt"));
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().highlight.clone()).as_deref(), Some(Path::new(r"D:\alpha.txt")));
 }
 
 #[gpui_kit::test]
@@ -452,14 +465,14 @@ fn moves_from_the_empty_search_field_into_home_with_down_picking_its_row(cx: &mu
     ui.press(cx, "down");
     assert!(ui.home_focused(cx));
     assert_eq!(ui.selected(cx, 0), [r"D:\"]);
-    assert_eq!(ui.read(cx, |v| v.state.columns[1].path.clone()), r"D:\");
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].path.to_str().unwrap().to_owned()), r"D:\");
     // The drive picked again leaves the folders open beside it be.
     ui.press(cx, "right");
     ui.press(cx, "right");
     ui.press(cx, "ctrl-f");
     ui.press(cx, "down");
     assert!(ui.home_focused(cx));
-    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().path.clone()), r"D:\work");
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().path.to_str().unwrap().to_owned()), r"D:\work");
 }
 
 #[gpui_kit::test]
@@ -535,7 +548,7 @@ fn shows_what_type_ahead_matched_until_a_second_after_its_last_key(cx: &mut Test
     ui.click(cx, row(r"D:\"));
     ui.press(cx, "right");
     let id = ui.read(cx, |v| v.state.columns[1].id);
-    let mark = |cx: &mut TestAppContext, path: &str, name: &str| ui.read(cx, |v| v.type_ahead_mark(id, path, name));
+    let mark = |cx: &mut TestAppContext, path: &str, name: &str| ui.read(cx, |v| v.type_ahead_mark(id, Path::new(path), name));
     // Keys in quick succession: `settle` would let most of the second go by.
     let key = |cx: &mut TestAppContext, text: &str| {
         ui.act(cx, |window, cx| window.input(text, cx));
@@ -612,7 +625,7 @@ fn adds_the_index_roots_to_home_once_a_search_reaches_everything(cx: &mut TestAp
     });
     *fake.failing.lock().unwrap() = Some("Everything 1.5に接続できません。".into());
     let ui = open(cx, fake.clone());
-    let home = |cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>());
+    let home = |cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     assert_eq!(home(cx), [r"D:\"]);
     *fake.failing.lock().unwrap() = None;
     ui.input(cx, "x");
@@ -650,7 +663,7 @@ fn reloads_only_the_folders_a_change_names(cx: &mut TestAppContext) {
     fake.lists.lock().unwrap().clear();
     fake.folders.lock().unwrap().get_mut(r"D:\a").unwrap().push(file(r"D:\a\new.txt"));
     let changed = ui.read(cx, |v| v.changed.clone());
-    *changed.lock().unwrap() = Changes::Paths(HashSet::from([r"D:\a\new.txt".to_owned()]));
+    *changed.lock().unwrap() = Changes::Paths(HashSet::from([PathBuf::from(r"D:\a\new.txt")]));
     settle(cx);
     assert_eq!(*fake.lists.lock().unwrap(), [r"D:\a"]);
     assert_eq!(ui.read(cx, |v| v.state.columns[2].entries.len()), 2);
@@ -840,13 +853,13 @@ fn makes_a_folder_a_favorite_with_its_star_and_ctrl_d_and_lists_it_at_home(cx: &
     ui.press(cx, "right");
     let work = ui.read(cx, |v| v.state.columns[2].id);
     ui.click(cx, ("star", work));
-    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\work"]);
+    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\work"]);
     // Home lists it first, under its own heading.
-    assert_eq!(ui.read(cx, |v| v.state.columns[0].entries[0].path.clone()), r"D:\work");
+    assert_eq!(ui.read(cx, |v| v.state.columns[0].entries[0].path.to_str().unwrap().to_owned()), r"D:\work");
     ui.press(cx, "ctrl-d");
     assert!(fake.settings.lock().unwrap().favorites.is_empty());
     ui.press(cx, "ctrl-d");
-    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\work"]);
+    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\work"]);
     // Taken off from its menu in home.
     ui.act(cx, |window, cx| window.within("home").right_click(row(r"D:\work"), cx));
     settle(cx);
@@ -924,7 +937,7 @@ fn lists_the_folder_tabbing_into_the_columns_opens(cx: &mut TestAppContext) {
     let view = ui.view.clone();
     ui.act(cx, |window, cx| view.read(cx).columns_focus.clone().focus(window, cx));
     settle(cx);
-    let last = ui.read(cx, |v| v.state.columns.last().map(|c| (c.path.clone(), c.loading, c.entries.len())).unwrap());
+    let last = ui.read(cx, |v| v.state.columns.last().map(|c| (text(&c.path), c.loading, c.entries.len())).unwrap());
     assert_eq!(last, (r"D:\work\sub".to_owned(), false, 1));
 }
 
@@ -1285,7 +1298,7 @@ fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppC
     ui.press(cx, "ctrl-f");
     ui.press(cx, "escape");
     assert_eq!(ui.field(cx), "");
-    ui.click(cx, row(&search_key("ext:pdf", None)));
+    ui.click(cx, row(search_key("ext:pdf", None)));
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(ui.home_focused(cx));
@@ -1344,7 +1357,7 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
         SavedSearch { name: String::new(), query: "dm:today".into(), filter: None },
     ];
     let ui = open(cx, fake.clone());
-    ui.click(cx, row(&search_key("ext:pdf", None)));
+    ui.click(cx, row(search_key("ext:pdf", None)));
     ui.press(cx, "f2");
     let (name, query) = ui.read(cx, |v| match &v.dialog {
         Some(crate::places::Dialog::EditSearch { name, query, .. }) => (name.clone(), query.clone()),
@@ -1368,7 +1381,7 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf dm:thisweek");
     assert_eq!(ui.field(cx), "ext:pdf dm:thisweek");
     // Escape closes the dialog without a change.
-    ui.click(cx, row(&search_key("ext:pdf dm:thisweek", None)));
+    ui.click(cx, row(search_key("ext:pdf dm:thisweek", None)));
     ui.press(cx, "f2");
     ui.press(cx, "escape");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
@@ -1461,7 +1474,7 @@ fn in_work(cx: &mut TestAppContext) -> (Arc<Fake>, Ui) {
     ui.press(cx, "right");
     ui.press(cx, "down");
     ui.press(cx, "right");
-    assert_eq!(ui.read(cx, |v| v.state.columns[2].path.clone()), r"D:\work");
+    assert_eq!(ui.read(cx, |v| v.state.columns[2].path.to_str().unwrap().to_owned()), r"D:\work");
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
     (fake, ui)
 }
@@ -1485,14 +1498,14 @@ fn picks_several_rows_with_ctrl_shift_and_ctrl_a(cx: &mut TestAppContext) {
 fn copies_and_pastes_picking_what_was_pasted(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "ctrl-c");
-    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\a.txt"]);
+    assert_eq!(texts(&fake.clipboard.lock().unwrap().paths), [r"D:\work\a.txt"]);
     assert!(ui.toasts(cx).iter().any(|t| t == "1 項目をコピーしました"));
     ui.press(cx, "ctrl-v");
     // Into its own folder: a copy named as Explorer names it, picked once listed.
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt - コピー"]);
     let entry = ui.read(cx, |v| v.history[0].clone());
-    assert_eq!(entry.items[0].path, r"D:\work\a.txt - コピー");
-    assert_eq!(entry.items[0].from.as_deref(), Some(r"D:\work\a.txt"));
+    assert_eq!(entry.items[0].path, Path::new(r"D:\work\a.txt - コピー"));
+    assert_eq!(entry.items[0].from.as_deref(), Some(Path::new(r"D:\work\a.txt")));
     // Paths as text, one a line.
     ui.press(cx, "ctrl-shift-c");
     assert_eq!(*fake.text.lock().unwrap(), r"D:\work\a.txt - コピー");
@@ -1504,10 +1517,10 @@ fn picks_what_the_shell_writes_out_by_its_name_once_it_is_listed(cx: &mut TestAp
     *fake.clipboard.lock().unwrap() = ClipboardFiles { contents: vec!["添付.txt".into()], sequence: 2, ..Default::default() };
     ui.press(cx, "ctrl-v");
     let entry = ui.read(cx, |v| v.history[0].clone());
-    assert_eq!((entry.items[0].path.as_str(), entry.items[0].status), (r"D:\work\添付.txt", ItemStatus::Handed));
+    assert_eq!((entry.items[0].path.to_str().unwrap(), entry.items[0].status), (r"D:\work\添付.txt", ItemStatus::Handed));
     assert!(!entry.has_problems());
     // Written out after the paste returned: picked once the listing shows it.
-    fake.add(r"D:\work", file(r"D:\work\添付.txt"));
+    fake.add(Path::new(r"D:\work"), file(r"D:\work\添付.txt"));
     ui.click(cx, "refresh");
     assert_eq!(ui.selected(cx, 2), [r"D:\work\添付.txt"]);
 }
@@ -1517,7 +1530,7 @@ fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppC
     let (fake, ui) = in_work(cx);
     assert!(ui.columns_focused(cx));
     ui.click(cx, "copy");
-    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\a.txt"]);
+    assert_eq!(texts(&fake.clipboard.lock().unwrap().paths), [r"D:\work\a.txt"]);
     assert!(ui.columns_focused(cx));
     ui.click(cx, "refresh");
     assert!(ui.columns_focused(cx));
@@ -1528,7 +1541,7 @@ fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppC
     let search = ui.read(cx, |v| v.search.clone());
     ui.act(cx, |window, cx| search.update(cx, |input, cx| input.focus(window, cx)));
     ui.click(cx, "cut");
-    assert!(ui.read(cx, |v| v.clipboard.cut && v.clipboard.paths == [r"D:\work\b.txt"]));
+    assert!(ui.read(cx, |v| v.clipboard.cut && texts(&v.clipboard.paths) == [r"D:\work\b.txt"]));
     assert!(ui.act(cx, |window, cx| search.read(cx).focus_handle(cx).is_focused(window)));
 }
 
@@ -1569,7 +1582,7 @@ fn marks_the_rows_the_clipboard_holds(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-x");
     settle(cx);
-    assert!(ui.read(cx, |v| v.clipboard.cut && v.clipboard.paths == [r"D:\work\a.txt"]));
+    assert!(ui.read(cx, |v| v.clipboard.cut && texts(&v.clipboard.paths) == [r"D:\work\a.txt"]));
     assert!(ui.act(cx, |window, _| window.try_find(SharedString::from(r"held:D:\work\a.txt")).is_some()));
 }
 
@@ -1676,7 +1689,7 @@ fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the
     });
     settle(cx);
     assert!(ui.read(cx, |v| !v.history_open));
-    assert_eq!(highlight(cx).as_deref(), Some(r"D:\work\c.txt"));
+    assert_eq!(highlight(cx).as_deref(), Some(Path::new(r"D:\work\c.txt")));
     // Closed before the answer came, the history has moved on from it.
     ui.act(cx, |window, cx| {
         ui.view.update(cx, |v, cx| {
@@ -1686,7 +1699,7 @@ fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the
         });
     });
     settle(cx);
-    assert_eq!(highlight(cx).as_deref(), Some(r"D:\work\c.txt"));
+    assert_eq!(highlight(cx).as_deref(), Some(Path::new(r"D:\work\c.txt")));
     // Gone since, it says so and the history stays open.
     ui.act(cx, |window, cx| {
         ui.view.update(cx, |v, cx| {
@@ -1705,7 +1718,40 @@ fn makes_a_folder_and_picks_it(cx: &mut TestAppContext) {
     ui.press(cx, "ctrl-shift-n");
     ui.click(cx, "submit-name");
     assert_eq!(ui.selected(cx, 2), [r"D:\work\新しいフォルダー"]);
-    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().path.clone()), r"D:\work\新しいフォルダー");
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().path.to_str().unwrap().to_owned()), r"D:\work\新しいフォルダー");
+}
+
+#[gpui_kit::test]
+fn sends_to_the_bin_the_item_picked_not_another_that_shows_alike(cx: &mut TestAppContext) {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    // A name holding an unpaired surrogate, which Windows allows, shows as one that holds U+FFFD.
+    let real = file("D:\\work\\a\u{FFFD}X");
+    let odd: PathBuf = {
+        let wide: Vec<u16> = r"D:\work\a".encode_utf16().chain([0xD800]).chain("X".encode_utf16()).collect();
+        std::ffi::OsString::from_wide(&wide).into()
+    };
+    assert_eq!(odd.as_os_str().encode_wide().count(), real.path.as_os_str().encode_wide().count());
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\work")]),
+            (r"D:\work", vec![real.clone(), Entry { path: odd.clone(), ..real.clone() }]),
+        ])
+    });
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(r"D:\"));
+    ui.click(cx, row(r"D:\work"));
+    // Each row is its own, though both show alike.
+    ui.click(cx, row(&odd));
+    assert_eq!(ui.read(cx, |v| v.state.columns[2].selected.clone()), std::slice::from_ref(&odd));
+    // Its name sent back as shown is no change, not a rename to what stood in for it.
+    ui.press(cx, "f2");
+    ui.click(cx, "submit-name");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(fake.operations.lock().unwrap().is_empty());
+    ui.press(cx, "delete");
+    let asked = fake.operations.lock().unwrap()[0].clone();
+    assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![odd]));
 }
 
 #[gpui_kit::test]
@@ -1715,7 +1761,7 @@ fn sends_to_the_bin_leaving_the_asking_to_the_shell_and_picks_the_next_row(cx: &
     ui.press(cx, "delete");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
     let asked = fake.operations.lock().unwrap()[0].clone();
-    assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![r"D:\work\b.txt".to_owned()]));
+    assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![PathBuf::from(r"D:\work\b.txt")]));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\c.txt"]);
     let entry = ui.read(cx, |v| v.history[0].clone());
     assert!(entry.items[0].gone);
@@ -1736,7 +1782,7 @@ fn deletes_outright_on_shift_delete_and_says_so_of_what_the_bin_could_not_take(c
     ui.press(cx, "delete");
     let entry = ui.read(cx, |v| v.history[0].clone());
     assert_eq!(entry.request.kind, Operation::Recycle);
-    let statuses: Vec<_> = entry.items.iter().map(|i| (folder_name(&i.path).to_owned(), i.status.label())).collect();
+    let statuses: Vec<_> = entry.items.iter().map(|i| (colet_core::paths::shown(folder_name(&i.path)), i.status.label())).collect();
     assert_eq!(statuses, [("b.txt".to_owned(), "完了"), ("c.txt".to_owned(), "完全に削除")]);
     assert_eq!(entry.outcome(), "完了");
 }
@@ -1798,7 +1844,7 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     // Still there: its name opens it in the columns.
     ui.click(cx, ("history-item", entry.id << 16));
     assert!(ui.read(cx, |v| !v.history_open));
-    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().highlight.clone()).as_deref(), Some(r"D:\work\a.txt"));
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().highlight.clone()).as_deref(), Some(Path::new(r"D:\work\a.txt")));
 }
 
 #[gpui_kit::test]
@@ -1809,7 +1855,7 @@ fn acts_from_the_menu_on_the_row_right_clicked_leaving_the_selection(cx: &mut Te
     assert!(ui.read(cx, |v| v.menu().is_some()));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
     ui.click(cx, "menu-copy");
-    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\c.txt"]);
+    assert_eq!(texts(&fake.clipboard.lock().unwrap().paths), [r"D:\work\c.txt"]);
     assert!(ui.read(cx, |v| v.menu().is_none()));
     // The Windows menu for the folder itself, from its empty space.
     let work = ui.read(cx, |v| v.state.columns[2].id);
@@ -1884,7 +1930,7 @@ fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &m
     let (fake, ui) = in_work(cx);
     let dialog_paths = |ui: &Ui, cx: &mut TestAppContext| {
         ui.read(cx, |v| match &v.dialog {
-            Some(crate::places::Dialog::Name { request: Request { paths, .. }, .. }) => paths.clone(),
+            Some(crate::places::Dialog::Name { request: Request { paths, .. }, .. }) => texts(paths),
             _ => Vec::new(),
         })
     };
@@ -1906,10 +1952,10 @@ fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &m
     settle(cx);
     assert!(ui.selected(cx, 2).is_empty());
     menu(&ui, cx, r"D:\work\b.txt", "menu-copy");
-    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\b.txt"]);
+    assert_eq!(texts(&fake.clipboard.lock().unwrap().paths), [r"D:\work\b.txt"]);
     menu(&ui, cx, r"D:\work\b.txt", "menu-recycle");
     let asked = fake.operations.lock().unwrap().last().unwrap().clone();
-    assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![r"D:\work\b.txt".to_owned()]));
+    assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![PathBuf::from(r"D:\work\b.txt")]));
 }
 
 #[gpui_kit::test]
@@ -1922,7 +1968,7 @@ fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) 
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "enter");
-    assert_eq!(fake.clipboard.lock().unwrap().paths, [r"D:\work\a.txt"]);
+    assert_eq!(texts(&fake.clipboard.lock().unwrap().paths), [r"D:\work\a.txt"]);
     assert!(ui.read(cx, |v| v.menu().is_none()));
     assert!(ui.columns_focused(cx));
     ui.press(cx, "shift-f10");
@@ -2090,7 +2136,7 @@ fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_she
     assert!(fake.opened.lock().unwrap().is_empty());
     ui.press(cx, "ctrl-f");
     ui.press(cx, "escape");
-    ui.act(cx, |window, cx| window.double_click(row(&search_key("ext:pdf", None)), cx));
+    ui.act(cx, |window, cx| window.double_click(row(search_key("ext:pdf", None)), cx));
     settle(cx);
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(fake.opened.lock().unwrap().is_empty());
@@ -2183,10 +2229,10 @@ fn drags_a_favorite_to_a_new_place_among_the_favorites(cx: &mut TestAppContext) 
     let (a, c) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, r"D:\c"));
     ui.hold_drag(cx, c.center(), upper(a));
     // The line goes above the row it would go before; the row carried fades.
-    assert_eq!(ui.read(cx, |v| v.landing.clone().and_then(|l| l.before)).as_deref(), Some(r"D:\a"));
+    assert_eq!(ui.read(cx, |v| v.landing.clone().and_then(|l| l.before)).as_deref(), Some(Path::new(r"D:\a")));
     ui.let_go(cx, upper(a));
-    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\c", r"D:\a", r"D:\b"]);
-    let home: Vec<String> = ui.read(cx, |v| v.state.columns[0].entries.iter().take(3).map(|e| e.path.clone()).collect());
+    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\c", r"D:\a", r"D:\b"]);
+    let home: Vec<String> = ui.read(cx, |v| v.state.columns[0].entries.iter().take(3).map(|e| text(&e.path)).collect());
     assert_eq!(home, [r"D:\c", r"D:\a", r"D:\b"]);
     // Neither picked nor opened.
     assert!(ui.selected(cx, 0).is_empty());
@@ -2213,12 +2259,12 @@ fn leaves_the_order_as_it_was_when_let_go_outside_its_own_kind(cx: &mut TestAppC
     ui.hold_drag(cx, a.center(), upper(one));
     assert_eq!(ui.read(cx, |v| v.landing.clone()), None);
     ui.let_go(cx, upper(one));
-    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\a", r"D:\b", r"D:\c"]);
+    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
     // Nor over the columns.
     let (c, columns) = (ui.home_row(cx, r"D:\c"), point(px(900.), px(300.)));
     ui.hold_drag(cx, c.center(), columns);
     ui.let_go(cx, columns);
-    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\a", r"D:\b", r"D:\c"]);
+    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
     assert!(ui.read(cx, |v| v.home_drag.is_none()));
 }
 
@@ -2231,7 +2277,7 @@ fn puts_down_a_drag_in_home_with_escape(cx: &mut TestAppContext) {
     ui.press(cx, "escape");
     assert!(ui.read(cx, |v| v.home_drag.is_none() && v.landing.is_none()));
     ui.let_go(cx, upper(a));
-    assert_eq!(fake.settings.lock().unwrap().favorites, [r"D:\a", r"D:\b", r"D:\c"]);
+    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
 }
 
 #[gpui_kit::test]
@@ -2256,7 +2302,7 @@ fn scrolls_home_while_a_drag_is_held_at_its_bottom_edge(cx: &mut TestAppContext)
 fn closes_the_menu_and_returns_the_keys_when_its_column_vanishes(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "shift-f10");
-    fake.remove(r"D:\work");
+    fake.remove(Path::new(r"D:\work"));
     let changed = ui.read(cx, |v| v.changed.clone());
     *changed.lock().unwrap() = Changes::Paths(HashSet::from([r"D:\work".into()]));
     settle(cx);
@@ -2331,7 +2377,7 @@ fn the_final_settings_save_supersedes_debounced_saves(cx: &mut TestAppContext) {
         v.flush_settings().unwrap();
     });
     settle(cx);
-    assert_eq!(fake.settings.lock().unwrap().favorites, ["latest"]);
+    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), ["latest"]);
     assert_eq!(fake.saves.load(Ordering::Relaxed), before + 1);
 }
 
@@ -2350,7 +2396,7 @@ fn refreshes_every_loaded_search_page_after_a_change_overtaken_by_pagination(cx:
     fake.changed.store(true, Ordering::Relaxed);
     ui.view.update(cx, |v, cx| v.more(id, cx));
     for _ in 0..4 { settle(cx); }
-    let paths = ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>());
+    let paths = ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     assert_eq!(paths.len(), 510);
     assert!(!paths.contains(&r"D:\0000.txt".into()));
     assert!(paths.contains(&r"D:\0500.txt".into()));
@@ -2377,7 +2423,7 @@ fn scrolls_a_column_s_last_row_clear_of_the_columns_scrollbar(cx: &mut TestAppCo
     let files: Vec<Entry> = (0..80).map(|n| file(&format!(r"{deepest}\{n:02}.txt"))).collect();
     let last = files.last().unwrap().path.clone();
     for entry in files {
-        fake.add(&deepest, entry);
+        fake.add(Path::new(&deepest), entry);
     }
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
@@ -2450,7 +2496,7 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     ui.press(cx, "/");
     // What is typed narrows the rows rather than jumping through them; the folder it hides closes.
     ui.input(cx, "TA");
-    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>());
+    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     assert_eq!(shown(&ui, cx), [r"D:\beta.txt"]);
     assert!(ui.selected(cx, 1).is_empty());
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
@@ -2680,7 +2726,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     ui.press(cx, "ctrl-d");
     assert_eq!(fake.settings.lock().unwrap().saved_searches, [saved(Some("画像")), saved(None)]);
     // Run from home, it chooses its filter again.
-    ui.click(cx, row(&search_key("cat", Some("画像"))));
+    ui.click(cx, row(search_key("cat", Some("画像"))));
     assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("画像"));
     assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
     // Back, the filter of the search before comes back with it.
@@ -2688,7 +2734,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     assert_eq!(ui.read(cx, |v| v.state.search_filter.clone()), None);
     assert_eq!(fake.settings.lock().unwrap().filter, None);
     // Its query alone is copied.
-    ui.click(cx, row(&search_key("cat", Some("画像"))));
+    ui.click(cx, row(search_key("cat", Some("画像"))));
     ui.press(cx, "ctrl-shift-c");
     assert_eq!(*fake.text.lock().unwrap(), "cat");
 }
@@ -2698,7 +2744,7 @@ fn changes_the_filter_a_saved_search_runs_within_from_its_edit(cx: &mut TestAppC
     let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\cat.jpg")])));
     fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: String::new(), query: "cat".into(), filter: Some("画像".into()) }];
     let ui = open(cx, fake.clone());
-    ui.click(cx, row(&search_key("cat", Some("画像"))));
+    ui.click(cx, row(search_key("cat", Some("画像"))));
     ui.press(cx, "f2");
     ui.click(cx, ("edit-search-filter", 2usize));
     ui.click(cx, "save-search");

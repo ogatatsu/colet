@@ -8,6 +8,7 @@ use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVo
 
 use crate::{
     entry::{Entry, Marks, Order, is_hidden, sort_entries},
+    paths::shown,
     wide::Wide,
 };
 
@@ -31,9 +32,9 @@ fn collect<T>(mut items: impl Iterator<Item = T>, cancelled: &AtomicBool) -> Res
 }
 
 /// The items directly in `path`, sorted; stops early, failing with [`STALE`], once `cancelled` is set.
-pub fn list(path: &str, order: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
+pub fn list(path: &Path, order: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
     check(cancelled)?;
-    if path.contains('\0') || !Path::new(path).is_absolute() {
+    if path.as_os_str().as_encoded_bytes().contains(&0) || !path.is_absolute() {
         return Err("絶対パスを指定してください".into());
     }
     let items = std::fs::read_dir(path).map_err(|e| format!("フォルダーを開けません: {e}"))?;
@@ -52,9 +53,9 @@ pub fn list(path: &str, order: Order, cancelled: &AtomicBool) -> Result<Vec<Entr
             };
             // Keep an item it cannot read in sight: a failure must not silently hide it.
             Ok(item.unwrap_or_else(|_| Entry {
-                path: p.display().to_string(),
-                name: entry.file_name().to_string_lossy().into_owned(),
-                parent: path.to_owned(),
+                name: shown(entry.file_name()),
+                parent: shown(path),
+                path: p.clone(),
                 directory: entry.file_type().is_ok_and(|t| t.is_dir()),
                 size: None,
                 modified: None,
@@ -102,7 +103,7 @@ pub fn roots() -> Vec<Entry> {
                 Some(label) => format!("{label} ({letter}:)"),
                 None => format!("{letter}:"),
             };
-            Entry::folder(&path, &name)
+            Entry::folder(path, &name)
         })
         .collect()
 }
@@ -113,7 +114,7 @@ mod tests {
 
     #[test]
     fn a_cancelled_listing_never_opens_the_folder() {
-        assert_eq!(list("invalid path", Order::default(), &AtomicBool::new(true)).unwrap_err(), STALE);
+        assert_eq!(list(Path::new("invalid path"), Order::default(), &AtomicBool::new(true)).unwrap_err(), STALE);
     }
 
     #[test]
@@ -135,7 +136,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "data").unwrap();
         std::fs::create_dir(dir.path().join("z")).unwrap();
-        let entries = list(&dir.path().display().to_string(), Order::default(), &AtomicBool::new(false)).unwrap();
+        let entries = list(dir.path(), Order::default(), &AtomicBool::new(false)).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "z");
         assert!(entries[0].directory);
@@ -143,9 +144,25 @@ mod tests {
     }
 
     #[test]
+    fn lists_a_name_that_is_not_text_as_the_item_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let odd = crate::paths::tests::unpaired(dir.path(), "a");
+        let real = dir.path().join("a\u{FFFD}X");
+        std::fs::write(&odd, "odd").unwrap();
+        std::fs::write(&real, "real").unwrap();
+        let entries = list(dir.path(), Order::default(), &AtomicBool::new(false)).unwrap();
+        // Both show alike, yet each path still opens its own item.
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, entries[1].name);
+        let mut read: Vec<String> = entries.iter().map(|e| std::fs::read_to_string(&e.path).unwrap()).collect();
+        read.sort();
+        assert_eq!(read, ["odd", "real"]);
+    }
+
+    #[test]
     fn lists_the_system_drive() {
         let drives = roots();
-        let system = drives.iter().find(|d| d.path == "C:\\").expect("C:");
+        let system = drives.iter().find(|d| d.path == Path::new("C:\\")).expect("C:");
         assert!(system.name.ends_with("C:)") || system.name == "C:", "{}", system.name);
     }
 }

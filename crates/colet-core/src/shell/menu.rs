@@ -23,6 +23,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Error, HRESULT, Interface, PCSTR, PCWSTR, PSTR, Result, w};
 
+use std::path::{Path, PathBuf};
+
 use super::{Apartment, Owner, Pidls, parse};
 
 /// The bindings leave this one out; it is `SEE_MASK_UNICODE`'s bit.
@@ -31,8 +33,8 @@ const CMIC_MASK_UNICODE: u32 = 0x4000;
 /// The menu to show: for `paths` (all in one folder), or for the folder `background` when `paths` is empty.
 pub struct ShowMenu {
     pub owner: Owner,
-    pub paths: Vec<String>,
-    pub background: String,
+    pub paths: Vec<PathBuf>,
+    pub background: PathBuf,
     /// Where to show it, in screen pixels.
     pub at: (i32, i32),
 }
@@ -220,7 +222,7 @@ fn invoke(menu: &IContextMenu, owner: HWND, command: usize, at: POINT) -> Result
     unsafe { menu.InvokeCommand(&info as *const _ as *const CMINVOKECOMMANDINFO) }
 }
 
-fn context_menu(owner: HWND, paths: &[String], background: &str) -> Result<IContextMenu> {
+fn context_menu(owner: HWND, paths: &[PathBuf], background: &Path) -> Result<IContextMenu> {
     if paths.is_empty() {
         let folder = Pidls(vec![parse(background)?]);
         let view: IShellFolder = unsafe { SHBindToObject(None, folder.0[0], None)? };
@@ -272,7 +274,7 @@ mod tests {
     use super::*;
 
     /// The verbs the menu for `paths` (or `background`) would offer, without showing it.
-    fn verbs(paths: &[String], background: &str) -> Result<Vec<String>> {
+    fn verbs(paths: &[PathBuf], background: &Path) -> Result<Vec<String>> {
         let apartment = Apartment::enter();
         apartment.result()?;
         let menu = context_menu(HWND::default(), paths, background)?;
@@ -291,7 +293,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("a.txt");
         std::fs::write(&file, "a").unwrap();
-        let verbs = verbs(&[file.to_string_lossy().into_owned()], "").unwrap();
+        let verbs = verbs(std::slice::from_ref(&file), Path::new("")).unwrap();
         assert!(verbs.iter().any(|verb| verb.eq_ignore_ascii_case("delete")), "{verbs:?}");
         assert!(!verbs.iter().any(|verb| verb.eq_ignore_ascii_case("rename")), "{verbs:?}");
         let background = verbs_for_background(dir.path());
@@ -299,7 +301,7 @@ mod tests {
     }
 
     fn verbs_for_background(dir: &std::path::Path) -> Vec<String> {
-        verbs(&[], &dir.to_string_lossy()).unwrap()
+        verbs(&[], dir).unwrap()
     }
 
     #[test]
@@ -308,8 +310,8 @@ mod tests {
         let paths = [a.path(), b.path()].map(|dir| {
             let file = dir.join("x.txt");
             std::fs::write(&file, "x").unwrap();
-            file.to_string_lossy().into_owned()
+            file
         });
-        assert!(verbs(&paths, "").is_err());
+        assert!(verbs(&paths, Path::new("")).is_err());
     }
 }
