@@ -101,8 +101,8 @@ fn button(p: Palette, id: impl Into<ElementId>, text: impl Into<SharedString>, p
         .when(primary, |b| b.bg(p.accent_fill).border_color(p.accent_fill).text_color(p.on_accent))
         .when(!primary, |b| b.bg(p.raised).border_color(p.border_strong))
         // A plain one lies on the dialog's own color, which a fade would leave as it was.
-        .when(enabled && primary, |b| b.cursor_pointer().hover(|b| b.opacity(0.9)))
-        .when(enabled && !primary, |b| b.cursor_pointer().hover(|b| b.bg(p.raised_hover)))
+        .when(enabled && primary, |b| b.hover(|b| b.opacity(0.9)))
+        .when(enabled && !primary, |b| b.hover(|b| b.bg(p.raised_hover)))
         .when(!enabled, |b| b.opacity(0.35))
         .child(text)
 }
@@ -641,7 +641,6 @@ impl Colet {
                             .items_center()
                             .gap_2()
                             .text_size(px(12.))
-                            .cursor_pointer()
                             .hover(|d| d.bg(p.raised_hover))
                             .child(svg().path(if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" }).size(px(12.)).text_color(p.text_faint))
                             .child(div().text_color(p.text_faint).child(clock(entry.started)))
@@ -686,12 +685,12 @@ impl Colet {
                                                     div().id(("history-item", (id << 16) | k as u64)).track_focus(&stops[&format!("history-item:{id}:{k}")]),
                                                     p,
                                                 ))
-                                                    .role(Role::Link)
+                                                    // Opened in Colet, not in a browser: a button, its name in the accent color.
+                                                    .role(Role::Button)
                                                     .aria_label(name.clone())
                                                     .rounded(px(4.))
                                                     .text_color(p.accent)
-                                                    .cursor_pointer()
-                                                    .hover(|d| d.underline())
+                                                    .hover(|d| d.bg(p.raised_hover))
                                                     .child(name)
                                                     .on_click(cx.listener(move |this, _, window, cx| this.reveal_from_history(path.clone(), window, cx)))
                                                     .test_support()
