@@ -326,6 +326,15 @@ pub struct Colet {
     pub focused_row: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     /// The file operation under way; they go one at a time.
     pub running: Option<Running>,
+    /// Copies and cuts still being put on the clipboard.
+    pub(crate) clipboard_writes: usize,
+    /// The turn each write takes, and the one being served.
+    pub(crate) clipboard_tickets: u64,
+    pub(crate) clipboard_lane: std::sync::Arc<(std::sync::Mutex<u64>, std::sync::Condvar)>,
+    /// A paste asked for while they were, into this folder: run once they are done, so it pastes them.
+    pub(crate) paste_waiting: Option<String>,
+    /// The settings could not be written as the window closed: the next close goes without them.
+    pub(crate) unsaved_close: bool,
     pub(crate) next_operation: u64,
     /// The file operations run since Colet opened, newest first.
     pub history: Vec<HistoryEntry>,
@@ -389,8 +398,21 @@ impl Colet {
                     );
                     return false;
                 }
-                let _ = this.flush_settings();
-                true
+                if this.unsaved_close {
+                    return true;
+                }
+                match this.flush_settings() {
+                    Ok(()) => true,
+                    Err(error) => {
+                        this.unsaved_close = true;
+                        this.notify(
+                            format!("{error}。もう一度閉じると、設定を保存せずに終了します。"),
+                            Tone::Error,
+                            cx,
+                        );
+                        false
+                    }
+                }
             })
         });
         let (settings, problem, keep_file) = match settings {
@@ -470,6 +492,11 @@ impl Colet {
             crumbs_row: Default::default(),
             crumbs_room: Default::default(),
             running: None,
+            clipboard_writes: 0,
+            clipboard_tickets: 0,
+            clipboard_lane: Default::default(),
+            paste_waiting: None,
+            unsaved_close: false,
             next_operation: 0,
             history: Vec::new(),
             unseen: 0,

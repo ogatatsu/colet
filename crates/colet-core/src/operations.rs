@@ -290,7 +290,7 @@ fn paste_items(
     check_destination(&[], &destination)?;
     let operation = if files.cut { Operation::Move { destination } } else { Operation::Copy { destination } };
     let tally = Arc::new(Tally::default());
-    let result = shell::operate_clipboard(&operation, owner, reporter(files.cut, tally.clone(), report));
+    let result = shell::operate_clipboard(&operation, files.sequence, owner, reporter(files.cut, tally.clone(), report));
     if files.cut && result.is_ok() && !tally.kept.load(Ordering::Relaxed) {
         clipboard::complete(files.sequence);
     }
@@ -306,7 +306,7 @@ fn paste_contents(
     mut report: impl FnMut(Event) + Send + 'static,
 ) -> Result<(), String> {
     check_destination(&[], &destination)?;
-    match shell::drop_clipboard(&destination, files.cut, owner) {
+    match shell::drop_clipboard(&destination, files.cut, files.sequence, owner) {
         Ok(Dropped::Refused) => Err("貼り付け先がクリップボードの内容を受け付けませんでした".into()),
         Ok(dropped) => {
             for name in &files.contents {
@@ -365,6 +365,9 @@ fn reporter(leaves: bool, tally: Arc<Tally>, mut report: impl FnMut(Event) + Sen
 fn outcome(result: windows::core::Result<()>, failed: bool) -> Result<(), String> {
     match result {
         Err(error) if error.code() == E_ABORT || error.code() == USER_CANCELLED => Err(CANCELLED.into()),
+        Err(error) if error.code() == clipboard::CHANGED => {
+            Err("貼り付けるまでにクリップボードの内容が変わりました。もう一度貼り付けてください。".into())
+        }
         Err(error) => Err(message(error.code())),
         Ok(()) if failed => Err("一部の項目を操作できませんでした。結果を確認してください。".into()),
         Ok(()) => Ok(()),

@@ -7,7 +7,7 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{Error, Result, w};
 
-use super::{Apartment, Owner, Pidls, Wide, parse};
+use super::{Apartment, Owner, Pidls, Wide};
 
 /// Opens `path` with the app Windows associates with it.
 pub fn open(path: &str, owner: Owner) -> Result<()> {
@@ -38,7 +38,7 @@ pub fn reveal(paths: &[String]) -> Result<()> {
         unsafe { ILFree(Some(pidl)) };
         return result;
     }
-    let items = Pidls(paths.iter().map(|path| parse(path)).collect::<Result<_>>()?);
+    let items = Pidls::parse_all(paths)?;
     let Some(&first) = items.0.first() else { return Ok(()) };
     let folder = Pidls(vec![unsafe { ILClone(first) }]);
     if folder.0[0].is_null() || !unsafe { ILRemoveLastID(Some(folder.0[0])) }.as_bool() {

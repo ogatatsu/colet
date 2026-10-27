@@ -226,7 +226,7 @@ fn context_menu(owner: HWND, paths: &[String], background: &str) -> Result<ICont
         let view: IShellFolder = unsafe { SHBindToObject(None, folder.0[0], None)? };
         return unsafe { view.CreateViewObject(owner) };
     }
-    let items = Pidls(paths.iter().map(|path| parse(path)).collect::<Result<_>>()?);
+    let items = Pidls::parse_all(paths)?;
     // One menu speaks for items in one folder only.
     let parent = Pidls(vec![unsafe { ILClone(items.0[0]) }]);
     if parent.0[0].is_null() || !unsafe { ILRemoveLastID(Some(parent.0[0])) }.as_bool() {

@@ -5,7 +5,6 @@ use std::cell::RefCell;
 use windows::Win32::Foundation::{E_ABORT, E_INVALIDARG};
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, IDataObject};
-use windows::Win32::System::Ole::OleGetClipboard;
 use windows::Win32::UI::Shell::{
     FileOperation, FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_RENAMEONCOLLISION, FOF_WANTNUKEWARNING,
     FOFX_ADDUNDORECORD, FOFX_RECYCLEONDELETE, IFileOperation, IFileOperationProgressSink,
@@ -57,9 +56,15 @@ pub fn operate(
 
 /// Copies or moves the shell items on the clipboard into `operation`'s destination: those with no path,
 /// as from a ZIP folder or a phone, which the shell reads from the clipboard's data object itself. Items
-/// with no path are told by the name the address bar shows. Blocks as [`operate`] does.
-pub fn operate_clipboard(operation: &Operation, owner: Owner, report: impl FnMut(Item) + 'static) -> Result<()> {
-    operate_data(operation, owner, report, || unsafe { OleGetClipboard() })
+/// with no path are told by the name the address bar shows; only while the clipboard still holds what was
+/// read as `sequence`. Blocks as [`operate`] does.
+pub fn operate_clipboard(
+    operation: &Operation,
+    sequence: u32,
+    owner: Owner,
+    report: impl FnMut(Item) + 'static,
+) -> Result<()> {
+    operate_data(operation, owner, report, || super::clipboard::data(sequence))
 }
 
 fn operate_data(

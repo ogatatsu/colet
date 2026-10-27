@@ -69,6 +69,17 @@ impl Drop for Pidls {
     }
 }
 
+impl Pidls {
+    /// Each of `paths` parsed; those parsed before one that fails are freed all the same.
+    fn parse_all(paths: &[String]) -> windows::core::Result<Self> {
+        let mut pidls = Pidls(Vec::with_capacity(paths.len()));
+        for path in paths {
+            pidls.0.push(parse(path)?);
+        }
+        Ok(pidls)
+    }
+}
+
 fn parse(path: &str) -> windows::core::Result<*mut ITEMIDLIST> {
     let path = Wide::new(path);
     let mut pidl = std::ptr::null_mut();

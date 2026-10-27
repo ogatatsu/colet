@@ -313,7 +313,51 @@ impl Colet {
         }
         let (backend, owner) = (self.backend.clone(), self.owner);
         let done = format!("{} 項目を{}しました", picked.len(), if cut { "切り取り" } else { "コピー" });
-        self.in_background(move || backend.copy_files(&picked, cut, owner), Some(done), cx);
+        self.write_clipboard(move || backend.copy_files(&picked, cut, owner), done, cx);
+    }
+
+    /// Puts something on the clipboard off the UI thread; a paste asked for meanwhile waits for it, so it
+    /// never pastes what was there before.
+    fn write_clipboard(
+        &mut self,
+        work: impl FnOnce() -> Result<(), String> + Send + 'static,
+        done: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.clipboard_writes += 1;
+        // Written in the order asked, so an earlier copy never lands over a later one.
+        let ticket = self.clipboard_tickets;
+        self.clipboard_tickets += 1;
+        let lane = self.clipboard_lane.clone();
+        let task = cx.background_executor().spawn(async move {
+            let (turn, next) = &*lane;
+            let mut serving = turn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            while *serving != ticket {
+                serving = next.wait(serving).unwrap_or_else(|poisoned| poisoned.into_inner());
+            }
+            // The turn passes on even if the write panics, or every later one would wait forever.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+            *serving += 1;
+            next.notify_all();
+            result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => this.notify(done, Tone::Info, cx),
+                    Err(error) => this.notify(error, Tone::Error, cx),
+                }
+                this.clipboard_writes -= 1;
+                if this.clipboard_writes == 0
+                    && let Some(destination) = this.paste_waiting.take()
+                {
+                    this.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// The paths as text, one a line; a saved search's is the query it runs.
@@ -326,7 +370,7 @@ impl Colet {
         let text = picked.iter().map(|p| saved_query(p).map_or(p.as_str(), |(query, _)| query)).collect::<Vec<_>>().join("\r\n");
         let (backend, owner) = (self.backend.clone(), self.owner);
         let done = format!("{} 項目のパスをコピーしました", picked.len());
-        self.in_background(move || backend.copy_text(&text, owner), Some(done), cx);
+        self.write_clipboard(move || backend.copy_text(&text, owner), done, cx);
     }
 
     pub fn paste(&mut self, cx: &mut Context<Self>) {
@@ -335,6 +379,10 @@ impl Colet {
             Some(reason) => self.refuse("貼り付け", reason, cx),
             None => {
                 let destination = self.destination().unwrap_or_default();
+                if self.clipboard_writes > 0 {
+                    self.paste_waiting = Some(destination);
+                    return;
+                }
                 self.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
             }
         }

@@ -7,7 +7,7 @@ use std::thread;
 
 use windows::Win32::Foundation::{HWND, LPARAM, POINTL, WPARAM};
 use windows::Win32::System::Com::IDataObject;
-use windows::Win32::System::Ole::{DROPEFFECT_COPY, DROPEFFECT_MOVE, IDropTarget, OleGetClipboard};
+use windows::Win32::System::Ole::{DROPEFFECT_COPY, DROPEFFECT_MOVE, IDropTarget};
 use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Shell::{ILFindLastID, IShellFolder, SHBindToParent};
@@ -29,6 +29,7 @@ pub enum Dropped {
 }
 
 struct Request {
+    sequence: u32,
     destination: String,
     cut: bool,
     owner: Owner,
@@ -45,12 +46,13 @@ struct Dropper {
 /// Wakes the dropping thread to take its requests.
 const WAKE: u32 = WM_APP;
 
-/// Drops what the clipboard holds on the folder `destination`, moved if `cut` and its source allows it.
+/// Drops what the clipboard holds on the folder `destination`, moved if `cut` and its source allows it, so
+/// long as it still holds what was read as `sequence`.
 /// Blocks until the drop returns, which may be before the shell has written everything out.
-pub fn drop_clipboard(destination: &str, cut: bool, owner: Owner) -> Result<Dropped> {
+pub fn drop_clipboard(destination: &str, cut: bool, sequence: u32, owner: Owner) -> Result<Dropped> {
     let dropper = dropper()?;
     let (done, result) = mpsc::channel();
-    let request = Request { destination: destination.to_owned(), cut, owner, done };
+    let request = Request { sequence, destination: destination.to_owned(), cut, owner, done };
     dropper.requests.send(request).map_err(|_| Error::empty())?;
     unsafe { PostThreadMessageW(dropper.thread, WAKE, WPARAM(0), LPARAM(0))? };
     result.recv().map_err(|_| Error::empty())?
@@ -87,8 +89,9 @@ fn spawn() -> Result<Dropper> {
             }
             while unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool() {
                 if message.hwnd.is_invalid() && message.message == WAKE {
-                    for Request { destination, cut, owner, done } in incoming.try_iter() {
-                        let _ = done.send(drop_on(&destination, cut, owner, None));
+                    for Request { sequence, destination, cut, owner, done } in incoming.try_iter() {
+                        let dropped = super::clipboard::data(sequence).and_then(|data| drop_on(&destination, cut, owner, data));
+                        let _ = done.send(dropped);
                     }
                     continue;
                 }
@@ -103,12 +106,8 @@ fn spawn() -> Result<Dropper> {
     Ok(Dropper { thread, requests })
 }
 
-/// Drops `data`, or what the clipboard holds, on the folder `destination`.
-fn drop_on(destination: &str, cut: bool, owner: Owner, data: Option<IDataObject>) -> Result<Dropped> {
-    let data = match data {
-        Some(data) => data,
-        None => unsafe { OleGetClipboard()? },
-    };
+/// Drops `data` on the folder `destination`.
+fn drop_on(destination: &str, cut: bool, owner: Owner, data: IDataObject) -> Result<Dropped> {
     let folder = Pidls(vec![parse(destination)?]);
     let parent: IShellFolder = unsafe { SHBindToParent(folder.0[0], None)? };
     let child = unsafe { ILFindLastID(folder.0[0]) } as *const _;
@@ -294,7 +293,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let _ole = Ole::enter().unwrap();
         let data = fixtures::contents("添付.txt", b"attached");
-        let dropped = drop_on(&dir.path().to_string_lossy(), false, 0, Some(data)).unwrap();
+        let dropped = drop_on(&dir.path().to_string_lossy(), false, 0, data).unwrap();
         assert_eq!(dropped, Dropped::Copied);
         assert_eq!(std::fs::read(dir.path().join("添付.txt")).unwrap(), b"attached");
     }

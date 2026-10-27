@@ -4,21 +4,22 @@
 //! Outlook puts its attachments there, are only noticed: the shell reads them itself.
 use std::{ffi::c_void, mem, ptr, thread, time::Duration};
 
-use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{E_CHANGED_STATE, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Com::IDataObject;
 use windows::Win32::System::DataExchange::{
     AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
     IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock};
-use windows::Win32::System::Ole::{CF_HDROP, CF_UNICODETEXT, DROPEFFECT_COPY, DROPEFFECT_MOVE};
+use windows::Win32::System::Ole::{CF_HDROP, CF_UNICODETEXT, DROPEFFECT_COPY, DROPEFFECT_MOVE, OleGetClipboard};
 use windows::Win32::UI::Shell::{DROPFILES, DragQueryFileW, FILEDESCRIPTORW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, HWND_MESSAGE,
     MSG, RegisterClassW, SetWindowLongPtrW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLIPBOARDUPDATE,
     WNDCLASSW,
 };
-use windows::core::{Error, PCWSTR, Result, w};
+use windows::core::{Error, HRESULT, PCWSTR, Result, w};
 
 use super::Owner;
 
@@ -188,6 +189,19 @@ unsafe fn described() -> Vec<String> {
     let _ = unsafe { GlobalUnlock(handle) };
     names
 }
+
+/// The clipboard's data object, as the shell reads it, so long as it still holds what was read as
+/// `sequence`: another copy in the meantime fails with [`CHANGED`] rather than pasting that instead.
+pub(super) fn data(sequence: u32) -> Result<IDataObject> {
+    let data = unsafe { OleGetClipboard()? };
+    if unsafe { GetClipboardSequenceNumber() } != sequence {
+        return Err(Error::from_hresult(CHANGED));
+    }
+    Ok(data)
+}
+
+/// The clipboard changed between being read and being pasted.
+pub const CHANGED: HRESULT = E_CHANGED_STATE;
 
 /// A cut pasted: empties the clipboard, as Explorer does, if what was read is still what it holds.
 pub fn complete(sequence: u32) {

@@ -378,6 +378,13 @@ impl State {
         for location in self.past.iter_mut().chain(self.future.iter_mut()) {
             if location.search_filter.as_deref() == Some(from) {
                 location.search_filter = to.map(Into::into);
+                // With nothing typed, the results column goes from it, and what was picked there with it.
+                if to.is_none() && location.query.is_empty() {
+                    if location.selections.len() > 1 {
+                        location.selections.remove(1);
+                    }
+                    location.active = location.active.saturating_sub(1);
+                }
             }
         }
         if self.search_filter.as_deref() != Some(from) {
@@ -1672,6 +1679,22 @@ mod tests {
         // With nothing typed, the results go with it.
         s.rename_search_filter("写真", None);
         assert_eq!(kinds(&s), [Kind::Home]);
+        assert_eq!(s.active, 0);
+    }
+
+    #[test]
+    fn a_filter_gone_takes_its_results_pick_from_the_way_back() {
+        let mut s = State::new();
+        s.set_search("", Some("画像".into()));
+        with_entries(&mut s, 1, vec![folder(r"D:\a")]);
+        s.select(1, one(r"D:\a"));
+        s.set_search("cat", None);
+        s.rename_search_filter("画像", None);
+        s.back();
+        assert_eq!(kinds(&s), [Kind::Home, Kind::Folder, Kind::Folder]);
+        // Each folder takes back its own pick, not the one of the column before it: the result's.
+        assert_eq!(s.columns[1].selected, one(r"D:\a"));
+        assert!(s.columns[2].selected.is_empty());
         assert_eq!(s.active, 0);
     }
 }
