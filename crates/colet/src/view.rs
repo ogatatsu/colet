@@ -16,7 +16,7 @@ use crate::{
     state::{Column, Kind},
 };
 
-/// What follows the pointer as a favorite or saved search is dragged in home: its row, faint.
+/// What follows the pointer as a row is dragged in home: its row, faint.
 pub struct HomeGhost {
     name: String,
     search: bool,
@@ -411,11 +411,11 @@ impl Colet {
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
         let ink = if lit { p.on_accent } else { p.text };
         let path = entry.path.clone();
-        // A favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
+        // A pinned row, favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
         let drag = (kind == Kind::Home)
             .then(|| movable(&self.settings, &entry.path))
             .flatten()
-            .map(|search| (HomeDrag { path: entry.path.clone(), search }, image.clone(), self.home_rows.clone(), cx.entity().downgrade()));
+            .map(|shelf| (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_rows.clone(), cx.entity().downgrade()));
         let dragged = kind == Kind::Home && self.home_drag.as_ref().is_some_and(|d| d.path == entry.path);
         let name = entry.name.clone();
         let picture = match (saved, image) {
@@ -457,7 +457,7 @@ impl Colet {
                     .on_drag(drag, move |drag, _, _, cx| {
                         view.update(cx, |this, cx| this.start_home_drag(drag, cx)).ok();
                         let width = rows.borrow().iter().find(|(path, _)| *path == drag.path).map_or(px(200.), |(_, b)| b.size.width);
-                        let (name, search, image) = (name.clone(), drag.search, image.clone());
+                        let (name, search, image) = (name.clone(), saved_query(&drag.path).is_some(), image.clone());
                         cx.new(|_| HomeGhost { name, search, image, width, palette: p })
                     })
             })
@@ -656,7 +656,7 @@ impl Colet {
             // Drawn afresh below, for a drag to find its place.
             self.home_rows.borrow_mut().clear();
             // The line where a drag would land: above the row it goes before, or below its kind's last.
-            let landing = self.home_drag.as_ref().zip(self.landing.as_ref()).map(|(d, l)| (d.search, l.before.clone()));
+            let landing = self.home_drag.as_ref().zip(self.landing.as_ref()).map(|(d, l)| (d.shelf, l.before.clone()));
             let mut rows = div()
                 .id("home-rows")
                 .role(Role::ListBox)
@@ -683,9 +683,9 @@ impl Colet {
                         .child(title),
                 );
                 for (i, entry) in items.iter().enumerate() {
-                    let line = landing.as_ref().and_then(|(search, before)| match before {
+                    let line = landing.as_ref().and_then(|(shelf, before)| match before {
                         Some(before) => (*before == entry.path).then_some(true),
-                        None => (i + 1 == items.len() && movable(&self.settings, &entry.path) == Some(*search)).then_some(false),
+                        None => (i + 1 == items.len() && movable(&self.settings, &entry.path) == Some(*shelf)).then_some(false),
                     });
                     rows = rows.child(div().px_1().relative().child(self.row(0, entry, marked, cx)).when_some(line, |d, above| {
                         d.child(

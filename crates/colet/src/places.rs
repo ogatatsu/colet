@@ -17,7 +17,7 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, Engine, Tone, WidthOf},
     search_filters::FilterEdit,
-    settings::{Placement, SavedSearch, Settings, Theme, written},
+    settings::{Placement, SavedSearch, Settings, Theme, pin_key, written},
     state::{Kind, saved_query, search_key},
 };
 
@@ -59,7 +59,8 @@ pub fn places(drives: Vec<Entry>, indexed: Vec<PathBuf>) -> Vec<Entry> {
     drives.into_iter().chain(others.into_iter().map(|path| Entry::folder(&path, &shown(&path)))).collect()
 }
 
-/// Home's rows: the favorites, the saved searches, then the places, each place once.
+/// Home's rows: the pinned in their order, then the favorites, the saved searches and the places, each
+/// place once. A pin whose row is not there, a drive unplugged, waits for it unseen.
 pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
     let favorites = settings.favorites.iter().map(|path| Entry::folder(path, &shown(folder_name(path))));
     let searches = settings.saved_searches.iter().map(|s| Entry {
@@ -67,29 +68,46 @@ pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
         ..Entry::folder(search_key(&s.query, s.filter.as_deref()), s.label())
     });
     let mut seen = std::collections::HashSet::new();
-    // A place is one whatever its case; a saved search is its query and filter exactly.
-    let key = |e: &Entry| if saved_query(&e.path).is_some() { e.path.as_os_str().to_owned() } else { path_key(&e.path) };
-    favorites.chain(searches).chain(drives).filter(|e| seen.insert(key(e))).collect()
+    let mut rest: Vec<Entry> = favorites.chain(searches).chain(drives).filter(|e| seen.insert(pin_key(&e.path))).collect();
+    let mut pinned = Vec::new();
+    for pin in settings.pinned.iter().map(|pin| pin_key(pin)) {
+        if let Some(at) = rest.iter().position(|e| pin_key(&e.path) == pin) {
+            pinned.push(rest.remove(at));
+        }
+    }
+    pinned.extend(rest);
+    pinned
 }
 
 /// Home's headings and their rows, shared by drawing and scrolling to the focused row.
 pub fn home_groups<'a>(settings: &Settings, entries: &'a [Entry]) -> Vec<(&'static str, Vec<&'a Entry>)> {
-    let favorite = |e: &&Entry| settings.is_favorite(&e.path);
+    let pinned = |e: &&Entry| settings.is_pinned(&e.path);
+    let favorite = |e: &&Entry| !pinned(e) && settings.is_favorite(&e.path);
+    let search = |e: &&Entry| !pinned(e) && saved_query(&e.path).is_some();
     [
-        ("お気に入り", entries.iter().filter(favorite).collect::<Vec<_>>()),
-        ("保存した検索", entries.iter().filter(|e| saved_query(&e.path).is_some()).collect()),
-        ("場所", entries.iter().filter(|e| saved_query(&e.path).is_none() && !favorite(e)).collect()),
+        ("ピン留め", entries.iter().filter(pinned).collect::<Vec<_>>()),
+        ("お気に入り", entries.iter().filter(favorite).collect()),
+        ("保存した検索", entries.iter().filter(search).collect()),
+        ("場所", entries.iter().filter(|e| !pinned(e) && !favorite(e) && !search(e)).collect()),
     ]
     .into_iter()
     .filter(|(_, rows)| !rows.is_empty())
     .collect()
 }
 
-/// A favorite or saved search dragged in home, to a new place among its own kind.
+/// The kinds of home's rows that are put in order by dragging, each among its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Shelf {
+    Pinned,
+    Favorite,
+    Search,
+}
+
+/// A pinned row, favorite or saved search dragged in home, to a new place among its own kind.
 #[derive(Clone)]
 pub struct HomeDrag {
     pub path: PathBuf,
-    pub search: bool,
+    pub shelf: Shelf,
 }
 
 /// Where a drag in home would put what it carries: before the row `before`, or after the last of its kind.
@@ -101,13 +119,15 @@ pub struct Landing {
 /// Where each of home's favorites and saved searches was drawn, by its path.
 pub type HomeRows = std::rc::Rc<std::cell::RefCell<Vec<(PathBuf, Bounds<Pixels>)>>>;
 
-/// Which of home's kinds that are put in order by dragging `path` is: a saved search, a favorite, or
-/// neither, as a place is.
-pub fn movable(settings: &Settings, path: &Path) -> Option<bool> {
-    if saved_query(path).is_some() {
-        Some(true)
+/// Which of home's kinds that are put in order by dragging `path` is: pinned, a saved search, a favorite,
+/// or none, as a place is.
+pub fn movable(settings: &Settings, path: &Path) -> Option<Shelf> {
+    if settings.is_pinned(path) {
+        Some(Shelf::Pinned)
+    } else if saved_query(path).is_some() {
+        Some(Shelf::Search)
     } else {
-        settings.is_favorite(path).then_some(false)
+        settings.is_favorite(path).then_some(Shelf::Favorite)
     }
 }
 
@@ -172,10 +192,11 @@ impl Colet {
     /// Changes the settings and writes them a moment later, once a burst of changes (a drag) is over;
     /// never over a file that could not be read.
     pub fn update_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
-        let before = (self.settings.favorites.clone(), self.settings.saved_searches.clone());
+        let listed = |s: &Settings| (s.favorites.clone(), s.saved_searches.clone(), s.pinned.clone());
+        let before = listed(&self.settings);
         change(&mut self.settings);
         self.settings.normalize();
-        if before != (self.settings.favorites.clone(), self.settings.saved_searches.clone()) {
+        if before != listed(&self.settings) {
             // Home lists them.
             let home = self.state.columns[0].id;
             self.load(home, 0, true, cx);
@@ -251,10 +272,28 @@ impl Colet {
         self.update_settings(
             |s| {
                 if s.is_favorite(&path) {
+                    // Its pin goes with it.
                     let key = path_key(&path);
                     s.favorites.retain(|f| path_key(f) != key);
+                    s.pinned.retain(|pin| pin_key(pin) != key);
                 } else {
                     s.favorites.push(path);
+                }
+            },
+            cx,
+        );
+    }
+
+    /// Pins a row of home at the end of the pinned ones, or puts it back among its own kind.
+    pub fn toggle_pin(&mut self, path: &Path, cx: &mut Context<Self>) {
+        let path = path.to_owned();
+        self.update_settings(
+            |s| {
+                if s.is_pinned(&path) {
+                    let key = pin_key(&path);
+                    s.pinned.retain(|pin| pin_key(pin) != key);
+                } else {
+                    s.pinned.push(path);
                 }
             },
             cx,
@@ -286,7 +325,7 @@ impl Colet {
         let (Some(drag), Some((at, list))) = (&self.home_drag, self.home_pointer) else { return };
         let landing = {
             let rows = self.home_rows.borrow();
-            let own: Vec<_> = rows.iter().filter(|(path, _)| movable(&self.settings, path) == Some(drag.search)).collect();
+            let own: Vec<_> = rows.iter().filter(|(path, _)| movable(&self.settings, path) == Some(drag.shelf)).collect();
             match (own.first(), own.last()) {
                 (Some(first), Some(last)) if list.contains(&at) && at.y >= first.1.top() && at.y < last.1.bottom() => {
                     let over = own.iter().position(|(_, bounds)| at.y < bounds.bottom()).unwrap_or(own.len() - 1);
@@ -350,12 +389,12 @@ impl Colet {
         let Some(Landing { before }) = landing else { return };
         let (path, before) = (drag.path.as_path(), before.as_deref());
         self.update_settings(
-            |s| {
-                if drag.search {
-                    move_before(&mut s.saved_searches, |s, key| search_key(&s.query, s.filter.as_deref()) == key, path, before);
-                } else {
-                    move_before(&mut s.favorites, |f, key| path_key(f) == path_key(key), path, before);
+            |s| match drag.shelf {
+                Shelf::Pinned => move_before(&mut s.pinned, |pin, key| pin_key(pin) == pin_key(key), path, before),
+                Shelf::Search => {
+                    move_before(&mut s.saved_searches, |s, key| search_key(&s.query, s.filter.as_deref()) == key, path, before)
                 }
+                Shelf::Favorite => move_before(&mut s.favorites, |f, key| path_key(f) == path_key(key), path, before),
             },
             cx,
         );
@@ -454,10 +493,15 @@ impl Colet {
         let name = name.read(cx).value().trim().to_owned();
         let query = query.read(cx).value().to_string();
         let edited = SavedSearch { name, query: query.clone(), filter: filter.clone() };
+        let (was, is) = (search_key(&original.0, original.1.as_deref()), search_key(&query, filter.as_deref()));
         self.update_settings(
             |s| {
                 if let Some(saved) = s.saved_searches.iter_mut().find(|saved| (&saved.query, &saved.filter) == (&original.0, &original.1)) {
                     *saved = edited;
+                    // Its pin follows it, where it was.
+                    for pin in s.pinned.iter_mut().filter(|pin| **pin == was) {
+                        *pin = is.clone();
+                    }
                 }
             },
             cx,
@@ -535,7 +579,7 @@ impl Colet {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Placement, SavedSearch, Settings, home_entries, move_before, places, restore_bounds, shown};
+    use super::{Entry, Placement, SavedSearch, Settings, Shelf, home_entries, home_groups, move_before, movable, places, restore_bounds, shown};
     use std::path::Path;
     use gpui_kit::{Bounds, DisplayId, point, px, size};
 
@@ -607,6 +651,28 @@ mod tests {
         let entries = home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)")]);
         let paths: Vec<&str> = entries.iter().map(|e| e.path.to_str().unwrap()).collect();
         assert_eq!(paths, [r"c:\", "search:ext:PDF", "search:ext:pdf"]);
+    }
+
+    #[test]
+    fn lists_the_pinned_first_in_their_order_each_out_of_its_kind() {
+        let settings = Settings {
+            favorites: vec![r"D:\Work".into(), r"D:\Music".into()],
+            saved_searches: vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None }],
+            // A drive unplugged waits unseen; a place is pinned whatever its case.
+            pinned: vec!["search:ext:pdf".into(), r"E:\".into(), r"c:\".into(), r"D:\Music".into()],
+            ..Settings::default()
+        };
+        let entries = home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)"), Entry::folder(r"D:\", "D:")]);
+        let paths: Vec<&str> = entries.iter().map(|e| e.path.to_str().unwrap()).collect();
+        assert_eq!(paths, ["search:ext:pdf", r"C:\", r"D:\Music", r"D:\Work", r"D:\"]);
+        let groups: Vec<(&str, Vec<&str>)> = home_groups(&settings, &entries)
+            .into_iter()
+            .map(|(title, rows)| (title, rows.into_iter().map(|e| e.path.to_str().unwrap()).collect()))
+            .collect();
+        assert_eq!(groups, [("ピン留め", vec!["search:ext:pdf", r"C:\", r"D:\Music"]), ("お気に入り", vec![r"D:\Work"]), ("場所", vec![r"D:\"])]);
+        assert_eq!(movable(&settings, Path::new(r"C:\")), Some(Shelf::Pinned));
+        assert_eq!(movable(&settings, Path::new(r"D:\Work")), Some(Shelf::Favorite));
+        assert_eq!(movable(&settings, Path::new(r"D:\")), None);
     }
 
     #[test]

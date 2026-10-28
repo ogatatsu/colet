@@ -29,6 +29,8 @@ gpui_kit::assets::icon_assets!(ExtraIcons, [
         Check,
         SlidersHorizontal,
         StarFill,
+        Pin,
+        PinOff,
         Scissors,
         ClipboardPaste,
         Link,

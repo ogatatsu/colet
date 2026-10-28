@@ -2253,6 +2253,36 @@ fn drags_a_saved_search_below_the_last_without_running_it(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn pins_rows_of_any_kind_above_the_rest_and_puts_them_in_order(cx: &mut TestAppContext) {
+    let (fake, ui) = ordered_home(cx);
+    let home = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
+    let pin = |ui: &Ui, cx: &mut TestAppContext, path: &str, line: &'static str| {
+        ui.act(cx, |window, cx| window.within("home").right_click(row(path), cx));
+        settle(cx);
+        ui.click(cx, line);
+    };
+    // A place, a saved search and a favorite, each from its menu in home, at the end of those pinned.
+    pin(&ui, cx, r"D:\", "menu-pin");
+    pin(&ui, cx, "search:two", "menu-pin");
+    pin(&ui, cx, r"D:\b", "menu-pin");
+    assert_eq!(texts(&fake.settings.lock().unwrap().pinned), [r"D:\", "search:two", r"D:\b"]);
+    assert_eq!(home(&ui, cx), [r"D:\", "search:two", r"D:\b", r"D:\a", r"D:\c", "search:one"]);
+    // Dragged among themselves, whatever their kinds.
+    let (place, favorite) = (ui.home_row(cx, r"D:\"), ui.home_row(cx, r"D:\b"));
+    ui.hold_drag(cx, favorite.center(), upper(place));
+    ui.let_go(cx, upper(place));
+    assert_eq!(texts(&fake.settings.lock().unwrap().pinned), [r"D:\b", r"D:\", "search:two"]);
+    // Put back from its menu, it is among its own kind where it was.
+    pin(&ui, cx, r"D:\", "menu-unpin");
+    assert_eq!(home(&ui, cx), [r"D:\b", "search:two", r"D:\a", r"D:\c", "search:one", r"D:\"]);
+    // A favorite or saved search let go of takes its pin with it.
+    pin(&ui, cx, r"D:\b", "menu-favorite");
+    pin(&ui, cx, "search:two", "menu-unsave");
+    assert!(fake.settings.lock().unwrap().pinned.is_empty());
+    assert!(!ui.read(cx, |v| v.menu_lines().iter().any(|l| matches!(l.command, crate::menus::Command::Pin(_)))));
+}
+
+#[gpui_kit::test]
 fn leaves_the_order_as_it_was_when_let_go_outside_its_own_kind(cx: &mut TestAppContext) {
     let (fake, ui) = ordered_home(cx);
     let (a, one) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, "search:one"));

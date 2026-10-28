@@ -1,4 +1,5 @@
-//! What Colet keeps between runs: the widths, the favorites, the saved searches, the search filters and
+//! What Colet keeps between runs: the widths, the favorites, the saved searches, what is pinned in home,
+//! the search filters and
 //! the one chosen, the sort order, which Everything to ask, the theme, and where the window was. Searches typed, history and the columns open
 //! are not kept.
 use std::{
@@ -10,7 +11,10 @@ use std::{
 use colet_core::entry::{Order, Sort};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::app::{COLUMN_WIDTHS, SIDEBAR_WIDTHS};
+use crate::{
+    app::{COLUMN_WIDTHS, SIDEBAR_WIDTHS},
+    state::{saved_query, search_key},
+};
 
 /// A search kept in home. An empty name shows the query itself.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -95,9 +99,13 @@ pub struct Settings {
     pub search_width: f32,
     /// Home's pane on the left.
     pub sidebar_width: f32,
-    #[serde(with = "favorites")]
+    #[serde(with = "paths")]
     pub favorites: Vec<PathBuf>,
     pub saved_searches: Vec<SavedSearch>,
+    /// Home's rows pinned above the rest, in their order, by the path each row has: a folder's, or a saved
+    /// search's key.
+    #[serde(with = "paths")]
+    pub pinned: Vec<PathBuf>,
     pub filters: Vec<SearchFilter>,
     /// The filter the next search is narrowed by, by name.
     pub filter: Option<String>,
@@ -116,6 +124,7 @@ impl Default for Settings {
             sidebar_width: 240.,
             favorites: Vec::new(),
             saved_searches: Vec::new(),
+            pinned: Vec::new(),
             filters: Vec::new(),
             filter: None,
             sort: Order::default(),
@@ -142,6 +151,11 @@ impl Settings {
         }
         for search in &mut self.saved_searches {
             if !known(&search.filter) {
+                // Its pin follows it to the search it is now.
+                let (was, is) = (search_key(&search.query, search.filter.as_deref()), search_key(&search.query, None));
+                for pin in self.pinned.iter_mut().filter(|pin| **pin == was) {
+                    *pin = is.clone();
+                }
                 search.filter = None;
             }
         }
@@ -149,6 +163,13 @@ impl Settings {
         self.saved_searches.retain(|s| !s.query.trim().is_empty() && seen.insert((s.query.clone(), s.filter.clone())));
         let mut seen = std::collections::HashSet::new();
         self.favorites.retain(|f| !f.as_os_str().is_empty() && seen.insert(colet_core::paths::path_key(f)));
+        // A pin is one of each row, and goes with the saved search it pins.
+        let saved: std::collections::HashSet<PathBuf> =
+            self.saved_searches.iter().map(|s| search_key(&s.query, s.filter.as_deref())).collect();
+        let mut seen = std::collections::HashSet::new();
+        self.pinned.retain(|pin| {
+            !pin.as_os_str().is_empty() && (saved_query(pin).is_none() || saved.contains(pin)) && seen.insert(pin_key(pin))
+        });
         if self.window.is_some_and(|w| !(w.width >= 200. && w.height >= 150.)) {
             self.window = None;
         }
@@ -163,16 +184,26 @@ impl Settings {
         self.filters.iter().find(|f| f.name == name).map(|f| f.query.as_str())
     }
 
+    pub fn is_pinned(&self, path: &Path) -> bool {
+        let key = pin_key(path);
+        self.pinned.iter().any(|pin| pin_key(pin) == key)
+    }
+
     pub fn is_favorite(&self, path: &Path) -> bool {
         let key = colet_core::paths::path_key(path);
         self.favorites.iter().any(|f| colet_core::paths::path_key(f) == key)
     }
 }
 
-/// The favorites, each as its path's text; one whose path is not text (an unpaired surrogate, which
-/// Windows allows in a name) as `{"utf16": [...]}`, the units Windows holds, so it still names that folder
-/// alone. One read neither way (a file edited by hand) is left out alone.
-mod favorites {
+/// What tells home's rows apart: a place whatever its case, a saved search by its query and filter exactly.
+pub fn pin_key(path: &Path) -> std::ffi::OsString {
+    if saved_query(path).is_some() { path.as_os_str().to_owned() } else { colet_core::paths::path_key(path) }
+}
+
+/// The favorites and the pins, each as its path's text; one whose path is not text (an unpaired surrogate,
+/// which Windows allows in a name) as `{"utf16": [...]}`, the units Windows holds, so it still names that
+/// folder alone. One read neither way (a file edited by hand) is left out alone.
+mod paths {
     use std::ffi::OsString;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
@@ -460,6 +491,35 @@ mod tests {
         assert_eq!(settings.saved_searches, [search("PDF", "ext:pdf"), search("", "dm:today")]);
         assert_eq!(settings.favorites, [PathBuf::from(r"D:\Work")]);
         assert_eq!(settings.saved_searches[1].label(), "dm:today");
+    }
+
+    #[test]
+    fn keeps_one_pin_of_each_row_and_none_for_a_search_not_saved() {
+        let search = |query: &str, filter: Option<&str>| SavedSearch { name: String::new(), query: query.into(), filter: filter.map(Into::into) };
+        let mut settings = Settings {
+            filters: vec![SearchFilter { name: "画像".into(), query: "ext:jpg".into() }],
+            saved_searches: vec![search("cat", None), search("dog", Some("動画")), search("cow", Some("画像"))],
+            pinned: vec![
+                r"D:\Work".into(),
+                r"d:\work".into(),
+                search_key("gone", None),
+                search_key("cat", None),
+                search_key("CAT", None),
+                // Its filter gone, the search it is now keeps the pin.
+                search_key("dog", Some("動画")),
+                search_key("cow", Some("画像")),
+                PathBuf::new(),
+            ],
+            ..Settings::default()
+        };
+        settings.normalize();
+        assert_eq!(
+            settings.pinned,
+            [PathBuf::from(r"D:\Work"), search_key("cat", None), search_key("dog", None), search_key("cow", Some("画像"))]
+        );
+        assert!(settings.is_pinned(Path::new(r"d:\WORK")) && !settings.is_pinned(&search_key("Cat", None)));
+        let written = serde_json::to_string(&settings).unwrap();
+        assert_eq!(serde_json::from_str::<Settings>(&written).unwrap().pinned, settings.pinned);
     }
 
     #[test]

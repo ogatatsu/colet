@@ -11,7 +11,7 @@ use crate::{
     ops::{Menu, NEEDS_FILE, ONE_ITEM},
     places::Dialog,
     search_filters::FilterEdit,
-    state::saved_query,
+    state::{Kind, saved_query},
     view::TipExt,
 };
 
@@ -30,6 +30,8 @@ pub enum Command {
     /// "ごみ箱へ移動" picked with Shift held, as Explorer's Delete deletes outright then.
     Delete,
     Favorite(std::path::PathBuf),
+    /// A row of home, pinned or put back.
+    Pin(std::path::PathBuf),
     Windows,
     /// A saved search, by its query and filter.
     EditSearch(String, Option<String>),
@@ -277,15 +279,27 @@ impl Colet {
         let reasons = self.reasons();
         let picked = self.picked();
         let entries = self.picked_entries();
+        // A row of home is pinned above the rest, or put back, one at a time.
+        let in_home = self.menu().and_then(|m| self.state.index_of(m.column)).is_some_and(|i| self.state.columns[i].kind == Kind::Home);
+        let pin = match picked.as_slice() {
+            [path] if in_home => Some(if self.settings.is_pinned(path) {
+                line("menu-unpin", "pin-off", "ピン留めを外す", None, None, Command::Pin(path.clone()))
+            } else {
+                line("menu-pin", "pin", "ピン留め", None, None, Command::Pin(path.clone()))
+            }),
+            _ => None,
+        };
         if let [path] = picked.as_slice()
             && let Some((query, filter)) = saved_query(path)
         {
             let filter = filter.map(str::to_owned);
-            return vec![
+            let mut lines = vec![
                 line("menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None, Command::CopyPath),
                 line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, Command::EditSearch(query.into(), filter.clone())).grouped(),
-                line("menu-unsave", "star", "保存した検索を解除", None, None, Command::Unsave(query.into(), filter)),
             ];
+            lines.extend(pin);
+            lines.push(line("menu-unsave", "star", "保存した検索を解除", None, None, Command::Unsave(query.into(), filter)));
+            return lines;
         }
         let one = entries.len() == 1;
         // From empty space nothing is picked, and the actions on items need no word.
@@ -323,6 +337,11 @@ impl Colet {
                 .grouped(),
             );
         }
+        if let Some(pin) = pin {
+            // Beside the favorite's line, in its group.
+            let first = !lines.last().is_some_and(|l| matches!(l.command, Command::Favorite(_)));
+            lines.push(if first { pin.grouped() } else { pin });
+        }
         lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows).grouped());
         lines
     }
@@ -355,6 +374,7 @@ impl Colet {
             Command::Favorite(path) => {
                 self.toggle_favorite(&path, cx);
             }
+            Command::Pin(path) => self.toggle_pin(&path, cx),
             Command::Windows => {
                 self.show_shell_menu(window, cx);
                 return;
