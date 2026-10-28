@@ -47,11 +47,11 @@ pub struct Column {
     /// What to pick once listed, by path key: the items just pasted here, which the listing that shows
     /// them may come after the paste is done.
     pub pick: Option<Vec<OsString>>,
-    /// A folder column narrowed to some names: `entries` then holds only those.
+    /// Home or a folder column narrowed to some names: `entries` then holds only those.
     pub filter: Option<Filter>,
 }
 
-/// The names a folder column is narrowed to, those holding `text`, and all it lists, kept aside.
+/// The names home or a folder column is narrowed to, those holding `text`, and all it lists, kept aside.
 #[derive(Clone, Debug)]
 pub struct Filter {
     pub text: String,
@@ -791,10 +791,11 @@ impl State {
         self.select(index, vec![path.to_owned()]);
     }
 
-    /// Narrows the folder column at `index` to the names holding `text`, or with none, or an empty one,
-    /// lists them all again. What it hides leaves the selection, and the folder open beside it closes.
+    /// Narrows home or the folder column at `index` to the names holding `text`, or with none, or an empty
+    /// one, lists them all again. What a folder hides leaves the selection, and the folder open beside it
+    /// closes; home keeps its pick, and what it opened, while looking for another place.
     pub fn set_filter(&mut self, index: usize, text: Option<&str>) {
-        let Some(c) = self.columns.get_mut(index).filter(|c| c.kind == Kind::Folder) else { return };
+        let Some(c) = self.columns.get_mut(index).filter(|c| c.kind != Kind::Search) else { return };
         match text.filter(|text| !text.is_empty()) {
             None => {
                 if let Some(filter) = c.filter.take() {
@@ -820,6 +821,9 @@ impl State {
         let shown: HashSet<&Path> = c.entries.iter().map(|e| e.path.as_path()).collect();
         if c.focused.as_ref().is_some_and(|f| !shown.contains(f.as_path())) {
             c.focused = None;
+        }
+        if c.kind == Kind::Home {
+            return;
         }
         let kept: Vec<PathBuf> = c.selected.iter().filter(|p| shown.contains(p.as_path())).cloned().collect();
         if kept.len() != c.selected.len() {
@@ -1551,9 +1555,26 @@ mod tests {
         assert_eq!(names(&s, 1).len(), 3);
         assert!(s.columns[1].entries.iter().all(|e| e.marks.name.is_empty()));
         assert!(s.columns[1].filter.is_none());
-        // Only folders narrow.
-        s.set_filter(0, Some("x"));
-        assert!(s.columns[0].filter.is_none());
+    }
+
+    #[test]
+    fn narrows_home_keeping_its_pick_and_what_it_opened() {
+        let mut s = drive(vec![folder(r"D:\alpha")]);
+        with_entries(&mut s, 0, vec![folder(r"C:\"), folder(r"D:\")]);
+        s.select(0, one(r"D:\"));
+        s.select(1, one(r"D:\alpha"));
+        assert_eq!(s.columns.len(), 3);
+        s.set_filter(0, Some("c:"));
+        assert_eq!(names(&s, 0), [r"C:\"]);
+        assert_eq!(s.columns[0].selected, one(r"D:\"));
+        assert_eq!(s.columns.len(), 3);
+        // A listing that comes after is narrowed too.
+        let id = s.columns[0].id;
+        s.load(id, 9, true);
+        s.page(id, 9, vec![folder(r"C:\"), folder(r"D:\"), folder(r"E:\")], 3, 0, &HashSet::new());
+        assert_eq!(names(&s, 0), [r"C:\"]);
+        s.set_filter(0, None);
+        assert_eq!(names(&s, 0).len(), 3);
     }
 
     #[test]

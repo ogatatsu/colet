@@ -3,7 +3,7 @@
 use std::{ops::Range, rc::Rc, time::Instant};
 
 use colet_core::{entry::Entry, paths::{folder_name, id_text, path_key, shown}, time};
-use gpui_kit::base::input::{self, Input};
+use gpui_kit::base::input::{self, Input, InputState};
 use gpui_kit::component::{button::{Button, ButtonVariants}, status_bar::StatusBar, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -13,7 +13,7 @@ use crate::{
     places::{HomeDrag, movable},
     state::saved_query,
     reveal::{Cell, on_screen, refit, reveal_target, uncover_target},
-    state::{Column, Kind},
+    state::{Column, ColumnId, Kind},
 };
 
 /// What follows the pointer as a row is dragged in home: its row, faint.
@@ -412,7 +412,8 @@ impl Colet {
         let ink = if lit { p.on_accent } else { p.text };
         let path = entry.path.clone();
         // A pinned row, favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
-        let drag = (kind == Kind::Home)
+        // Narrowed, home hides some of its kind, and where among them it would land is not to be seen.
+        let drag = (kind == Kind::Home && c.filter.is_none())
             .then(|| movable(&self.settings, &entry.path))
             .flatten()
             .map(|shelf| (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_rows.clone(), cx.entity().downgrade()));
@@ -642,6 +643,7 @@ impl Colet {
         if c.entries.is_empty() {
             let (name, text) = match kind {
                 Kind::Search => ("search", "一致する項目はありません"),
+                Kind::Home if c.filter.is_some() => ("funnel", "一致する項目はありません"),
                 Kind::Home => ("hard-drive", "場所もお気に入りもありません"),
                 Kind::Folder if c.total > 0 && c.filter.is_some() => ("funnel", "一致する項目はありません"),
                 Kind::Folder => ("folder", "このフォルダーは空です"),
@@ -891,66 +893,7 @@ impl Colet {
                     .test_support(),
             )
             .when_some(field, |d, input| {
-                let focused = self.has_keys(&input, window, cx);
-                let has_text = !input.read(cx).value().is_empty();
-                d.child(
-                    div().flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(
-                        // Ringed as the search field is; the ring lies over the gaps around.
-                        frame(p, focused).m(px(-3.)).child(
-                            div()
-                                .id(("filter", id))
-                                .w_full()
-                                .h(px(28.))
-                                .pl(px(8.))
-                                .pr(px(2.))
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .bg(p.surface)
-                                .border_1()
-                                .border_color(p.border_strong)
-                                .rounded(px(6.))
-                                // Accented while it has the keys, or narrows the rows from out of them.
-                                .child(icon("funnel", 13., if focused || filtering { p.accent } else { p.text_muted }))
-                                .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(&input, cx)).child(Input::new(&input)))
-                                // ↓ goes into the rows it lets through; Esc clears it, then goes there too.
-                                .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
-                                    cx.stop_propagation();
-                                    this.leave_filter(id, window, cx);
-                                }))
-                                .on_action(cx.listener(move |this, _: &input::Escape, window, cx| {
-                                    cx.stop_propagation();
-                                    this.escape_filter(id, window, cx);
-                                }))
-                                // ← and → past the text's ends stay here, not going on to the next column; Enter
-                                // only goes into the rows, opening nothing there.
-                                .on_action(|_: &input::MoveLeft, _, cx| cx.stop_propagation())
-                                .on_action(|_: &input::MoveRight, _, cx| cx.stop_propagation())
-                                .on_action(|_: &input::Enter, _, cx| cx.stop_propagation())
-                                .when(has_text, |b| {
-                                    b.child(
-                                        Button::new(("clear-filter", id))
-                                            .ghost()
-                                            .xsmall()
-                                            .icon(glyph("x"))
-                                            .accessibility_label("フィルタをクリア")
-                                            .tooltip("フィルタをクリア（Esc）")
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                if let Some(field) = this.filters.get(&id) {
-                                                    let input = field.input.clone();
-                                                    input.update(cx, |input, cx| {
-                                                        input.set_value("", window, cx);
-                                                        input.focus(window, cx);
-                                                    });
-                                                    this.filter(id, "", cx);
-                                                }
-                                            })),
-                                    )
-                                })
-                                .test_support(),
-                        ),
-                    ),
-                )
+                d.child(div().flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(self.filter_field(id, filtering, &input, window, cx)))
             })
             .child(body)
             .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
@@ -958,9 +901,72 @@ impl Colet {
             .into_any_element()
     }
 
+    /// The field narrowing home or the folder column `id` to the names holding what is typed there.
+    fn filter_field(&self, id: ColumnId, filtering: bool, input: &Entity<InputState>, window: &Window, cx: &mut Context<Self>) -> Div {
+        let p = self.palette;
+        let focused = self.has_keys(input, window, cx);
+        let has_text = !input.read(cx).value().is_empty();
+        // Ringed as the search field is; the ring lies over the gaps around.
+        frame(p, focused).m(px(-3.)).child(
+            div()
+                .id(("filter", id))
+                .w_full()
+                .h(px(28.))
+                .pl(px(8.))
+                .pr(px(2.))
+                .flex()
+                .items_center()
+                .gap_2()
+                .bg(p.surface)
+                .border_1()
+                .border_color(p.border_strong)
+                .rounded(px(6.))
+                // Accented while it has the keys, or narrows the rows from out of them.
+                .child(icon("funnel", 13., if focused || filtering { p.accent } else { p.text_muted }))
+                .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(input, cx)).child(Input::new(input)))
+                // ↓ goes into the rows it lets through; Esc clears it, then goes there too.
+                .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
+                    cx.stop_propagation();
+                    this.leave_filter(id, window, cx);
+                }))
+                .on_action(cx.listener(move |this, _: &input::Escape, window, cx| {
+                    cx.stop_propagation();
+                    this.escape_filter(id, window, cx);
+                }))
+                // ← and → past the text's ends stay here, not going on to the next column; Enter
+                // only goes into the rows, opening nothing there.
+                .on_action(|_: &input::MoveLeft, _, cx| cx.stop_propagation())
+                .on_action(|_: &input::MoveRight, _, cx| cx.stop_propagation())
+                .on_action(|_: &input::Enter, _, cx| cx.stop_propagation())
+                .when(has_text, |b| {
+                    b.child(
+                        Button::new(("clear-filter", id))
+                            .ghost()
+                            .xsmall()
+                            .icon(glyph("x"))
+                            .accessibility_label("フィルタをクリア")
+                            .tooltip("フィルタをクリア（Esc）")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if let Some(field) = this.filters.get(&id) {
+                                    let input = field.input.clone();
+                                    input.update(cx, |input, cx| {
+                                        input.set_value("", window, cx);
+                                        input.focus(window, cx);
+                                    });
+                                    this.filter(id, "", cx);
+                                }
+                            })),
+                    )
+                })
+                .test_support(),
+        )
+    }
+
     fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());
+        let home = &self.state.columns[0];
+        let (id, filtering) = (home.id, home.filter.is_some());
+        let field = self.filters.get(&id).map(|field| field.input.clone());
         let marked = self.state.active == 0 && !self.search_focused;
         let body = self.column_body(0, marked, cx);
         let width = self.sidebar_width(window);
@@ -985,15 +991,7 @@ impl Colet {
                     .px_3()
                     .flex()
                     .items_center()
-                    .gap(px(2.))
-                    .child(
-                        Self::icon_button("back", "arrow-left", "戻る", "戻る（Alt+←）", back)
-                            .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
-                    )
-                    .child(
-                        Self::icon_button("forward", "arrow-right", "進む", "進む（Alt+→）", forward)
-                            .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx))),
-                    ),
+                    .when_some(field, |d, input| d.child(div().flex_1().min_w_0().child(self.filter_field(id, filtering, &input, window, cx)))),
             )
             .child(keys)
             .child(self.resizer("sidebar-resizer", WidthOf::Sidebar, width, cx))
@@ -1006,6 +1004,7 @@ impl Colet {
         let focused = self.search_focused;
         let has_query = !self.state.query.is_empty();
         let sort = self.settings.sort;
+        let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());
 
         let sort_keyed = keyed(&self.sort_focus, window);
         let filter_button = self.filter_button(window, cx);
@@ -1016,6 +1015,20 @@ impl Colet {
             .flex()
             .items_center()
             .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .gap(px(2.))
+                    .child(
+                        Self::icon_button("back", "arrow-left", "戻る", "戻る（Alt+←）", back)
+                            .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
+                    )
+                    .child(
+                        Self::icon_button("forward", "arrow-right", "進む", "進む（Alt+→）", forward)
+                            .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx))),
+                    ),
+            )
             .child(
                 // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row. However
                 // narrow the window, it keeps room to type in.

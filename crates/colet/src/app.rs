@@ -1165,12 +1165,12 @@ impl Colet {
 
     // ---- Filters ----
 
-    /// Each folder column has its field, holding what it is narrowed to: a field is made for a column new
-    /// here, goes with one gone, and empties where a new folder or a paste lifted the filter.
+    /// Home and each folder column have their field, holding what they are narrowed to: a field is made for
+    /// a column new here, goes with one gone, and empties where a new folder or a paste lifted the filter.
     pub fn filter_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let folders: HashSet<ColumnId> = self.state.columns.iter().filter(|c| c.kind == Kind::Folder).map(|c| c.id).collect();
-        self.filters.retain(|id, _| folders.contains(id));
-        for c in self.state.columns.iter().filter(|c| c.kind == Kind::Folder) {
+        let kept: HashSet<ColumnId> = self.state.columns.iter().filter(|c| c.kind != Kind::Search).map(|c| c.id).collect();
+        self.filters.retain(|id, _| kept.contains(id));
+        for c in self.state.columns.iter().filter(|c| c.kind != Kind::Search) {
             let id = c.id;
             match self.filters.get_mut(&id) {
                 Some(field) => {
@@ -1196,11 +1196,11 @@ impl Colet {
         }
     }
 
-    /// The field of the folder column worked in takes the keys, with its text picked to type over.
+    /// The field of home or the folder column worked in takes the keys, with its text picked to type over.
     pub fn open_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let c = &self.state.columns[self.state.active];
-        if c.kind != Kind::Folder {
-            self.notify("フィルタはフォルダーのカラムでだけ使えます。", Tone::Info, cx);
+        if c.kind == Kind::Search {
+            self.notify("フィルタはホームとフォルダーのカラムでだけ使えます。", Tone::Info, cx);
             return;
         }
         let id = c.id;

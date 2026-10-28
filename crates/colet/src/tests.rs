@@ -2510,18 +2510,13 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
         ])
     });
     let ui = open(cx, fake);
-    // Home narrows nothing, and says so.
     ui.click(cx, row(r"D:\"));
-    ui.press(cx, "left");
-    ui.press(cx, "/");
-    assert!(ui.toasts(cx).iter().any(|t| t.contains("フォルダーのカラムでだけ")));
     ui.press(cx, "right");
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
-    let (home, id, alpha) = ui.read(cx, |v| (v.state.columns[0].id, v.state.columns[1].id, v.state.columns[2].id));
-    // Each folder has its field from the start, an empty one too; home has none.
+    let (id, alpha) = ui.read(cx, |v| (v.state.columns[1].id, v.state.columns[2].id));
+    // Each folder has its field from the start, an empty one too.
     assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
     assert!(ui.act(cx, |window, _| window.try_find(("filter", alpha)).is_some()));
-    assert!(ui.act(cx, |window, _| window.try_find(("filter", home)).is_none()));
     let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string());
     ui.press(cx, "/");
     // What is typed narrows the rows rather than jumping through them; the folder it hides closes.
@@ -2575,6 +2570,39 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     ui.act(cx, |_, _| ());
     assert_eq!(typed(&ui, cx), "");
     assert_eq!(shown(&ui, cx).len(), 3);
+}
+
+#[gpui_kit::test]
+fn narrows_home_from_its_field_keeping_the_place_open(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"C:\", "OS (C:)"), Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[(r"C:\", vec![]), (r"D:\", vec![folder(r"D:\alpha")])])
+    });
+    let ui = open(cx, fake);
+    let home = ui.read(cx, |v| v.state.columns[0].id);
+    // Home has its field from the start, where back and forward were: those are beside the search.
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", home)).is_some()));
+    let (back, field) = ui.act(cx, |window, _| (window.find("back").bounds(), window.find("search-box").bounds()));
+    assert!(back.right() <= field.left(), "{back:?} {field:?}");
+    ui.click(cx, row(r"D:\"));
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
+    // / in home goes to its field; what is typed narrows its rows, and the place hidden stays open.
+    ui.press(cx, "/");
+    assert!(ui.toasts(cx).is_empty());
+    ui.input(cx, "os");
+    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
+    assert_eq!(shown(&ui, cx), [r"C:\"]);
+    assert_eq!(ui.selected(cx, 0), [r"D:\"]);
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
+    // Nothing let through says so.
+    ui.input(cx, "zz");
+    assert!(shown(&ui, cx).is_empty());
+    // Esc clears it, then goes back to the rows.
+    ui.press(cx, "escape");
+    assert_eq!(shown(&ui, cx).len(), 2);
+    ui.press(cx, "escape");
+    assert!(ui.home_focused(cx));
+    assert_eq!(ui.active(cx), 0);
 }
 
 #[gpui_kit::test]
