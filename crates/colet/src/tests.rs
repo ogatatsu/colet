@@ -2594,9 +2594,30 @@ fn narrows_home_from_its_field_keeping_the_place_open(cx: &mut TestAppContext) {
     assert_eq!(shown(&ui, cx), [r"C:\"]);
     assert_eq!(ui.selected(cx, 0), [r"D:\"]);
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
-    // Nothing let through says so.
+    // ↓ opens the first it lets through, the keys on it in home's rows.
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 0), [r"C:\"]);
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].path.clone()), PathBuf::from(r"C:\"));
+    assert!(ui.home_focused(cx));
+    assert_eq!(ui.read(cx, |v| v.state.columns[0].focused.clone()), Some(PathBuf::from(r"C:\")));
+    // Enter opens the row the keys were on while it shows, rather than the first.
+    ui.press(cx, "escape");
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 0), [r"D:\"]);
+    ui.press(cx, "/");
+    ui.input(cx, ":");
+    assert_eq!(shown(&ui, cx).len(), 2);
+    ui.press(cx, "enter");
+    assert_eq!(ui.selected(cx, 0), [r"D:\"]);
+    assert!(ui.home_focused(cx));
+    // Nothing let through says so, and ↓ and Enter keep the keys in the field.
+    ui.press(cx, "/");
     ui.input(cx, "zz");
     assert!(shown(&ui, cx).is_empty());
+    ui.press(cx, "down");
+    ui.press(cx, "enter");
+    assert!(!ui.home_focused(cx));
+    assert_eq!(ui.selected(cx, 0), [r"D:\"]);
     // Esc clears it, then goes back to the rows.
     ui.press(cx, "escape");
     assert_eq!(shown(&ui, cx).len(), 2);

@@ -924,17 +924,17 @@ impl Colet {
                 // Accented while it has the keys, or narrows the rows from out of them.
                 .child(icon("funnel", 13., if focused || filtering { p.accent } else { p.text_muted }))
                 .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(input, cx)).child(Input::new(input)))
-                // ↓ goes into the rows it lets through; Esc clears it, then goes there too.
+                // ↓ goes into the rows it lets through, in home opening one; Esc clears it, then goes there too.
                 .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
                     cx.stop_propagation();
-                    this.leave_filter(id, window, cx);
+                    this.open_from_filter(id, window, cx);
                 }))
                 .on_action(cx.listener(move |this, _: &input::Escape, window, cx| {
                     cx.stop_propagation();
                     this.escape_filter(id, window, cx);
                 }))
-                // ← and → past the text's ends stay here, not going on to the next column; Enter
-                // only goes into the rows, opening nothing there.
+                // ← and → past the text's ends stay here, not going on to the next column; Enter does
+                // as ↓ does, in a folder opening nothing.
                 .on_action(|_: &input::MoveLeft, _, cx| cx.stop_propagation())
                 .on_action(|_: &input::MoveRight, _, cx| cx.stop_propagation())
                 .on_action(|_: &input::Enter, _, cx| cx.stop_propagation())

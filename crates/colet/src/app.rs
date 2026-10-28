@@ -1187,7 +1187,7 @@ impl Colet {
                             let text = input.read(cx).value().to_string();
                             this.filter(id, &text, cx);
                         }
-                        InputEvent::PressEnter { .. } => this.leave_filter(id, window, cx),
+                        InputEvent::PressEnter { .. } => this.open_from_filter(id, window, cx),
                         InputEvent::Focus | InputEvent::Blur => cx.notify(),
                     });
                     self.filters.insert(id, FilterField { input, applied: String::new(), _changes: subscription });
@@ -1230,6 +1230,20 @@ impl Colet {
         let Some(index) = self.state.index_of(id) else { return };
         self.state.set_active(index);
         self.focus_active(window, cx);
+    }
+
+    /// ↓ or Enter in a field: a folder's goes into its rows. Home's picks the row the keys were on, or the
+    /// first it lets through, as a click does, opening the place; with none let through, it keeps the keys.
+    pub fn open_from_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.state.index_of(id) else { return };
+        let c = &self.state.columns[index];
+        if c.kind != Kind::Home {
+            self.leave_filter(id, window, cx);
+            return;
+        }
+        let shown = c.focused.clone().filter(|path| c.entry(path).is_some());
+        let Some(path) = shown.or_else(|| c.entries.first().map(|e| e.path.clone())) else { return };
+        self.pick(index, path, window, cx);
     }
 
     /// Lists all again and empties the field; the keys go back to the rows.
