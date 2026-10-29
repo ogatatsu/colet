@@ -642,6 +642,7 @@ impl Colet {
         }
         if c.entries.is_empty() {
             let (name, text) = match kind {
+                Kind::Search if c.filter.is_some() => ("funnel", "一致する項目はありません"),
                 Kind::Search => ("search", "一致する項目はありません"),
                 Kind::Home if c.filter.is_some() => ("funnel", "一致する項目はありません"),
                 Kind::Home => ("hard-drive", "場所もお気に入りもありません"),
@@ -795,6 +796,8 @@ impl Colet {
         let header_title = title.clone();
         let count = match &c.filter {
             _ if c.error.is_some() || c.unread() => String::new(),
+            // Everything narrows the results: how many it lets through, of how many the search finds.
+            Some(f) if kind == Kind::Search => format!("{} / {}", time::count(c.total as u64), time::count(f.whole as u64)),
             Some(f) if !f.text.is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.total as u64)),
             _ => time::count(c.total as u64),
         };
@@ -901,7 +904,7 @@ impl Colet {
             .into_any_element()
     }
 
-    /// The field narrowing home or the folder column `id` to the names holding what is typed there.
+    /// The field narrowing the column `id` to the names holding what is typed there.
     fn filter_field(&self, id: ColumnId, filtering: bool, input: &Entity<InputState>, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = self.palette;
         let focused = self.has_keys(input, window, cx);

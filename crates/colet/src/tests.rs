@@ -113,10 +113,23 @@ impl Backend for Fake {
         if let Some(error) = self.failing.lock().unwrap().clone() {
             return Err(error);
         }
-        let results = self.results.lock().unwrap();
+        // Narrowed, as Everything is, to the names holding the text.
+        let narrow = search.query.rsplit_once(" nopath:nowildcards:\"").map(|(_, text)| text.trim_end_matches('"').to_lowercase());
+        let results: Vec<Entry> = self
+            .results
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| narrow.as_ref().is_none_or(|text| e.name.to_lowercase().contains(text.as_str())))
+            .cloned()
+            .collect();
         let end = (search.offset + search.count).min(results.len());
         let entries = results[search.offset.min(end)..end].to_vec();
         Ok((Page { entries, total: results.len(), offset: search.offset }, "Everything 1.5".into()))
+    }
+
+    fn count(&self, _: &str) -> Result<usize, String> {
+        Ok(self.results.lock().unwrap().len())
     }
 
     fn search_changed(&self) -> Result<bool, String> {
@@ -2624,6 +2637,49 @@ fn narrows_home_from_its_field_keeping_the_place_open(cx: &mut TestAppContext) {
     ui.press(cx, "escape");
     assert!(ui.home_focused(cx));
     assert_eq!(ui.active(cx), 0);
+}
+
+#[gpui_kit::test]
+fn narrows_the_results_by_name_through_everything_keeping_the_one_picked(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\alpha.txt"), file(r"D:\beta.txt"), file(r"D:\alphabet.txt")]));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "a");
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 1), [r"D:\alpha.txt"]);
+    let id = ui.read(cx, |v| v.state.columns[1].id);
+    // The results have their field, as a folder has; / goes there.
+    assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
+    ui.press(cx, "/");
+    assert!(ui.toasts(cx).is_empty());
+    // Everything is asked once typing pauses, for the names holding the text as it is.
+    for key in ["b", "e", "t"] {
+        ui.act(cx, |window, cx| window.input(key, cx));
+        cx.executor().advance_clock(Duration::from_millis(30));
+    }
+    settle(cx);
+    let narrowed: Vec<String> = fake.queries().into_iter().filter(|q| q.contains("nopath:")).collect();
+    assert_eq!(narrowed, ["<a> nopath:nowildcards:\"bet\""]);
+    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
+    assert_eq!(shown(&ui, cx), [r"D:\beta.txt", r"D:\alphabet.txt"]);
+    // Counted against all the search finds; the one picked, hidden, stays picked with its folder open.
+    let header = ui.read(cx, |v| (v.state.columns[1].total, v.state.columns[1].filter.as_ref().map(|f| f.whole)));
+    assert_eq!(header, (2, Some(3)));
+    assert_eq!(ui.selected(cx, 1), [r"D:\alpha.txt"]);
+    assert!(ui.read(cx, |v| v.state.columns.len()) > 2);
+    // ↓ goes into the rows; Esc there lists all again and empties the field.
+    ui.press(cx, "down");
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.active(cx), 1);
+    ui.press(cx, "escape");
+    assert_eq!(shown(&ui, cx).len(), 3);
+    assert_eq!(ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string()), "");
+    // Another search starts with nothing narrowed.
+    ui.press(cx, "/");
+    ui.input(cx, "x");
+    ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.search_for("b", None, window, cx)));
+    settle(cx);
+    assert!(ui.read(cx, |v| v.state.columns[1].filter.is_none()));
+    assert_eq!(shown(&ui, cx).len(), 3);
 }
 
 #[gpui_kit::test]

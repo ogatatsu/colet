@@ -34,6 +34,8 @@ pub trait Backend: Send + Sync + 'static {
     fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String>;
     /// The results and the name of what they came from.
     fn search(&self, search: Search) -> Result<(Page, String), String>;
+    /// How many results `query` finds, leaving the last search and its watch be.
+    fn count(&self, query: &str) -> Result<usize, String>;
     /// Whether the last search's results changed; so until it is searched afresh.
     fn search_changed(&self) -> Result<bool, String>;
     /// Lets go of Everything, so the next search connects afresh.
@@ -96,6 +98,12 @@ impl Backend for Live {
         let page =
             session.search(&search.query, search.sort, search.offset, search.count, search.refresh)?;
         Ok((page, session.connection.clone()))
+    }
+
+    fn count(&self, query: &str) -> Result<usize, String> {
+        // Held so it never connects as a search does.
+        let _session = self.session.lock().map_err(|e| e.to_string())?;
+        everything::count(query)
     }
 
     fn search_changed(&self) -> Result<bool, String> {
@@ -188,6 +196,39 @@ pub type Shared = Arc<dyn Backend>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::narrowed_query;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    #[ignore = "needs a running Everything 1.5 that indexes the temporary folder"]
+    fn narrows_the_results_to_names_holding_the_text_as_it_is_and_counts_them_all() {
+        let fixture = tempfile::Builder::new().prefix("colet-narrow-").tempdir().unwrap();
+        std::fs::write(fixture.path().join("alpha beta.txt"), b"x").unwrap();
+        std::fs::write(fixture.path().join("alphabet.txt"), b"x").unwrap();
+        std::fs::create_dir(fixture.path().join("Beta")).unwrap();
+        std::fs::write(fixture.path().join(r"Beta\x.txt"), b"x").unwrap();
+        let live = Live::default();
+        let base = format!("\"{}\\\"", fixture.path().display());
+        let names = |query: String| {
+            let search = Search { query, sort: Order::default(), offset: 0, count: 100, refresh: true, request: 0 };
+            let mut names: Vec<String> = live.search(search).unwrap().0.entries.into_iter().map(|e| e.name).collect();
+            names.sort();
+            names
+        };
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while live.count(&base).unwrap() < 4 {
+            assert!(Instant::now() < deadline, "Everything did not index the fixture");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_eq!(live.count(&base).unwrap(), 4);
+        // The words as one, in the name only: not the file in a folder that holds them.
+        assert_eq!(names(narrowed_query(&base, "a b")), ["alpha beta.txt"]);
+        assert_eq!(names(narrowed_query(&base, "BETA")), ["Beta", "alpha beta.txt"]);
+        // No wildcards, and a quote, which no name holds, matches nothing.
+        assert!(names(narrowed_query(&base, "a*t")).is_empty());
+        assert!(names(narrowed_query(&base, "a\"b")).is_empty());
+        assert_eq!(live.count(&narrowed_query(&base, "alpha")).unwrap(), 2);
+    }
 
     #[test]
     fn tells_a_folder_from_a_file_and_a_junction_to_one_gone_from_nothing() {

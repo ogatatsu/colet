@@ -51,6 +51,13 @@ pub fn everything_query(query: &str, filter: Option<&str>) -> String {
     }
 }
 
+/// The search `query` narrowed to the names holding `text` as it is: not the folders they are in, and with
+/// no wildcards. A quote cannot stand in a name, nor can an `|`: put for it, the text matches nothing, as it
+/// should, rather than ending the quotes early.
+pub fn narrowed_query(query: &str, text: &str) -> String {
+    format!("<{}> nopath:nowildcards:\"{}\"", closed(query), text.replace('"', "|"))
+}
+
 /// `text` with a quote left open closed, as Everything closes it at the end of the text: inside `< >` it
 /// would run on over the `>` and take it for a letter, finding nothing while `"my doc` is being typed.
 fn closed(text: &str) -> std::borrow::Cow<'_, str> {
@@ -570,6 +577,13 @@ mod tests {
         assert_eq!(everything_query("", Some("path:\"D:\\a")), "<path:\"D:\\a\">");
         // Without a filter Everything is asked what was typed, and closes the quote itself.
         assert_eq!(everything_query("\"my doc", None), "\"my doc");
+    }
+
+    #[test]
+    fn narrows_the_search_to_names_holding_the_text_as_it_is() {
+        assert_eq!(narrowed_query("cat | dog", "a b"), "<cat | dog> nopath:nowildcards:\"a b\"");
+        assert_eq!(narrowed_query("\"my doc", "*"), "<\"my doc\"> nopath:nowildcards:\"*\"");
+        assert_eq!(narrowed_query("cat", "a\"b"), "<cat> nopath:nowildcards:\"a|b\"");
     }
 
     #[test]

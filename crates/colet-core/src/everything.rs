@@ -99,6 +99,38 @@ pub fn roots() -> Result<Vec<PathBuf>, String> {
     }
 }
 
+/// How many results `query` finds, none of them read. Asked on a client of its own, as [`roots`] are.
+pub fn count(query: &str) -> Result<usize, String> {
+    if query.contains('\0') {
+        return Err("入力に使用できない文字が含まれています".into());
+    }
+    unsafe {
+        let client = open(None);
+        if client.is_null() {
+            return Err("Everything 1.5に接続できません".into());
+        }
+        let state = Everything3_CreateSearchState();
+        let count = if state.is_null() {
+            Err("検索状態を作成できません".into())
+        } else {
+            Everything3_SetSearchTextW(state, Wide::new(query).get().0);
+            Everything3_SetSearchViewportCount(state, 0);
+            let result = Everything3_Search(client, state);
+            let count = if result.is_null() {
+                Err(format!("Everything検索に失敗しました (0x{:08X})", Everything3_GetLastError()))
+            } else {
+                let total = Everything3_GetResultListCount(result);
+                Everything3_DestroyResultList(result);
+                Ok(total)
+            };
+            Everything3_DestroySearchState(state);
+            count
+        };
+        Everything3_DestroyClient(client);
+        count
+    }
+}
+
 unsafe fn indexed_roots(client: Handle) -> Result<Vec<PathBuf>, String> {
     unsafe {
         if Everything3_IsDBLoaded(client) == 0 {

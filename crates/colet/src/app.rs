@@ -35,7 +35,7 @@ use crate::{
     menus::Popup,
     ops::{HistoryEntry, Running},
     places::{Dialog, HomeDrag, HomeRows, Landing, home_entries, home_groups, places},
-    settings::{LoadError, Saver, Settings, everything_query},
+    settings::{LoadError, Saver, Settings, everything_query, narrowed_query},
     state::{ColumnId, Kind, State},
     theme::Palette,
 };
@@ -209,10 +209,11 @@ pub struct Slide {
     pub keep: Option<usize>,
 }
 
-/// What a listing came back with: the entries, how many in all, and for a search what answered it.
-type Listing = Result<(Vec<Entry>, usize, Option<String>), String>;
+/// What a listing came back with: the entries, how many in all, and for a search what answered it, and
+/// how many it finds without the filter that narrows it.
+type Listing = Result<(Vec<Entry>, usize, Option<String>, Option<usize>), String>;
 
-/// The field narrowing a folder column, and what it last narrowed it to: the column lifting the filter on
+/// The field narrowing a column, and what it last narrowed it to: the column lifting the filter on
 /// its own, for what was made or pasted there, tells from that, not from text typed and yet to be told.
 pub struct FilterField {
     pub input: Entity<InputState>,
@@ -241,7 +242,7 @@ pub struct Colet {
     pub search: Entity<InputState>,
     /// The search field has the keys: no column is marked as worked in.
     pub search_focused: bool,
-    /// The field of each folder column, narrowing it to some names.
+    /// The field of each column, narrowing it to some names.
     pub filters: HashMap<ColumnId, FilterField>,
     pub home_focus: FocusHandle,
     pub columns_focus: FocusHandle,
@@ -726,12 +727,17 @@ impl Colet {
                 cx.background_executor().spawn(async move {
                     let entries = home_entries(&settings, places(backend.roots(), backend.indexed_roots()));
                     let total = entries.len();
-                    Ok((entries, total, None))
+                    Ok((entries, total, None, None))
                 })
             }
             Kind::Search => {
                 let filter = self.state.search_filter.as_deref().and_then(|name| self.settings.filter_query(name));
-                let query = everything_query(&self.state.query, filter);
+                let whole = everything_query(&self.state.query, filter);
+                // Narrowed, the search is counted without it too, along with the first page.
+                let (query, whole) = match &c.filter {
+                    Some(filter) => (narrowed_query(&whole, &filter.text), (offset == 0).then_some(whole)),
+                    None => (whole, None),
+                };
                 // A refresh reloads all it has loaded, so later selections stay.
                 let count = if offset > 0 { PAGE } else { PAGE.max(c.entries.len()) };
                 if !matches!(self.engine, Engine::Connected(_)) {
@@ -740,7 +746,8 @@ impl Colet {
                 let search = Search { query, sort, offset, count, refresh: offset == 0, request };
                 cx.background_executor().spawn(async move {
                     let (page, connection) = backend.search(search)?;
-                    Ok((page.entries, page.total, Some(connection)))
+                    let whole = whole.and_then(|query| backend.count(&query).ok());
+                    Ok((page.entries, page.total, Some(connection), whole))
                 })
             }
             Kind::Folder => {
@@ -752,7 +759,7 @@ impl Colet {
                 cx.background_executor().spawn(async move {
                     let entries = backend.list(&path, sort, &cancelled)?;
                     let total = entries.len();
-                    Ok((entries, total, None))
+                    Ok((entries, total, None, None))
                 })
             }
         };
@@ -770,7 +777,10 @@ impl Colet {
             self.pending.remove(&id);
         }
         match result {
-            Ok((entries, total, connection)) => {
+            Ok((entries, total, connection, whole)) => {
+                if let Some(whole) = whole {
+                    self.state.counted(id, request, whole);
+                }
                 self.state.page(id, request, entries, total, offset, &self.departed);
                 // One left behind still ends the wait for the connection.
                 if let Some(name) = connection.filter(|_| current || matches!(self.engine, Engine::Connecting)) {
@@ -1165,12 +1175,12 @@ impl Colet {
 
     // ---- Filters ----
 
-    /// Home and each folder column have their field, holding what they are narrowed to: a field is made for
-    /// a column new here, goes with one gone, and empties where a new folder or a paste lifted the filter.
+    /// Each column has its field, holding what it is narrowed to: a field is made for a column new here,
+    /// goes with one gone, and empties where a new folder or a paste lifted the filter.
     pub fn filter_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let kept: HashSet<ColumnId> = self.state.columns.iter().filter(|c| c.kind != Kind::Search).map(|c| c.id).collect();
+        let kept: HashSet<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
         self.filters.retain(|id, _| kept.contains(id));
-        for c in self.state.columns.iter().filter(|c| c.kind != Kind::Search) {
+        for c in &self.state.columns {
             let id = c.id;
             match self.filters.get_mut(&id) {
                 Some(field) => {
@@ -1196,14 +1206,9 @@ impl Colet {
         }
     }
 
-    /// The field of home or the folder column worked in takes the keys, with its text picked to type over.
+    /// The field of the column worked in takes the keys, with its text picked to type over.
     pub fn open_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let c = &self.state.columns[self.state.active];
-        if c.kind == Kind::Search {
-            self.notify("フィルタはホームとフォルダーのカラムでだけ使えます。", Tone::Info, cx);
-            return;
-        }
-        let id = c.id;
+        let id = self.state.columns[self.state.active].id;
         self.filter_fields(window, cx);
         let Some(field) = self.filters.get(&id) else { return };
         field.input.clone().update(cx, |input, cx| {
@@ -1219,6 +1224,22 @@ impl Colet {
         self.state.set_filter(index, Some(text));
         if let Some(field) = self.filters.get_mut(&id) {
             field.applied = text.into();
+        }
+        // Everything narrows the results, asked as the search field asks it: once typing pauses, for the
+        // text still there.
+        if self.state.columns[index].kind == Kind::Search {
+            let text = text.to_owned();
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(Duration::from_millis(150)).await;
+                this.update(cx, |this, cx| {
+                    let Some(index) = this.state.index_of(id) else { return };
+                    if this.state.columns[index].filter.as_ref().map_or("", |f| f.text.as_str()) == text {
+                        this.load(id, 0, true, cx);
+                    }
+                })
+                .ok();
+            })
+            .detach();
         }
         // The rows move: the focused one is brought in sight again.
         self.scrolled_to.remove(&id);
@@ -1250,6 +1271,9 @@ impl Colet {
     pub fn close_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
         self.state.set_filter(index, None);
+        if self.state.columns[index].kind == Kind::Search {
+            self.load(id, 0, true, cx);
+        }
         if let Some(field) = self.filters.get_mut(&id) {
             field.applied.clear();
             field.input.clone().update(cx, |input, cx| input.set_value("", window, cx));

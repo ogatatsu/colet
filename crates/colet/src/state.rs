@@ -47,15 +47,18 @@ pub struct Column {
     /// What to pick once listed, by path key: the items just pasted here, which the listing that shows
     /// them may come after the paste is done.
     pub pick: Option<Vec<OsString>>,
-    /// Home or a folder column narrowed to some names: `entries` then holds only those.
+    /// A column narrowed to some names: `entries` then holds only those.
     pub filter: Option<Filter>,
 }
 
-/// The names home or a folder column is narrowed to, those holding `text`, and all it lists, kept aside.
+/// The names a column is narrowed to, those holding `text`, and all it lists, kept aside.
 #[derive(Clone, Debug)]
 pub struct Filter {
     pub text: String,
     all: Vec<Entry>,
+    /// The search results, which Everything narrows, keep nothing aside: how many the search finds
+    /// without the filter stands for them.
+    pub whole: usize,
 }
 
 /// Where `needle` stands in `name`, case aside, each time it does: byte ranges of `name`.
@@ -785,18 +788,28 @@ impl State {
         }
         // It shows, to be seen picked, even where the filter would hide it: the filter goes then.
         if let Some(text) = text.filter(|text| !found(&shown(folder_name(path)), text).is_empty()) {
-            c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries) });
+            c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries), whole: 0 });
             self.narrow(index);
         }
         self.select(index, vec![path.to_owned()]);
     }
 
-    /// Narrows home or the folder column at `index` to the names holding `text`, or with none, or an empty
-    /// one, lists them all again. What a folder hides leaves the selection, and the folder open beside it
-    /// closes; home keeps its pick, and what it opened, while looking for another place.
+    /// Narrows the column at `index` to the names holding `text`, or with none, or an empty one, lists them
+    /// all again. What a folder hides leaves the selection, and the folder open beside it closes; home
+    /// keeps its pick, and what it opened, while looking for another place. The search results are
+    /// narrowed by Everything, asked again: they show as they are until it answers.
     pub fn set_filter(&mut self, index: usize, text: Option<&str>) {
-        let Some(c) = self.columns.get_mut(index).filter(|c| c.kind != Kind::Search) else { return };
-        match text.filter(|text| !text.is_empty()) {
+        let Some(c) = self.columns.get_mut(index) else { return };
+        let text = text.filter(|text| !text.is_empty());
+        if c.kind == Kind::Search {
+            c.filter = match (text, c.filter.take()) {
+                (None, _) => None,
+                (Some(text), Some(filter)) => Some(Filter { text: text.into(), ..filter }),
+                (Some(text), None) => Some(Filter { text: text.into(), all: Vec::new(), whole: c.total }),
+            };
+            return;
+        }
+        match text {
             None => {
                 if let Some(filter) = c.filter.take() {
                     c.entries = filter.all;
@@ -807,7 +820,7 @@ impl State {
                     Some(filter) => filter.all,
                     None => std::mem::take(&mut c.entries),
                 };
-                c.filter = Some(Filter { text: text.into(), all });
+                c.filter = Some(Filter { text: text.into(), all, whole: 0 });
                 self.narrow(index);
             }
         }
@@ -816,7 +829,7 @@ impl State {
     /// Lists what the column's filter lets through, letting go of what it hides.
     fn narrow(&mut self, index: usize) {
         let c = &mut self.columns[index];
-        let Some(filter) = &c.filter else { return };
+        let Some(filter) = c.filter.as_ref().filter(|_| c.kind != Kind::Search) else { return };
         c.entries = filter.all.iter().filter_map(|e| narrowed(e, &filter.text)).collect();
         let shown: HashSet<&Path> = c.entries.iter().map(|e| e.path.as_path()).collect();
         if c.focused.as_ref().is_some_and(|f| !shown.contains(f.as_path())) {
@@ -902,6 +915,20 @@ impl State {
         if c.request != request {
             return;
         }
+        // Everything narrowed the results already. A result picked on its own that the filter hides stays
+        // picked, as home's place does, and what it opened stays open.
+        if c.kind == Kind::Search {
+            let hidden = match (&c.filter, c.selected.as_slice()) {
+                (Some(filter), [path]) if found(&shown(folder_name(path)), &filter.text).is_empty() => Some(path.clone()),
+                _ => None,
+            };
+            self.list(index, entries, total, offset, departed);
+            let c = &mut self.columns[index];
+            if let Some(path) = hidden.filter(|_| c.selected.is_empty()) {
+                c.selected = vec![path];
+            }
+            return;
+        }
         // The listing stands for all the column lists; the filter narrows it again after.
         let text = c.filter.take().map(|f| {
             c.entries = f.all;
@@ -916,8 +943,20 @@ impl State {
         if picked && c.selected.iter().any(|p| c.entry(p).is_some_and(|e| narrowed(e, &text).is_none())) {
             return;
         }
-        c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries) });
+        c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries), whole: 0 });
         self.narrow(index);
+    }
+
+    /// How many the search finds without the filter Everything narrows it by, asked along with `request`.
+    pub fn counted(&mut self, id: ColumnId, request: u64, whole: usize) {
+        let Some(index) = self.index_of(id) else { return };
+        let c = &mut self.columns[index];
+        if c.request != request {
+            return;
+        }
+        if let Some(filter) = &mut c.filter {
+            filter.whole = whole;
+        }
     }
 
     /// What [`page`](Self::page) does with a listing that is the one the column waits for.
@@ -1589,6 +1628,45 @@ mod tests {
         // Emptied, it narrows no more.
         s.set_filter(1, Some(""));
         assert_eq!(names(&s, 1).len(), 3);
+        assert!(s.columns[1].filter.is_none());
+    }
+
+    #[test]
+    fn narrows_the_results_as_everything_answers_keeping_a_result_picked_on_its_own() {
+        let results = vec![folder(r"D:\alpha"), file(r"D:\beta.txt"), file(r"E:\alphabet.txt")];
+        let mut s = State::new();
+        s.set_query("a");
+        let id = s.columns[1].id;
+        s.load(id, 1, false);
+        s.page(id, 1, results.clone(), 3, 0, &HashSet::new());
+        s.select(1, one(r"D:\alpha"));
+        let open = s.columns.len();
+        assert!(open > 2);
+        // The results show as they are until Everything answers, counted from all the search finds.
+        s.set_filter(1, Some("bet"));
+        assert_eq!(names(&s, 1).len(), 3);
+        assert_eq!(s.columns[1].filter.as_ref().map(|f| f.whole), Some(3));
+        s.load(id, 2, true);
+        s.counted(id, 2, 4);
+        s.page(id, 2, results[1..].to_vec(), 2, 0, &HashSet::new());
+        assert_eq!(names(&s, 1), [r"D:\beta.txt", r"E:\alphabet.txt"]);
+        assert_eq!((s.columns[1].total, s.columns[1].filter.as_ref().map(|f| f.whole)), (2, Some(4)));
+        // The one picked, hidden, stays picked, the folder it opened open.
+        assert_eq!(s.columns[1].selected, one(r"D:\alpha"));
+        assert_eq!(s.columns.len(), open);
+        // Of several picked, those hidden let go; a rename, which narrows the others again, leaves them be.
+        s.select(1, vec![PathBuf::from(r"D:\beta.txt"), PathBuf::from(r"E:\alphabet.txt")]);
+        s.set_filter(1, Some("beta."));
+        s.load(id, 3, true);
+        s.page(id, 3, results[1..2].to_vec(), 1, 0, &HashSet::new());
+        assert_eq!(s.columns[1].selected, one(r"D:\beta.txt"));
+        s.renamed(Path::new(r"D:\gamma"), Path::new(r"D:\delta"));
+        assert_eq!(names(&s, 1), [r"D:\beta.txt"]);
+        // Emptied, it narrows no more; another search starts with none.
+        s.set_filter(1, Some(""));
+        assert!(s.columns[1].filter.is_none());
+        s.set_filter(1, Some("x"));
+        s.set_query("b");
         assert!(s.columns[1].filter.is_none());
     }
 
