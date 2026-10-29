@@ -1141,6 +1141,8 @@ impl Colet {
                 None => input.replace_text_in_range(None, text, window, cx),
             }
         });
+        // The IME's panel goes on under the field's caret, now the field's to tell.
+        window.invalidate_character_coordinates();
         self.changed(cx);
     }
 
@@ -1339,8 +1341,15 @@ impl EntityInputHandler for Colet {
         self.type_into_filter(text, Some(caret), window, cx);
     }
 
-    fn bounds_for_range(&mut self, _: Range<usize>, _: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<Bounds<Pixels>> {
-        None
+    // Where the IME shows what it composes: at the end of the field it goes on in, the column's own, not
+    // the one it was last shown at.
+    fn bounds_for_range(&mut self, _: Range<usize>, _: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> Option<Bounds<Pixels>> {
+        let id = self.state.columns[self.state.active].id;
+        let input = self.filters.get(&id)?.input.clone();
+        input.update(cx, |input, cx| {
+            let end = input.value().encode_utf16().count();
+            input.bounds_for_range(end..end, input.text_bounds()?, window, cx)
+        })
     }
 
     fn character_index_for_point(&mut self, _: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
