@@ -1253,18 +1253,20 @@ impl Colet {
         self.focus_active(window, cx);
     }
 
-    /// ↓ or Enter in a field: a folder's goes into its rows. Home's picks the row the keys were on, or the
-    /// first it lets through, as a click does, opening the place; with none let through, it keeps the keys.
+    /// ↓ or Enter in a field picks the row the keys were on, or the first it lets through, as a click does,
+    /// and the keys go there; a row picked already, among others too, is not picked again. With none let
+    /// through, the field keeps the keys.
     pub fn open_from_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
         let c = &self.state.columns[index];
-        if c.kind != Kind::Home {
-            self.leave_filter(id, window, cx);
-            return;
-        }
         let shown = c.focused.clone().filter(|path| c.entry(path).is_some());
         let Some(path) = shown.or_else(|| c.entries.first().map(|e| e.path.clone())) else { return };
-        self.pick(index, path, window, cx);
+        if c.selected.contains(&path) {
+            self.state.columns[index].focused = Some(path);
+            self.leave_filter(id, window, cx);
+        } else {
+            self.pick(index, path, window, cx);
+        }
     }
 
     /// Lists all again and empties the field; the keys go back to the rows.

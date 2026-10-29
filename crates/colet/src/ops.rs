@@ -1,6 +1,7 @@
 //! What the user does to files: copy, cut and paste through the clipboard, rename, make folders, send to
 //! the Recycle Bin, open; one operation at a time, each kept in the history with how its items ended.
 use std::{
+    borrow::Cow,
     collections::HashSet,
     ffi::OsString,
     path::{Path, PathBuf},
@@ -221,17 +222,17 @@ impl Colet {
         self.state.columns.get(index)
     }
 
-    /// What the file actions work on: the selection, or while the menu is open, what it was opened on.
+    /// What the file actions work on: the selection shown, or while the menu is open, what it was opened on.
     pub fn picked(&self) -> Vec<PathBuf> {
-        self.picked_paths().to_vec()
+        self.picked_paths().into_owned()
     }
 
-    /// [`picked`](Self::picked), lent rather than copied, for what is asked each frame.
-    fn picked_paths(&self) -> &[PathBuf] {
-        let Some(column) = self.action_column() else { return &[] };
+    /// [`picked`](Self::picked), lent rather than copied where it can be, for what is asked each frame.
+    fn picked_paths(&self) -> Cow<'_, [PathBuf]> {
+        let Some(column) = self.action_column() else { return Cow::Borrowed(&[]) };
         match self.menu() {
-            Some(Menu { paths: Some(paths), .. }) => paths,
-            _ => &column.selected,
+            Some(Menu { paths: Some(paths), .. }) => Cow::Borrowed(paths),
+            _ => column.shown_selected(),
         }
     }
 
@@ -650,7 +651,7 @@ impl Colet {
         }
         let paths = match &menu.paths {
             Some(paths) => paths.clone(),
-            None => self.state.columns[index].selected.clone(),
+            None => self.state.columns[index].shown_selected().into_owned(),
         };
         let background = if paths.is_empty() { self.state.columns[index].path.clone() } else { PathBuf::new() };
         let (backend, owner, at) = (self.backend.clone(), self.owner, menu.screen);

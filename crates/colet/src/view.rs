@@ -347,7 +347,7 @@ impl Colet {
             .on_action(cx.listener(|this, _: &OpenItem, window, cx| {
                 let index = this.state.active;
                 // Several picked open together, as the menu's 開く does.
-                if this.state.columns[index].selected.len() > 1 {
+                if this.state.columns[index].shown_selected().len() > 1 {
                     this.open_picked(window, cx);
                 } else if let Some(path) = this.state.columns[index].focused.clone() {
                     this.open(index, &path, window, cx);
@@ -927,7 +927,7 @@ impl Colet {
                 // Accented while it has the keys, or narrows the rows from out of them.
                 .child(icon("funnel", 13., if focused || filtering { p.accent } else { p.text_muted }))
                 .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(input, cx)).child(Input::new(input)))
-                // ↓ goes into the rows it lets through, in home opening one; Esc clears it, then goes there too.
+                // ↓ picks a row it lets through, as a click does, going there; Esc clears it, then goes there too.
                 .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
                     cx.stop_propagation();
                     this.open_from_filter(id, window, cx);
@@ -937,7 +937,7 @@ impl Colet {
                     this.escape_filter(id, window, cx);
                 }))
                 // ← and → past the text's ends stay here, not going on to the next column; Enter does
-                // as ↓ does, in a folder opening nothing.
+                // as ↓ does.
                 .on_action(|_: &input::MoveLeft, _, cx| cx.stop_propagation())
                 .on_action(|_: &input::MoveRight, _, cx| cx.stop_propagation())
                 .on_action(|_: &input::Enter, _, cx| cx.stop_propagation())
@@ -1576,9 +1576,11 @@ impl Colet {
             Kind::Search => "検索結果".into(),
             Kind::Home => "ホーム".into(),
         };
-        let picked: Vec<&Entry> = active.selected.iter().filter_map(|path| active.entry(path)).collect();
+        // What a filter hides is not counted, nor acted on.
+        let shown_selected = active.shown_selected();
+        let picked: Vec<&Entry> = shown_selected.iter().filter_map(|path| active.entry(path)).collect();
         let detail = match picked.as_slice() {
-            _ if active.selected.len() > 1 => format!("{} 項目を選択", active.selected.len()),
+            _ if shown_selected.len() > 1 => format!("{} 項目を選択", shown_selected.len()),
             [entry] => {
                 let what = if entry.directory { "フォルダー".into() } else { time::size(entry.size) };
                 match entry.modified.and_then(time::date_time) {

@@ -1493,6 +1493,25 @@ fn in_work(cx: &mut TestAppContext) -> (Arc<Fake>, Ui) {
 }
 
 #[gpui_kit::test]
+fn keeps_what_a_filter_hides_picked_acting_only_on_what_shows(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "ctrl-a");
+    ui.press(cx, "/");
+    ui.input(cx, "b");
+    assert_eq!(ui.selected(cx, 2).len(), 3);
+    assert_eq!(ui.read(cx, |v| v.state.columns[2].shown_selected().len()), 1);
+    // ↓ lands on the row it lets through, picked already: the others stay picked.
+    ui.press(cx, "down");
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.selected(cx, 2).len(), 3);
+    assert_eq!(ui.read(cx, |v| v.state.columns[2].focused.clone()), Some(PathBuf::from(r"D:\work\b.txt")));
+    // What is acted on is only what shows.
+    ui.press(cx, "delete");
+    let asked = fake.operations.lock().unwrap()[0].clone();
+    assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![PathBuf::from(r"D:\work\b.txt")]));
+}
+
+#[gpui_kit::test]
 fn picks_several_rows_with_ctrl_shift_and_ctrl_a(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "shift-down");
@@ -2532,13 +2551,14 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     assert!(ui.act(cx, |window, _| window.try_find(("filter", alpha)).is_some()));
     let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string());
     ui.press(cx, "/");
-    // What is typed narrows the rows rather than jumping through them; the folder it hides closes.
+    // What is typed narrows the rows rather than jumping through them; the folder it hides stays picked,
+    // and open, as home's place does.
     ui.input(cx, "TA");
     let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     assert_eq!(shown(&ui, cx), [r"D:\beta.txt"]);
-    assert!(ui.selected(cx, 1).is_empty());
-    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
-    // ↓ goes into the rows, on the first.
+    assert_eq!(ui.selected(cx, 1), [r"D:\alpha"]);
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
+    // ↓ picks the first it lets through, as a click does, the keys on it.
     ui.press(cx, "down");
     assert!(ui.columns_focused(cx));
     assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
@@ -2559,6 +2579,10 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     ui.press(cx, "/");
     ui.input(cx, "zz");
     assert!(shown(&ui, cx).is_empty());
+    // Nothing let through, ↓ and Enter keep the keys in the field.
+    ui.press(cx, "down");
+    ui.press(cx, "enter");
+    assert!(!ui.columns_focused(cx));
     ui.press(cx, "escape");
     assert_eq!(shown(&ui, cx).len(), 3);
     assert!(!ui.columns_focused(cx));

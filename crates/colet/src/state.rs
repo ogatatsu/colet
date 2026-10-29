@@ -132,6 +132,16 @@ impl Column {
     pub fn entry(&self, path: &Path) -> Option<&Entry> {
         self.entries.iter().find(|e| e.path == path)
     }
+
+    /// The picks it shows, which are what is acted on: those a filter hides stay picked only to keep what
+    /// they opened open.
+    pub fn shown_selected(&self) -> Cow<'_, [PathBuf]> {
+        if self.filter.is_none() {
+            return Cow::Borrowed(&self.selected);
+        }
+        let listed: HashSet<&Path> = self.entries.iter().map(|e| e.path.as_path()).collect();
+        self.selected.iter().filter(|p| listed.contains(p.as_path())).cloned().collect()
+    }
 }
 
 /// A search result or favorite's own column, the anchor, and whether the folders above it are out.
@@ -795,9 +805,8 @@ impl State {
     }
 
     /// Narrows the column at `index` to the names holding `text`, or with none, or an empty one, lists them
-    /// all again. What a folder hides leaves the selection, and the folder open beside it closes; home
-    /// keeps its pick, and what it opened, while looking for another place. The search results are
-    /// narrowed by Everything, asked again: they show as they are until it answers.
+    /// all again. What it hides stays picked, and what that opened open, while another is looked for. The
+    /// search results are narrowed by Everything, asked again: they show as they are until it answers.
     pub fn set_filter(&mut self, index: usize, text: Option<&str>) {
         let Some(c) = self.columns.get_mut(index) else { return };
         let text = text.filter(|text| !text.is_empty());
@@ -826,7 +835,7 @@ impl State {
         }
     }
 
-    /// Lists what the column's filter lets through, letting go of what it hides.
+    /// Lists what the column's filter lets through; the keys let go of a row it hides.
     fn narrow(&mut self, index: usize) {
         let c = &mut self.columns[index];
         let Some(filter) = c.filter.as_ref().filter(|_| c.kind != Kind::Search) else { return };
@@ -834,13 +843,6 @@ impl State {
         let shown: HashSet<&Path> = c.entries.iter().map(|e| e.path.as_path()).collect();
         if c.focused.as_ref().is_some_and(|f| !shown.contains(f.as_path())) {
             c.focused = None;
-        }
-        if c.kind == Kind::Home {
-            return;
-        }
-        let kept: Vec<PathBuf> = c.selected.iter().filter(|p| shown.contains(p.as_path())).cloned().collect();
-        if kept.len() != c.selected.len() {
-            self.select(index, kept);
         }
     }
 
@@ -915,18 +917,19 @@ impl State {
         if c.request != request {
             return;
         }
-        // Everything narrowed the results already. A result picked on its own that the filter hides stays
-        // picked, as home's place does, and what it opened stays open.
+        // Everything narrowed the results already, leaving out what the filter hides; that stays picked, as
+        // in the other columns, told by its name.
         if c.kind == Kind::Search {
-            let hidden = match (&c.filter, c.selected.as_slice()) {
-                (Some(filter), [path]) if found(&shown(folder_name(path)), &filter.text).is_empty() => Some(path.clone()),
-                _ => None,
+            let hidden: Vec<PathBuf> = match &c.filter {
+                Some(filter) => {
+                    c.selected.iter().filter(|p| found(&shown(folder_name(p)), &filter.text).is_empty()).cloned().collect()
+                }
+                None => Vec::new(),
             };
             self.list(index, entries, total, offset, departed);
             let c = &mut self.columns[index];
-            if let Some(path) = hidden.filter(|_| c.selected.is_empty()) {
-                c.selected = vec![path];
-            }
+            let kept: HashSet<PathBuf> = c.selected.iter().cloned().collect();
+            c.selected.extend(hidden.into_iter().filter(|p| !kept.contains(p)));
             return;
         }
         // The listing stands for all the column lists; the filter narrows it again after.
@@ -1568,20 +1571,23 @@ mod tests {
     }
 
     #[test]
-    fn narrows_a_folder_to_the_names_holding_the_text_dropping_what_it_hides() {
+    fn narrows_a_folder_to_the_names_holding_the_text_keeping_what_it_hides_picked() {
         let mut s = drive(vec![folder(r"D:\alpha"), file(r"D:\beta.txt"), folder(r"D:\gamma")]);
         s.select(1, one(r"D:\alpha"));
         assert_eq!(s.columns.len(), 3);
         s.set_filter(1, Some("TA"));
         assert_eq!(names(&s, 1), [r"D:\beta.txt"]);
         assert_eq!(s.columns[1].entries[0].marks.name, [5..7]);
-        // The folder it had open beside it is hidden: it lets go of it, and its column closes.
-        assert!(s.columns[1].selected.is_empty());
-        assert_eq!(s.columns.len(), 2);
-        // What it still shows stays picked.
-        s.select(1, one(r"D:\beta.txt"));
+        // The folder it had open beside it is hidden: it stays picked, and its column open, but is not
+        // what is acted on.
+        assert_eq!(s.columns[1].selected, one(r"D:\alpha"));
+        assert_eq!(s.columns.len(), 3);
+        assert!(s.columns[1].shown_selected().is_empty());
+        // Of several picked, what shows is acted on.
+        s.select(1, vec![PathBuf::from(r"D:\alpha"), PathBuf::from(r"D:\beta.txt")]);
         s.set_filter(1, Some("t"));
-        assert_eq!(s.columns[1].selected, one(r"D:\beta.txt"));
+        assert_eq!(s.columns[1].selected.len(), 2);
+        assert_eq!(*s.columns[1].shown_selected(), one(r"D:\beta.txt"));
         // Ctrl+A picks only what shows.
         s.set_filter(1, Some("a"));
         s.select_all(1);
@@ -1632,7 +1638,7 @@ mod tests {
     }
 
     #[test]
-    fn narrows_the_results_as_everything_answers_keeping_a_result_picked_on_its_own() {
+    fn narrows_the_results_as_everything_answers_keeping_what_it_hides_picked() {
         let results = vec![folder(r"D:\alpha"), file(r"D:\beta.txt"), file(r"E:\alphabet.txt")];
         let mut s = State::new();
         s.set_query("a");
@@ -1654,12 +1660,14 @@ mod tests {
         // The one picked, hidden, stays picked, the folder it opened open.
         assert_eq!(s.columns[1].selected, one(r"D:\alpha"));
         assert_eq!(s.columns.len(), open);
-        // Of several picked, those hidden let go; a rename, which narrows the others again, leaves them be.
+        // Of several picked, those hidden stay picked too, but only what shows is acted on; a rename, which
+        // narrows the others again, leaves the results be.
         s.select(1, vec![PathBuf::from(r"D:\beta.txt"), PathBuf::from(r"E:\alphabet.txt")]);
         s.set_filter(1, Some("beta."));
         s.load(id, 3, true);
         s.page(id, 3, results[1..2].to_vec(), 1, 0, &HashSet::new());
-        assert_eq!(s.columns[1].selected, one(r"D:\beta.txt"));
+        assert_eq!(s.columns[1].selected, [PathBuf::from(r"D:\beta.txt"), PathBuf::from(r"E:\alphabet.txt")]);
+        assert_eq!(*s.columns[1].shown_selected(), one(r"D:\beta.txt"));
         s.renamed(Path::new(r"D:\gamma"), Path::new(r"D:\delta"));
         assert_eq!(names(&s, 1), [r"D:\beta.txt"]);
         // Emptied, it narrows no more; another search starts with none.
