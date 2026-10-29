@@ -651,9 +651,11 @@ impl Colet {
                 }))
                 .on_drop(cx.listener(|this, drag: &HomeDrag, _, cx| this.drop_home(drag, cx)))
                 .test_support();
-            for (title, items) in groups {
+            for (k, (title, items)) in groups.into_iter().enumerate() {
                 rows = rows.child(
                     div()
+                        // Set off from the kind above, so the kinds read apart.
+                        .when(k > 0, |d| d.mt(px(8.)))
                         .h(px(28.))
                         .px_3()
                         .pb(px(6.))
