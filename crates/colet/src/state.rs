@@ -36,6 +36,9 @@ pub struct Column {
     pub selected: Vec<PathBuf>,
     /// The row the keys are on.
     pub focused: Option<PathBuf>,
+    /// The row the keys were on until a filter hid it: they go back to it once it shows again, unless
+    /// they have gone to another since.
+    hid: Option<PathBuf>,
     pub loading: bool,
     pub error: Option<String>,
     /// The listing it waits for; any other that arrives is stale.
@@ -150,6 +153,7 @@ impl Column {
             total: 0,
             selected: Vec::new(),
             focused: None,
+            hid: None,
             loading: true,
             error: None,
             request: 0,
@@ -866,6 +870,11 @@ impl State {
             None => {
                 if let Some(filter) = c.filter.take() {
                     c.entries = filter.all;
+                    // All show again: the keys go back to the row the filter took them off.
+                    let hid = c.hid.take();
+                    if c.focused.is_none() {
+                        c.focused = hid;
+                    }
                 }
             }
             Some(text) => {
@@ -879,14 +888,18 @@ impl State {
         }
     }
 
-    /// Lists what the column's filter lets through; the keys let go of a row it hides.
+    /// Lists what the column's filter lets through; the keys let go of a row it hides, kept to go back
+    /// to once it shows again, while they have gone to no other.
     fn narrow(&mut self, index: usize) {
         let c = &mut self.columns[index];
         let Some(filter) = c.filter.as_ref().filter(|_| c.kind != Kind::Search) else { return };
         c.entries = filter.all.iter().filter_map(|e| narrowed(e, &filter.text)).collect();
         let shown: HashSet<&Path> = c.entries.iter().map(|e| e.path.as_path()).collect();
-        if c.focused.as_ref().is_some_and(|f| !shown.contains(f.as_path())) {
-            c.focused = None;
+        match &c.focused {
+            Some(f) if !shown.contains(f.as_path()) => c.hid = c.focused.take(),
+            Some(_) => c.hid = None,
+            None if c.hid.as_ref().is_some_and(|h| shown.contains(h.as_path())) => c.focused = c.hid.take(),
+            None => {}
         }
     }
 
@@ -970,10 +983,21 @@ impl State {
                 }
                 None => Vec::new(),
             };
+            let keys = c.focused.clone().or_else(|| c.hid.take());
             self.list(index, entries, total, offset, departed);
             let c = &mut self.columns[index];
             let kept: HashSet<PathBuf> = c.selected.iter().cloned().collect();
             c.selected.extend(hidden.into_iter().filter(|p| !kept.contains(p)));
+            // The keys let go of a result the filter hides, as in the other columns, and go back to it
+            // once it shows again.
+            if let Some(path) = keys {
+                if c.entry(&path).is_some() {
+                    c.focused = Some(path);
+                } else if c.filter.as_ref().is_some_and(|f| holds(&shown(folder_name(&path)), &f.text).is_none()) {
+                    c.focused = None;
+                    c.hid = Some(path);
+                }
+            }
             return;
         }
         // The listing stands for all the column lists; the filter narrows it again after.
@@ -1741,6 +1765,40 @@ mod tests {
         s.set_filter(1, Some("x"));
         s.set_query("b");
         assert!(s.columns[1].filter.is_none());
+    }
+
+    #[test]
+    fn keeps_the_result_a_filter_takes_the_keys_off_to_go_back_to_once_it_shows() {
+        let results = vec![folder(r"D:\alpha"), file(r"D:\beta.txt"), file(r"E:\alphabet.txt")];
+        let mut s = State::new();
+        s.set_query("a");
+        let id = s.columns[1].id;
+        s.load(id, 1, false);
+        s.page(id, 1, results.clone(), 3, 0, &HashSet::new());
+        s.select(1, one(r"D:\alpha"));
+        let mut answer = |s: &mut State, request: u64, entries: &[Entry]| {
+            s.load(id, request, true);
+            s.page(id, request, entries.to_vec(), entries.len(), 0, &HashSet::new());
+        };
+        s.set_filter(1, Some("bet"));
+        answer(&mut s, 2, &results[1..]);
+        assert_eq!(s.columns[1].focused, None);
+        // Shown again, loosened or lifted, the keys are back on it.
+        s.set_filter(1, Some("al"));
+        answer(&mut s, 3, &[results[0].clone(), results[2].clone()]);
+        assert_eq!(s.columns[1].focused, Some(PathBuf::from(r"D:\alpha")));
+        s.set_filter(1, Some("bet"));
+        answer(&mut s, 4, &results[1..]);
+        s.set_filter(1, None);
+        answer(&mut s, 5, &results);
+        assert_eq!(s.columns[1].focused, Some(PathBuf::from(r"D:\alpha")));
+        // Gone to another meanwhile, they stay there.
+        s.set_filter(1, Some("bet"));
+        answer(&mut s, 6, &results[1..]);
+        s.select(1, one(r"D:\beta.txt"));
+        s.set_filter(1, None);
+        answer(&mut s, 7, &results);
+        assert_eq!(s.columns[1].focused, Some(PathBuf::from(r"D:\beta.txt")));
     }
 
     #[test]

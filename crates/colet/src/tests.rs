@@ -552,6 +552,41 @@ fn walks_folders_by_keys_and_goes_back(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn goes_back_to_the_row_a_filter_hid_once_it_shows_again(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\alpha"), folder(r"D:\apple"), file(r"D:\beta.txt")])])
+    });
+    let ui = open(cx, fake);
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "down");
+    ui.press(cx, "down");
+    let focused = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].focused.as_deref().map(text));
+    // Hidden, then shown again by Esc in the field: ↓ goes to it, still picked on its own.
+    ui.input(cx, "ap");
+    assert_eq!(focused(&ui, cx), None);
+    ui.press(cx, "escape");
+    ui.press(cx, "down");
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
+    assert_eq!(focused(&ui, cx).as_deref(), Some(r"D:\beta.txt"));
+    // Shown again by a filter loosened, too.
+    ui.input(cx, "al");
+    ui.press(cx, "backspace");
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
+    assert_eq!(focused(&ui, cx).as_deref(), Some(r"D:\beta.txt"));
+    // Gone to another meanwhile, the keys stay there.
+    ui.press(cx, "escape");
+    ui.input(cx, "ap");
+    ui.press(cx, "down");
+    ui.press(cx, "escape");
+    assert_eq!(ui.selected(cx, 1), [r"D:\apple"]);
+    assert_eq!(focused(&ui, cx).as_deref(), Some(r"D:\apple"));
+}
+
+#[gpui_kit::test]
 fn types_from_the_rows_into_their_field_each_time_as_another_word(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],
