@@ -422,7 +422,8 @@ impl Colet {
                             .flex()
                             .gap_3()
                             .child(div().w(px(180.)).flex_none().text_color(p.text).child(key))
-                            .child(div().text_color(p.text_muted).child(what))
+                            // Wrapped in the room left, rather than cut at the dialog's edge.
+                            .child(div().flex_1().min_w_0().text_color(p.text_muted).child(what))
                     })));
                 let buttons = vec![
                     push("close-preferences", "閉じる", true, true)
@@ -468,7 +469,7 @@ impl Colet {
         let Some((title, content, buttons)) = self.dialog_parts(window, cx) else { return dialog };
         let colet = cx.weak_entity();
         dialog
-            .w(px(440.))
+            .w(px(560.))
             .close_button(false)
             .overlay_closable(false)
             .on_cancel(move |_, window, cx| {
