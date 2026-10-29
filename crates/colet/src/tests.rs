@@ -20,7 +20,7 @@ use colet_core::{
 };
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, SharedString, Entity, Focusable, ScrollDelta, ScrollStrategy, TestAppContext, Window,
+    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, EntityInputHandler as _, SharedString, Entity, Focusable, ScrollDelta, ScrollStrategy, TestAppContext, Window,
     WindowBounds, WindowOptions, point, px, size,
 };
 
@@ -531,7 +531,7 @@ fn opens_a_deep_search_file_on_its_own_folder_and_right_jumps_to_it(cx: &mut Tes
 }
 
 #[gpui_kit::test]
-fn walks_folders_by_keys_and_type_ahead_and_goes_back(cx: &mut TestAppContext) {
+fn walks_folders_by_keys_and_goes_back(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],
         ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\alpha"), folder(r"D:\beta"), file(r"D:\gamma.txt")])])
@@ -541,7 +541,7 @@ fn walks_folders_by_keys_and_type_ahead_and_goes_back(cx: &mut TestAppContext) {
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
     ui.press(cx, "right");
     assert_eq!(ui.selected(cx, 1), [r"D:\alpha"]);
-    ui.input(cx, "g");
+    ui.press(cx, "end");
     assert_eq!(ui.selected(cx, 1), [r"D:\gamma.txt"]);
     ui.press(cx, "up");
     assert_eq!(ui.selected(cx, 1), [r"D:\beta"]);
@@ -552,7 +552,7 @@ fn walks_folders_by_keys_and_type_ahead_and_goes_back(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn shows_what_type_ahead_matched_until_a_second_after_its_last_key(cx: &mut TestAppContext) {
+fn types_from_the_rows_into_their_field_each_time_as_another_word(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],
         ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\alpha"), folder(r"D:\apple"), file(r"D:\beta.txt")])])
@@ -561,39 +561,72 @@ fn shows_what_type_ahead_matched_until_a_second_after_its_last_key(cx: &mut Test
     ui.click(cx, row(r"D:\"));
     ui.press(cx, "right");
     let id = ui.read(cx, |v| v.state.columns[1].id);
-    let mark = |cx: &mut TestAppContext, path: &str, name: &str| ui.read(cx, |v| v.type_ahead_mark(id, Path::new(path), name));
-    // Keys in quick succession: `settle` would let most of the second go by.
-    let key = |cx: &mut TestAppContext, text: &str| {
-        ui.act(cx, |window, cx| window.input(text, cx));
-        cx.run_until_parked();
-    };
-    let wait = |cx: &mut TestAppContext, ms: u64| {
-        cx.executor().advance_clock(Duration::from_millis(ms));
-        cx.run_until_parked();
-    };
-    key(cx, "a");
-    key(cx, "p");
-    assert_eq!(ui.selected(cx, 1), [r"D:\apple"]);
-    assert_eq!(mark(cx, r"D:\apple", "apple"), Some((2, false)));
-    // A key that finds nothing leaves the row and its match, marked missing; the keys after it add nothing.
-    key(cx, "z");
-    assert_eq!(ui.selected(cx, 1), [r"D:\apple"]);
-    assert_eq!(mark(cx, r"D:\apple", "apple"), Some((2, true)));
-    wait(cx, 600);
-    key(cx, "b");
-    assert_eq!(ui.selected(cx, 1), [r"D:\apple"]);
-    // A second after the miss, however many keys came since, it is over: the next key starts afresh.
-    wait(cx, 500);
-    assert_eq!(mark(cx, r"D:\apple", "apple"), None);
-    key(cx, "b");
-    assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
-    // Moved off the row some other way, the next key starts afresh too, not as "ba".
-    ui.act(cx, |window, cx| window.press("up", cx));
-    ui.act(cx, |window, cx| window.press("up", cx));
-    cx.run_until_parked();
-    key(cx, "a");
-    key(cx, "p");
-    assert_eq!(ui.selected(cx, 1), [r"D:\apple"]);
+    let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string());
+    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
+    // A key in the rows goes on in the field, which takes the keys.
+    ui.input(cx, "ap");
+    assert_eq!(typed(&ui, cx), "ap");
+    assert!(!ui.columns_focused(cx));
+    assert_eq!(shown(&ui, cx), [r"D:\apple"]);
+    ui.press(cx, "down");
+    assert!(ui.columns_focused(cx));
+    // Typed again from the rows, it is another word.
+    ui.input(cx, "e");
+    assert_eq!(typed(&ui, cx), "ap e");
+    assert_eq!(shown(&ui, cx), [r"D:\apple"]);
+    ui.press(cx, "down");
+    // A space alone starts nothing.
+    ui.input(cx, " ");
+    assert_eq!(typed(&ui, cx), "ap e");
+    assert!(ui.columns_focused(cx));
+    // Backspace takes the last char off, the keys going to the field; there, it is the field's own.
+    ui.press(cx, "backspace");
+    assert_eq!(typed(&ui, cx), "ap ");
+    assert!(!ui.columns_focused(cx));
+    ui.press(cx, "backspace");
+    assert_eq!(typed(&ui, cx), "ap");
+    // Ending in a space, the field takes the word after it; a quote left open is closed first.
+    ui.input(cx, " ");
+    ui.press(cx, "down");
+    ui.input(cx, "p");
+    assert_eq!(typed(&ui, cx), "ap p");
+    ui.press(cx, "escape");
+    ui.press(cx, "escape");
+    assert!(ui.columns_focused(cx));
+    ui.input(cx, "\"a");
+    ui.press(cx, "down");
+    ui.input(cx, "h");
+    assert_eq!(typed(&ui, cx), "\"a\" h");
+    assert_eq!(shown(&ui, cx), [r"D:\alpha"]);
+    // With nothing in the field, Backspace in the rows leaves the keys there.
+    ui.press(cx, "escape");
+    ui.press(cx, "escape");
+    ui.press(cx, "backspace");
+    assert!(ui.columns_focused(cx));
+}
+
+#[gpui_kit::test]
+fn hands_what_an_ime_composes_in_the_rows_on_to_their_field(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\写真"), folder(r"D:\動画")])])
+    });
+    let ui = open(cx, fake);
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    let id = ui.read(cx, |v| v.state.columns[1].id);
+    let view = ui.view.clone();
+    ui.act(cx, |window, cx| view.update(cx, |v, cx| v.replace_and_mark_text_in_range(None, "しゃ", Some(2..2), window, cx)));
+    settle(cx);
+    assert!(!ui.columns_focused(cx));
+    let input = ui.view.read_with(cx, |v, _| v.filters[&id].input.clone());
+    // The field goes on composing it, and takes what the IME settles on in its place.
+    let marked = ui.act(cx, |window, cx| input.update(cx, |input, cx| input.marked_text_range(window, cx)));
+    assert_eq!(marked, Some(0..2));
+    ui.act(cx, |window, cx| input.update(cx, |input, cx| input.replace_text_in_range(None, "写", window, cx)));
+    settle(cx);
+    assert_eq!(ui.view.read_with(cx, |_, cx| input.read(cx).value().to_string()), "写");
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>()), [r"D:\写真"]);
 }
 
 #[gpui_kit::test]
@@ -1496,7 +1529,6 @@ fn in_work(cx: &mut TestAppContext) -> (Arc<Fake>, Ui) {
 fn keeps_what_a_filter_hides_picked_acting_only_on_what_shows(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "ctrl-a");
-    ui.press(cx, "/");
     ui.input(cx, "b");
     assert_eq!(ui.selected(cx, 2).len(), 3);
     assert_eq!(ui.read(cx, |v| v.state.columns[2].shown_selected().len()), 1);
@@ -2533,7 +2565,7 @@ fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut
 }
 
 #[gpui_kit::test]
-fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut TestAppContext) {
+fn narrows_a_folder_by_name_typed_in_its_rows_and_lists_all_again_on_escape(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "D:")],
         ..Fake::default().with_folders(&[
@@ -2550,7 +2582,6 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
     assert!(ui.act(cx, |window, _| window.try_find(("filter", alpha)).is_some()));
     let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string());
-    ui.press(cx, "/");
     // What is typed narrows the rows rather than jumping through them; the folder it hides stays picked,
     // and open, as home's place does.
     ui.input(cx, "TA");
@@ -2562,8 +2593,8 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     ui.press(cx, "down");
     assert!(ui.columns_focused(cx));
     assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
-    // / goes back to the field, its text picked to type over.
-    ui.press(cx, "/");
+    // Esc in the rows lists all again, and what is typed there starts afresh.
+    ui.press(cx, "escape");
     ui.input(cx, "mm");
     assert_eq!(shown(&ui, cx), [r"D:\gamma"]);
     ui.press(cx, "enter");
@@ -2576,7 +2607,6 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     assert!(ui.columns_focused(cx));
     assert_eq!(ui.selected(cx, 1), [r"D:\gamma"]);
     // In the field, Esc clears it, then goes back to the rows.
-    ui.press(cx, "/");
     ui.input(cx, "zz");
     assert!(shown(&ui, cx).is_empty());
     // Nothing let through, ↓ and Enter keep the keys in the field.
@@ -2590,14 +2620,12 @@ fn narrows_a_folder_by_name_from_slash_and_lists_all_again_on_escape(cx: &mut Te
     assert!(ui.columns_focused(cx));
     assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
     // Its x clears it.
-    ui.press(cx, "/");
     ui.input(cx, "be");
     assert_eq!(shown(&ui, cx), [r"D:\beta.txt"]);
     ui.click(cx, ("clear-filter", id));
     assert_eq!(shown(&ui, cx).len(), 3);
     assert_eq!(typed(&ui, cx), "");
     // Lifted for what was made or pasted, the field empties too.
-    ui.press(cx, "/");
     ui.input(cx, "be");
     ui.view.update(cx, |v, cx| {
         v.state.set_filter(1, None);
@@ -2624,7 +2652,6 @@ fn narrows_home_from_its_field_keeping_the_place_open(cx: &mut TestAppContext) {
     ui.click(cx, row(r"D:\"));
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
     // / in home goes to its field; what is typed narrows its rows, and the place hidden stays open.
-    ui.press(cx, "/");
     assert!(ui.toasts(cx).is_empty());
     ui.input(cx, "os");
     let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
@@ -2641,14 +2668,12 @@ fn narrows_home_from_its_field_keeping_the_place_open(cx: &mut TestAppContext) {
     ui.press(cx, "escape");
     ui.press(cx, "down");
     assert_eq!(ui.selected(cx, 0), [r"D:\"]);
-    ui.press(cx, "/");
     ui.input(cx, ":");
     assert_eq!(shown(&ui, cx).len(), 2);
     ui.press(cx, "enter");
     assert_eq!(ui.selected(cx, 0), [r"D:\"]);
     assert!(ui.home_focused(cx));
     // Nothing let through says so, and ↓ and Enter keep the keys in the field.
-    ui.press(cx, "/");
     ui.input(cx, "zz");
     assert!(shown(&ui, cx).is_empty());
     ui.press(cx, "down");
@@ -2671,9 +2696,8 @@ fn narrows_the_results_by_name_through_everything_keeping_the_one_picked(cx: &mu
     ui.press(cx, "down");
     assert_eq!(ui.selected(cx, 1), [r"D:\alpha.txt"]);
     let id = ui.read(cx, |v| v.state.columns[1].id);
-    // The results have their field, as a folder has; / goes there.
+    // The results have their field, as a folder has; a key in its rows goes there.
     assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
-    ui.press(cx, "/");
     assert!(ui.toasts(cx).is_empty());
     // Everything is asked once typing pauses, for the names holding the text as it is.
     for key in ["b", "e", "t"] {
@@ -2698,7 +2722,6 @@ fn narrows_the_results_by_name_through_everything_keeping_the_one_picked(cx: &mu
     assert_eq!(shown(&ui, cx).len(), 3);
     assert_eq!(ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string()), "");
     // Another search starts with nothing narrowed.
-    ui.press(cx, "/");
     ui.input(cx, "x");
     ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.search_for("b", None, window, cx)));
     settle(cx);
@@ -2721,7 +2744,6 @@ fn keeps_the_arrows_and_enter_in_a_filter_field_to_itself(cx: &mut TestAppContex
     assert_eq!(ui.selected(cx, 1), [r"D:\alpha"]);
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
     let active = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.active);
-    ui.press(cx, "/");
     ui.input(cx, "al");
     // Past either end of the text, ← and → stay in the field rather than going to the next column.
     ui.press(cx, "right");
@@ -2737,7 +2759,6 @@ fn keeps_the_arrows_and_enter_in_a_filter_field_to_itself(cx: &mut TestAppContex
     ui.press(cx, "down");
     assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
     // Enter goes into the rows and opens nothing there.
-    ui.press(cx, "/");
     ui.input(cx, "ta");
     ui.press(cx, "enter");
     assert!(ui.columns_focused(cx));

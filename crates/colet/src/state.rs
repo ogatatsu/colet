@@ -102,6 +102,16 @@ pub fn filter_words(text: &str) -> Vec<String> {
     words
 }
 
+/// What a filter's field holds, made ready for a word typed after it: a space put between, and a quote
+/// left open closed first, so that the word is one of its own.
+pub fn room_for_a_word(held: &str) -> String {
+    let open = held.matches('"').count() % 2 == 1;
+    if held.is_empty() || !open && held.ends_with(char::is_whitespace) {
+        return held.into();
+    }
+    format!("{held}{} ", if open { "\"" } else { "" })
+}
+
 /// Where `name` holds each of the words of `text`, in any order, if it holds them all: the ranges of all
 /// of them, those that meet as one. No words, nothing marked, are held by any name.
 pub fn holds(name: &str, text: &str) -> Option<Vec<Range<usize>>> {

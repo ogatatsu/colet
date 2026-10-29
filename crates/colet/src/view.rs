@@ -207,16 +207,6 @@ fn with_marks(text: &str, marks: &[Range<usize>]) -> StyledText {
     StyledText::new(text.to_owned()).with_highlights(marks.iter().map(|range| (range.clone(), style)))
 }
 
-/// A name with the start type-ahead matched underlined thicker, in `color`, over the marks of a search
-/// there.
-fn with_typed(text: &str, marks: &[Range<usize>], typed: Option<(usize, Hsla)>) -> StyledText {
-    let Some((end, color)) = typed else { return with_marks(text, marks) };
-    let mark = HighlightStyle { underline: Some(UnderlineStyle { thickness: px(1.), ..Default::default() }), ..Default::default() };
-    let typed = HighlightStyle { underline: Some(UnderlineStyle { thickness: px(2.), color: Some(color), wavy: false }), ..Default::default() };
-    let rest = marks.iter().filter(|r| r.end > end).map(|r| (r.start.max(end)..r.end, mark));
-    StyledText::new(text.to_owned()).with_highlights((end > 0).then_some((0..end, typed)).into_iter().chain(rest))
-}
-
 /// Rows of home and the folders; search results carry their folder on a second line.
 /// The widths a row's size and modified time take: `1023.9 MB` and `2026/12/31 23:59`, at 12px.
 const SIZE_WIDTH: f32 = 56.;
@@ -353,7 +343,11 @@ impl Colet {
                     this.open(index, &path, window, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &FocusFilter, window, cx| this.open_filter(window, cx)))
+            .on_action(cx.listener(|this, _: &TrimFilter, window, cx| {
+                if !this.trim_filter(window, cx) {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|this, _: &ClearFilter, window, cx| {
                 let c = &this.state.columns[this.state.active];
                 if c.filter.is_some() {
@@ -362,21 +356,14 @@ impl Colet {
                     cx.propagate();
                 }
             }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                let keystroke = &event.keystroke;
-                let m = keystroke.modifiers;
-                // A filter's field sits in its column, under these keys; what is typed there is its own.
-                if m.control || m.alt || m.platform || this.filter_focused(window, cx) {
-                    return;
-                }
-                if let Some(text) = keystroke.key_char.as_deref()
-                    && !text.trim().is_empty()
-                    && text.chars().count() == 1
-                {
-                    this.type_ahead(text, window, cx);
-                    cx.stop_propagation();
-                }
-            }))
+    }
+
+    /// While `focus`, the rows', has the keys, what is typed there goes to their column's field.
+    fn takes_text(&self, focus: &FocusHandle, cx: &mut Context<Self>) -> impl IntoElement {
+        let (focus, view) = (focus.clone(), cx.entity());
+        canvas(|_, _, _| {}, move |bounds, _, window, cx| window.handle_input(&focus, ElementInputHandler::new(bounds, view), cx))
+            .absolute()
+            .size_full()
     }
 
     fn row(&mut self, index: usize, entry: &Entry, marked: bool, cx: &mut Context<Self>) -> AnyElement {
@@ -426,14 +413,6 @@ impl Colet {
         };
         let menu_path = entry.path.clone();
         let focused_row = (marked && c.focused.as_ref() == Some(&entry.path)).then(|| self.focused_row.clone());
-        // What type-ahead has matched of the name, in the row's ink, or the danger's once a key found nothing.
-        let typed = self.type_ahead_mark(c.id, &entry.path, &entry.name).filter(|_| marked).map(|(end, missed)| {
-            (end, match (missed, lit) {
-                (false, _) => ink,
-                (true, false) => p.danger,
-                (true, true) => p.danger_on_fill,
-            })
-        });
         div()
             .id(SharedString::from(id_text(&entry.path)))
             // Like Finder, the selection stays: the menu acts on the row clicked, or the whole selection if
@@ -505,7 +484,7 @@ impl Colet {
                                     .min_w_0()
                                     .truncate()
                                     .when(barred && highlighted, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
-                                    .child(with_typed(&entry.name, &entry.marks.name, typed)),
+                                    .child(with_marks(&entry.name, &entry.marks.name)),
                             )
                             // A badge, tinted with the row's own ink so it shows on any of its fills.
                             .when_some(within, |d, filter| {
@@ -530,7 +509,7 @@ impl Colet {
                         d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(with_marks(&entry.parent, &entry.marks.parent)))
                     }),
             )
-            // Out of the name, so type-ahead stays the file's own: a fade alone would read as hidden.
+            // Out of the name, so the name stays the file's own: a fade alone would read as hidden.
             .when(held, |r| {
                 r.child(
                     div()
@@ -973,7 +952,7 @@ impl Colet {
         let marked = self.state.active == 0 && !self.search_focused;
         let body = self.column_body(0, marked, cx);
         let width = self.sidebar_width(window);
-        let keys = div().id("home").track_focus(&self.home_focus).flex_1().min_h_0().flex().flex_col().child(body);
+        let keys = div().id("home").track_focus(&self.home_focus).flex_1().min_h_0().relative().flex().flex_col().child(self.takes_text(&self.home_focus, cx)).child(body);
         let keys = self.column_keys(keys, cx);
         div()
             .id("sidebar")
@@ -1387,6 +1366,7 @@ impl Colet {
             .flex()
             .relative()
             .bg(p.bg)
+            .child(self.takes_text(&self.columns_focus, cx))
             .children(pinned_column)
             .when(away > 0, |d| {
                 d.child(

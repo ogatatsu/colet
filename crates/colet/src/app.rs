@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
+    ops::Range,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -36,7 +37,7 @@ use crate::{
     ops::{HistoryEntry, Running},
     places::{Dialog, HomeDrag, HomeRows, Landing, home_entries, home_groups, places},
     settings::{LoadError, Saver, Settings, everything_query, narrowed_query},
-    state::{ColumnId, Kind, State, filter_words},
+    state::{ColumnId, Kind, State, filter_words, room_for_a_word},
     theme::Palette,
 };
 
@@ -72,7 +73,7 @@ actions!(
         OpenTextMenu,
         CloseMenu,
         OpenSort,
-        FocusFilter,
+        TrimFilter,
         ClearFilter,
         OpenSearchFilters,
     ]
@@ -130,7 +131,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", OpenSort, Some(SORT)),
         KeyBinding::new("space", OpenSort, Some(SORT)),
         KeyBinding::new("down", OpenSort, Some(SORT)),
-        KeyBinding::new("/", FocusFilter, Some(COLUMNS)),
+        KeyBinding::new("backspace", TrimFilter, Some(COLUMNS)),
         KeyBinding::new("escape", ClearFilter, Some(COLUMNS)),
     ]);
 }
@@ -221,20 +222,6 @@ pub struct FilterField {
     _changes: Subscription,
 }
 
-/// What type-ahead has typed so far, in which column, and on which row: empty once a second has passed.
-struct TypeAhead {
-    text: String,
-    /// Bumped by each key that runs the text on or misses: the second after the last one ends it.
-    serial: u64,
-    column: ColumnId,
-    /// The row the keys left focused: the text goes when they are moved off it some other way.
-    path: Option<PathBuf>,
-    /// How many chars of that row's name the text matched.
-    matched: usize,
-    /// The last key found nothing: the keys after it add nothing, nor hold off the end.
-    missed: bool,
-}
-
 pub struct Colet {
     pub state: State,
     pub widths: Widths,
@@ -281,7 +268,6 @@ pub struct Colet {
     missed: Arc<Mutex<Vec<PathBuf>>>,
     searched_at: Option<Instant>,
     search_refresh: bool,
-    typed: TypeAhead,
     pub settings: Settings,
     /// Writes the settings; none when the file read at start could not be read and is still there, so
     /// it is never written over this session.
@@ -469,7 +455,6 @@ impl Colet {
             missed: Arc::default(),
             searched_at: None,
             search_refresh: false,
-            typed: TypeAhead { text: String::new(), serial: 0, column: 0, path: None, matched: 0, missed: false },
             settings,
             settings_saver,
             settings_changes: 0,
@@ -1104,75 +1089,6 @@ impl Colet {
         }
     }
 
-    /// Typing a name's start picks the first row from the focused one on that starts with it; the typed
-    /// text runs on while keys come within a second of each other in one column, on the row they picked.
-    pub fn type_ahead(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let index = self.state.active;
-        let c = &self.state.columns[index];
-        let typed = &mut self.typed;
-        if typed.text.is_empty() || typed.column != c.id || typed.path != c.focused {
-            typed.text.clear();
-            typed.matched = 0;
-            typed.missed = false;
-        } else if typed.missed {
-            return;
-        }
-        typed.column = c.id;
-        let typed = format!("{}{}", self.typed.text, text.to_lowercase());
-        let start = c.focused.as_ref().and_then(|f| c.entries.iter().position(|e| &e.path == f)).unwrap_or(0);
-        // A run of one letter steps through the names starting with it.
-        let repeat = typed.chars().count() > 1 && typed.chars().all(|ch| typed.starts_with(ch));
-        let (needle, skip) = if repeat { (&typed[..typed.chars().next().unwrap().len_utf8()], 1) } else { (typed.as_str(), 0) };
-        let count = c.entries.len();
-        let found = (0..count)
-            .map(|k| (start + skip + k) % count.max(1))
-            .find(|&i| c.entries[i].name.to_lowercase().starts_with(needle));
-        if let Some(i) = found {
-            let path = c.entries[i].path.clone();
-            self.typed.matched = needle.chars().count();
-            self.typed.text = typed;
-            if index == 0 {
-                self.state.columns[0].focused = Some(path.clone());
-            }
-            self.state.select(index, vec![path]);
-            self.sync_search_field(window, cx);
-        } else if self.typed.text.is_empty() {
-            // Nothing matched yet, so nothing to show missing: the next key starts afresh.
-            return;
-        } else {
-            self.typed.missed = true;
-        }
-        self.typed.path = self.state.columns.get(index).and_then(|c| c.focused.clone());
-        self.typed.serial += 1;
-        let serial = self.typed.serial;
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(1)).await;
-            this.update(cx, |this, cx| {
-                if this.typed.serial == serial {
-                    this.typed.text.clear();
-                    cx.notify();
-                }
-            })
-            .ok();
-        })
-        .detach();
-        cx.notify();
-    }
-
-    /// How many bytes of the name of `path` in `column` type-ahead has matched, and whether its last key
-    /// found nothing: none where it is not running, or the keys have moved off the row.
-    pub fn type_ahead_mark(&self, column: ColumnId, path: &Path, name: &str) -> Option<(usize, bool)> {
-        let typed = &self.typed;
-        if typed.text.is_empty() || typed.column != column || typed.path.as_deref() != Some(path) {
-            return None;
-        }
-        let c = self.state.columns.iter().find(|c| c.id == column)?;
-        if c.focused.as_deref() != Some(path) {
-            return None;
-        }
-        Some((name.char_indices().nth(typed.matched).map_or(name.len(), |(i, _)| i), typed.missed))
-    }
-
     // ---- Filters ----
 
     /// Each column has its field, holding what it is narrowed to: a field is made for a column new here,
@@ -1190,7 +1106,7 @@ impl Colet {
                     }
                 }
                 None => {
-                    let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む（/）"));
+                    let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む"));
                     self.palette.style_input(&input, cx);
                     let subscription = cx.subscribe_in(&input, window, move |this: &mut Self, input, event, window, cx| match event {
                         InputEvent::Change => {
@@ -1206,16 +1122,44 @@ impl Colet {
         }
     }
 
-    /// The field of the column worked in takes the keys, with its text picked to type over.
-    pub fn open_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// What is typed in the rows goes on in their column's field, which takes the keys: after what it
+    /// holds, as a word of its own. What an IME is composing, `marked` with its caret, is handed on as it
+    /// is, so the field takes the rest of it. A space alone starts nothing.
+    pub fn type_into_filter(&mut self, text: &str, marked: Option<Option<Range<usize>>>, window: &mut Window, cx: &mut Context<Self>) {
+        if text.trim().is_empty() {
+            return;
+        }
         let id = self.state.columns[self.state.active].id;
         self.filter_fields(window, cx);
         let Some(field) = self.filters.get(&id) else { return };
         field.input.clone().update(cx, |input, cx| {
+            let held = room_for_a_word(&input.value());
+            input.set_value(held, window, cx);
             input.focus(window, cx);
-            input.select_all(window, cx);
+            match marked {
+                Some(caret) => input.replace_and_mark_text_in_range(None, text, caret, window, cx),
+                None => input.replace_text_in_range(None, text, window, cx),
+            }
         });
         self.changed(cx);
+    }
+
+    /// Backspace in the rows takes the last char off their column's field, which takes the keys; false
+    /// while it holds none.
+    pub fn trim_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let id = self.state.columns[self.state.active].id;
+        let Some(field) = self.filters.get(&id) else { return false };
+        let input = field.input.clone();
+        let mut held = input.read(cx).value().to_string();
+        if held.pop().is_none() {
+            return false;
+        }
+        input.update(cx, |input, cx| {
+            input.set_value(held.clone(), window, cx);
+            input.focus(window, cx);
+        });
+        self.filter(id, &held, cx);
+        true
     }
 
     /// Narrows the column `id` to the names holding `text`, as it is typed.
@@ -1298,11 +1242,6 @@ impl Colet {
         }
     }
 
-    /// Whether a filter's field has the keys, which type there rather than ahead in the rows.
-    pub fn filter_focused(&self, window: &Window, cx: &App) -> bool {
-        self.filters.values().any(|field| field.input.read(cx).focus_handle(cx).is_focused(window))
-    }
-
     pub fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state.back();
         self.sync_search_field(window, cx);
@@ -1362,5 +1301,49 @@ impl Colet {
 
     pub fn list_handle(&mut self, id: ColumnId) -> UniformListScrollHandle {
         self.lists.entry(id).or_default().clone()
+    }
+}
+
+/// The rows take text as a field does, though they hold none: what is typed there, and what an IME
+/// composes, goes on in their column's field. Taking text keeps the IME on while the keys are in them.
+impl EntityInputHandler for Colet {
+    fn text_for_range(&mut self, _: Range<usize>, _: &mut Option<Range<usize>>, _: &mut Window, _: &mut Context<Self>) -> Option<String> {
+        None
+    }
+
+    fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
+        Some(UTF16Selection { range: 0..0, reversed: false })
+    }
+
+    fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
+        None
+    }
+
+    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {}
+
+    // A paste in the rows pastes files, from its keys.
+    fn paste(&mut self, _: ClipboardItem, _: &mut Window, _: &mut Context<Self>) {}
+
+    fn replace_text_in_range(&mut self, _: Option<Range<usize>>, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.type_into_filter(text, None, window, cx);
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _: Option<Range<usize>>,
+        text: &str,
+        caret: Option<Range<usize>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.type_into_filter(text, Some(caret), window, cx);
+    }
+
+    fn bounds_for_range(&mut self, _: Range<usize>, _: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<Bounds<Pixels>> {
+        None
+    }
+
+    fn character_index_for_point(&mut self, _: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        None
     }
 }
