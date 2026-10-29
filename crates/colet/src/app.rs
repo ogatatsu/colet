@@ -34,7 +34,7 @@ use crate::{
     backend::{self, Search},
     icons::Icons,
     menus::Popup,
-    ops::{HistoryEntry, Running},
+    ops::{ClipboardLane, HistoryEntry, Running},
     places::{Dialog, HomeDrag, HomeRows, Landing, home_entries, home_groups, places},
     settings::{LoadError, Saver, Settings, everything_query, narrowed_query},
     state::{ColumnId, Kind, State, filter_words, room_for_a_word},
@@ -317,9 +317,7 @@ pub struct Colet {
     pub running: Option<Running>,
     /// Copies and cuts still being put on the clipboard.
     pub(crate) clipboard_writes: usize,
-    /// The turn each write takes, and the one being served.
-    pub(crate) clipboard_tickets: u64,
-    pub(crate) clipboard_lane: std::sync::Arc<(std::sync::Mutex<u64>, std::sync::Condvar)>,
+    pub(crate) clipboard_lane: ClipboardLane,
     /// A paste asked for while they were, into this folder: run once they are done, so it pastes them.
     pub(crate) paste_waiting: Option<PathBuf>,
     /// The settings could not be written as the window closed: the next close goes without them.
@@ -481,7 +479,6 @@ impl Colet {
             crumbs_room: Default::default(),
             running: None,
             clipboard_writes: 0,
-            clipboard_tickets: 0,
             clipboard_lane: Default::default(),
             paste_waiting: None,
             unsaved_close: false,

@@ -5,7 +5,7 @@ use std::{
     collections::HashSet,
     ffi::OsString,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -328,22 +328,11 @@ impl Colet {
         cx: &mut Context<Self>,
     ) {
         self.clipboard_writes += 1;
-        // Written in the order asked, so an earlier copy never lands over a later one.
-        let ticket = self.clipboard_tickets;
-        self.clipboard_tickets += 1;
-        let lane = self.clipboard_lane.clone();
-        let task = cx.background_executor().spawn(async move {
-            let (turn, next) = &*lane;
-            let mut serving = turn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            while *serving != ticket {
-                serving = next.wait(serving).unwrap_or_else(|poisoned| poisoned.into_inner());
-            }
-            // The turn passes on even if the write panics, or every later one would wait forever.
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
-            *serving += 1;
-            next.notify_all();
-            result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-        });
+        let result = self.clipboard_lane.write(work);
+        // A lane that stopped, as after a write panicked, never says.
+        let task = cx
+            .background_executor()
+            .spawn(async move { result.recv().unwrap_or_else(|_| Err("クリップボードに書き込めません".into())) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
@@ -836,6 +825,34 @@ impl Colet {
                 self.focus_active(window, cx);
             }
         }
+    }
+}
+
+/// Puts things on the clipboard on a thread of its own, one write after another in the order asked, so
+/// an earlier copy never lands over a later one.
+pub struct ClipboardLane(mpsc::Sender<Box<dyn FnOnce() + Send>>);
+
+impl Default for ClipboardLane {
+    fn default() -> Self {
+        let (writes, queued) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
+        // Ends once the lane is dropped and the writes sent before are done.
+        std::thread::spawn(move || {
+            for write in queued {
+                write();
+            }
+        });
+        Self(writes)
+    }
+}
+
+impl ClipboardLane {
+    /// Queues `work` behind the writes before it; the receiver hears how it went.
+    fn write(&self, work: impl FnOnce() -> Result<(), String> + Send + 'static) -> mpsc::Receiver<Result<(), String>> {
+        let (done, result) = mpsc::channel();
+        let _ = self.0.send(Box::new(move || {
+            let _ = done.send(work());
+        }));
+        result
     }
 }
 
