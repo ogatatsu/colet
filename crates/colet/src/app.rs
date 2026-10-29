@@ -36,7 +36,7 @@ use crate::{
     ops::{HistoryEntry, Running},
     places::{Dialog, HomeDrag, HomeRows, Landing, home_entries, home_groups, places},
     settings::{LoadError, Saver, Settings, everything_query, narrowed_query},
-    state::{ColumnId, Kind, State},
+    state::{ColumnId, Kind, State, filter_words},
     theme::Palette,
 };
 
@@ -1233,7 +1233,9 @@ impl Colet {
                 cx.background_executor().timer(Duration::from_millis(150)).await;
                 this.update(cx, |this, cx| {
                     let Some(index) = this.state.index_of(id) else { return };
-                    if this.state.columns[index].filter.as_ref().map_or("", |f| f.text.as_str()) == text {
+                    // Spaces alone, no words, ask for all as an empty field does.
+                    let applied = this.state.columns[index].filter.as_ref().map_or("", |f| f.text.as_str());
+                    if applied == text || applied.is_empty() && filter_words(&text).is_empty() {
                         this.load(id, 0, true, cx);
                     }
                 })

@@ -221,12 +221,12 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
         }
         assert_eq!(live.count(&base).unwrap(), 4);
-        // The words as one, in the name only: not the file in a folder that holds them.
-        assert_eq!(names(narrowed_query(&base, "a b")), ["alpha beta.txt"]);
+        // Each word, in any order, in the name only: not the file in a folder that holds them.
+        assert_eq!(names(narrowed_query(&base, "bet alpha")), ["alpha beta.txt", "alphabet.txt"]);
+        assert_eq!(names(narrowed_query(&base, "\"a b\"")), ["alpha beta.txt"]);
         assert_eq!(names(narrowed_query(&base, "BETA")), ["Beta", "alpha beta.txt"]);
-        // No wildcards, and a quote, which no name holds, matches nothing.
+        // No wildcards.
         assert!(names(narrowed_query(&base, "a*t")).is_empty());
-        assert!(names(narrowed_query(&base, "a\"b")).is_empty());
         assert_eq!(live.count(&narrowed_query(&base, "alpha")).unwrap(), 2);
     }
 

@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     app::{COLUMN_WIDTHS, SIDEBAR_WIDTHS},
-    state::{saved_query, search_key},
+    state::{filter_words, saved_query, search_key},
 };
 
 /// A search kept in home. An empty name shows the query itself.
@@ -51,11 +51,11 @@ pub fn everything_query(query: &str, filter: Option<&str>) -> String {
     }
 }
 
-/// The search `query` narrowed to the names holding `text` as it is: not the folders they are in, and with
-/// no wildcards. A quote cannot stand in a name, nor can an `|`: put for it, the text matches nothing, as it
-/// should, rather than ending the quotes early.
+/// The search `query` narrowed to the names holding each word of `text` as it is, in any order, as the
+/// columns Colet narrows itself are: not the folders they are in, and with no wildcards.
 pub fn narrowed_query(query: &str, text: &str) -> String {
-    format!("<{}> nopath:nowildcards:\"{}\"", closed(query), text.replace('"', "|"))
+    let words: String = filter_words(text).iter().map(|word| format!(" nopath:nowildcards:\"{word}\"")).collect();
+    format!("<{}>{words}", closed(query))
 }
 
 /// `text` with a quote left open closed, as Everything closes it at the end of the text: inside `< >` it
@@ -581,9 +581,9 @@ mod tests {
 
     #[test]
     fn narrows_the_search_to_names_holding_the_text_as_it_is() {
-        assert_eq!(narrowed_query("cat | dog", "a b"), "<cat | dog> nopath:nowildcards:\"a b\"");
+        assert_eq!(narrowed_query("cat | dog", "a\u{3000}b"), "<cat | dog> nopath:nowildcards:\"a\" nopath:nowildcards:\"b\"");
         assert_eq!(narrowed_query("\"my doc", "*"), "<\"my doc\"> nopath:nowildcards:\"*\"");
-        assert_eq!(narrowed_query("cat", "a\"b"), "<cat> nopath:nowildcards:\"a|b\"");
+        assert_eq!(narrowed_query("cat", "\"a b\" c|d"), "<cat> nopath:nowildcards:\"a b\" nopath:nowildcards:\"c|d\"");
     }
 
     #[test]

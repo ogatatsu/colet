@@ -87,12 +87,46 @@ pub fn found(name: &str, needle: &str) -> Vec<Range<usize>> {
     ranges
 }
 
-/// `entry` with its marks on where its name holds `text`, if it does; any entry while `text` is empty.
-fn narrowed(entry: &Entry, text: &str) -> Option<Entry> {
-    let name = found(&entry.name, text);
-    if !text.is_empty() && name.is_empty() {
-        return None;
+/// The words a filter's `text` asks a name to hold, apart at any space, half or full width, but in quotes,
+/// which are taken out. A quote left open is closed at the end, as Everything closes it.
+pub fn filter_words(text: &str) -> Vec<String> {
+    let (mut words, mut word, mut quoted) = (Vec::new(), String::new(), false);
+    for c in text.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => words.extend((!word.is_empty()).then(|| std::mem::take(&mut word))),
+            c => word.push(c),
+        }
     }
+    words.extend((!word.is_empty()).then_some(word));
+    words
+}
+
+/// Where `name` holds each of the words of `text`, in any order, if it holds them all: the ranges of all
+/// of them, those that meet as one. No words, nothing marked, are held by any name.
+pub fn holds(name: &str, text: &str) -> Option<Vec<Range<usize>>> {
+    let mut ranges = Vec::new();
+    for word in filter_words(text) {
+        let at = found(name, &word);
+        if at.is_empty() {
+            return None;
+        }
+        ranges.extend(at);
+    }
+    ranges.sort_by_key(|r| r.start);
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for r in ranges {
+        match merged.last_mut() {
+            Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
+            _ => merged.push(r),
+        }
+    }
+    Some(merged)
+}
+
+/// `entry` with its marks on where its name holds the words of `text`, if it holds them all.
+fn narrowed(entry: &Entry, text: &str) -> Option<Entry> {
+    let name = holds(&entry.name, text)?;
     Some(Entry { marks: Marks { name, parent: Vec::new() }, ..entry.clone() })
 }
 
@@ -797,19 +831,19 @@ impl State {
             c.total += 1;
         }
         // It shows, to be seen picked, even where the filter would hide it: the filter goes then.
-        if let Some(text) = text.filter(|text| !found(&shown(folder_name(path)), text).is_empty()) {
+        if let Some(text) = text.filter(|text| holds(&shown(folder_name(path)), text).is_some()) {
             c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries), whole: 0 });
             self.narrow(index);
         }
         self.select(index, vec![path.to_owned()]);
     }
 
-    /// Narrows the column at `index` to the names holding `text`, or with none, or an empty one, lists them
-    /// all again. What it hides stays picked, and what that opened open, while another is looked for. The
+    /// Narrows the column at `index` to the names holding the words of `text`, or with none, or no words in
+    /// it, lists them all again. What it hides stays picked, and what that opened open, while another is looked for. The
     /// search results are narrowed by Everything, asked again: they show as they are until it answers.
     pub fn set_filter(&mut self, index: usize, text: Option<&str>) {
         let Some(c) = self.columns.get_mut(index) else { return };
-        let text = text.filter(|text| !text.is_empty());
+        let text = text.filter(|text| !filter_words(text).is_empty());
         if c.kind == Kind::Search {
             c.filter = match (text, c.filter.take()) {
                 (None, _) => None,
@@ -922,7 +956,7 @@ impl State {
         if c.kind == Kind::Search {
             let hidden: Vec<PathBuf> = match &c.filter {
                 Some(filter) => {
-                    c.selected.iter().filter(|p| found(&shown(folder_name(p)), &filter.text).is_empty()).cloned().collect()
+                    c.selected.iter().filter(|p| holds(&shown(folder_name(p)), &filter.text).is_none()).cloned().collect()
                 }
                 None => Vec::new(),
             };
@@ -1568,6 +1602,27 @@ mod tests {
         assert_eq!(found("\u{130}x", "\u{69}\u{307}x"), [0..3]);
         assert!(found("abc", "").is_empty());
         assert!(found("abc", "abcd").is_empty());
+    }
+
+    #[test]
+    fn takes_the_words_apart_at_any_space_but_in_quotes() {
+        assert_eq!(filter_words(" rep\u{3000}2024  x"), ["rep", "2024", "x"]);
+        assert_eq!(filter_words("\"my doc\" a\"b c\"d"), ["my doc", "ab cd"]);
+        // A quote left open is closed at the end.
+        assert_eq!(filter_words("x \"my do"), ["x", "my do"]);
+        assert!(filter_words(" \u{3000}\"\" ").is_empty());
+        // Nothing else is read: a minus or a bar is a letter as any.
+        assert_eq!(filter_words("-a|b"), ["-a|b"]);
+    }
+
+    #[test]
+    fn holds_a_name_with_all_the_words_in_any_order_marked_as_one_where_they_meet() {
+        assert_eq!(holds("2024_Report.txt", "rep 2024"), Some(vec![0..4, 5..8]));
+        assert_eq!(holds("abcd", "ab bc"), Some(vec![0..3]));
+        assert_eq!(holds("abcd", "ab cd"), Some(vec![0..4]));
+        assert_eq!(holds("my doc.txt", "\"my doc\""), Some(vec![0..6]));
+        assert_eq!(holds("2024_Report.txt", "rep 2025"), None);
+        assert_eq!(holds("abc", "  "), Some(vec![]));
     }
 
     #[test]
