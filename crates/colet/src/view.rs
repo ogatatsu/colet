@@ -519,13 +519,13 @@ impl Colet {
                         .test_support(),
                 )
             })
-            // Each in a set width, flush right, so they read down the column as a table's would. A folder has
-            // no size of its own; like Explorer, it leaves the cell blank.
+            // Each in a set width, flush left under its heading, so they read down the column as a table's
+            // would. A folder has no size of its own; like Explorer, it leaves the cell blank.
             .when(kind != Kind::Home, |r| {
                 let size = if entry.directory { String::new() } else { time::size(entry.size) };
                 let modified = entry.modified.and_then(time::date_minute).unwrap_or_else(|| "—".into());
                 let cell = |width: f32, text: String| {
-                    div().flex_none().w(px(width)).flex().justify_end().whitespace_nowrap().text_size(px(12.)).text_color(muted).child(text)
+                    div().flex_none().w(px(width)).flex().whitespace_nowrap().text_size(px(12.)).text_color(muted).child(text)
                 };
                 r.child(cell(SIZE_WIDTH, size)).child(cell(MODIFIED_WIDTH, modified))
             })
@@ -960,11 +960,8 @@ impl Colet {
                 .rounded(px(4.))
                 .hover(|d| d.bg(p.hover))
                 .text_color(if chosen { p.text } else { p.text_muted })
-                .when(by != Sort::Name, |d| d.justify_end())
-                // Right of a size or a time, the arrow would push the heading off its cells' edge.
-                .when(chosen && by != Sort::Name, |d| d.child(icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted)))
                 .child(by.label())
-                .when(chosen && by == Sort::Name, |d| d.child(icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted)))
+                .when(chosen, |d| d.child(icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted)))
                 .on_click(cx.listener(move |this, _, _, cx| this.sort_by_heading(id, by, cx)))
                 .test_support()
         };
