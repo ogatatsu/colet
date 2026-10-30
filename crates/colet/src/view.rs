@@ -1876,6 +1876,18 @@ impl Render for Colet {
                     this.open_filter_menu(window, cx);
                 }
             }))
+            // As the strip's button does: the keys stay where they are.
+            .on_action(cx.listener(|this, _: &Unfold, _, cx| {
+                if this.dialog.is_none() && this.state.folded_away() > 0 {
+                    this.state.unfold();
+                    this.changed(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FocusHome, window, cx| {
+                if this.dialog.is_none() {
+                    this.focus_home(window, cx);
+                }
+            }))
             // Esc puts down a drag in home, before the keys reach anything else.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.home_drag.is_some() && event.keystroke.key == "escape" {

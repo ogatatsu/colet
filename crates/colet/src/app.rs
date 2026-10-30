@@ -77,6 +77,8 @@ actions!(
         TrimFilter,
         ClearFilter,
         OpenSearchFilters,
+        Unfold,
+        FocusHome,
     ]
 );
 
@@ -107,6 +109,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-f", FocusSearch, None),
         KeyBinding::new("ctrl-l", FocusSearch, None),
         KeyBinding::new("ctrl-shift-f", OpenSearchFilters, None),
+        KeyBinding::new("ctrl-u", Unfold, None),
+        KeyBinding::new("ctrl-h", FocusHome, None),
         KeyBinding::new("f2", RenameItem, Some(COLUMNS)),
         KeyBinding::new("ctrl-c", CopyItems, Some(COLUMNS)),
         KeyBinding::new("ctrl-x", CutItems, Some(COLUMNS)),
@@ -1150,6 +1154,12 @@ impl Colet {
         self.state.step(by);
         // Moving in home can run a saved search, which the field shows.
         self.sync_search_field(window, cx);
+    }
+
+    /// Home's pane takes the keys, on the row they were on there, as ← back to it lands.
+    pub fn focus_home(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.set_active(0);
+        self.focus_active(window, cx);
     }
 
     pub fn move_column(&mut self, right: bool, window: &mut Window, cx: &mut Context<Self>) {

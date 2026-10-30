@@ -553,6 +553,57 @@ fn opens_a_deep_search_file_on_its_own_folder_and_right_jumps_to_it(cx: &mut Tes
 }
 
 #[gpui_kit::test]
+fn brings_the_folded_folders_out_with_ctrl_u_leaving_the_keys_be(cx: &mut TestAppContext) {
+    let (deep, other) = (file(r"D:\a\b\zeta.txt"), file(r"D:\a\b\zeta2.txt"));
+    let fake = Arc::new(Fake::default().with_results(vec![deep.clone(), other.clone()]).with_folders(&[
+        (r"D:\", vec![folder(r"D:\a")]),
+        (r"D:\a", vec![folder(r"D:\a\b")]),
+        (r"D:\a\b", vec![deep.clone(), other.clone()]),
+    ]));
+    let ui = open(cx, fake);
+    ui.input(cx, "zeta");
+    ui.click(cx, row(&deep.path));
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 2);
+    ui.press(cx, "ctrl-u");
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
+    assert!(ui.act(cx, |window, _| window.try_find("unfold").is_none()));
+    assert_eq!(ui.active(cx), 1);
+    assert!(ui.columns_focused(cx));
+    // Nothing folded: nothing to do.
+    ui.press(cx, "ctrl-u");
+    assert_eq!(ui.active(cx), 1);
+    // From the search field too, which keeps the keys.
+    let results = ui.read(cx, |v| v.state.columns[1].id);
+    ui.click_in(cx, ("column", results), row(&other.path));
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 2);
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "ctrl-u");
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
+    assert!(ui.read(cx, |v| v.search_focused));
+}
+
+#[gpui_kit::test]
+fn takes_the_keys_home_with_ctrl_h_on_the_row_they_were_on(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(drive_d()));
+    ui.press(cx, "down");
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    assert!(ui.columns_focused(cx));
+    let open = ui.read(cx, |v| v.state.columns.len());
+    ui.press(cx, "ctrl-h");
+    assert!(ui.home_focused(cx));
+    assert_eq!(ui.active(cx), 0);
+    assert_eq!(ui.read(cx, |v| v.state.columns[0].focused.clone()), Some(PathBuf::from(r"D:\")));
+    // It only goes there: the folders beside it stay open.
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), open);
+    // From the search field too.
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "ctrl-h");
+    assert!(ui.home_focused(cx));
+    assert_eq!(ui.read(cx, |v| v.state.columns[0].focused.clone()), Some(PathBuf::from(r"D:\")));
+}
+
+#[gpui_kit::test]
 fn walks_folders_by_keys_and_goes_back(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],
