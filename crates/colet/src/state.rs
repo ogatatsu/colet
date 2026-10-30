@@ -47,6 +47,9 @@ pub struct Column {
     pub highlight: Option<PathBuf>,
     /// Where a Shift range starts: the row last picked on its own.
     pub anchor: Option<PathBuf>,
+    /// What was picked before the first Ctrl+Shift range from the anchor, which the next ones add to
+    /// in its place; gone once the anchor moves.
+    base: Option<Vec<PathBuf>>,
     /// What to pick once listed, by path key: the items just pasted here, which the listing that shows
     /// them may come after the paste is done.
     pub pick: Option<Vec<OsString>>,
@@ -159,9 +162,32 @@ impl Column {
             request: 0,
             highlight,
             anchor: None,
+            base: None,
             pick: None,
             filter: None,
         }
+    }
+
+    /// The row the keys land on `by` rows from theirs (clamped at the ends); with none yet, from the item
+    /// the column points at, or above its first row.
+    fn landing(&self, by: isize) -> Option<usize> {
+        let last = self.entries.len().checked_sub(1)? as isize;
+        let from = self.focused.as_ref().or(self.highlight.as_ref()).and_then(|p| self.entries.iter().position(|e| &e.path == p));
+        Some(match from {
+            Some(from) => (from as isize + by).clamp(0, last),
+            None if by > 0 => (by - 1).clamp(0, last),
+            None => 0,
+        } as usize)
+    }
+
+    /// Where a Shift range to `path` starts, and the rows it takes in.
+    fn range_to(&self, path: &Path) -> Option<(Option<PathBuf>, Vec<PathBuf>)> {
+        let position = |p: &PathBuf| self.entries.iter().position(|e| &e.path == p);
+        let to = self.entries.iter().position(|e| e.path == path)?;
+        let anchor = self.anchor.clone().or_else(|| self.focused.clone()).filter(|a| position(a).is_some());
+        let from = anchor.as_ref().and_then(position).unwrap_or(to);
+        let range = self.entries[from.min(to)..=from.max(to)].iter().map(|e| e.path.clone()).collect();
+        Some((anchor, range))
     }
 
     /// Loading with nothing listed yet: its total is not known, not 0.
@@ -568,6 +594,7 @@ impl State {
             let c = &mut self.columns[index];
             c.focused = paths.last().cloned();
             c.anchor = paths.last().cloned();
+            c.base = None;
             c.selected = paths;
             c.highlight = None;
             c.pick = None;
@@ -678,21 +705,32 @@ impl State {
     pub fn step(&mut self, by: isize) {
         let index = self.active;
         let c = &self.columns[index];
-        if c.entries.is_empty() {
-            return;
-        }
-        let from = c.focused.as_ref().or(c.highlight.as_ref()).and_then(|p| c.entries.iter().position(|e| &e.path == p));
-        let last = c.entries.len() as isize - 1;
-        let to = match from {
-            Some(from) => (from as isize + by).clamp(0, last),
-            None if by > 0 => (by - 1).clamp(0, last),
-            None => 0,
-        } as usize;
+        let Some(to) = c.landing(by) else { return };
         let path = c.entries[to].path.clone();
         if c.selected.len() == 1 && c.selected[0] == path {
             return;
         }
         self.select(index, vec![path]);
+    }
+
+    /// Ctrl+↑↓: moves the keys `by` rows in the active column as `step` does, picking nothing.
+    pub fn focus_step(&mut self, by: isize) {
+        let c = &mut self.columns[self.active];
+        if let Some(to) = c.landing(by) {
+            c.focused = Some(c.entries[to].path.clone());
+        }
+    }
+
+    /// Ctrl+Space: adds the row the keys are on to the selection, or takes it out; with none, the row
+    /// they would land on.
+    pub fn toggle_focused(&mut self) {
+        let index = self.active;
+        let c = &self.columns[index];
+        let listed = |p: &&PathBuf| c.entry(p).is_some();
+        let target = c.focused.as_ref().filter(listed).or(c.highlight.as_ref().filter(listed)).or(c.entries.first().map(|e| &e.path));
+        if let Some(path) = target.cloned() {
+            self.toggle(index, &path);
+        }
     }
 
     /// Ctrl+click: adds the row to the selection, or takes it out.
@@ -712,20 +750,32 @@ impl State {
 
     /// Shift+click: picks the rows from the anchor to `path`, in their order.
     pub fn extend(&mut self, index: usize, path: &Path) {
-        let Some(c) = self.columns.get(index) else { return };
-        let position = |p: &PathBuf| c.entries.iter().position(|e| &e.path == p);
-        let Some(to) = c.entries.iter().position(|e| e.path == path) else { return };
-        let anchor = c.anchor.clone().or_else(|| c.focused.clone()).filter(|a| position(a).is_some());
-        let from = anchor.as_ref().and_then(position).unwrap_or(to);
-        let range: Vec<PathBuf> = c.entries[from.min(to)..=from.max(to)].iter().map(|e| e.path.clone()).collect();
+        let Some((anchor, range)) = self.columns.get(index).and_then(|c| c.range_to(path)) else { return };
         self.select(index, range);
         let c = &mut self.columns[index];
         c.focused = Some(path.to_owned());
         c.anchor = anchor.or_else(|| Some(path.to_owned()));
     }
 
-    /// Shift+↑↓: moves the keys `by` rows, picking the rows from the anchor to there.
-    pub fn extend_step(&mut self, by: isize) {
+    /// Ctrl+Shift+click: adds the rows from the anchor to `path` to what was picked before the first such
+    /// range from the anchor, so a range drawn back lets go of the rows it passed.
+    pub fn add_range(&mut self, index: usize, path: &Path) {
+        let Some(c) = self.columns.get(index) else { return };
+        let Some((anchor, range)) = c.range_to(path) else { return };
+        let base = c.base.clone().unwrap_or_else(|| c.selected.clone());
+        let kept: HashSet<&PathBuf> = base.iter().collect();
+        let mut picked = base.clone();
+        picked.extend(range.into_iter().filter(|p| !kept.contains(p)));
+        self.select(index, picked);
+        let c = &mut self.columns[index];
+        c.focused = Some(path.to_owned());
+        c.anchor = anchor.or_else(|| Some(path.to_owned()));
+        c.base = Some(base);
+    }
+
+    /// Shift+↑↓: moves the keys `by` rows, picking the rows from the anchor to there; with Ctrl, adding
+    /// them as `add_range` does.
+    pub fn extend_step(&mut self, by: isize, add: bool) {
         let index = self.active;
         let c = &self.columns[index];
         if c.entries.is_empty() {
@@ -737,7 +787,11 @@ impl State {
             None => 0,
         };
         let path = c.entries[to].path.clone();
-        self.extend(index, &path);
+        if add {
+            self.add_range(index, &path);
+        } else {
+            self.extend(index, &path);
+        }
     }
 
     /// Ctrl+A: picks every row listed so far.
@@ -800,7 +854,7 @@ impl State {
                     e.path = path;
                 }
             }
-            for p in &mut c.selected {
+            for p in c.selected.iter_mut().chain(c.base.iter_mut().flatten()) {
                 *p = moved(p);
             }
             for p in [&mut c.focused, &mut c.highlight, &mut c.anchor].into_iter().flatten() {
@@ -1538,10 +1592,61 @@ mod tests {
         assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\b", r"D:\d"]));
         s.toggle(1, Path::new(r"D:\a"));
         assert_eq!(s.columns[1].selected, all(&[r"D:\b", r"D:\d"]));
-        s.extend_step(-1);
+        s.extend_step(-1, false);
         assert_eq!(s.columns[1].selected, all(&[r"D:\a"]));
         s.select_all(1);
         assert_eq!(s.columns[1].selected.len(), 4);
+    }
+
+    #[test]
+    fn picks_rows_apart_from_the_keys_alone() {
+        let entries = ["a", "b", "c", "d", "e", "f"].map(|n| file(&format!(r"D:\{n}")));
+        let mut s = drive(entries.to_vec());
+        s.select(1, one(r"D:\a"));
+        // Ctrl+↓ moves the keys and nothing else; Ctrl+Space picks where they are.
+        s.focus_step(2);
+        assert_eq!(s.columns[1].selected, one(r"D:\a"));
+        assert_eq!(s.columns[1].focused.as_deref(), Some(Path::new(r"D:\c")));
+        s.toggle_focused();
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\c"]));
+        s.focus_step(isize::MAX / 2);
+        assert_eq!(s.columns[1].focused.as_deref(), Some(Path::new(r"D:\f")));
+        s.focus_step(-1);
+        s.toggle_focused();
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\c", r"D:\e"]));
+        // Again, it lets go.
+        s.toggle_focused();
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\c"]));
+    }
+
+    #[test]
+    fn adds_a_range_drawn_back_from_the_anchor_to_what_was_picked() {
+        let entries = ["a", "b", "c", "d", "e", "f"].map(|n| file(&format!(r"D:\{n}")));
+        let mut s = drive(entries.to_vec());
+        s.select(1, one(r"D:\a"));
+        s.focus_step(2);
+        s.toggle_focused();
+        // From c, Ctrl+Shift+↓ twice adds d and e beside a.
+        s.extend_step(1, true);
+        s.extend_step(1, true);
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\c", r"D:\d", r"D:\e"]));
+        // Drawn back, e goes; a and c, picked before, stay.
+        s.extend_step(-1, true);
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\c", r"D:\d"]));
+        // Moving the keys alone keeps the anchor, and the next range starts from c again.
+        s.focus_step(2);
+        s.extend_step(1, true);
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\c", r"D:\d", r"D:\e", r"D:\f"]));
+        s.extend_step(-3, true);
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\c"]));
+        // Upward from c takes b in, and a, already picked, once only.
+        s.extend_step(-1, true);
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\c", r"D:\b"]));
+        s.add_range(1, Path::new(r"D:\a"));
+        assert_eq!(s.columns[1].selected, all(&[r"D:\a", r"D:\c", r"D:\b"]));
+        // Shift alone puts the range in the selection's place.
+        s.extend_step(1, false);
+        assert_eq!(s.columns[1].selected, all(&[r"D:\b", r"D:\c"]));
     }
 
     #[test]

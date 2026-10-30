@@ -70,6 +70,15 @@ actions!(
         SelectAll,
         ExtendUp,
         ExtendDown,
+        AddUp,
+        AddDown,
+        FocusPrevious,
+        FocusNext,
+        FocusPageUp,
+        FocusPageDown,
+        FocusFirst,
+        FocusLast,
+        TogglePicked,
         OpenMenu,
         OpenTextMenu,
         CloseMenu,
@@ -122,6 +131,16 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-a", SelectAll, Some(COLUMNS)),
         KeyBinding::new("shift-up", ExtendUp, Some(COLUMNS)),
         KeyBinding::new("shift-down", ExtendDown, Some(COLUMNS)),
+        KeyBinding::new("ctrl-shift-up", AddUp, Some(COLUMNS)),
+        KeyBinding::new("ctrl-shift-down", AddDown, Some(COLUMNS)),
+        // The keys move apart from the selection, Ctrl+Space picking the rows they pass on the way.
+        KeyBinding::new("ctrl-up", FocusPrevious, Some(COLUMNS)),
+        KeyBinding::new("ctrl-down", FocusNext, Some(COLUMNS)),
+        KeyBinding::new("ctrl-pageup", FocusPageUp, Some(COLUMNS)),
+        KeyBinding::new("ctrl-pagedown", FocusPageDown, Some(COLUMNS)),
+        KeyBinding::new("ctrl-home", FocusFirst, Some(COLUMNS)),
+        KeyBinding::new("ctrl-end", FocusLast, Some(COLUMNS)),
+        KeyBinding::new("ctrl-space", TogglePicked, Some(COLUMNS)),
         KeyBinding::new("shift-f10", OpenMenu, Some(COLUMNS)),
         KeyBinding::new("menu", OpenMenu, Some(COLUMNS)),
         // In a text field, where the field's own keys are.
@@ -1154,6 +1173,11 @@ impl Colet {
         self.state.step(by);
         // Moving in home can run a saved search, which the field shows.
         self.sync_search_field(window, cx);
+    }
+
+    pub fn focus_step(&mut self, by: isize, cx: &mut Context<Self>) {
+        self.state.focus_step(by);
+        self.changed(cx);
     }
 
     /// Home's pane takes the keys, on the row they were on there, as ← back to it lands.

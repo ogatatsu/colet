@@ -319,11 +319,31 @@ impl Colet {
                 this.changed(cx);
             }))
             .on_action(cx.listener(|this, _: &ExtendUp, _, cx| {
-                this.state.extend_step(-1);
+                this.state.extend_step(-1, false);
                 this.changed(cx);
             }))
             .on_action(cx.listener(|this, _: &ExtendDown, _, cx| {
-                this.state.extend_step(1);
+                this.state.extend_step(1, false);
+                this.changed(cx);
+            }))
+            .on_action(cx.listener(|this, _: &AddUp, _, cx| {
+                this.state.extend_step(-1, true);
+                this.changed(cx);
+            }))
+            .on_action(cx.listener(|this, _: &AddDown, _, cx| {
+                this.state.extend_step(1, true);
+                this.changed(cx);
+            }))
+            .on_action(cx.listener(|this, _: &FocusPrevious, _, cx| this.focus_step(-1, cx)))
+            .on_action(cx.listener(|this, _: &FocusNext, _, cx| this.focus_step(1, cx)))
+            .on_action(cx.listener(|this, _: &FocusPageUp, _, cx| this.focus_step(-10, cx)))
+            .on_action(cx.listener(|this, _: &FocusPageDown, _, cx| this.focus_step(10, cx)))
+            .on_action(cx.listener(|this, _: &FocusFirst, _, cx| this.focus_step(-isize::MAX / 2, cx)))
+            .on_action(cx.listener(|this, _: &FocusLast, _, cx| this.focus_step(isize::MAX / 2, cx)))
+            .on_action(cx.listener(|this, _: &TogglePicked, window, cx| {
+                this.state.toggle_focused();
+                // A saved search picked alone in home runs, which the field shows.
+                this.sync_search_field(window, cx);
                 this.changed(cx);
             }))
             .on_action(cx.listener(|this, _: &OpenMenu, window, cx| {
@@ -541,6 +561,10 @@ impl Colet {
                 let modifiers = event.modifiers();
                 if event.click_count() >= 2 {
                     this.open(index, &path, window, cx);
+                } else if modifiers.control && modifiers.shift {
+                    this.state.add_range(index, &path);
+                    this.state.set_active(index);
+                    this.changed(cx);
                 } else if modifiers.control {
                     this.state.toggle(index, &path);
                     this.state.set_active(index);

@@ -20,7 +20,7 @@ use colet_core::{
 };
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, EntityInputHandler as _, SharedString, Entity, Focusable, ScrollDelta, ScrollStrategy, TestAppContext, Window,
+    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, EntityInputHandler as _, SharedString, Entity, Focusable, Modifiers, ScrollDelta, ScrollStrategy, TestAppContext, Window,
     WindowBounds, WindowOptions, point, px, size,
 };
 
@@ -399,6 +399,12 @@ impl Ui {
     fn click(&self, cx: &mut TestAppContext, id: impl Into<ElementId>) {
         let id = id.into();
         self.act(cx, |window, cx| window.click(id, cx));
+        settle(cx);
+    }
+
+    fn click_with(&self, cx: &mut TestAppContext, id: impl Into<ElementId>, modifiers: Modifiers) {
+        let id = id.into();
+        self.act(cx, |window, cx| window.click_with_modifiers(id, modifiers, cx));
         settle(cx);
     }
 
@@ -1668,6 +1674,23 @@ fn picks_several_rows_with_ctrl_shift_and_ctrl_a(cx: &mut TestAppContext) {
     ui.press(cx, "shift-up");
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt", r"D:\work\b.txt"]);
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
+}
+
+#[gpui_kit::test]
+fn picks_rows_apart_from_the_keys(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    // Ctrl+↓ passes b by, picking nothing; Ctrl+Space picks c beside a.
+    ui.press(cx, "ctrl-down");
+    ui.press(cx, "ctrl-down");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
+    ui.press(cx, "ctrl-space");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt", r"D:\work\c.txt"]);
+    // Ctrl+Shift+↑ adds b, from c.
+    ui.press(cx, "ctrl-shift-up");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt", r"D:\work\c.txt", r"D:\work\b.txt"]);
+    // Ctrl+Shift+click draws it back to c alone, a staying.
+    ui.click_with(cx, row(r"D:\work\c.txt"), Modifiers { control: true, shift: true, ..Default::default() });
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt", r"D:\work\c.txt"]);
 }
 
 #[gpui_kit::test]
