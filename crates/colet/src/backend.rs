@@ -7,7 +7,10 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
-use crate::settings::{self, LoadError, Settings};
+use crate::{
+    settings::{self, LoadError, Settings},
+    sorts::{self, Sorts},
+};
 use colet_core::{
     entry::{Entry, Order},
     everything::{self, Page, SearchSession},
@@ -42,6 +45,8 @@ pub trait Backend: Send + Sync + 'static {
     fn reconnect(&self);
     fn load_settings(&self) -> Result<Settings, LoadError>;
     fn save_settings(&self, settings: &Settings) -> Result<(), String>;
+    fn load_sorts(&self) -> Result<Sorts, LoadError>;
+    fn save_sorts(&self, sorts: &Sorts) -> Result<(), String>;
     /// Carries out a file operation, telling `report` how each item ends. Blocks until it is done.
     fn operate(&self, request: Request, owner: Owner, report: Box<dyn FnMut(Event) + Send>) -> Result<(), String>;
     /// The files on the clipboard; `None` while another app holds it.
@@ -127,6 +132,14 @@ impl Backend for Live {
 
     fn save_settings(&self, settings: &Settings) -> Result<(), String> {
         settings::save(settings)
+    }
+
+    fn load_sorts(&self) -> Result<Sorts, LoadError> {
+        sorts::load()
+    }
+
+    fn save_sorts(&self, sorts: &Sorts) -> Result<(), String> {
+        sorts::save(sorts)
     }
 
     fn operate(&self, request: Request, owner: Owner, report: Box<dyn FnMut(Event) + Send>) -> Result<(), String> {

@@ -2,7 +2,7 @@
 //! and the status bar beside it.
 use std::{ops::Range, rc::Rc, time::Instant};
 
-use colet_core::{entry::Entry, paths::{folder_name, id_text, path_key, shown}, time};
+use colet_core::{entry::{Entry, Sort, direction_label}, paths::{folder_name, id_text, path_key, shown}, time};
 use gpui_kit::base::input::{self, Input, InputState};
 use gpui_kit::component::{button::{Button, ButtonVariants}, status_bar::StatusBar, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -787,6 +787,8 @@ impl Colet {
         let path = shown(&c.path);
         let star_path = c.path.clone();
         let body = self.column_body(index, marked, cx);
+        let sort_button = self.sort_button(index, window, cx);
+        let headings = self.headings(index, cx);
         div()
             .id(("column", id))
             .role(Role::Group)
@@ -848,6 +850,7 @@ impl Colet {
                             .child(header_title),
                     )
                     .child(div().text_size(px(12.)).text_color(p.text_faint).child(count))
+                    .child(sort_button)
                     .child({
                         let kept = match kind {
                             Kind::Search => self.settings.saved(&self.state.query, self.state.search_filter.as_deref()).is_some(),
@@ -879,9 +882,107 @@ impl Colet {
             .when_some(field, |d, input| {
                 d.child(div().flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(self.filter_field(id, filtering, &input, window, cx)))
             })
+            .child(headings)
             .child(body)
             .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
             .test_support()
+            .into_any_element()
+    }
+
+    /// The button of the column's own order, beside its star: accented while it is given one apart from
+    /// the default, and its menu under it.
+    fn sort_button(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let c = &self.state.columns[index];
+        let id = c.id;
+        let (order, own) = (self.order_of(c), self.own_order(c).is_some());
+        let open = self.column_sort_open() == Some(id);
+        let label = format!("並び順: {}{}", order.label(), if own { "" } else { "（既定）" });
+        let focus = self.stop(format!("column-sort:{id}"), cx);
+        let keyed = keyed(&focus, window);
+        div()
+            .relative()
+            .flex_none()
+            .child(
+                div()
+                    .id(("column-sort", id))
+                    .test_support()
+                    .track_focus(&focus)
+                    .key_context(SORT)
+                    .on_action(cx.listener(move |this, _: &OpenSort, window, cx| this.open_column_sort(id, window, cx)))
+                    .role(Role::Button)
+                    .aria_label(label.clone())
+                    .aria_expanded(open)
+                    .tip(label)
+                    .size(px(24.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(4.))
+                    .border_2()
+                    .border_color(if keyed { p.focus } else { transparent_black() })
+                    .hover(|d| d.bg(p.hover))
+                    .when(open, |d| d.bg(p.hover))
+                    .child(icon("arrow-up-down", 14., if own { p.accent } else { p.text_muted }))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if this.column_sort_open() == Some(id) {
+                            this.close_menus(true, window, cx);
+                        } else {
+                            this.open_column_sort(id, window, cx);
+                        }
+                    })),
+            )
+            .when_some(self.menu_element("column-sort-menu", "並び順", cx).filter(|_| open), |d, menu| {
+                d.child(deferred(div().absolute().top(px(28.)).right_0().w(px(160.)).child(menu)).with_priority(1))
+            })
+            .into_any_element()
+    }
+
+    /// The headings over the column's rows, each sorting it by what it heads; the one it goes by shows
+    /// the way it runs. Laid out as a row is, so each stands over its cells.
+    fn headings(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let c = &self.state.columns[index];
+        let id = c.id;
+        let order = self.order_of(c);
+        let heading = |by: Sort, name: &'static str| {
+            let chosen = order.by == by;
+            let label = if chosen { format!("{}で並べ替え（{}）", by.label(), direction_label(order.descending)) } else { format!("{}で並べ替え", by.label()) };
+            div()
+                .id((name, id))
+                .role(Role::Button)
+                .aria_label(label)
+                .h_full()
+                .px(px(4.))
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .rounded(px(4.))
+                .hover(|d| d.bg(p.hover))
+                .text_color(if chosen { p.text } else { p.text_muted })
+                .when(by != Sort::Name, |d| d.justify_end())
+                // Right of a size or a time, the arrow would push the heading off its cells' edge.
+                .when(chosen && by != Sort::Name, |d| d.child(icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted)))
+                .child(by.label())
+                .when(chosen && by == Sort::Name, |d| d.child(icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted)))
+                .on_click(cx.listener(move |this, _, _, cx| this.sort_by_heading(id, by, cx)))
+                .test_support()
+        };
+        // The row's room: the list's 4px, then the row's 8px and its 2px ring; inside, the gap between cells.
+        // Each heading reaches 4px past its cells, over the gap, so its text stands where theirs does.
+        div()
+            .flex_none()
+            .h(px(24.))
+            .px(px(10.))
+            .flex()
+            .items_center()
+            .border_b_1()
+            .border_color(p.border)
+            .text_size(px(11.))
+            .child(heading(Sort::Name, "sort-by-name").flex_1().min_w_0())
+            .child(heading(Sort::Size, "sort-by-size").w(px(SIZE_WIDTH + 8.)).flex_none())
+            .child(heading(Sort::Modified, "sort-by-modified").w(px(MODIFIED_WIDTH + 8.)).flex_none())
+            .child(div().w(px(13. + 8.)).flex_none())
             .into_any_element()
     }
 
@@ -1074,8 +1175,9 @@ impl Colet {
                                 .key_context(SORT)
                                 .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(window, cx)))
                                 .role(Role::Button)
-                                .aria_label(format!("並び順: {}", sort.label()))
+                                .aria_label(format!("既定の並び順: {}", sort.label()))
                                 .aria_expanded(self.sort_open())
+                                .tip("既定の並び順")
                                 .h(px(32.))
                                 .pl(px(10.))
                                 .pr_2()
@@ -1101,7 +1203,7 @@ impl Colet {
                                 .test_support(),
                         ),
                     )
-                    .when_some(self.menu_element("sort-menu", "並び順", cx).filter(|_| self.sort_open()), |d, menu| {
+                    .when_some(self.menu_element("sort-menu", "既定の並び順", cx).filter(|_| self.sort_open()), |d, menu| {
                         d.child(deferred(div().absolute().top(px(36.)).right_0().w(px(160.)).child(menu)).with_priority(1))
                     }),
             )

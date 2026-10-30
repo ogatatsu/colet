@@ -210,7 +210,7 @@ pub fn pin_key(path: &Path) -> std::ffi::OsString {
 /// The favorites and the pins, each as its path's text; one whose path is not text (an unpaired surrogate,
 /// which Windows allows in a name) as `{"utf16": [...]}`, the units Windows holds, so it still names that
 /// folder alone. One read neither way (a file edited by hand) is left out alone.
-mod paths {
+pub(crate) mod paths {
     use std::ffi::OsString;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
@@ -223,33 +223,37 @@ mod paths {
         Wide { utf16: Vec<u16> },
     }
 
+    /// One path as it is written.
+    pub fn kept(path: &Path) -> serde_json::Value {
+        let kept = match path.to_str() {
+            Some(text) => Kept::Text(text.to_owned()),
+            None => Kept::Wide { utf16: path.as_os_str().encode_wide().collect() },
+        };
+        serde_json::to_value(kept).unwrap_or_default()
+    }
+
+    /// One path as it is written; none, when it reads neither way.
+    pub fn read(value: serde_json::Value) -> Option<PathBuf> {
+        match serde_json::from_value(value).ok()? {
+            Kept::Text(text) => Some(PathBuf::from(text)),
+            Kept::Wide { utf16 } => Some(OsString::from_wide(&utf16).into()),
+        }
+    }
+
     pub fn serialize<S: Serializer>(paths: &[PathBuf], serializer: S) -> Result<S::Ok, S::Error> {
-        let kept: Vec<Kept> = paths
-            .iter()
-            .map(|path| match path.to_str() {
-                Some(text) => Kept::Text(text.to_owned()),
-                None => Kept::Wide { utf16: path.as_os_str().encode_wide().collect() },
-            })
-            .collect();
-        kept.serialize(serializer)
+        paths.iter().map(|path| kept(path)).collect::<Vec<_>>().serialize(serializer)
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<PathBuf>, D::Error> {
         let values = Vec::<serde_json::Value>::deserialize(deserializer)?;
-        Ok(values
-            .into_iter()
-            .filter_map(|value| match serde_json::from_value(value).ok()? {
-                Kept::Text(text) => Some(PathBuf::from(text)),
-                Kept::Wide { utf16 } => Some(OsString::from_wide(&utf16).into()),
-            })
-            .collect())
+        Ok(values.into_iter().filter_map(read).collect())
     }
 }
 
 /// The sort order as `{"by": "size", "descending": true}`, read leniently: what is missing or not known
 /// (a file edited by hand, or written by a later Colet) goes back to its default alone, rather than have
 /// the whole file taken for broken.
-mod order {
+pub(crate) mod order {
     use super::*;
 
     fn name(by: Sort) -> &'static str {
@@ -277,12 +281,12 @@ mod order {
     }
 }
 
-/// `%APPDATA%\Colet\settings.json`.
-pub fn path() -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("APPDATA")?).join("Colet").join("settings.json"))
+/// `%APPDATA%\Colet\<name>`, beside the other files Colet keeps.
+pub fn kept_path(name: &str) -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("APPDATA")?).join("Colet").join(name))
 }
 
-/// Why the settings kept could not be used; Colet starts on the defaults either way.
+/// Why a file kept could not be used; Colet starts on the defaults either way.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadError {
     pub message: String,
@@ -291,28 +295,42 @@ pub struct LoadError {
     pub kept: bool,
 }
 
+/// A file Colet keeps, as its words name it.
+pub struct File {
+    /// Its name without `.json`, which a broken one is put aside under.
+    pub stem: &'static str,
+    /// What it holds: "設定".
+    pub what: &'static str,
+    /// What it holds, as it is a file: "設定ファイル".
+    pub file: &'static str,
+    /// What Colet starts on without it: "既定の設定".
+    pub fallback: &'static str,
+}
+
+pub const SETTINGS: File = File { stem: "settings", what: "設定", file: "設定ファイル", fallback: "既定の設定" };
+
 type Done = mpsc::Sender<Result<(), String>>;
 
-/// Writes the settings on a thread of its own, one save after another in the order they were sent, so
+/// Writes a file kept on a thread of its own, one save after another in the order they were sent, so
 /// an older save never lands over a newer one: the final save on close waits for those before it.
-pub struct Saver(mpsc::Sender<(Settings, Done)>);
+pub struct Saver<T>(mpsc::Sender<(T, Done)>);
 
-impl Saver {
-    pub fn new(write: impl Fn(&Settings) -> Result<(), String> + Send + 'static) -> Self {
-        let (saves, queued) = mpsc::channel::<(Settings, Done)>();
+impl<T: Send + 'static> Saver<T> {
+    pub fn new(write: impl Fn(&T) -> Result<(), String> + Send + 'static) -> Self {
+        let (saves, queued) = mpsc::channel::<(T, Done)>();
         // Ends once the saver is dropped and the saves sent before are written.
         std::thread::spawn(move || {
-            for (settings, done) in queued {
-                let _ = done.send(write(&settings));
+            for (kept, done) in queued {
+                let _ = done.send(write(&kept));
             }
         });
         Self(saves)
     }
 
-    /// Queues `settings` behind the saves before it; the receiver hears how its write went.
-    pub fn save(&self, settings: Settings) -> mpsc::Receiver<Result<(), String>> {
+    /// Queues `kept` behind the saves before it; the receiver hears how its write went.
+    pub fn save(&self, kept: T) -> mpsc::Receiver<Result<(), String>> {
         let (done, result) = mpsc::channel();
-        let _ = self.0.send((settings, done));
+        let _ = self.0.send((kept, done));
         result
     }
 }
@@ -322,35 +340,47 @@ pub fn written(result: mpsc::Receiver<Result<(), String>>) -> Result<(), String>
     result.recv().unwrap_or_else(|_| Err("設定を保存できません".into()))
 }
 
+/// `%APPDATA%\Colet\settings.json`.
+pub fn path() -> Option<PathBuf> {
+    kept_path("settings.json")
+}
+
 /// The settings kept, or the defaults when there are none yet.
 pub fn load() -> Result<Settings, LoadError> {
     let Some(path) = path() else { return Ok(Settings::default()) };
     load_from(&path)
 }
 
-/// A file that does not parse is put aside, so the defaults written next do not take its place unseen.
 fn load_from(path: &Path) -> Result<Settings, LoadError> {
+    read(path, &SETTINGS).map(|mut settings: Settings| {
+        settings.normalize();
+        settings
+    })
+}
+
+/// What `path` holds, or the defaults when it is not there yet. A file that does not parse is put aside,
+/// so the defaults written next do not take its place unseen.
+pub fn read<T: serde::de::DeserializeOwned + Default>(path: &Path, file: &File) -> Result<T, LoadError> {
     let kept = |e: &dyn std::fmt::Display| LoadError {
-        message: format!("設定を読み込めません: {e}。元の設定ファイルを残すため、変更は保存しません。"),
+        message: format!("{}を読み込めません: {e}。元の{}を残すため、変更は保存しません。", file.what, file.file),
         kept: true,
     };
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Settings::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
         Err(e) => return Err(kept(&e)),
     };
-    match serde_json::from_slice::<Settings>(&bytes) {
-        Ok(mut settings) => {
-            settings.normalize();
-            Ok(settings)
-        }
+    match serde_json::from_slice::<T>(&bytes) {
+        Ok(read) => Ok(read),
         Err(e) => {
             let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-            let aside = path.with_file_name(format!("settings.broken-{stamp}.json"));
+            let aside = path.with_file_name(format!("{}.broken-{stamp}.json", file.stem));
             match std::fs::rename(path, &aside) {
                 Ok(()) => Err(LoadError {
                     message: format!(
-                        "設定ファイルが壊れていたため、既定の設定で始めました（{e}）。元のファイルは{}に残しています。",
+                        "{}が壊れていたため、{}で始めました（{e}）。元のファイルは{}に残しています。",
+                        file.file,
+                        file.fallback,
                         aside.display()
                     ),
                     kept: false,
@@ -368,10 +398,15 @@ pub fn save(settings: &Settings) -> Result<(), String> {
 }
 
 fn save_to(settings: &Settings, path: &Path) -> Result<(), String> {
-    let fail = |e: std::io::Error| format!("設定を保存できません: {e}");
+    write(settings, path, &SETTINGS)
+}
+
+/// Writes `kept` beside `path` and then over it, so a failed write leaves the old one whole.
+pub fn write<T: Serialize>(kept: &T, path: &Path, file: &File) -> Result<(), String> {
+    let fail = |e: std::io::Error| format!("{}を保存できません: {e}", file.what);
     std::fs::create_dir_all(path.parent().unwrap()).map_err(fail)?;
     let temporary = path.with_extension("json.tmp");
-    let json = serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?;
+    let json = serde_json::to_vec_pretty(kept).map_err(|e| e.to_string())?;
     std::fs::write(&temporary, json).map_err(fail)?;
     std::fs::rename(&temporary, path).map_err(fail)
 }
@@ -391,7 +426,7 @@ mod tests {
         let (release, released) = mpsc::channel::<()>();
         let gate = Mutex::new((started, released));
         let target = path.clone();
-        let saver = Saver::new(move |settings| {
+        let saver = Saver::new(move |settings: &Settings| {
             if settings.favorites == [PathBuf::from("older")] {
                 let gate = gate.lock().unwrap();
                 gate.0.send(()).unwrap();

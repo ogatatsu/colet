@@ -12,6 +12,7 @@ mod places;
 mod reveal;
 mod search_filters;
 mod settings;
+mod sorts;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -38,7 +39,8 @@ gpui_kit::assets::icon_assets!(ExtraIcons, [
         FolderPlus,
         Trash,
         Clock,
-        Funnel
+        Funnel,
+        ArrowUpDown
     ]);
 
 /// GPUI Kit's icons, and the few more Colet draws.
@@ -69,6 +71,7 @@ fn main() {
         app::bind_keys(cx);
         let live: backend::Shared = std::sync::Arc::new(backend::Live::default());
         let settings = live.load_settings();
+        let sorts = live.load_sorts();
         // Where it was left, or centered on the screen the first time.
         let (display_id, window_bounds) = match settings.as_ref().ok().and_then(|s| s.window) {
             Some(w) => {
@@ -92,7 +95,7 @@ fn main() {
                 if let Ok(RawWindowHandle::Win32(handle)) = HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
                     instance.answer(handle.hwnd.get());
                 }
-                cx.new(|cx| app::Colet::new(live, settings, window, cx))
+                cx.new(|cx| app::Colet::new(live, settings, sorts, window, cx))
             },
         )
         .expect("failed to open window");

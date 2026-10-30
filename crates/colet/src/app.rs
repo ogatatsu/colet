@@ -37,7 +37,8 @@ use crate::{
     ops::{ClipboardLane, HistoryEntry, Running},
     places::{Dialog, HomeDrag, HomeRows, Landing, home_entries, home_groups, places},
     settings::{LoadError, Saver, Settings, everything_query, narrowed_query},
-    state::{ColumnId, Kind, State, filter_words, room_for_a_word},
+    sorts::Sorts,
+    state::{Column, ColumnId, Kind, State, filter_words, room_for_a_word},
     theme::Palette,
 };
 
@@ -271,9 +272,14 @@ pub struct Colet {
     pub settings: Settings,
     /// Writes the settings; none when the file read at start could not be read and is still there, so
     /// it is never written over this session.
-    pub(crate) settings_saver: Option<Saver>,
+    pub(crate) settings_saver: Option<Saver<Settings>>,
     /// Counts the changes to the settings: a save waiting out a burst goes only for the last.
     pub(crate) settings_changes: u64,
+    /// The orders the columns are given apart from `settings.sort`, kept in a file of their own and
+    /// written as the settings are.
+    pub sorts: Sorts,
+    pub(crate) sorts_saver: Option<Saver<Sorts>>,
+    pub(crate) sorts_changes: u64,
     /// What the latest operation sent away, by path key: a listing that finds it gone takes it as
     /// Colet's own doing.
     pub(crate) departed: HashSet<OsString>,
@@ -341,11 +347,12 @@ pub struct Colet {
 }
 
 impl Colet {
-    /// `settings` as read at start; an error is said once the window is up, and the defaults used. A file
-    /// still there unread is never written over.
+    /// `settings` and `sorts` as read at start; an error is said once the window is up, and the defaults
+    /// used. A file still there unread is never written over.
     pub fn new(
         backend: backend::Shared,
         settings: Result<Settings, LoadError>,
+        sorts: Result<Sorts, LoadError>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -410,6 +417,14 @@ impl Colet {
             let backend = backend.clone();
             Saver::new(move |settings| backend.save_settings(settings))
         });
+        let (sorts, sorts_problem, keep_sorts) = match sorts {
+            Ok(sorts) => (sorts, None, false),
+            Err(error) => (Sorts::default(), Some(error.message), error.kept),
+        };
+        let sorts_saver = (!keep_sorts).then(|| {
+            let backend = backend.clone();
+            Saver::new(move |sorts| backend.save_sorts(sorts))
+        });
         let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
             Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
             _ => 0,
@@ -456,6 +471,9 @@ impl Colet {
             settings,
             settings_saver,
             settings_changes: 0,
+            sorts,
+            sorts_saver,
+            sorts_changes: 0,
             departed: HashSet::new(),
             dialog: None,
             dialog_subscriptions: Vec::new(),
@@ -493,7 +511,7 @@ impl Colet {
             clipboard_changed: Arc::new(AtomicBool::new(true)),
             _subscriptions: subscriptions,
         };
-        if let Some(problem) = problem {
+        for problem in [problem, sorts_problem].into_iter().flatten() {
             this.notify(problem, Tone::Error, cx);
         }
         this.palette.style_input(&this.search, cx);
@@ -701,7 +719,7 @@ impl Colet {
         self.pending.insert(id, request);
         self.state.load(id, request, quiet);
         let c = &self.state.columns[index];
-        let sort = self.settings.sort;
+        let sort = self.order_of(c);
         let backend = self.backend.clone();
         let task: Task<Listing> = match c.kind {
             Kind::Home => {
@@ -807,22 +825,77 @@ impl Colet {
         }
     }
 
-    /// Sorts by `by`, keeping the way it runs.
-    pub fn set_sort(&mut self, by: Sort, cx: &mut Context<Self>) {
-        self.set_order(Order { by, ..self.settings.sort }, cx);
+    /// The order the column `c` is listed in: its own, or the default.
+    pub fn order_of(&self, c: &Column) -> Order {
+        self.own_order(c).unwrap_or(self.settings.sort)
     }
 
-    pub fn set_direction(&mut self, descending: bool, cx: &mut Context<Self>) {
-        self.set_order(Order { descending, ..self.settings.sort }, cx);
+    /// The order the column `c` is given apart from the default: its folder's, or the search results'.
+    pub fn own_order(&self, c: &Column) -> Option<Order> {
+        match c.kind {
+            Kind::Home => None,
+            Kind::Search => self.sorts.search,
+            Kind::Folder => self.sorts.folder(&c.path),
+        }
     }
 
-    fn set_order(&mut self, order: Order, cx: &mut Context<Self>) {
-        if self.sort_open() {
+    /// The order of the column `id`, or the default when `None`.
+    fn order_for(&self, target: Option<ColumnId>) -> Order {
+        match target.and_then(|id| self.state.index_of(id)) {
+            Some(index) => self.order_of(&self.state.columns[index]),
+            None => self.settings.sort,
+        }
+    }
+
+    /// Sorts the column `target`, or by default, by `by`, keeping the way it runs.
+    pub fn set_sort(&mut self, target: Option<ColumnId>, by: Sort, cx: &mut Context<Self>) {
+        self.set_order(target, Order { by, ..self.order_for(target) }, cx);
+    }
+
+    pub fn set_direction(&mut self, target: Option<ColumnId>, descending: bool, cx: &mut Context<Self>) {
+        self.set_order(target, Order { descending, ..self.order_for(target) }, cx);
+    }
+
+    /// Sorts the column `id` by the heading `by` pressed: the way it runs turned round when it already
+    /// goes by it, or else as that heading starts, names from A and sizes and times from the largest.
+    pub fn sort_by_heading(&mut self, id: ColumnId, by: Sort, cx: &mut Context<Self>) {
+        let order = self.order_for(Some(id));
+        let descending = if order.by == by { !order.descending } else { by != Sort::Name };
+        self.set_order(Some(id), Order { by, descending }, cx);
+    }
+
+    /// Gives the column `target` the order, or makes it the default; a column given the default follows
+    /// it from then on. The columns whose order this changes are listed again.
+    pub fn set_order(&mut self, target: Option<ColumnId>, order: Order, cx: &mut Context<Self>) {
+        if matches!(self.popup, Some(Popup::Sort | Popup::ColumnSort(_))) {
             self.popup = None;
         }
-        if order != self.settings.sort {
-            self.update_settings(|s| s.sort = order, cx);
-            self.refresh(cx);
+        let orders = |this: &Self| -> Vec<(ColumnId, Order)> {
+            this.state.columns.iter().filter(|c| c.kind != Kind::Home).map(|c| (c.id, this.order_of(c))).collect()
+        };
+        let before = orders(self);
+        match target.and_then(|id| self.state.index_of(id)) {
+            None if target.is_none() && order != self.settings.sort => self.update_settings(|s| s.sort = order, cx),
+            Some(index) => {
+                let c = &self.state.columns[index];
+                let own = (order != self.settings.sort).then_some(order);
+                if own != self.own_order(c) {
+                    let (kind, path) = (c.kind, c.path.clone());
+                    self.update_sorts(
+                        |sorts| match kind {
+                            Kind::Search => sorts.search = own,
+                            _ => sorts.set_folder(&path, own),
+                        },
+                        cx,
+                    );
+                }
+            }
+            None => {}
+        }
+        for ((id, was), (_, is)) in before.into_iter().zip(orders(self)) {
+            if was != is {
+                self.load(id, 0, true, cx);
+            }
         }
         cx.notify();
     }
@@ -1093,6 +1166,8 @@ impl Colet {
     pub fn filter_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let kept: HashSet<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
         self.filters.retain(|id, _| kept.contains(id));
+        // So does its order's button's stop.
+        self.stops.retain(|key, _| key.strip_prefix("column-sort:").is_none_or(|id| id.parse().is_ok_and(|id| kept.contains(&id))));
         for c in &self.state.columns {
             let id = c.id;
             match self.filters.get_mut(&id) {

@@ -3,6 +3,7 @@
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
+    sync::mpsc::Receiver,
     time::Duration,
 };
 
@@ -18,6 +19,7 @@ use crate::{
     app::{Colet, Engine, Tone, WidthOf},
     search_filters::FilterEdit,
     settings::{Placement, SavedSearch, Settings, Theme, pin_key, written},
+    sorts::Sorts,
     state::{Kind, saved_query, search_key},
 };
 
@@ -204,20 +206,36 @@ impl Colet {
         self.settings_changes += 1;
         let change = self.settings_changes;
         cx.notify();
-        if self.settings_saver.is_none() {
-            return;
+        if self.settings_saver.is_some() {
+            // A later change has its own save coming.
+            Self::save_later(cx, move |this| {
+                let saver = this.settings_saver.as_ref().filter(|_| this.settings_changes == change)?;
+                Some(saver.save(this.settings.clone()))
+            });
         }
+    }
+
+    /// Changes the orders the columns are given apart from the default, and writes them as the settings
+    /// are written.
+    pub fn update_sorts(&mut self, change: impl FnOnce(&mut Sorts), cx: &mut Context<Self>) {
+        change(&mut self.sorts);
+        self.sorts_changes += 1;
+        let change = self.sorts_changes;
+        cx.notify();
+        if self.sorts_saver.is_some() {
+            Self::save_later(cx, move |this| {
+                let saver = this.sorts_saver.as_ref().filter(|_| this.sorts_changes == change)?;
+                Some(saver.save(this.sorts.clone()))
+            });
+        }
+    }
+
+    /// Sends the save `queue` makes a moment later, once a burst of changes (a drag) is over, and says
+    /// if it fails; `queue` sends none when a later change has its own coming.
+    fn save_later(cx: &mut Context<Self>, queue: impl FnOnce(&Self) -> Option<Receiver<Result<(), String>>> + 'static) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(250)).await;
-            // A later change has its own save coming.
-            let queued = this
-                .update(cx, |this, _| {
-                    let saver = this.settings_saver.as_ref().filter(|_| this.settings_changes == change)?;
-                    Some(saver.save(this.settings.clone()))
-                })
-                .ok()
-                .flatten();
-            let Some(queued) = queued else { return };
+            let Some(queued) = this.update(cx, |this, _| queue(this)).ok().flatten() else { return };
             let saved = cx.background_executor().spawn(async move { written(queued) }).await;
             if let Err(error) = saved {
                 this.update(cx, |this, cx| this.notify(error, Tone::Error, cx)).ok();
@@ -226,14 +244,16 @@ impl Colet {
         .detach();
     }
 
-    /// Writes the settings now, as the window closes, once the saves before are written; the saves still
-    /// waiting out a burst are dropped.
+    /// Writes the settings and the columns' orders now, as the window closes, once the saves before are
+    /// written; the saves still waiting out a burst are dropped.
     pub fn flush_settings(&mut self) -> Result<(), String> {
         self.settings_changes += 1;
-        match &self.settings_saver {
-            Some(saver) => written(saver.save(self.settings.clone())),
-            None => Ok(()),
-        }
+        self.sorts_changes += 1;
+        let settings = self.settings_saver.as_ref().map(|saver| saver.save(self.settings.clone()));
+        let sorts = self.sorts_saver.as_ref().map(|saver| saver.save(self.sorts.clone()));
+        let settings = settings.map_or(Ok(()), written);
+        let sorts = sorts.map_or(Ok(()), written);
+        settings.and(sorts)
     }
 
     pub fn remember_window(&mut self, window: &Window, cx: &mut Context<Self>) {
