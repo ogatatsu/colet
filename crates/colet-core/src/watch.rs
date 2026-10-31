@@ -68,7 +68,8 @@ pub struct FolderWatcher {
 }
 
 enum WatchCommand {
-    Set(Vec<PathBuf>),
+    /// With who to tell once the watches are as asked.
+    Set(Vec<PathBuf>, mpsc::Sender<()>),
     /// Path keys.
     Repair(Vec<OsString>),
     Stop,
@@ -130,11 +131,15 @@ impl FolderWatcher {
                 let mut asked = HashMap::<OsString, (PathBuf, bool)>::new();
                 while let Ok(mut command) = sets.recv() {
                     let mut next = None;
+                    let mut told = Vec::new();
                     let mut all = false;
                     let mut reset = HashSet::new();
                     loop {
                         match command {
-                            WatchCommand::Set(paths) => next = Some(paths),
+                            WatchCommand::Set(paths, tell) => {
+                                next = Some(paths);
+                                told.push(tell);
+                            }
                             WatchCommand::Repair(paths) => {
                                 all |= paths.is_empty();
                                 reset.extend(paths);
@@ -202,6 +207,9 @@ impl FolderWatcher {
                     if !failed.is_empty() {
                         unwatched(failed);
                     }
+                    for tell in told {
+                        let _ = tell.send(());
+                    }
                 }
             })
             .map_err(|e| e.to_string())?;
@@ -209,9 +217,12 @@ impl FolderWatcher {
     }
 
     /// Watches exactly `paths` from now on: the new ones are watched, the ones gone let go. Returns at
-    /// once.
-    pub fn set(&self, paths: Vec<PathBuf>) {
-        let _ = self.wanted.send(WatchCommand::Set(paths));
+    /// once; the receiver hears when that is done. A folder to be moved or deleted waits for it: Windows
+    /// keeps a folder in place while a folder inside it is watched.
+    pub fn set(&self, paths: Vec<PathBuf>) -> mpsc::Receiver<()> {
+        let (tell, told) = mpsc::channel();
+        let _ = self.wanted.send(WatchCommand::Set(paths, tell));
+        told
     }
 }
 
@@ -315,6 +326,18 @@ mod tests {
         std::fs::write(a.path().join("later.txt"), "x").unwrap();
         assert!(next(&changes, Duration::from_millis(500)).is_none());
         assert!(unwatched.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_folder_holding_a_watched_one_moves_once_the_watch_is_let_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let (outer, inner) = (dir.path().join("outer"), dir.path().join("outer").join("inner"));
+        std::fs::create_dir_all(&inner).unwrap();
+        let watcher = FolderWatcher::new(Arc::new(Mutex::new(Changes::default())), |_| {}).unwrap();
+        watcher.set(vec![outer.clone(), inner.clone()]).recv().unwrap();
+        assert!(std::fs::rename(&outer, dir.path().join("moved")).is_err());
+        watcher.set(vec![]).recv().unwrap();
+        std::fs::rename(&outer, dir.path().join("moved")).unwrap();
     }
 
     #[test]

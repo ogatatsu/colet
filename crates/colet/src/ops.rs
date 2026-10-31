@@ -683,8 +683,19 @@ impl Colet {
             },
         );
         self.history.truncate(MAX_ENTRIES);
+        // What leaves its place goes unwatched first, with the folders inside it.
+        let leaving = match request.kind {
+            Kind::Recycle | Kind::Delete | Kind::Rename => request.paths.as_slice(),
+            Kind::Paste if self.clipboard.cut => self.clipboard.paths.as_slice(),
+            Kind::Paste | Kind::NewFolder => &[],
+        };
+        self.released = leaving.iter().map(|p| path_key(p)).collect();
+        let released = self.watch(cx);
         let (backend, owner, asked) = (self.backend.clone(), self.owner, request.clone());
         let task = cx.background_executor().spawn(async move {
+            if let Some(released) = released {
+                let _ = released.recv();
+            }
             backend.operate(asked, owner, Box::new(move |event| events.lock().unwrap().push(event)))
         });
         cx.notify();
@@ -724,6 +735,8 @@ impl Colet {
     fn finished(&mut self, request: Request, result: Result<(), String>, cx: &mut Context<Self>) {
         self.take_operation_events();
         let Some(Running { id, made, placed: pasted, .. }) = self.running.take() else { return };
+        // Watched again by the refresh below, which lists what changed while they were not.
+        self.released.clear();
         let Request { kind, paths, destination, name } = request;
         let (cancelled, problem) = match &result {
             Ok(()) => (false, None),

@@ -6,7 +6,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, mpsc,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -16,7 +16,7 @@ use colet_core::{
     entry::{Entry, Order, Sort},
     everything::PAGE,
     operations::message,
-    paths::{parent_folder, path_key, shown},
+    paths::{ancestors, parent_folder, path_key, shown},
     quick_look, shell,
     watch::{Changes, FolderWatcher},
 };
@@ -288,6 +288,9 @@ pub struct Colet {
     cancels: HashMap<ColumnId, Arc<AtomicBool>>,
     watcher: Option<FolderWatcher>,
     watched: Vec<PathBuf>,
+    /// What the running operation moves or deletes, by path key: the folders at or inside it go unwatched
+    /// until it ends, as Windows keeps a folder in place while a folder inside it is watched.
+    pub(crate) released: HashSet<OsString>,
     /// Folders already said to go unwatched, each said once.
     unwatched: HashSet<OsString>,
     /// What the watcher saw change, collected until the UI takes it.
@@ -492,6 +495,7 @@ impl Colet {
             cancels: HashMap::new(),
             watcher: None,
             watched: Vec::new(),
+            released: HashSet::new(),
             unwatched: HashSet::new(),
             changed: Arc::default(),
             missed: Arc::default(),
@@ -933,9 +937,10 @@ impl Colet {
 
     // ---- Watching ----
 
-    /// Watches the folders the columns could read, one level deep. The watcher opens them on its own
-    /// thread, so a share slow to answer never holds up the window.
-    fn watch(&mut self, cx: &mut Context<Self>) {
+    /// Watches the folders the columns could read, one level deep, but those `released` lets go. The
+    /// watcher opens them on its own thread, so a share slow to answer never holds up the window; the
+    /// receiver hears once it has, when there was anything to change.
+    pub(crate) fn watch(&mut self, cx: &mut Context<Self>) -> Option<mpsc::Receiver<()>> {
         let paths: Vec<PathBuf> = self
             .state
             .columns
@@ -943,8 +948,9 @@ impl Colet {
             .filter(|c| c.kind == Kind::Folder && c.error.is_none())
             .map(|c| c.path.clone())
             .collect();
+        let paths = kept_watching(paths, &self.released);
         if paths == self.watched {
-            return;
+            return None;
         }
         self.watched = paths.clone();
         if self.watcher.is_none() {
@@ -954,13 +960,11 @@ impl Colet {
                 Ok(watcher) => self.watcher = Some(watcher),
                 Err(error) => {
                     self.notify(error, Tone::Error, cx);
-                    return;
+                    return None;
                 }
             }
         }
-        if let Some(watcher) = &self.watcher {
-            watcher.set(paths);
-        }
+        self.watcher.as_ref().map(|watcher| watcher.set(paths))
     }
 
     /// Says which folders the watcher could list but not watch, each once.
@@ -1505,4 +1509,12 @@ impl EntityInputHandler for Colet {
     fn character_index_for_point(&mut self, _: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
         None
     }
+}
+
+/// `folders` but those at or inside one `released` holds, by path key.
+pub(crate) fn kept_watching(folders: Vec<PathBuf>, released: &HashSet<OsString>) -> Vec<PathBuf> {
+    if released.is_empty() {
+        return folders;
+    }
+    folders.into_iter().filter(|folder| !ancestors(folder).iter().any(|a| released.contains(&path_key(a)))).collect()
 }

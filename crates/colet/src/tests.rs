@@ -2042,6 +2042,21 @@ fn never_sends_a_drive_at_home_to_the_bin(cx: &mut TestAppContext) {
     assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はドライブはコピーできません"), "{:?}", ui.toasts(cx));
 }
 
+#[test]
+fn lets_go_of_the_folders_at_or_inside_what_an_operation_moves() {
+    let folders: Vec<PathBuf> = [r"D:\", r"D:\work", r"D:\work\a", r"D:\work\a\b", r"D:\work\ab"].into_iter().map(PathBuf::from).collect();
+    let released = HashSet::from([colet_core::paths::path_key(Path::new(r"d:\WORK\a"))]);
+    assert_eq!(texts(&crate::app::kept_watching(folders.clone(), &released)), [r"D:\", r"D:\work", r"D:\work\ab"]);
+    assert_eq!(crate::app::kept_watching(folders.clone(), &HashSet::new()), folders);
+}
+
+#[gpui_kit::test]
+fn watches_again_once_an_operation_ends(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "delete");
+    assert!(ui.read(cx, |v| v.running.is_none() && v.released.is_empty()));
+}
+
 #[gpui_kit::test]
 fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
