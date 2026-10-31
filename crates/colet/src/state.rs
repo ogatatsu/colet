@@ -357,6 +357,8 @@ pub struct State {
     /// A search result or favorite opens on its own column with the folders above it folded away until
     /// asked for. Gone with the anchor.
     pub fold: Option<Fold<ColumnId>>,
+    /// The folder column worked in last, which → from the results or home goes back to while it stays.
+    last_folder: Option<ColumnId>,
     next_id: ColumnId,
 }
 
@@ -412,6 +414,7 @@ impl State {
             future: Vec::new(),
             notice: None,
             fold: None,
+            last_folder: None,
             next_id: 0,
         };
         let home = state.column(Kind::Home, Path::new(""), None);
@@ -582,6 +585,15 @@ impl State {
             self.unfold();
         }
         self.active = active;
+        self.note_folder();
+    }
+
+    fn note_folder(&mut self) {
+        if let Some(c) = self.columns.get(self.active)
+            && c.kind == Kind::Folder
+        {
+            self.last_folder = Some(c.id);
+        }
     }
 
     /// Brings out the folders above a search result or favorite, for good.
@@ -739,12 +751,18 @@ impl State {
         // favorite always shows exactly its own chain.
         if unchanged && (kind == Kind::Folder || self.columns.len() == index + 1 + next.len()) {
             self.active = index;
+            self.note_folder();
             return;
+        }
+        // Another pick in the results or home shows something else, even in the folders it keeps.
+        if kind != Kind::Folder {
+            self.last_folder = None;
         }
         let anchor = next.last().map(|c| c.id);
         self.columns.truncate(index + 1);
         self.columns.extend(next);
         self.active = index;
+        self.note_folder();
         // Only a pick that opens something is a place to come back to.
         if entry.is_some() {
             // Picked afresh from the results or home, its own column stands alone.
@@ -755,20 +773,36 @@ impl State {
         }
     }
 
-    /// The column ← or → leads to from `index`, if any. From search results or home, → lands where the
-    /// pick is shown rather than on the drive at the top of its ancestors; folded-away folders are passed
-    /// over, ← going back to the results or home, → on to the column they fold above.
+    /// The column ← or → leads to from `index`, if any. From search results or home, → goes back to the
+    /// folder column worked in last while it stays; before one, it lands where the pick is shown rather
+    /// than on the drive at the top of its ancestors, wherever the keys were moved to apart from it: a
+    /// folder's own contents, folded above or not, a file's folder. Home beside the results leads to
+    /// them. Folded-away folders are passed over, ← going back to the results or home, → on to the
+    /// column they fold above.
     pub fn neighbour(&self, index: usize, right: bool) -> Option<usize> {
         let mut next = if right { index + 1 } else { index.checked_sub(1)? };
         let c = &self.columns[index];
+        let beside_folders = self.columns.get(index + 1).is_some_and(|c| c.kind == Kind::Folder);
+        let last = self.last_folder.and_then(|id| self.index_of(id)).filter(|&at| at > index);
         if right
             && c.kind != Kind::Folder
-            && let Some(result) = &c.focused
-            && let Some(shown) = self.columns.iter().enumerate().skip(index + 1).position(|(_, c)| {
-                c.highlight.as_ref() == Some(result) || c.selected.contains(result)
-            })
+            && beside_folders
+            && let Some(at) = last
         {
-            next = index + 1 + shown;
+            next = at;
+        } else if right
+            && c.kind != Kind::Folder
+            && let [pick] = c.selected.as_slice()
+        {
+            // A favorite narrowed is keyed apart from its folder, which is what is shown.
+            let pick = home_path(pick);
+            let later = || self.columns.iter().enumerate().skip(index + 1);
+            let shown = later()
+                .find(|(_, c)| c.kind == Kind::Folder && c.path == *pick)
+                .or_else(|| later().find(|(_, c)| c.highlight.as_deref() == Some(&*pick) || c.selected.iter().any(|p| *p == *pick)));
+            if let Some((at, _)) = shown {
+                next = at;
+            }
         }
         if let Some(f) = self.folded()
             && !f.open
@@ -944,6 +978,7 @@ impl State {
         let at = columns.iter().position(|c| c.highlight.as_deref() == Some(path));
         self.active = at.unwrap_or(columns.len() - 1);
         self.columns = columns;
+        self.note_folder();
         self.query.clear();
         self.search_filter = None;
         self.fold = None;
@@ -1621,6 +1656,60 @@ mod tests {
         assert_eq!(s.neighbour(4, false), Some(1));
         assert_eq!(s.neighbour(0, false), None);
         assert_eq!(s.neighbour(4, true), None);
+    }
+
+    #[test]
+    fn right_from_a_folder_result_lands_in_its_contents_folded_above_or_not() {
+        let deep = folder(r"D:\a\b");
+        let mut s = State::new();
+        s.set_query("b");
+        with_entries(&mut s, 1, vec![deep.clone()]);
+        s.select(1, one(&deep.path));
+        assert_eq!(paths(&s), ["", "", r"D:\", r"D:\a", r"D:\a\b"]);
+        assert_eq!(s.neighbour(1, true), Some(4));
+        // Brought out, its parent pointing at it is passed over all the same.
+        s.unfold();
+        assert_eq!(s.neighbour(1, true), Some(4));
+        // ← steps back one column at a time once they are out.
+        assert_eq!(s.neighbour(4, false), Some(3));
+    }
+
+    #[test]
+    fn right_goes_back_to_the_folder_column_left_until_another_pick() {
+        let (deep, other) = (file(r"D:\a\b\zeta.txt"), file(r"D:\a\b\eta.txt"));
+        let mut s = State::new();
+        s.set_query("ta");
+        with_entries(&mut s, 1, vec![deep.clone(), other.clone()]);
+        s.select(1, one(&deep.path));
+        s.unfold();
+        s.set_active(4);
+        // ← back up the folders brought out, then to the results.
+        for at in [3, 2, 1] {
+            let next = s.neighbour(s.active, false).unwrap();
+            assert_eq!(next, at);
+            s.set_active(next);
+        }
+        assert_eq!(s.neighbour(1, true), Some(2));
+        // Home beside the results leads to them.
+        assert_eq!(s.neighbour(0, true), Some(1));
+        // Another result shows another file, in the same folders: → lands where it is shown.
+        s.step(1);
+        assert_eq!(s.columns[1].selected, one(&other.path));
+        assert_eq!(s.neighbour(1, true), Some(4));
+    }
+
+    #[test]
+    fn right_lands_where_the_pick_is_shown_with_the_keys_moved_apart_from_it() {
+        let (deep, other) = (file(r"D:\a\b\zeta.txt"), file(r"E:\eta.txt"));
+        let mut s = State::new();
+        s.set_query("ta");
+        with_entries(&mut s, 1, vec![deep.clone(), other.clone()]);
+        s.select(1, one(&deep.path));
+        with_entries(&mut s, 4, vec![deep.clone()]);
+        s.active = 1;
+        s.focus_step(1);
+        assert_eq!(s.columns[1].focused, Some(other.path.clone()));
+        assert_eq!(s.neighbour(1, true), Some(4));
     }
 
     #[test]
