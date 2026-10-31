@@ -281,6 +281,9 @@ pub struct Colet {
     pub fitted: (f32, f32),
     /// The anchor of the fold last drawn, and how many folders it held away, to tell when they come out.
     pub drawn_fold: Option<(ColumnId, usize)>,
+    /// The scrolling columns the columns were last brought on screen with, to tell home or the pinned
+    /// results taken up again beside the same columns from a pick there opening others.
+    pub revealed: Vec<ColumnId>,
     pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
     request: u64,
@@ -488,6 +491,7 @@ impl Colet {
             hold: 0.,
             fitted: (0., 0.),
             drawn_fold: None,
+            revealed: Vec::new(),
             owner,
             backend,
             request: 0,

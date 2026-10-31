@@ -1315,6 +1315,31 @@ fn rest(ui: &Ui, cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn leaves_the_columns_where_they_are_once_left_brings_the_keys_back_home(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    for _ in 1..chain.len() {
+        ui.press(cx, "left");
+    }
+    rest(&ui, cx);
+    assert_eq!(ui.read(cx, |v| v.state.active), 1, "the keys are on the first column");
+    // Scrolled by hand short of the last column: going home would once have slid them to it.
+    ui.read(cx, |v| v.columns_scroll.set_offset(point(px(-100.), px(0.))));
+    ui.act(cx, |_, _| ());
+    let at = ui.read(cx, |v| v.columns_scroll.offset().x);
+    assert!(at < px(0.) && ui.read(cx, |v| v.columns_scroll.max_offset().x) > -at, "short of the last column");
+    ui.press(cx, "left");
+    assert_eq!(ui.read(cx, |v| v.state.active), 0, "the keys are home");
+    rest(&ui, cx);
+    assert_eq!(ui.read(cx, |v| v.columns_scroll.offset().x), at);
+}
+
+#[gpui_kit::test]
 fn slides_a_column_on_screen_once_a_press_in_its_header_or_its_empty_room_is_let_go(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
     // A width the view holds no whole number of, so the right edge cuts a column.

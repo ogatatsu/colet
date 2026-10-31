@@ -1823,10 +1823,16 @@ impl Colet {
             }
             let (cells, active) = self.scrolling();
             let start = self.slide.as_ref().map_or(from, |s| s.target);
+            let shown: Vec<ColumnId> =
+                self.state.columns[self.state.columns.len() - cells.len()..].iter().map(|c| c.id).collect();
             let target = match keep {
                 Some(keep) => uncover_target(view, &cells, keep),
+                // Home or the pinned results taken up again beside the same columns, as ← brings the keys
+                // there, leave the columns where they are.
+                None if active.is_none() && shown == self.revealed => start,
                 None => reveal_target(start, view, &cells, active),
             };
+            self.revealed = shown;
             self.hold = target.max(from);
             self.fitted = (view, self.widths.column);
             if (target - from).abs() >= 0.5 {
