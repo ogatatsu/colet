@@ -108,6 +108,29 @@ pub fn filter_words(text: &str) -> Vec<String> {
     words
 }
 
+/// A filter's `text` as a favorite or saved search keeps it: the spaces at its ends gone, and each run of
+/// them between its words one; those in quotes, part of a word, as they are. None when it holds no word.
+pub fn narrowing(text: &str) -> Option<String> {
+    if filter_words(text).is_empty() {
+        return None;
+    }
+    let (mut kept, mut quoted, mut space) = (String::new(), false, false);
+    for c in text.trim().chars() {
+        if c.is_whitespace() && !quoted {
+            space = true;
+            continue;
+        }
+        if std::mem::take(&mut space) {
+            kept.push(' ');
+        }
+        if c == '"' {
+            quoted = !quoted;
+        }
+        kept.push(c);
+    }
+    Some(kept)
+}
+
 /// What a filter's field holds, made ready for a word typed after it: a space put between, and a quote
 /// left open closed first, so that the word is one of its own.
 pub fn room_for_a_word(held: &str) -> String {
@@ -207,6 +230,11 @@ impl Column {
         self.entries.iter().find(|e| e.path == path)
     }
 
+    /// What it is narrowed to, as a favorite or saved search keeps it.
+    pub fn narrowing(&self) -> Option<String> {
+        self.filter.as_ref().and_then(|f| narrowing(&f.text))
+    }
+
     /// The picks it shows, which are what is acted on: those a filter hides stay picked only to keep what
     /// they opened open.
     pub fn shown_selected(&self) -> Cow<'_, [PathBuf]> {
@@ -245,24 +273,71 @@ pub struct Folded {
     pub open: bool,
 }
 
-/// Home keys a saved search by its query behind this, and its filter's name after a NUL, which neither
-/// can hold; no path starts this way, a drive letter being one character.
+/// Home keys a saved search by its query behind this, its filter's name after a NUL, and what its results
+/// are narrowed to after another, none of which can hold one; no path starts this way, a drive letter being
+/// one character.
 const SEARCH_KEY: &str = "search:";
 
-pub fn search_key(query: &str, filter: Option<&str>) -> PathBuf {
-    match filter {
-        Some(filter) => format!("{SEARCH_KEY}{query}\0{filter}").into(),
-        None => format!("{SEARCH_KEY}{query}").into(),
+pub fn search_key(query: &str, filter: Option<&str>, narrow: Option<&str>) -> PathBuf {
+    let mut key = format!("{SEARCH_KEY}{query}");
+    // A filter's name is never empty: an empty one stands for none, before a narrowing.
+    if filter.is_some() || narrow.is_some() {
+        key.push('\0');
+        key.push_str(filter.unwrap_or_default());
+    }
+    if let Some(narrow) = narrow {
+        key.push('\0');
+        key.push_str(narrow);
+    }
+    key.into()
+}
+
+/// The query a home row runs, the filter it runs within and what its results are narrowed to, when it is
+/// a saved search.
+pub fn saved_query(path: &Path) -> Option<(&str, Option<&str>, Option<&str>)> {
+    let key = path.to_str()?.strip_prefix(SEARCH_KEY)?;
+    let mut parts = key.splitn(3, '\0');
+    let query = parts.next().unwrap_or_default();
+    let filter = parts.next().filter(|filter| !filter.is_empty());
+    Some((query, filter, parts.next()))
+}
+
+/// Home keys a favorite narrowed to some names by its folder's path, then a NUL and the narrowing, which no
+/// path can hold; one not narrowed, by its path alone.
+pub fn favorite_key(path: &Path, narrow: Option<&str>) -> PathBuf {
+    let Some(narrow) = narrow else { return path.to_owned() };
+    let mut key = path.as_os_str().to_owned();
+    key.push("\0");
+    key.push(narrow);
+    key.into()
+}
+
+/// The folder a favorite's key names, and what it is narrowed to; none for a key with no narrowing, or a
+/// saved search's.
+pub fn narrowed_folder(key: &Path) -> Option<(PathBuf, String)> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    if saved_query(key).is_some() {
+        return None;
+    }
+    let wide: Vec<u16> = key.as_os_str().encode_wide().collect();
+    let at = wide.iter().position(|&unit| unit == 0)?;
+    Some((OsString::from_wide(&wide[..at]).into(), String::from_utf16_lossy(&wide[at + 1..])))
+}
+
+/// What a row of home stands for on disk: a favorite's folder, narrowed or not; any other row's own path.
+pub fn home_path(key: &Path) -> Cow<'_, Path> {
+    match narrowed_folder(key) {
+        Some((path, _)) => Cow::Owned(path),
+        None => Cow::Borrowed(key),
     }
 }
 
-/// The query a home row runs and the filter it runs within, when it is a saved search.
-pub fn saved_query(path: &Path) -> Option<(&str, Option<&str>)> {
-    let key = path.to_str()?.strip_prefix(SEARCH_KEY)?;
-    Some(match key.split_once('\0') {
-        Some((query, filter)) => (query, Some(filter)),
-        None => (key, None),
-    })
+/// A favorite's folder and what it is narrowed to, from its key.
+pub fn favorite_parts(key: &Path) -> (Cow<'_, Path>, Option<String>) {
+    match narrowed_folder(key) {
+        Some((path, narrow)) => (Cow::Owned(path), Some(narrow)),
+        None => (Cow::Borrowed(key), None),
+    }
 }
 
 /// How far back it goes.
@@ -540,26 +615,49 @@ impl State {
         }
     }
 
+    /// What the search results are narrowed to, as a saved search keeps it.
+    pub fn search_narrowing(&self) -> Option<String> {
+        self.columns.iter().find(|c| c.kind == Kind::Search).and_then(Column::narrowing)
+    }
+
     pub fn select(&mut self, index: usize, paths: Vec<PathBuf>) {
+        // A folder picked in home opens narrowed as its favorite keeps it, or not narrowed at all.
+        let opened = match (self.columns.get(index), paths.as_slice()) {
+            (Some(c), [key]) if c.kind == Kind::Home && saved_query(key).is_none() && c.entry(key).is_some_and(|e| e.directory) => {
+                Some(favorite_parts(key)).map(|(path, narrow)| (path.into_owned(), narrow))
+            }
+            _ => None,
+        };
+        self.select_rows(index, paths);
+        if let Some((path, narrow)) = opened
+            && let Some(at) = self.columns.iter().rposition(|c| c.kind == Kind::Folder && c.path == path)
+        {
+            self.set_filter(at, narrow.as_deref());
+        }
+    }
+
+    fn select_rows(&mut self, index: usize, paths: Vec<PathBuf>) {
         let Some(c) = self.columns.get(index) else { return };
         let here = self.snapshot();
-        // A saved search in home runs its query beside it. Home keeps the pick and the focus, so the next
-        // one is a keystroke away.
+        // A saved search in home runs its query beside it, narrowed as it was kept. Home keeps the pick and
+        // the focus, so the next one is a keystroke away.
         if c.kind == Kind::Home
             && let [path] = paths.as_slice()
-            && let Some((query, filter)) = saved_query(path)
+            && let Some((query, filter, narrow)) = saved_query(path)
         {
-            if self.query == query && self.search_filter.as_deref() == filter && self.columns.len() == 2 && c.selected == paths {
+            let same = self.query == query && self.search_filter.as_deref() == filter && self.search_narrowing().as_deref() == narrow;
+            if same && self.columns.len() == 2 && c.selected == paths {
                 self.active = index;
                 return;
             }
             let path = path.clone();
-            let (query, filter) = (query.to_owned(), filter.map(str::to_owned));
+            let (query, filter, narrow) = (query.to_owned(), filter.map(str::to_owned), narrow.map(str::to_owned));
             let mut home = self.columns.swap_remove(0);
             home.selected = vec![path.clone()];
             home.focused = Some(path);
             let search = self.column(Kind::Search, Path::new(""), None);
             self.columns = vec![home, search];
+            self.set_filter(1, narrow.as_deref());
             self.query = query;
             self.search_filter = filter;
             self.active = index;
@@ -588,6 +686,8 @@ impl State {
         let kind = c.kind;
         // Like Finder, only a single selection opens a column to the right.
         let entry = (paths.len() == 1).then(|| c.entry(&paths[0]).cloned()).flatten();
+        // A favorite narrowed is keyed apart from its folder, which is what opens.
+        let entry = entry.map(|e| Entry { path: home_path(&e.path).into_owned(), ..e });
         // The pointer from a search result has done its job once the user picks something here; leaving
         // it would read as a second selection.
         {
@@ -734,12 +834,12 @@ impl State {
     }
 
     /// What QuickLook previews: the row the keys are on in the active column, or the item it points at;
-    /// none on a saved search, which is no file.
-    pub fn keys_on(&self) -> Option<&Path> {
+    /// none on a saved search, which is no file. A favorite narrowed is its folder.
+    pub fn keys_on(&self) -> Option<Cow<'_, Path>> {
         let c = self.columns.get(self.active)?;
         let listed = |p: &&PathBuf| c.entry(p).is_some();
         let path = c.focused.as_ref().filter(listed).or(c.highlight.as_ref().filter(listed))?;
-        saved_query(path).is_none().then_some(path.as_path())
+        saved_query(path).is_none().then(|| home_path(path))
     }
 
     /// Ctrl+click: adds the row to the selection, or takes it out.
@@ -1550,7 +1650,7 @@ mod tests {
     #[test]
     fn runs_a_saved_search_picked_in_home_keeping_homes_pick() {
         let mut s = State::new();
-        let pdf = search_key("ext:pdf", None);
+        let pdf = search_key("ext:pdf", None, None);
         with_entries(&mut s, 0, vec![Entry::folder(&pdf, "PDF"), folder(r"D:\")]);
         s.select(0, one(&pdf));
         assert_eq!(s.query, "ext:pdf");
@@ -1994,11 +2094,11 @@ mod tests {
     #[test]
     fn runs_a_saved_search_within_its_filter() {
         let mut s = State::new();
-        let images = search_key("cat", Some("画像"));
-        let plain = search_key("cat", None);
+        let images = search_key("cat", Some("画像"), None);
+        let plain = search_key("cat", None, None);
         assert_ne!(images, plain);
-        assert_eq!(saved_query(&images), Some(("cat", Some("画像"))));
-        assert_eq!(saved_query(&plain), Some(("cat", None)));
+        assert_eq!(saved_query(&images), Some(("cat", Some("画像"), None)));
+        assert_eq!(saved_query(&plain), Some(("cat", None, None)));
         with_entries(&mut s, 0, vec![Entry::folder(&images, "cat"), Entry::folder(&plain, "cat"), folder(r"D:\")]);
         s.select(0, one(&images));
         assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", Some("画像")));
@@ -2010,6 +2110,48 @@ mod tests {
         assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("", None));
         s.back();
         assert_eq!(s.search_filter.as_deref(), Some("画像"));
+    }
+
+    #[test]
+    fn keys_a_favorite_and_a_saved_search_by_what_they_are_narrowed_to() {
+        let narrowed = favorite_key(Path::new(r"D:\Work"), Some("a b"));
+        assert_eq!(favorite_key(Path::new(r"D:\Work"), None), PathBuf::from(r"D:\Work"));
+        assert_eq!(narrowed_folder(&narrowed), Some((PathBuf::from(r"D:\Work"), "a b".to_owned())));
+        assert_eq!(home_path(&narrowed), Path::new(r"D:\Work"));
+        assert_eq!(narrowed_folder(Path::new(r"D:\Work")), None);
+        let search = search_key("cat", None, Some("a"));
+        assert_eq!(saved_query(&search), Some(("cat", None, Some("a"))));
+        assert_eq!(saved_query(&search_key("cat", Some("画像"), Some("a"))), Some(("cat", Some("画像"), Some("a"))));
+        assert_eq!(narrowed_folder(&search), None);
+        assert_eq!(home_path(&search), search.as_path());
+    }
+
+    #[test]
+    fn keeps_a_narrowing_as_it_would_be_typed_again() {
+        assert_eq!(narrowing("  a \u{3000} b  "), Some("a b".into()));
+        assert_eq!(narrowing("\"x  y\"  z"), Some("\"x  y\" z".into()));
+        assert_eq!(narrowing("A"), Some("A".into()));
+        assert_eq!(narrowing("   "), None);
+        assert_eq!(narrowing(""), None);
+    }
+
+    #[test]
+    fn opens_a_favorite_from_home_narrowed_as_it_was_kept() {
+        let mut s = State::new();
+        let narrowed = favorite_key(Path::new(r"D:\a"), Some("x"));
+        with_entries(&mut s, 0, vec![Entry::folder(&narrowed, "a"), folder(r"D:\a")]);
+        s.select(0, one(&narrowed));
+        let last = s.columns.last().unwrap();
+        assert_eq!((last.path.as_path(), last.narrowing().as_deref()), (Path::new(r"D:\a"), Some("x")));
+        // The same folder from its favorite not narrowed lists it all.
+        s.select(0, one(r"D:\a"));
+        let last = s.columns.last().unwrap();
+        assert_eq!((last.path.as_path(), last.filter.is_none()), (Path::new(r"D:\a"), true));
+        // A saved search runs narrowed as it was kept.
+        let search = search_key("cat", None, Some("y"));
+        with_entries(&mut s, 0, vec![Entry { directory: false, ..Entry::folder(&search, "cat") }]);
+        s.select(0, one(&search));
+        assert_eq!((s.query.as_str(), s.search_narrowing().as_deref()), ("cat", Some("y")));
     }
 
     #[test]

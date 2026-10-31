@@ -1,6 +1,7 @@
 //! The window's one view: it keeps the navigation state, fetches what the columns list, watches the open
 //! folders, and takes the keys. `view.rs` draws it.
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     ffi::OsString,
     ops::Range,
@@ -567,12 +568,7 @@ impl Colet {
         crate::theme::apply(window, self.settings.theme, cx);
         let mut inputs = vec![self.search.clone()];
         inputs.extend(self.filters.values().map(|field| field.input.clone()));
-        match &self.dialog {
-            Some(Dialog::Name { input, .. }) => inputs.push(input.clone()),
-            Some(Dialog::EditSearch { name, query, .. }) => inputs.extend([name.clone(), query.clone()]),
-            Some(Dialog::Filters { edit: Some(edit), .. }) => inputs.extend([edit.name.clone(), edit.query.clone()]),
-            Some(Dialog::Filters { .. } | Dialog::Preferences | Dialog::Open { .. }) | None => {}
-        }
+        inputs.extend(self.dialog.iter().flat_map(Dialog::fields));
         for input in &inputs {
             self.palette.style_input(input, cx);
         }
@@ -1176,7 +1172,7 @@ impl Colet {
     /// Space: QuickLook shows the row the keys are on, or closes on it. Nowhere for it to go is said, and
     /// only here: the keys moving on say nothing.
     pub fn quick_look(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.state.keys_on().map(Path::to_path_buf) else { return };
+        let Some(path) = self.state.keys_on().map(Cow::into_owned) else { return };
         self.quick_looked = Some(path.clone());
         let done = self.backend.quick_look(quick_look::Message::Toggle, path);
         let task = cx.background_executor().spawn(async move { done.recv() });
@@ -1198,7 +1194,7 @@ impl Colet {
     /// stays as it is. QuickLook takes it only while a preview is open.
     fn follow_quick_look(&mut self) {
         let Some(path) = self.state.keys_on() else { return };
-        if self.quick_looked.as_deref() != Some(path) {
+        if self.quick_looked.as_deref() != Some(path.as_ref()) {
             self.quick_looked = Some(path.to_path_buf());
             drop(self.backend.quick_look(quick_look::Message::Switch, path.to_path_buf()));
         }
@@ -1239,7 +1235,8 @@ impl Colet {
     // ---- Filters ----
 
     /// Each column has its field, holding what it is narrowed to: a field is made for a column new here,
-    /// goes with one gone, and empties where a new folder or a paste lifted the filter.
+    /// goes with one gone, empties where a new folder or a paste lifted the filter, and takes the narrowing
+    /// a favorite or saved search opened with.
     pub fn filter_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let kept: HashSet<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
         self.filters.retain(|id, _| kept.contains(id));
@@ -1248,14 +1245,20 @@ impl Colet {
         for c in &self.state.columns {
             let id = c.id;
             match self.filters.get_mut(&id) {
-                Some(field) => {
-                    if c.filter.is_none() && !field.applied.is_empty() {
+                Some(field) => match &c.filter {
+                    None if !field.applied.is_empty() => {
                         field.applied.clear();
                         field.input.update(cx, |input, cx| input.set_value("", window, cx));
                     }
-                }
+                    Some(filter) if filter.text != field.applied => {
+                        field.applied = filter.text.clone();
+                        field.input.update(cx, |input, cx| input.set_value(filter.text.clone(), window, cx));
+                    }
+                    _ => {}
+                },
                 None => {
-                    let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む"));
+                    let text = c.filter.as_ref().map(|f| f.text.clone()).unwrap_or_default();
+                    let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む").default_value(text.clone()));
                     self.palette.style_input(&input, cx);
                     let subscription = cx.subscribe_in(&input, window, move |this: &mut Self, input, event, window, cx| match event {
                         InputEvent::Change => {
@@ -1265,7 +1268,7 @@ impl Colet {
                         InputEvent::PressEnter { .. } => this.open_from_filter(id, window, cx),
                         InputEvent::Focus | InputEvent::Blur => cx.notify(),
                     });
-                    self.filters.insert(id, FilterField { input, applied: String::new(), _changes: subscription });
+                    self.filters.insert(id, FilterField { input, applied: text, _changes: subscription });
                 }
             }
         }

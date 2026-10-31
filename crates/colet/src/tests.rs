@@ -301,6 +301,11 @@ impl Backend for Fake {
     }
 }
 
+/// The favorites' folders, as the fake keeps them.
+fn favorite_texts(favorites: &[crate::settings::Favorite]) -> Vec<String> {
+    favorites.iter().map(|f| text(&f.path)).collect()
+}
+
 /// Paths the tests made, as the fake keeps them.
 fn texts(paths: &[PathBuf]) -> Vec<String> {
     paths.iter().map(|path| text(path)).collect()
@@ -1032,19 +1037,107 @@ fn makes_a_folder_a_favorite_with_its_star_and_ctrl_d_and_lists_it_at_home(cx: &
     ui.press(cx, "right");
     let work = ui.read(cx, |v| v.state.columns[2].id);
     ui.click(cx, ("star", work));
-    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\work"]);
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\work"]);
     // Home lists it first, under its own heading.
     assert_eq!(ui.read(cx, |v| v.state.columns[0].entries[0].path.to_str().unwrap().to_owned()), r"D:\work");
     ui.press(cx, "ctrl-d");
     assert!(fake.settings.lock().unwrap().favorites.is_empty());
     ui.press(cx, "ctrl-d");
-    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\work"]);
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\work"]);
     // Taken off from its menu in home.
     ui.act(cx, |window, cx| window.within("home").right_click(row(r"D:\work"), cx));
     settle(cx);
     ui.click(cx, "menu-favorite");
     assert!(fake.settings.lock().unwrap().favorites.is_empty());
     assert!(ui.read(cx, |v| v.menu().is_none()));
+}
+
+#[gpui_kit::test]
+fn keeps_a_folder_narrowed_as_a_favorite_of_its_own_and_opens_it_narrowed(cx: &mut TestAppContext) {
+    use crate::settings::Favorite;
+    use crate::state::favorite_key;
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\work")]),
+            (r"D:\work", vec![file(r"D:\work\a.pdf"), file(r"D:\work\b.txt")]),
+        ])
+    });
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.click(cx, ("star", work));
+    // Narrowed, the star is another favorite's, kept with the narrowing as it would be typed again.
+    ui.input(cx, "  pdf  ");
+    let kept = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.settings.is_favorite(&v.favorite_key_of(2)));
+    assert!(!kept(&ui, cx));
+    ui.click(cx, ("star", work));
+    assert!(kept(&ui, cx));
+    let narrowed = Favorite { narrow: Some("pdf".into()), ..Favorite::new(r"D:\work") };
+    assert_eq!(fake.settings.lock().unwrap().favorites, [Favorite::new(r"D:\work"), narrowed.clone()]);
+    let key = favorite_key(Path::new(r"D:\work"), Some("pdf"));
+    let homes = ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>());
+    assert!(homes.contains(&key) && homes.contains(&PathBuf::from(r"D:\work")), "{homes:?}");
+    // Opened from home, it lists what the narrowing lets through, its field showing it; the other, all.
+    let opened = |ui: &Ui, cx: &mut TestAppContext| {
+        let (id, shown) = ui.read(cx, |v| {
+            let c = v.state.columns.last().unwrap();
+            (c.id, c.entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>())
+        });
+        (shown, ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string()))
+    };
+    ui.click_in(cx, "home", row(r"D:\work"));
+    assert_eq!(opened(&ui, cx), (vec![r"D:\work\a.pdf".to_owned(), r"D:\work\b.txt".to_owned()], String::new()));
+    ui.click_in(cx, "home", row(&key));
+    assert_eq!(opened(&ui, cx), (vec![r"D:\work\a.pdf".to_owned()], "pdf".to_owned()));
+    // F2 there edits it, rather than renaming its folder.
+    ui.press(cx, "f2");
+    let fields = ui.read(cx, |v| match &v.dialog {
+        Some(crate::places::Dialog::EditFavorite { name, narrow, .. }) => Some((name.clone(), narrow.clone())),
+        _ => None,
+    });
+    let (name, narrow) = fields.expect("the favorite's edit");
+    let set = |ui: &Ui, cx: &mut TestAppContext, input: &Entity<gpui_kit::base::input::InputState>, text: &str| {
+        let (input, text) = (input.clone(), text.to_owned());
+        ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value(text, window, cx)));
+        settle(cx);
+    };
+    // Narrowed as the other is, it would be that one again.
+    set(&ui, cx, &narrow, " ");
+    assert!(ui.view.read_with(cx, |v, cx| v.favorite_edit_problem(cx)).is_some());
+    set(&ui, cx, &name, "書類");
+    set(&ui, cx, &narrow, "txt");
+    ui.click(cx, "save-favorite");
+    let edited = Favorite { name: "書類".into(), narrow: Some("txt".into()), ..Favorite::new(r"D:\work") };
+    assert_eq!(fake.settings.lock().unwrap().favorites, [Favorite::new(r"D:\work"), edited]);
+    // Taken off, its name and narrowing go too, and it says so.
+    let key = favorite_key(Path::new(r"D:\work"), Some("txt"));
+    ui.act(cx, |window, cx| window.within("home").right_click(row(&key), cx));
+    settle(cx);
+    ui.click(cx, "menu-favorite");
+    assert_eq!(fake.settings.lock().unwrap().favorites, [Favorite::new(r"D:\work")]);
+    assert!(ui.toasts(cx).iter().any(|t| t.contains("「書類」をお気に入りから外しました")), "{:?}", ui.toasts(cx));
+}
+
+#[gpui_kit::test]
+fn saves_a_search_narrowed_apart_and_runs_it_narrowed(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf"), file(r"D:\b.pdf")]));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "ext:pdf");
+    ui.press(cx, "down");
+    let results = ui.read(cx, |v| v.state.columns[1].id);
+    ui.input(cx, "a");
+    ui.click(cx, ("star", results));
+    let saved = fake.settings.lock().unwrap().saved_searches.clone();
+    assert_eq!(saved, [SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: Some("a".into()) }]);
+    // Run from home, the results are narrowed as they were kept.
+    ui.press(cx, "escape");
+    ui.click_in(cx, "home", row(search_key("ext:pdf", None, Some("a"))));
+    let (narrowing, id) = ui.read(cx, |v| (v.state.search_narrowing(), v.state.columns[1].id));
+    assert_eq!(narrowing.as_deref(), Some("a"));
+    assert_eq!(ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string()), "a");
 }
 
 #[gpui_kit::test]
@@ -1473,11 +1566,11 @@ fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppC
     ui.input(cx, "ext:pdf");
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.click(cx, ("star", results));
-    assert_eq!(fake.settings.lock().unwrap().saved_searches, [SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None }]);
+    assert_eq!(fake.settings.lock().unwrap().saved_searches, [SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: None }]);
     ui.press(cx, "ctrl-f");
     ui.press(cx, "escape");
     assert_eq!(ui.field(cx), "");
-    ui.click(cx, row(search_key("ext:pdf", None)));
+    ui.click(cx, row(search_key("ext:pdf", None, None)));
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(ui.home_focused(cx));
@@ -1491,7 +1584,7 @@ fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppC
 #[gpui_kit::test]
 fn unsaves_a_search_with_ctrl_d_and_says_so(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
-    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None }];
+    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None }];
     let ui = open(cx, fake.clone());
     ui.input(cx, "ext:pdf");
     ui.press(cx, "ctrl-d");
@@ -1532,11 +1625,11 @@ fn saves_afresh_once_a_broken_file_is_put_aside(cx: &mut TestAppContext) {
 fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
     fake.settings.lock().unwrap().saved_searches = vec![
-        SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None },
-        SavedSearch { name: String::new(), query: "dm:today".into(), filter: None },
+        SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: None },
+        SavedSearch { name: String::new(), query: "dm:today".into(), filter: None, narrow: None },
     ];
     let ui = open(cx, fake.clone());
-    ui.click(cx, row(search_key("ext:pdf", None)));
+    ui.click(cx, row(search_key("ext:pdf", None, None)));
     ui.press(cx, "f2");
     let (name, query) = ui.read(cx, |v| match &v.dialog {
         Some(crate::places::Dialog::EditSearch { name, query, .. }) => (name.clone(), query.clone()),
@@ -1554,13 +1647,13 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     assert!(ui.read(cx, |v| v.dialog.is_none()));
     assert_eq!(
         fake.settings.lock().unwrap().saved_searches[0],
-        SavedSearch { name: "PDF".into(), query: "ext:pdf dm:thisweek".into(), filter: None }
+        SavedSearch { name: "PDF".into(), query: "ext:pdf dm:thisweek".into(), filter: None, narrow: None }
     );
     // The search showing follows its new query.
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf dm:thisweek");
     assert_eq!(ui.field(cx), "ext:pdf dm:thisweek");
     // Escape closes the dialog without a change.
-    ui.click(cx, row(search_key("ext:pdf dm:thisweek", None)));
+    ui.click(cx, row(search_key("ext:pdf dm:thisweek", None, None)));
     ui.press(cx, "f2");
     ui.press(cx, "escape");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
@@ -2496,7 +2589,7 @@ fn marks_under_the_crumbs_what_is_on_screen_while_some_are_folded(cx: &mut TestA
 #[gpui_kit::test]
 fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_shell(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
-    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None }];
+    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None }];
     let ui = open(cx, fake.clone());
     // ↓ from the field picks it in home, which runs it.
     ui.press(cx, "down");
@@ -2515,7 +2608,7 @@ fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_she
     assert!(fake.opened.lock().unwrap().is_empty());
     ui.press(cx, "ctrl-f");
     ui.press(cx, "escape");
-    ui.act(cx, |window, cx| window.double_click(row(search_key("ext:pdf", None)), cx));
+    ui.act(cx, |window, cx| window.double_click(row(search_key("ext:pdf", None, None)), cx));
     settle(cx);
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(fake.opened.lock().unwrap().is_empty());
@@ -2530,7 +2623,7 @@ fn brings_homes_focused_row_into_view_across_all_three_headings(cx: &mut TestApp
     {
         let mut settings = fake.settings.lock().unwrap();
         settings.favorites = vec![r"D:\favorite".into()];
-        settings.saved_searches = (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None }).collect();
+        settings.saved_searches = (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None, narrow: None }).collect();
     }
     let ui = open(cx, fake);
     ui.press(cx, "down");
@@ -2553,7 +2646,7 @@ fn ordered_home(cx: &mut TestAppContext) -> (Arc<Fake>, Ui) {
     {
         let mut settings = fake.settings.lock().unwrap();
         settings.favorites = vec![r"D:\a".into(), r"D:\b".into(), r"D:\c".into()];
-        settings.saved_searches = ["one", "two"].map(|q| SavedSearch { name: String::new(), query: q.into(), filter: None }).to_vec();
+        settings.saved_searches = ["one", "two"].map(|q| SavedSearch { name: String::new(), query: q.into(), filter: None, narrow: None }).to_vec();
     }
     let ui = open(cx, fake.clone());
     (fake, ui)
@@ -2610,7 +2703,7 @@ fn drags_a_favorite_to_a_new_place_among_the_favorites(cx: &mut TestAppContext) 
     // The line goes above the row it would go before; the row carried fades.
     assert_eq!(ui.read(cx, |v| v.landing.clone().and_then(|l| l.before)).as_deref(), Some(Path::new(r"D:\a")));
     ui.let_go(cx, upper(a));
-    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\c", r"D:\a", r"D:\b"]);
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\c", r"D:\a", r"D:\b"]);
     let home: Vec<String> = ui.read(cx, |v| v.state.columns[0].entries.iter().take(3).map(|e| text(&e.path)).collect());
     assert_eq!(home, [r"D:\c", r"D:\a", r"D:\b"]);
     // Neither picked nor opened.
@@ -2668,12 +2761,12 @@ fn leaves_the_order_as_it_was_when_let_go_outside_its_own_kind(cx: &mut TestAppC
     ui.hold_drag(cx, a.center(), upper(one));
     assert_eq!(ui.read(cx, |v| v.landing.clone()), None);
     ui.let_go(cx, upper(one));
-    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
     // Nor over the columns.
     let (c, columns) = (ui.home_row(cx, r"D:\c"), point(px(900.), px(300.)));
     ui.hold_drag(cx, c.center(), columns);
     ui.let_go(cx, columns);
-    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
     assert!(ui.read(cx, |v| v.home_drag.is_none()));
 }
 
@@ -2686,14 +2779,14 @@ fn puts_down_a_drag_in_home_with_escape(cx: &mut TestAppContext) {
     ui.press(cx, "escape");
     assert!(ui.read(cx, |v| v.home_drag.is_none() && v.landing.is_none()));
     ui.let_go(cx, upper(a));
-    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
 }
 
 #[gpui_kit::test]
 fn scrolls_home_while_a_drag_is_held_at_its_bottom_edge(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake { roots: vec![folder(r"D:\")], ..Fake::default().with_folders(&[(r"D:\", vec![])]) });
     fake.settings.lock().unwrap().saved_searches =
-        (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None }).collect();
+        (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None, narrow: None }).collect();
     let ui = open(cx, fake.clone());
     let list = ui.act(cx, |window, _| window.find("home-rows").bounds());
     let first = ui.home_row(cx, "search:query0");
@@ -2786,7 +2879,7 @@ fn the_final_settings_save_supersedes_debounced_saves(cx: &mut TestAppContext) {
         v.flush_settings().unwrap();
     });
     settle(cx);
-    assert_eq!(texts(&fake.settings.lock().unwrap().favorites), ["latest"]);
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), ["latest"]);
     assert_eq!(fake.saves.load(Ordering::Relaxed), before + 1);
 }
 
@@ -3211,7 +3304,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     ui.press(cx, "ctrl-f");
     ui.input(cx, "cat");
     ui.press(cx, "ctrl-d");
-    let saved = |filter: Option<&str>| SavedSearch { name: String::new(), query: "cat".into(), filter: filter.map(Into::into) };
+    let saved = |filter: Option<&str>| SavedSearch { name: String::new(), query: "cat".into(), filter: filter.map(Into::into), narrow: None };
     assert_eq!(fake.settings.lock().unwrap().saved_searches, [saved(Some("画像"))]);
     // The same query with no filter is another search, saved apart.
     ui.click(cx, "search-filter");
@@ -3221,7 +3314,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     ui.press(cx, "ctrl-d");
     assert_eq!(fake.settings.lock().unwrap().saved_searches, [saved(Some("画像")), saved(None)]);
     // Run from home, it chooses its filter again.
-    ui.click(cx, row(search_key("cat", Some("画像"))));
+    ui.click(cx, row(search_key("cat", Some("画像"), None)));
     assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("画像"));
     assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
     // Back, the filter of the search before comes back with it.
@@ -3229,7 +3322,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     assert_eq!(ui.read(cx, |v| v.state.search_filter.clone()), None);
     assert_eq!(fake.settings.lock().unwrap().filter, None);
     // Its query alone is copied.
-    ui.click(cx, row(search_key("cat", Some("画像"))));
+    ui.click(cx, row(search_key("cat", Some("画像"), None)));
     ui.press(cx, "ctrl-shift-c");
     assert_eq!(*fake.text.lock().unwrap(), "cat");
 }
@@ -3237,9 +3330,9 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
 #[gpui_kit::test]
 fn changes_the_filter_a_saved_search_runs_within_from_its_edit(cx: &mut TestAppContext) {
     let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\cat.jpg")])));
-    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: String::new(), query: "cat".into(), filter: Some("画像".into()) }];
+    fake.settings.lock().unwrap().saved_searches = vec![SavedSearch { name: String::new(), query: "cat".into(), filter: Some("画像".into()), narrow: None }];
     let ui = open(cx, fake.clone());
-    ui.click(cx, row(search_key("cat", Some("画像"))));
+    ui.click(cx, row(search_key("cat", Some("画像"), None)));
     ui.press(cx, "f2");
     ui.click(cx, ("edit-search-filter", 2usize));
     ui.click(cx, "save-search");

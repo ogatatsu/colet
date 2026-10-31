@@ -11,7 +11,7 @@ use gpui_kit::*;
 use crate::{
     app::*,
     places::{HomeDrag, movable},
-    state::saved_query,
+    state::{favorite_key, narrowed_folder, saved_query},
     reveal::{Cell, on_screen, refit, reveal_target, uncover_target},
     state::{Column, ColumnId, Kind},
 };
@@ -400,11 +400,17 @@ impl Colet {
         let kind = c.kind;
         let selected = c.selected.contains(&entry.path);
         let saved = saved_query(&entry.path);
-        // Home lights the saved search that is running.
+        // Home lights the saved search that is running, narrowed as it was kept.
         let highlighted = c.highlight.as_ref() == Some(&entry.path)
-            || saved.is_some_and(|(q, f)| self.state.pinned() && q == self.state.query && f == self.state.search_filter.as_deref());
+            || saved.is_some_and(|(q, f, n)| {
+                self.state.pinned() && q == self.state.query && f == self.state.search_filter.as_deref() && n == self.state.search_narrowing().as_deref()
+            });
         // The filter a saved search runs within, faint beside its name.
-        let within = saved.and_then(|(_, f)| f).map(str::to_owned);
+        let within = saved.and_then(|(_, f, _)| f).map(str::to_owned);
+        // What a favorite or saved search opens narrowed to, fainter after it.
+        let narrow = (kind == Kind::Home)
+            .then(|| saved.map(|(_, _, n)| n.map(str::to_owned)).unwrap_or_else(|| narrowed_folder(&entry.path).map(|(_, n)| n)))
+            .flatten();
         // On the clipboard, cut or copied, whoever put it there.
         let held = !self.held.is_empty() && self.held.contains(&path_key(&entry.path));
         let cut = held && self.clipboard.cut;
@@ -422,7 +428,11 @@ impl Colet {
         // only what the menu acts on stands out.
         let aside = self.menu().is_some_and(|m| m.column == c.id && m.paths.is_some());
         let lit = selected && marked && !aside;
-        let image = self.icons.get(entry, cx);
+        // A narrowed favorite's is its folder's: a drive's own, say.
+        let image = match narrowed_folder(&entry.path) {
+            Some((path, _)) => self.icons.get(&Entry { path, ..entry.clone() }, cx),
+            None => self.icons.get(entry, cx),
+        };
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
         let ink = if lit { p.on_accent } else { p.text };
         let path = entry.path.clone();
@@ -530,6 +540,20 @@ impl Colet {
                                         .line_height(px(16.))
                                         .text_color(ink)
                                         .child(filter),
+                                )
+                            })
+                            .when_some(narrow, |d, narrow| {
+                                d.child(
+                                    div()
+                                        .id(SharedString::from(format!("narrow:{}", id_text(&entry.path))))
+                                        .min_w(px(24.))
+                                        .flex_shrink_1()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(2.))
+                                        .tip(format!("絞り込み：{narrow}"))
+                                        .child(icon("funnel", 11., muted))
+                                        .child(div().min_w_0().truncate().text_size(px(11.)).text_color(muted).child(narrow)),
                                 )
                             }),
                     )
@@ -817,7 +841,7 @@ impl Colet {
         let filtering = c.filter.as_ref().is_some_and(|f| !f.text.is_empty());
         let field = self.filters.get(&id).map(|field| field.input.clone());
         let path = shown(&c.path);
-        let star_path = c.path.clone();
+        let (star_key, narrowing) = (favorite_key(&c.path, c.narrowing().as_deref()), c.narrowing());
         let body = self.column_body(index, marked, cx);
         let sort_button = self.sort_button(index, window, cx);
         let headings = self.headings(index, cx);
@@ -884,9 +908,13 @@ impl Colet {
                     .child(div().text_size(px(12.)).text_color(p.text_faint).child(count))
                     .child(sort_button)
                     .child({
+                        // What it is narrowed to now is part of what is kept.
                         let kept = match kind {
-                            Kind::Search => self.settings.saved(&self.state.query, self.state.search_filter.as_deref()).is_some(),
-                            _ => self.settings.is_favorite(&star_path),
+                            Kind::Search => self
+                                .settings
+                                .saved(&self.state.query, self.state.search_filter.as_deref(), narrowing.as_deref())
+                                .is_some(),
+                            _ => self.settings.is_favorite(&star_key),
                         };
                         let label = match (kind, kept) {
                             (Kind::Search, true) => "保存した検索を解除（Ctrl+D）",
@@ -902,10 +930,10 @@ impl Colet {
                             .tooltip(label)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if kind == Kind::Search {
-                                    let (query, filter) = (this.state.query.clone(), this.state.search_filter.clone());
-                                    this.toggle_saved(&query, filter, cx);
-                                } else {
-                                    this.toggle_favorite(&star_path, cx);
+                                    this.toggle_saved_current(cx);
+                                } else if let Some(index) = this.state.index_of(id) {
+                                    let key = this.favorite_key_of(index);
+                                    this.toggle_favorite(&key, cx);
                                 }
                             }))
                     })

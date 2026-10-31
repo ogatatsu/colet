@@ -5,7 +5,7 @@ use colet_core::{
 };
 use std::path::PathBuf;
 
-use gpui_kit::base::input::Input;
+use gpui_kit::base::input::{Input, InputState};
 use gpui_kit::component::{button::{Button, ButtonVariants}, dialog::Dialog as DialogFrame, spinner::Spinner, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -127,12 +127,29 @@ fn filter_choice(id: ElementId, text: &str, chosen: bool) -> Button {
 }
 
 impl Colet {
+    /// The field for what a favorite or saved search opens narrowed to, and why it cannot be kept, if it
+    /// cannot.
+    fn narrow_field(&self, input: &Entity<InputState>, problem: Option<&'static str>, window: &Window, cx: &mut Context<Self>) -> Div {
+        let p = self.palette;
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(label(p, "絞り込み"))
+            .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
+            .child(match problem {
+                Some(problem) => div().text_size(px(12.)).text_color(p.danger).child(problem),
+                None => div().text_size(px(12.)).text_color(p.text_faint).child("開いたとき、この文字で名前を絞り込みます"),
+            })
+    }
+
     fn dialog_parts(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(&'static str, Div, Vec<AnyElement>)> {
         let p = self.palette;
         let title = match self.dialog.as_ref()? {
             Dialog::Name { request: Request { kind: Operation::NewFolder, .. }, .. } => "新規フォルダー",
             Dialog::Name { .. } => "名前を変更",
             Dialog::EditSearch { .. } => "保存した検索を編集",
+            Dialog::EditFavorite { .. } => "お気に入りを編集",
             Dialog::Filters { edit: Some(FilterEdit { original: None, .. }), .. } => "フィルターを追加",
             Dialog::Filters { edit: Some(_), .. } => "フィルターを編集",
             Dialog::Filters { deleting: Some(_), .. } => "フィルターを削除",
@@ -182,7 +199,34 @@ impl Colet {
                 ];
                 (content, buttons)
             }
-            Dialog::EditSearch { name, query, filter, .. } => {
+            Dialog::EditFavorite { original, name, narrow } => {
+                let problem = self.favorite_edit_problem(cx);
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(div().text_size(px(12.)).text_color(p.text_faint).child(format!("フォルダー：{}", shown(&original.path))))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(label(p, "名前"))
+                            .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                            .child(div().text_size(px(12.)).text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
+                    )
+                    .child(self.narrow_field(narrow, problem, window, cx));
+                let buttons = vec![
+                    push("cancel", "キャンセル", false, true)
+                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                        .into_any_element(),
+                    push("save-favorite", "保存", true, problem.is_none())
+                        .on_click(cx.listener(|this, _, window, cx| this.submit_favorite_edit(window, cx)))
+                        .into_any_element(),
+                ];
+                (content, buttons)
+            }
+            Dialog::EditSearch { name, query, filter, narrow, .. } => {
                 let problem = self.edit_problem(cx);
                 let chosen = filter.clone();
                 let content = div()
@@ -224,7 +268,8 @@ impl Colet {
                                         .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(choice.clone(), cx)))
                                 })),
                         ),
-                    );
+                    )
+                    .child(self.narrow_field(narrow, None, window, cx));
                 let buttons = vec![
                     push("cancel", "キャンセル", false, true)
                         .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))

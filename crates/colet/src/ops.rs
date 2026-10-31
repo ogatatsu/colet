@@ -20,7 +20,8 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, Tone},
     places::Dialog,
-    state::{Column, ColumnId, Kind as ColumnKind, saved_query},
+    settings::Favorite,
+    state::{Column, ColumnId, Kind as ColumnKind, favorite_key, favorite_parts, home_path, saved_query},
 };
 
 /// The most operations kept, and the most items of each.
@@ -266,7 +267,7 @@ impl Colet {
                 Some(NEEDS_SELECTION)
             } else if search {
                 Some("保存した検索はコピーできません")
-            } else if picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(p).is_none()) {
+            } else if picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(&home_path(p)).is_none()) {
                 Some("ドライブはコピーできません")
             } else {
                 None
@@ -314,6 +315,7 @@ impl Colet {
             self.refuse(if cut { "切り取り" } else { "コピー" }, reason, cx);
             return;
         }
+        let picked: Vec<PathBuf> = picked.iter().map(|p| home_path(p).into_owned()).collect();
         let (backend, owner) = (self.backend.clone(), self.owner);
         let done = format!("{} 項目を{}しました", picked.len(), if cut { "切り取り" } else { "コピー" });
         self.write_clipboard(move || backend.copy_files(&picked, cut, owner), done, cx);
@@ -356,7 +358,8 @@ impl Colet {
         .detach();
     }
 
-    /// The paths as text, one a line; a saved search's is the query it runs.
+    /// The paths as text, one a line; a saved search's is the query it runs, a narrowed favorite's its
+    /// folder's.
     pub fn copy_paths(&mut self, cx: &mut Context<Self>) {
         let picked = self.picked();
         self.take_menu();
@@ -369,7 +372,10 @@ impl Colet {
             if i > 0 {
                 text.push("\r\n");
             }
-            text.push(saved_query(p).map_or(p.as_os_str(), |(query, _)| query.as_ref()));
+            match saved_query(p) {
+                Some((query, ..)) => text.push(query),
+                None => text.push(home_path(p).as_os_str()),
+            }
         }
         let (backend, owner) = (self.backend.clone(), self.owner);
         let done = format!("{} 項目のパスをコピーしました", picked.len());
@@ -391,16 +397,20 @@ impl Colet {
         }
     }
 
-    /// F2: a rename, or for a saved search in home, its edit.
+    /// F2: a rename, or for a saved search or favorite in home, its edit.
     pub fn ask_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (picked, reasons, entries) = (self.picked(), self.reasons(), self.picked_entries());
+        let at_home = self.action_column().is_some_and(|c| c.kind == ColumnKind::Home);
         self.take_menu();
-        if let [path] = picked.as_slice()
-            && let Some((query, filter)) = saved_query(path)
-        {
-            let (query, filter) = (query.to_owned(), filter.map(str::to_owned));
-            self.open_edit(&query, filter.as_deref(), window, cx);
-            return;
+        if let [path] = picked.as_slice() {
+            if saved_query(path).is_some() {
+                self.open_edit(path, window, cx);
+                return;
+            }
+            if at_home && self.settings.is_favorite(path) {
+                self.open_favorite_edit(path, window, cx);
+                return;
+            }
         }
         if picked.is_empty() {
             return;
@@ -618,7 +628,7 @@ impl Colet {
                 self.in_background(move || backend.open(&folder, owner).map_err(|error| format!("開けません: {error}")), None, cx);
             }
             _ if !picked.is_empty() => {
-                let paths: Vec<PathBuf> = picked.into_iter().map(|e| e.path).collect();
+                let paths: Vec<PathBuf> = picked.into_iter().map(|e| home_path(&e.path).into_owned()).collect();
                 self.in_background(move || backend.reveal(&paths), None, cx);
             }
             _ => {}
@@ -646,6 +656,7 @@ impl Colet {
             Some(paths) => paths.clone(),
             None => self.state.columns[index].shown_selected().into_owned(),
         };
+        let paths: Vec<PathBuf> = paths.iter().map(|p| home_path(p).into_owned()).collect();
         let background = if paths.is_empty() { self.state.columns[index].path.clone() } else { PathBuf::new() };
         let (backend, owner, at) = (self.backend.clone(), self.owner, menu.screen);
         let task = cx.background_executor().spawn(async move { backend.shell_menu(paths, background, at, owner) });
@@ -750,12 +761,18 @@ impl Colet {
             // Carry the selection over to the new name before the listing drops the old one.
             self.state.renamed(&paths[0], to);
             // Home's favorites and pins at it or inside it follow it, as the refresh below lists home again.
+            // A narrowed favorite's folder moves under its narrowing.
             let from = &paths[0];
-            let moved = |list: &[PathBuf]| -> Option<Vec<PathBuf>> {
-                let moved: Vec<PathBuf> = list.iter().map(|p| colet_core::paths::moved(p, from, to).unwrap_or_else(|| p.clone())).collect();
-                (moved != list).then_some(moved)
+            let moved_path = |p: &Path| colet_core::paths::moved(p, from, to);
+            let moved_key = |key: &PathBuf| {
+                let (path, narrow) = favorite_parts(key);
+                moved_path(&path).map_or_else(|| key.clone(), |path| favorite_key(&path, narrow.as_deref()))
             };
-            let (favorites, pinned) = (moved(&self.settings.favorites), moved(&self.settings.pinned));
+            let pinned: Vec<PathBuf> = self.settings.pinned.iter().map(moved_key).collect();
+            let pinned = (pinned != self.settings.pinned).then_some(pinned);
+            let favorites: Vec<Favorite> =
+                self.settings.favorites.iter().map(|f| Favorite { path: moved_path(&f.path).unwrap_or_else(|| f.path.clone()), ..f.clone() }).collect();
+            let favorites = (favorites != self.settings.favorites).then_some(favorites);
             if favorites.is_some() || pinned.is_some() {
                 self.update_settings(
                     |s| {

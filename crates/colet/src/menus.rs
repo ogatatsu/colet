@@ -10,7 +10,6 @@ use crate::{
     app::Colet,
     ops::{Menu, NEEDS_FILE, ONE_ITEM},
     places::Dialog,
-    search_filters::FilterEdit,
     state::{ColumnId, Kind, saved_query},
     view::TipExt,
 };
@@ -33,9 +32,9 @@ pub enum Command {
     /// A row of home, pinned or put back.
     Pin(std::path::PathBuf),
     Windows,
-    /// A saved search, by its query and filter.
-    EditSearch(String, Option<String>),
-    Unsave(String, Option<String>),
+    /// A saved search, by its row's key.
+    EditSearch(std::path::PathBuf),
+    Unsave(std::path::PathBuf),
     /// A sort for the column, or for the default when `None`.
     Sort(Option<ColumnId>, Sort),
     Direction(Option<ColumnId>, bool),
@@ -224,13 +223,7 @@ impl Colet {
     fn text_fields(&self) -> Vec<Entity<InputState>> {
         let mut fields = vec![self.search.clone()];
         fields.extend(self.filters.values().map(|field| field.input.clone()));
-        match &self.dialog {
-            Some(Dialog::Name { input, .. }) => fields.push(input.clone()),
-            Some(Dialog::EditSearch { name, query, .. } | Dialog::Filters { edit: Some(FilterEdit { name, query, .. }), .. }) => {
-                fields.extend([name.clone(), query.clone()])
-            }
-            _ => {}
-        }
+        fields.extend(self.dialog.iter().flat_map(Dialog::fields));
         fields
     }
 
@@ -311,15 +304,14 @@ impl Colet {
             _ => None,
         };
         if let [path] = picked.as_slice()
-            && let Some((query, filter)) = saved_query(path)
+            && saved_query(path).is_some()
         {
-            let filter = filter.map(str::to_owned);
             let mut lines = vec![
                 line("menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None, Command::CopyPath),
-                line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, Command::EditSearch(query.into(), filter.clone())).grouped(),
+                line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, Command::EditSearch(path.clone())).grouped(),
             ];
             lines.extend(pin);
-            lines.push(line("menu-unsave", "star", "保存した検索を解除", None, None, Command::Unsave(query.into(), filter)));
+            lines.push(line("menu-unsave", "star", "保存した検索を解除", None, None, Command::Unsave(path.clone())));
             return lines;
         }
         let one = entries.len() == 1;
@@ -332,6 +324,12 @@ impl Colet {
             1 => None,
             _ => entries.iter().all(|e| e.directory).then_some(NEEDS_FILE),
         };
+        // F2 on a favorite in home edits it: its folder is not renamed from there.
+        let rename = if in_home && one && self.settings.is_favorite(&entries[0].path) {
+            line("menu-edit-favorite", "pencil-line", "編集", Some("F2"), None, Command::Rename)
+        } else {
+            line("menu-rename", "pencil-line", "名前を変更", Some("F2"), quiet(reasons.rename), Command::Rename)
+        };
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), open_off, Command::Open),
             line("menu-explorer", "folder-open", "Explorerで表示", None, reasons.explorer, Command::Explorer),
@@ -339,7 +337,7 @@ impl Colet {
             line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), Command::Cut),
             line("menu-paste", "clipboard-paste", "貼り付け", Some("Ctrl+V"), reasons.paste, Command::Paste),
             line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), quiet(reasons.copy_path), Command::CopyPath),
-            line("menu-rename", "pencil-line", "名前を変更", Some("F2"), quiet(reasons.rename), Command::Rename).grouped(),
+            rename.grouped(),
             line("menu-new-folder", "folder-plus", "新規フォルダー", Some("Ctrl+Shift+N"), reasons.paste, Command::NewFolder),
             line("menu-recycle", "trash", "ごみ箱へ移動", Some("Delete"), quiet(reasons.delete), Command::Recycle),
         ];
@@ -400,8 +398,12 @@ impl Colet {
                 self.show_shell_menu(window, cx);
                 return;
             }
-            Command::EditSearch(query, filter) => self.open_edit(&query, filter.as_deref(), window, cx),
-            Command::Unsave(query, filter) => self.toggle_saved(&query, filter, cx),
+            Command::EditSearch(key) => self.open_edit(&key, window, cx),
+            Command::Unsave(key) => {
+                if let Some((query, filter, narrow)) = saved_query(&key) {
+                    self.toggle_saved(query, filter.map(str::to_owned), narrow.map(str::to_owned), cx);
+                }
+            }
             Command::Sort(target, by) => self.set_sort(target, by, cx),
             Command::Direction(target, descending) => self.set_direction(target, descending, cx),
             Command::Unsort(id) => self.set_order(Some(id), self.settings.sort, cx),

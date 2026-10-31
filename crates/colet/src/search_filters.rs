@@ -109,10 +109,10 @@ impl Colet {
                     }
                     // A pinned search keeps its pin under the name.
                     for pin in &mut s.pinned {
-                        if let Some((query, Some(filter))) = crate::state::saved_query(pin)
+                        if let Some((query, Some(filter), narrow)) = crate::state::saved_query(pin)
                             && filter == from
                         {
-                            *pin = crate::state::search_key(query, Some(&to));
+                            *pin = crate::state::search_key(query, Some(&to), narrow);
                         }
                     }
                 }
