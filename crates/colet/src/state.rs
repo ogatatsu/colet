@@ -842,12 +842,15 @@ impl State {
         saved_query(path).is_none().then(|| home_path(path))
     }
 
-    /// Ctrl+click: adds the row to the selection, or takes it out.
+    /// Ctrl+click: adds the row to the selection, or takes it out; in home, which picks one row at a time,
+    /// it is picked alone.
     pub fn toggle(&mut self, index: usize, path: &Path) {
         let Some(c) = self.columns.get(index) else { return };
         let mut selected = c.selected.clone();
         if let Some(at) = selected.iter().position(|p| p == path) {
             selected.remove(at);
+        } else if c.kind == Kind::Home {
+            selected = vec![path.to_owned()];
         } else {
             selected.push(path.to_owned());
         }

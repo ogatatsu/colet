@@ -289,6 +289,22 @@ impl Colet {
         )
     }
 
+    /// The keys are in home's pane.
+    fn in_home(&self) -> bool {
+        self.state.columns.get(self.state.active).is_some_and(|c| c.kind == Kind::Home)
+    }
+
+    /// Shift+↑↓, with Ctrl adding: picks rows on the way, or in home, which picks one at a time, moves as
+    /// the arrows do.
+    fn extend_step(&mut self, by: isize, add: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.in_home() {
+            self.step(by, window, cx);
+            return;
+        }
+        self.state.extend_step(by, add);
+        self.changed(cx);
+    }
+
     fn icon_button(id: &'static str, name: &'static str, label: &'static str, tip: &'static str, enabled: bool) -> Button {
         Button::new(id).ghost().icon(glyph(name)).accessibility_label(label).tooltip(tip).disabled(!enabled)
     }
@@ -314,26 +330,17 @@ impl Colet {
             .on_action(cx.listener(|this, _: &NewFolder, window, cx| this.ask_new_folder(window, cx)))
             .on_action(cx.listener(|this, _: &RecycleItems, _, cx| this.delete_picked(false, cx)))
             .on_action(cx.listener(|this, _: &RecycleItemsForGood, _, cx| this.delete_picked(true, cx)))
+            // Home picks one row at a time: Ctrl+A picks nothing there, and Shift moves as the arrows do.
             .on_action(cx.listener(|this, _: &SelectAll, _, cx| {
-                this.state.select_all(this.state.active);
-                this.changed(cx);
+                if !this.in_home() {
+                    this.state.select_all(this.state.active);
+                    this.changed(cx);
+                }
             }))
-            .on_action(cx.listener(|this, _: &ExtendUp, _, cx| {
-                this.state.extend_step(-1, false);
-                this.changed(cx);
-            }))
-            .on_action(cx.listener(|this, _: &ExtendDown, _, cx| {
-                this.state.extend_step(1, false);
-                this.changed(cx);
-            }))
-            .on_action(cx.listener(|this, _: &AddUp, _, cx| {
-                this.state.extend_step(-1, true);
-                this.changed(cx);
-            }))
-            .on_action(cx.listener(|this, _: &AddDown, _, cx| {
-                this.state.extend_step(1, true);
-                this.changed(cx);
-            }))
+            .on_action(cx.listener(|this, _: &ExtendUp, window, cx| this.extend_step(-1, false, window, cx)))
+            .on_action(cx.listener(|this, _: &ExtendDown, window, cx| this.extend_step(1, false, window, cx)))
+            .on_action(cx.listener(|this, _: &AddUp, window, cx| this.extend_step(-1, true, window, cx)))
+            .on_action(cx.listener(|this, _: &AddDown, window, cx| this.extend_step(1, true, window, cx)))
             .on_action(cx.listener(|this, _: &FocusPrevious, _, cx| this.focus_step(-1, cx)))
             .on_action(cx.listener(|this, _: &FocusNext, _, cx| this.focus_step(1, cx)))
             .on_action(cx.listener(|this, _: &FocusPageUp, _, cx| this.focus_step(-10, cx)))
@@ -593,6 +600,9 @@ impl Colet {
                 let modifiers = event.modifiers();
                 if event.click_count() >= 2 {
                     this.open(index, &path, window, cx);
+                } else if kind == Kind::Home {
+                    // Home picks one row at a time, whatever is held.
+                    this.pick(index, path.clone(), window, cx);
                 } else if modifiers.control && modifiers.shift {
                     this.state.add_range(index, &path);
                     this.state.set_active(index);

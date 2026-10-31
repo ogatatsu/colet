@@ -281,8 +281,6 @@ impl Colet {
             // With nothing picked, the folder column's own folder.
             explorer: if none {
                 self.destination().is_none().then_some(NEEDS_FOLDER)
-            } else if at_home && picked.len() > 1 {
-                Some(ONE_ITEM)
             } else if apart {
                 Some(SAME_FOLDER)
             } else {

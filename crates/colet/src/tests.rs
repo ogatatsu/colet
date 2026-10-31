@@ -2220,7 +2220,7 @@ fn shows_several_picked_in_one_folder_together_in_explorer(cx: &mut TestAppConte
 }
 
 #[gpui_kit::test]
-fn shows_several_in_explorer_only_from_one_folder_and_not_in_home(cx: &mut TestAppContext) {
+fn shows_several_in_explorer_only_from_one_folder(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "D:"), Entry::folder(r"E:\", "E:")],
         ..Fake::default().with_results(vec![file(r"D:\a\x.txt"), file(r"D:\b\y.txt")])
@@ -2235,16 +2235,33 @@ fn shows_several_in_explorer_only_from_one_folder_and_not_in_home(cx: &mut TestA
     ui.press(cx, "shift-f10");
     assert_eq!(explorer(&ui, cx), Some(crate::ops::SAME_FOLDER));
     ui.press(cx, "escape");
-    // Two drives in home.
-    ui.press(cx, "ctrl-f");
-    ui.press(cx, "escape");
-    ui.click(cx, row(r"D:\"));
-    ui.press(cx, "left");
-    ui.press(cx, "ctrl-a");
-    assert!(ui.selected(cx, 0).len() > 1);
-    ui.press(cx, "shift-f10");
-    assert_eq!(explorer(&ui, cx), Some(crate::ops::ONE_ITEM));
     assert!(fake.revealed.lock().unwrap().is_empty());
+}
+
+#[gpui_kit::test]
+fn picks_one_row_at_a_time_in_home(cx: &mut TestAppContext) {
+    let (_, ui) = ordered_home(cx);
+    ui.click(cx, row(r"D:\a"));
+    ui.press(cx, "left");
+    // Ctrl+A picks nothing more, and Shift+↓ moves as ↓ does.
+    ui.press(cx, "ctrl-a");
+    assert_eq!(ui.selected(cx, 0), [r"D:\a"]);
+    ui.press(cx, "shift-down");
+    assert_eq!(ui.selected(cx, 0), [r"D:\b"]);
+    ui.press(cx, "ctrl-shift-down");
+    assert_eq!(ui.selected(cx, 0), [r"D:\c"]);
+    // A click with Ctrl or Shift held picks the row alone, as a plain one does.
+    ui.click_with(cx, row(r"D:\a"), Modifiers::control());
+    assert_eq!(ui.selected(cx, 0), [r"D:\a"]);
+    ui.click_with(cx, row(r"D:\c"), Modifiers::shift());
+    assert_eq!(ui.selected(cx, 0), [r"D:\c"]);
+    ui.press(cx, "left");
+    // Ctrl+Space picks the row the keys are on alone, or lets go of it.
+    ui.press(cx, "ctrl-up");
+    ui.press(cx, "ctrl-space");
+    assert_eq!(ui.selected(cx, 0), [r"D:\b"]);
+    ui.press(cx, "ctrl-space");
+    assert!(ui.selected(cx, 0).is_empty());
 }
 
 #[gpui_kit::test]
@@ -2774,15 +2791,10 @@ fn offers_in_home_only_what_its_rows_can_do(cx: &mut TestAppContext) {
     assert_eq!(lines(&ui, cx), ["開く", "Explorerで表示", "| パスをコピー", "| ピン留め", "お気に入りに追加", "| その他のオプションを確認"]);
     menu(&ui, cx, "search:one");
     assert_eq!(lines(&ui, cx), ["開く", "| 検索文字列をコピー", "| 編集", "ピン留め", "保存した検索を解除"]);
-    // Several picked keep one's lines, only the path's on.
-    ui.press(cx, "escape");
-    ui.click(cx, row(r"D:\a"));
-    ui.press(cx, "shift-down");
-    ui.press(cx, "shift-f10");
-    assert_eq!(lines(&ui, cx), ["開く", "Explorerで表示", "| パスをコピー", "| 編集", "ピン留め", "お気に入りを解除", "| その他のオプションを確認"]);
-    assert_eq!(ui.lines_on(cx), ["パスをコピー", "その他のオプションを確認"]);
     // Nor do the keys copy from home.
     ui.press(cx, "escape");
+    ui.click(cx, row(r"D:\a"));
+    ui.press(cx, "left");
     ui.press(cx, "ctrl-c");
     assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はホームでは使えません"), "{:?}", ui.toasts(cx));
 }
