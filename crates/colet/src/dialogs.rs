@@ -17,6 +17,7 @@ use crate::{
     places::Dialog,
     search_filters::FilterEdit,
     settings::Theme,
+    state::Kind,
     theme::Palette,
     view::TipExt,
 };
@@ -550,7 +551,12 @@ impl Colet {
         if self.dialog.is_some() {
             return;
         }
-        let Some(column) = self.state.columns.get(index).map(|c| c.id) else { return };
+        let Some(c) = self.state.columns.get(index) else { return };
+        // Home has nothing to offer but on its rows.
+        if c.kind == Kind::Home && paths.as_ref().map_or_else(|| c.shown_selected().is_empty(), Vec::is_empty) {
+            return;
+        }
+        let column = c.id;
         self.state.set_active(index);
         self.column_focus(index).focus(window, cx);
         let scale = window.scale_factor();

@@ -1,5 +1,7 @@
 //! The menus, the file menu, a text field's, the sort order's and the search filters', as lines that the
 //! mouse and the keys pick alike: ↑↓ move, Enter picks, Esc closes, and the keys go back to where they were.
+use std::path::PathBuf;
+
 use colet_core::entry::{Sort, direction_label};
 use gpui_kit::base::input::{self, InputState};
 use gpui_kit::component::{ActiveTheme, menu::{PopupMenu, PopupMenuItem}};
@@ -8,7 +10,7 @@ use gpui_kit::*;
 
 use crate::{
     app::Colet,
-    ops::{Menu, NEEDS_FILE, ONE_ITEM},
+    ops::{Menu, NEEDS_FILE, ONE_ITEM, Reasons},
     places::Dialog,
     state::{ColumnId, Kind, saved_query},
     view::TipExt,
@@ -292,28 +294,10 @@ impl Colet {
         }
         let reasons = self.reasons();
         let picked = self.picked();
-        let entries = self.picked_entries();
-        // A row of home is pinned above the rest, or put back, one at a time.
-        let in_home = self.menu().and_then(|m| self.state.index_of(m.column)).is_some_and(|i| self.state.columns[i].kind == Kind::Home);
-        let pin = match picked.as_slice() {
-            [path] if in_home => Some(if self.settings.is_pinned(path) {
-                line("menu-unpin", "pin-off", "ピン留めを外す", None, None, Command::Pin(path.clone()))
-            } else {
-                line("menu-pin", "pin", "ピン留め", None, None, Command::Pin(path.clone()))
-            }),
-            _ => None,
-        };
-        if let [path] = picked.as_slice()
-            && saved_query(path).is_some()
-        {
-            let mut lines = vec![
-                line("menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None, Command::CopyPath),
-                line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, Command::EditSearch(path.clone())).grouped(),
-            ];
-            lines.extend(pin);
-            lines.push(line("menu-unsave", "star", "保存した検索を解除", None, None, Command::Unsave(path.clone())));
-            return lines;
+        if self.menu().and_then(|m| self.state.index_of(m.column)).is_some_and(|i| self.state.columns[i].kind == Kind::Home) {
+            return self.home_lines(&picked, &reasons);
         }
+        let entries = self.picked_entries();
         let one = entries.len() == 1;
         // From empty space nothing is picked, and the actions on items need no word.
         let some = !picked.is_empty();
@@ -324,12 +308,6 @@ impl Colet {
             1 => None,
             _ => entries.iter().all(|e| e.directory).then_some(NEEDS_FILE),
         };
-        // F2 on a favorite in home edits it: its folder is not renamed from there.
-        let rename = if in_home && one && self.settings.is_favorite(&entries[0].path) {
-            line("menu-edit-favorite", "pencil-line", "編集", Some("F2"), None, Command::Rename)
-        } else {
-            line("menu-rename", "pencil-line", "名前を変更", Some("F2"), quiet(reasons.rename), Command::Rename)
-        };
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), open_off, Command::Open),
             line("menu-explorer", "folder-open", "Explorerで表示", None, reasons.explorer, Command::Explorer),
@@ -337,7 +315,7 @@ impl Colet {
             line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), Command::Cut),
             line("menu-paste", "clipboard-paste", "貼り付け", Some("Ctrl+V"), reasons.paste, Command::Paste),
             line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), quiet(reasons.copy_path), Command::CopyPath),
-            rename.grouped(),
+            line("menu-rename", "pencil-line", "名前を変更", Some("F2"), quiet(reasons.rename), Command::Rename).grouped(),
             line("menu-new-folder", "folder-plus", "新規フォルダー", Some("Ctrl+Shift+N"), reasons.paste, Command::NewFolder),
             line("menu-recycle", "trash", "ごみ箱へ移動", Some("Delete"), quiet(reasons.delete), Command::Recycle),
         ];
@@ -356,11 +334,50 @@ impl Colet {
                 .grouped(),
             );
         }
-        if let Some(pin) = pin {
-            // Beside the favorite's line, in its group.
-            let first = !lines.last().is_some_and(|l| matches!(l.command, Command::Favorite(_)));
-            lines.push(if first { pin.grouped() } else { pin });
+        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows).grouped());
+        lines
+    }
+
+    /// The menu of rows of home: opening them, their paths, and keeping them there. What home never does,
+    /// as copying, cutting, pasting or deleting, is not offered; several picked keep one's lines, off.
+    fn home_lines(&self, picked: &[PathBuf], reasons: &Reasons) -> Vec<Line> {
+        let Some(first) = picked.first().cloned() else { return Vec::new() };
+        let several = (picked.len() > 1).then_some(ONE_ITEM);
+        // A row of home is pinned above the rest, or put back, one at a time.
+        let pin = if several.is_none() && self.settings.is_pinned(&first) {
+            line("menu-unpin", "pin-off", "ピン留めを外す", None, None, Command::Pin(first.clone()))
+        } else {
+            line("menu-pin", "pin", "ピン留め", None, several, Command::Pin(first.clone()))
+        };
+        if several.is_none() && saved_query(&first).is_some() {
+            return vec![
+                line("menu-open", "external-link", "開く", Some("Enter"), None, Command::Open),
+                line("menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None, Command::CopyPath).grouped(),
+                line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, Command::EditSearch(first.clone())).grouped(),
+                pin,
+                line("menu-unsave", "star", "保存した検索を解除", None, None, Command::Unsave(first)),
+            ];
         }
+        let mut lines = vec![
+            line("menu-open", "external-link", "開く", Some("Enter"), several, Command::Open),
+            line("menu-explorer", "folder-open", "Explorerで表示", None, reasons.explorer, Command::Explorer),
+            line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, Command::CopyPath).grouped(),
+        ];
+        // F2 on a favorite edits it: a place has nothing to edit, and its folder is not renamed from here.
+        if several.is_some() || self.settings.is_favorite(&first) {
+            lines.push(line("menu-edit-favorite", "pencil-line", "編集", Some("F2"), several, Command::Rename));
+        }
+        lines.push(pin);
+        let favorite = picked.iter().all(|path| self.settings.is_favorite(path));
+        lines.push(line(
+            "menu-favorite",
+            if favorite { "star-fill" } else { "star" },
+            if favorite { "お気に入りを解除" } else { "お気に入りに追加" },
+            Some("Ctrl+D"),
+            several,
+            Command::Favorite(first),
+        ));
+        lines[3].group = true;
         lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows).grouped());
         lines
     }

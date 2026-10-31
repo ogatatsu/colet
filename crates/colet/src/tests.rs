@@ -2132,7 +2132,7 @@ fn never_sends_a_drive_at_home_to_the_bin(cx: &mut TestAppContext) {
     assert!(ui.read(cx, |v| v.dialog.is_none()));
     assert!(ui.toasts(cx).iter().any(|t| t.starts_with("「ごみ箱へ移動」はホームでは使えません")), "{:?}", ui.toasts(cx));
     ui.press(cx, "ctrl-c");
-    assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はドライブはコピーできません"), "{:?}", ui.toasts(cx));
+    assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はホームでは使えません"), "{:?}", ui.toasts(cx));
 }
 
 #[test]
@@ -2752,6 +2752,39 @@ fn pins_rows_of_any_kind_above_the_rest_and_puts_them_in_order(cx: &mut TestAppC
     pin(&ui, cx, "search:two", "menu-unsave");
     assert!(fake.settings.lock().unwrap().pinned.is_empty());
     assert!(!ui.read(cx, |v| v.menu_lines().iter().any(|l| matches!(l.command, crate::menus::Command::Pin(_)))));
+}
+
+#[gpui_kit::test]
+fn offers_in_home_only_what_its_rows_can_do(cx: &mut TestAppContext) {
+    let (_, ui) = ordered_home(cx);
+    let lines = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.read(cx, |v| v.menu_lines().into_iter().map(|l| format!("{}{}", if l.group { "| " } else { "" }, l.text)).collect::<Vec<_>>())
+    };
+    let menu = |ui: &Ui, cx: &mut TestAppContext, path: &str| {
+        ui.press(cx, "escape");
+        ui.act(cx, |window, cx| window.within("home").right_click(row(path), cx));
+        settle(cx);
+    };
+    // Nothing picked, the menu key opens nothing.
+    ui.press(cx, "shift-f10");
+    assert!(ui.read(cx, |v| v.menu().is_none()));
+    menu(&ui, cx, r"D:\a");
+    assert_eq!(lines(&ui, cx), ["開く", "Explorerで表示", "| パスをコピー", "| 編集", "ピン留め", "お気に入りを解除", "| その他のオプションを確認"]);
+    menu(&ui, cx, r"D:\");
+    assert_eq!(lines(&ui, cx), ["開く", "Explorerで表示", "| パスをコピー", "| ピン留め", "お気に入りに追加", "| その他のオプションを確認"]);
+    menu(&ui, cx, "search:one");
+    assert_eq!(lines(&ui, cx), ["開く", "| 検索文字列をコピー", "| 編集", "ピン留め", "保存した検索を解除"]);
+    // Several picked keep one's lines, only the path's on.
+    ui.press(cx, "escape");
+    ui.click(cx, row(r"D:\a"));
+    ui.press(cx, "shift-down");
+    ui.press(cx, "shift-f10");
+    assert_eq!(lines(&ui, cx), ["開く", "Explorerで表示", "| パスをコピー", "| 編集", "ピン留め", "お気に入りを解除", "| その他のオプションを確認"]);
+    assert_eq!(ui.lines_on(cx), ["パスをコピー", "その他のオプションを確認"]);
+    // Nor do the keys copy from home.
+    ui.press(cx, "escape");
+    ui.press(cx, "ctrl-c");
+    assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はホームでは使えません"), "{:?}", ui.toasts(cx));
 }
 
 #[gpui_kit::test]

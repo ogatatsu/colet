@@ -265,6 +265,8 @@ impl Colet {
         Reasons {
             copy: if none {
                 Some(NEEDS_SELECTION)
+            } else if at_home {
+                Some(NOT_AT_HOME)
             } else if search {
                 Some("保存した検索はコピーできません")
             } else if picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(&home_path(p)).is_none()) {
