@@ -138,7 +138,6 @@ pub fn write_text(text: &OsStr, owner: Owner) -> Result<()> {
 pub fn read_files() -> Result<ClipboardFiles> {
     let _clipboard = Opened::new(0)?;
     unsafe {
-        let sequence = GetClipboardSequenceNumber();
         let mut cut = false;
         if let Ok(effect) = GetClipboardData(preferred_effect()) {
             let value = GlobalLock(HGLOBAL(effect.0)).cast::<u32>();
@@ -150,6 +149,8 @@ pub fn read_files() -> Result<ClipboardFiles> {
         let Ok(drop) = GetClipboardData(CF_HDROP.0.into()) else {
             let items = IsClipboardFormatAvailable(RegisterClipboardFormatW(w!("Shell IDList Array"))).is_ok();
             let contents = if items { Vec::new() } else { described() };
+            // Read after the formats: one its owner renders only now, as asked for, counts as a change.
+            let sequence = GetClipboardSequenceNumber();
             return Ok(ClipboardFiles { items, contents, cut, sequence, ..ClipboardFiles::default() });
         };
         let drop = HDROP(drop.0);
@@ -162,6 +163,7 @@ pub fn read_files() -> Result<ClipboardFiles> {
                 from_wide(&buffer[..len])
             })
             .collect();
+        let sequence = GetClipboardSequenceNumber();
         Ok(ClipboardFiles { paths, cut, sequence, ..ClipboardFiles::default() })
     }
 }

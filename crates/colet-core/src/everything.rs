@@ -198,8 +198,10 @@ impl Watch {
             loop {
                 // Holds the client's lock until a change comes, or the client is shut down.
                 if unsafe { Everything3_WaitForResultListChange(client) } != 0 {
+                    // Nothing clears the change on this client, so waiting again would return at once,
+                    // over and over: it stays heard until a fresh search starts another watch.
                     heard.changed.store(true, Ordering::Relaxed);
-                    continue;
+                    return;
                 }
                 let error = unsafe { Everything3_GetLastError() };
                 if error == 0 {

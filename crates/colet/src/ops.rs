@@ -336,13 +336,17 @@ impl Colet {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
+                let written = result.is_ok();
                 match result {
                     Ok(()) => this.notify(done, Tone::Info, cx),
                     Err(error) => this.notify(error, Tone::Error, cx),
                 }
                 this.clipboard_writes -= 1;
+                // The paste waits on the last write: failed, the clipboard still holds what was there
+                // before, never what it was meant to paste.
                 if this.clipboard_writes == 0
                     && let Some(destination) = this.paste_waiting.take()
+                    && written
                 {
                     this.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
                 }
@@ -732,6 +736,26 @@ impl Colet {
         if let Some(to) = &renamed {
             // Carry the selection over to the new name before the listing drops the old one.
             self.state.renamed(&paths[0], to);
+            // Home's favorites and pins at it or inside it follow it, as the refresh below lists home again.
+            let from = &paths[0];
+            let moved = |list: &[PathBuf]| -> Option<Vec<PathBuf>> {
+                let moved: Vec<PathBuf> = list.iter().map(|p| colet_core::paths::moved(p, from, to).unwrap_or_else(|| p.clone())).collect();
+                (moved != list).then_some(moved)
+            };
+            let (favorites, pinned) = (moved(&self.settings.favorites), moved(&self.settings.pinned));
+            if favorites.is_some() || pinned.is_some() {
+                self.update_settings(
+                    |s| {
+                        if let Some(favorites) = favorites {
+                            s.favorites = favorites;
+                        }
+                        if let Some(pinned) = pinned {
+                            s.pinned = pinned;
+                        }
+                    },
+                    cx,
+                );
+            }
         }
         if kind == Kind::NewFolder && result.is_ok() {
             // The shell says where it made the folder, which a name clash may have changed.
@@ -785,6 +809,8 @@ impl Colet {
         if open {
             self.unseen = 0;
         } else {
+            // A lookup still out for an item pressed is over: opening the history again does not revive it.
+            self.revealing = None;
             self.column_focus(self.state.active).focus(window, cx);
         }
         cx.notify();
