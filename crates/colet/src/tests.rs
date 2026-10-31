@@ -3500,6 +3500,21 @@ fn says_quick_look_is_not_running_only_from_space(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn shows_quick_look_from_the_space_an_ime_types(cx: &mut TestAppContext) {
+    use QuickLookMessage::Toggle;
+    let (fake, ui) = in_work(cx);
+    let id = ui.read(cx, |v| v.state.columns[2].id);
+    fake.quick_looked();
+    ui.input(cx, "　");
+    assert_eq!(fake.quick_looked(), [(Toggle, r"D:\work\a.txt".into())]);
+    ui.input(cx, " ");
+    assert_eq!(fake.quick_looked(), [(Toggle, r"D:\work\a.txt".into())]);
+    // Nothing goes on in the field, which the keys are left out of.
+    assert!(ui.columns_focused(cx));
+    assert!(ui.view.read_with(cx, |v, cx| v.filters.get(&id).is_none_or(|f| f.input.read(cx).value().is_empty())));
+}
+
+#[gpui_kit::test]
 fn leaves_space_to_a_columns_field(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     let id = ui.read(cx, |v| v.state.columns[2].id);

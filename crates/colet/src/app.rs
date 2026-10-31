@@ -1471,7 +1471,12 @@ impl EntityInputHandler for Colet {
     // A paste in the rows pastes files, from its keys.
     fn paste(&mut self, _: ClipboardItem, _: &mut Window, _: &mut Context<Self>) {}
 
+    // Space with the IME on comes here as the space it types, not as the key: QuickLook all the same.
     fn replace_text_in_range(&mut self, _: Option<Range<usize>>, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !text.is_empty() && text.trim().is_empty() {
+            self.quick_look(cx);
+            return;
+        }
         self.type_into_filter(text, None, window, cx);
     }
 
