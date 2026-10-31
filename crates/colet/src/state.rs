@@ -733,6 +733,15 @@ impl State {
         }
     }
 
+    /// What QuickLook previews: the row the keys are on in the active column, or the item it points at;
+    /// none on a saved search, which is no file.
+    pub fn keys_on(&self) -> Option<&Path> {
+        let c = self.columns.get(self.active)?;
+        let listed = |p: &&PathBuf| c.entry(p).is_some();
+        let path = c.focused.as_ref().filter(listed).or(c.highlight.as_ref().filter(listed))?;
+        saved_query(path).is_none().then_some(path.as_path())
+    }
+
     /// Ctrl+click: adds the row to the selection, or takes it out.
     pub fn toggle(&mut self, index: usize, path: &Path) {
         let Some(c) = self.columns.get(index) else { return };

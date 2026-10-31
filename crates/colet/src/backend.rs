@@ -3,7 +3,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, OnceLock, mpsc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
@@ -16,6 +16,7 @@ use colet_core::{
     everything::{self, Page, SearchSession},
     folders,
     operations::{self, Event, Request},
+    quick_look,
     shell::{self, MenuThread, Owner, ShowMenu, clipboard::{self, ClipboardFiles}},
 };
 
@@ -64,6 +65,8 @@ pub trait Backend: Send + Sync + 'static {
     fn path_kind(&self, path: &Path) -> Option<bool>;
     /// The Windows context menu at screen point `at`, for `paths` or the folder `background`.
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String>;
+    /// Asks QuickLook to show `path`, in the order asked; what it returns tells how that went.
+    fn quick_look(&self, message: quick_look::Message, path: PathBuf) -> mpsc::Receiver<Result<(), quick_look::Error>>;
 }
 
 fn said(error: windows_core::Error) -> String {
@@ -77,6 +80,8 @@ pub struct Live {
     latest: AtomicU64,
     /// Started at the first menu, and kept for the life of the app.
     menu: Mutex<Option<MenuThread>>,
+    /// Started at the first preview, and kept for the life of the app.
+    quick_look: OnceLock<quick_look::Sender>,
 }
 
 impl Backend for Live {
@@ -201,6 +206,10 @@ impl Backend for Live {
             }
             Err(error) => Err(said(error)),
         }
+    }
+
+    fn quick_look(&self, message: quick_look::Message, path: PathBuf) -> mpsc::Receiver<Result<(), quick_look::Error>> {
+        self.quick_look.get_or_init(quick_look::Sender::spawn).send(message, path)
     }
 }
 

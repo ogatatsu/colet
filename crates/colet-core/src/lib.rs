@@ -3,6 +3,7 @@ pub mod entry;
 pub mod everything;
 pub mod folders;
 pub mod paths;
+pub mod quick_look;
 pub mod operations;
 pub mod shell;
 pub mod time;

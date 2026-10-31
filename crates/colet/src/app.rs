@@ -15,8 +15,9 @@ use std::{
 use colet_core::{
     entry::{Entry, Order, Sort},
     everything::PAGE,
+    operations::message,
     paths::{parent_folder, path_key, shown},
-    shell,
+    quick_look, shell,
     watch::{Changes, FolderWatcher},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
@@ -88,6 +89,7 @@ actions!(
         OpenSearchFilters,
         Unfold,
         FocusHome,
+        QuickLook,
     ]
 );
 
@@ -141,6 +143,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-home", FocusFirst, Some(COLUMNS)),
         KeyBinding::new("ctrl-end", FocusLast, Some(COLUMNS)),
         KeyBinding::new("ctrl-space", TogglePicked, Some(COLUMNS)),
+        // In the rows only: a field or a button there takes its own Space.
+        KeyBinding::new("space", QuickLook, Some(COLUMNS)),
         KeyBinding::new("shift-f10", OpenMenu, Some(COLUMNS)),
         KeyBinding::new("menu", OpenMenu, Some(COLUMNS)),
         // In a text field, where the field's own keys are.
@@ -366,6 +370,8 @@ pub struct Colet {
     /// The clipboard's paths by path key: another app may write them in another case.
     pub held: HashSet<OsString>,
     clipboard_changed: Arc<AtomicBool>,
+    /// What QuickLook was last told to show: a preview open follows the keys from it.
+    quick_looked: Option<PathBuf>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -532,6 +538,7 @@ impl Colet {
             clipboard: ClipboardFiles::default(),
             held: HashSet::new(),
             clipboard_changed: Arc::new(AtomicBool::new(true)),
+            quick_looked: None,
             _subscriptions: subscriptions,
         };
         for problem in [problem, sorts_problem].into_iter().flatten() {
@@ -595,6 +602,7 @@ impl Colet {
     /// Starts what the columns now on screen need, drops what the ones gone needed, and redraws.
     pub fn changed(&mut self, cx: &mut Context<Self>) {
         self.sync(cx);
+        self.follow_quick_look();
         if self.reveal_pending.is_none() {
             self.reveal_pending = Some(true);
         }
@@ -1159,6 +1167,37 @@ impl Colet {
         }
         let (backend, owner) = (self.backend.clone(), self.owner);
         self.in_background(move || backend.open(&entry.path, owner).map_err(|error| format!("開けません: {error}")), None, cx);
+    }
+
+    /// Space: QuickLook shows the row the keys are on, or closes on it. Nowhere for it to go is said, and
+    /// only here: the keys moving on say nothing.
+    pub fn quick_look(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.state.keys_on().map(Path::to_path_buf) else { return };
+        self.quick_looked = Some(path.clone());
+        let done = self.backend.quick_look(quick_look::Message::Toggle, path);
+        let task = cx.background_executor().spawn(async move { done.recv() });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| match result {
+                Ok(Err(quick_look::Error::NotRunning)) => this.notify("QuickLook が起動していません", Tone::Info, cx),
+                Ok(Err(quick_look::Error::Failed(error))) => {
+                    this.notify(format!("QuickLook で表示できません: {}", message(error.code())), Tone::Error, cx)
+                }
+                _ => {}
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// A preview open goes on to the row the keys have gone to; there being none, or a saved search, it
+    /// stays as it is. QuickLook takes it only while a preview is open.
+    fn follow_quick_look(&mut self) {
+        let Some(path) = self.state.keys_on() else { return };
+        if self.quick_looked.as_deref() != Some(path) {
+            self.quick_looked = Some(path.to_path_buf());
+            drop(self.backend.quick_look(quick_look::Message::Switch, path.to_path_buf()));
+        }
     }
 
     /// A crumb takes the keys to its column, bringing it on screen even when it is already active. It only

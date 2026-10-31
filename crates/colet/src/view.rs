@@ -346,6 +346,14 @@ impl Colet {
                 this.sync_search_field(window, cx);
                 this.changed(cx);
             }))
+            .on_action(cx.listener(|this, _: &QuickLook, window, cx| {
+                if this.home_focus.is_focused(window) || this.columns_focus.is_focused(window) {
+                    this.quick_look(cx);
+                } else {
+                    // A field types it, a button is pressed by it.
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|this, _: &OpenMenu, window, cx| {
                 // Under the focused row, as from the keyboard; or the column's top.
                 let at = match this.focused_row.get() {

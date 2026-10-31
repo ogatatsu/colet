@@ -22,10 +22,11 @@ use crate::{
 };
 
 /// The keys the preferences list, as the old app's did.
-const SHORTCUTS: [(&str, &str); 28] = [
+const SHORTCUTS: [(&str, &str); 29] = [
     ("↑ ↓", "項目を選択（Shift で範囲選択）"),
     ("← →", "カラムを移動"),
     ("Enter", "開く"),
+    ("Space", "QuickLook でプレビュー"),
     ("Alt+← / Alt+→", "戻る / 進む"),
     ("マウスの戻る / 進むボタン", "戻る / 進む"),
     ("Ctrl+H", "ホームへ移動"),
