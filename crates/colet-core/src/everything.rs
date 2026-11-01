@@ -492,6 +492,8 @@ unsafe fn read(result: Handle, offset: usize) -> Page {
 }
 
 #[cfg(test)]
+// A mark is a list of ranges, most often holding only one.
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};

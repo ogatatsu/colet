@@ -1305,6 +1305,8 @@ impl State {
 }
 
 #[cfg(test)]
+// A mark is a list of ranges, most often holding only one.
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
     use colet_core::paths::ancestors;
@@ -2082,7 +2084,7 @@ mod tests {
         s.load(id, 1, false);
         s.page(id, 1, results.clone(), 3, 0, &HashSet::new());
         s.select(1, one(r"D:\alpha"));
-        let mut answer = |s: &mut State, request: u64, entries: &[Entry]| {
+        let answer = |s: &mut State, request: u64, entries: &[Entry]| {
             s.load(id, request, true);
             s.page(id, request, entries.to_vec(), entries.len(), 0, &HashSet::new());
         };

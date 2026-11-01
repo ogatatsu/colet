@@ -155,7 +155,7 @@ impl Colet {
             Dialog::Filters { edit: Some(_), .. } => "フィルターを編集",
             Dialog::Filters { deleting: Some(_), .. } => "フィルターを削除",
             Dialog::Filters { .. } => "検索フィルター",
-            Dialog::Preferences { .. } => "設定",
+            Dialog::Preferences => "設定",
             Dialog::Open { .. } => "開く",
         };
         let confirm_open = self.stop("confirm-open", cx);

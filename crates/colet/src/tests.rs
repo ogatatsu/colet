@@ -3005,7 +3005,7 @@ fn scrolls_a_column_s_last_row_clear_of_the_columns_scrollbar(cx: &mut TestAppCo
     ui.press(cx, "end");
     rest(&ui, cx);
     let active = ui.active(cx);
-    assert_eq!(ui.selected(cx, active), [last.clone()]);
+    assert_eq!(ui.selected(cx, active), std::slice::from_ref(&last));
     let (view, bottom) = ui.act(cx, |window, _| (window.find("columns-scroll").bounds(), window.find(row(&last)).bounds().bottom()));
     // The columns scroll sideways, so their scrollbar lies over the bottom.
     assert!(ui.read(cx, |v| v.columns_scroll.max_offset().x) > px(0.));

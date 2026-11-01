@@ -231,6 +231,8 @@ pub fn sort_entries(entries: &mut [Entry], order: Order) {
 }
 
 #[cfg(test)]
+// A mark is a list of ranges, most often holding only one.
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
 

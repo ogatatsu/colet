@@ -164,8 +164,7 @@ mod tests {
         assert!(error.message.starts_with("カラムの並び順のファイルが壊れていたため、既定の並び順で始めました"), "{}", error.message);
         assert!(!path.exists());
         assert_eq!(settings::read::<Sorts>(&path, &SORTS), Ok(Sorts::default()));
-        let mut sorts = Sorts::default();
-        sorts.search = Some(Order { by: Sort::Size, descending: true });
+        let sorts = Sorts { search: Some(Order { by: Sort::Size, descending: true }), ..Default::default() };
         settings::write(&sorts, &path, &SORTS).unwrap();
         assert_eq!(settings::read::<Sorts>(&path, &SORTS), Ok(sorts));
     }
