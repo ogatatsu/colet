@@ -37,7 +37,7 @@ use crate::{
     icons::Icons,
     menus::Popup,
     ops::{ClipboardLane, History, Running},
-    places::{Dialog, HomeDrag, HomeRows, Landing, home_entries, home_groups, places},
+    places::{Dialog, HomeDragging, home_entries, home_groups, places},
     settings::{LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, State, filter_words, room_for_a_word},
@@ -311,15 +311,7 @@ pub struct Colet {
     pub(crate) dialog_shown: bool,
     /// Home's list, for its scrollbar.
     pub home_scroll: ScrollHandle,
-    /// The favorite or saved search being dragged in home, and where it would land; none while outside
-    /// its own kind.
-    pub home_drag: Option<HomeDrag>,
-    pub landing: Option<Landing>,
-    /// Where the pointer last was in a drag in home, and home's list then: held at an edge, it scrolls on.
-    pub(crate) home_pointer: Option<(Point<Pixels>, Bounds<Pixels>)>,
-    pub(crate) home_scrolling: bool,
-    /// Where each of home's favorites and saved searches was drawn, for a drag to find its place among them.
-    pub home_rows: HomeRows,
+    pub home_drag: HomeDragging,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
     pub(crate) stops: HashMap<String, FocusHandle>,
     /// The keys are in the column worked in: its focused row is ringed.
@@ -488,11 +480,7 @@ impl Colet {
             dialog_focus: cx.focus_handle(),
             dialog_shown: false,
             home_scroll: ScrollHandle::new(),
-            home_drag: None,
-            landing: None,
-            home_pointer: None,
-            home_scrolling: false,
-            home_rows: Default::default(),
+            home_drag: HomeDragging::default(),
             stops: HashMap::new(),
             keys_in_column: false,
             popup: None,

@@ -139,6 +139,57 @@ pub struct Landing {
 /// Where each of home's favorites and saved searches was drawn, by its path.
 pub type HomeRows = std::rc::Rc<std::cell::RefCell<Vec<(PathBuf, Bounds<Pixels>)>>>;
 
+/// A drag in home, putting a favorite, saved search or pinned row in order among its kind.
+#[derive(Default)]
+pub struct HomeDragging {
+    /// What is being dragged; none while no drag is under way.
+    pub carried: Option<HomeDrag>,
+    /// Where it would land; none while outside its own kind.
+    pub landing: Option<Landing>,
+    /// Where the pointer last was, and home's list then: held at an edge, it scrolls on.
+    pointer: Option<(Point<Pixels>, Bounds<Pixels>)>,
+    /// Home's list is scrolling toward the edge the drag is held at.
+    scrolling: bool,
+    /// Where each of home's favorites and saved searches was drawn, for a drag to find its place among them.
+    pub rows: HomeRows,
+}
+
+impl HomeDragging {
+    /// Where the drag would land: between two rows of its own kind, by the half of the row it is over;
+    /// nowhere outside them. True when that moved.
+    fn aim(&mut self, settings: &Settings) -> bool {
+        let (Some(drag), Some((at, list))) = (&self.carried, self.pointer) else { return false };
+        let landing = {
+            let rows = self.rows.borrow();
+            let own: Vec<_> = rows.iter().filter(|(path, _)| movable(settings, path) == Some(drag.shelf)).collect();
+            match (own.first(), own.last()) {
+                (Some(first), Some(last)) if list.contains(&at) && at.y >= first.1.top() && at.y < last.1.bottom() => {
+                    let over = own.iter().position(|(_, bounds)| at.y < bounds.bottom()).unwrap_or(own.len() - 1);
+                    let (path, bounds) = own[over];
+                    let before = if at.y < bounds.center().y { Some(path.clone()) } else { own.get(over + 1).map(|(path, _)| path.clone()) };
+                    Some(Landing { before })
+                }
+                _ => None,
+            }
+        };
+        let moved = self.landing != landing;
+        self.landing = landing;
+        moved
+    }
+
+    /// The way home's list scrolls while the drag is held at its edge.
+    fn edge(&self) -> Option<f32> {
+        self.carried.as_ref().and(self.pointer).and_then(|(at, list)| drag_edge(at, list))
+    }
+
+    /// Over, dropped or not: nothing has moved.
+    fn end(&mut self) {
+        self.carried = None;
+        self.landing = None;
+        self.pointer = None;
+    }
+}
+
 /// Which of home's kinds that are put in order by dragging `path` is: pinned, a saved search, a favorite,
 /// or none, as a place is.
 pub fn movable(settings: &Settings, path: &Path) -> Option<Shelf> {
@@ -339,52 +390,35 @@ impl Colet {
 
     /// A favorite or saved search is picked up in home: its row fades where it was.
     pub fn start_home_drag(&mut self, drag: &HomeDrag, cx: &mut Context<Self>) {
-        self.home_drag = Some(drag.clone());
-        self.landing = None;
+        self.home_drag.carried = Some(drag.clone());
+        self.home_drag.landing = None;
         cx.notify();
     }
 
     /// The pointer moved in a drag in home, with home's list drawn at `list`.
     pub fn drag_home(&mut self, at: Point<Pixels>, list: Bounds<Pixels>, cx: &mut Context<Self>) {
-        if self.home_drag.is_none() {
+        if self.home_drag.carried.is_none() {
             return;
         }
-        self.home_pointer = Some((at, list));
+        self.home_drag.pointer = Some((at, list));
         self.aim_home_drag(cx);
         if drag_edge(at, list).is_some() {
             self.keep_home_scrolling(cx);
         }
     }
 
-    /// Where the drag would land: between two rows of its own kind, by the half of the row it is over;
-    /// nowhere outside them.
     fn aim_home_drag(&mut self, cx: &mut Context<Self>) {
-        let (Some(drag), Some((at, list))) = (&self.home_drag, self.home_pointer) else { return };
-        let landing = {
-            let rows = self.home_rows.borrow();
-            let own: Vec<_> = rows.iter().filter(|(path, _)| movable(&self.settings, path) == Some(drag.shelf)).collect();
-            match (own.first(), own.last()) {
-                (Some(first), Some(last)) if list.contains(&at) && at.y >= first.1.top() && at.y < last.1.bottom() => {
-                    let over = own.iter().position(|(_, bounds)| at.y < bounds.bottom()).unwrap_or(own.len() - 1);
-                    let (path, bounds) = own[over];
-                    let before = if at.y < bounds.center().y { Some(path.clone()) } else { own.get(over + 1).map(|(path, _)| path.clone()) };
-                    Some(Landing { before })
-                }
-                _ => None,
-            }
-        };
-        if self.landing != landing {
-            self.landing = landing;
+        if self.home_drag.aim(&self.settings) {
             cx.notify();
         }
     }
 
     /// Scrolls home's list while a drag is held at its edge, a step a frame.
     fn keep_home_scrolling(&mut self, cx: &mut Context<Self>) {
-        if self.home_scrolling {
+        if self.home_drag.scrolling {
             return;
         }
-        self.home_scrolling = true;
+        self.home_drag.scrolling = true;
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_millis(16)).await;
@@ -400,7 +434,7 @@ impl Colet {
     /// One step toward the edge the drag is held at; false once it is let go of, moved off the edge, or
     /// the list is as far as it goes.
     fn scroll_home_drag(&mut self, cx: &mut Context<Self>) -> bool {
-        let way = self.home_drag.as_ref().and(self.home_pointer).and_then(|(at, list)| drag_edge(at, list));
+        let way = self.home_drag.edge();
         let offset = self.home_scroll.offset();
         let max = f32::from(self.home_scroll.max_offset().y);
         let to = way.map(|way| (f32::from(offset.y) - way * 8.).clamp(-max, 0.));
@@ -412,7 +446,7 @@ impl Colet {
                 true
             }
             _ => {
-                self.home_scrolling = false;
+                self.home_drag.scrolling = false;
                 false
             }
         }
@@ -420,7 +454,7 @@ impl Colet {
 
     /// The drag is let go of over home's list: what it carries goes where it would land, if anywhere.
     pub fn drop_home(&mut self, drag: &HomeDrag, cx: &mut Context<Self>) {
-        let landing = self.landing.take();
+        let landing = self.home_drag.landing.take();
         self.end_home_drag();
         cx.notify();
         let Some(Landing { before }) = landing else { return };
@@ -437,9 +471,7 @@ impl Colet {
 
     /// The drag in home is over, dropped or not: nothing has moved.
     pub fn end_home_drag(&mut self) {
-        self.home_drag = None;
-        self.landing = None;
-        self.home_pointer = None;
+        self.home_drag.end();
     }
 
     /// Saved with no name of its own, so home shows the query until one is given; with the filter it runs

@@ -448,8 +448,8 @@ impl Colet {
         let drag = (kind == Kind::Home && c.filter.is_none())
             .then(|| movable(&self.settings, &entry.path))
             .flatten()
-            .map(|shelf| (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_rows.clone(), cx.entity().downgrade()));
-        let dragged = kind == Kind::Home && self.home_drag.as_ref().is_some_and(|d| d.path == entry.path);
+            .map(|shelf| (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_drag.rows.clone(), cx.entity().downgrade()));
+        let dragged = kind == Kind::Home && self.home_drag.carried.as_ref().is_some_and(|d| d.path == entry.path);
         let name = entry.name.clone();
         let picture = match (saved, image) {
             (Some(_), _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
@@ -702,9 +702,9 @@ impl Colet {
             let entries = c.entries.clone();
             let groups = crate::places::home_groups(&self.settings, &entries);
             // Drawn afresh below, for a drag to find its place.
-            self.home_rows.borrow_mut().clear();
+            self.home_drag.rows.borrow_mut().clear();
             // The line where a drag would land: above the row it goes before, or below its kind's last.
-            let landing = self.home_drag.as_ref().zip(self.landing.as_ref()).map(|(d, l)| (d.shelf, l.before.clone()));
+            let landing = self.home_drag.carried.as_ref().zip(self.home_drag.landing.as_ref()).map(|(d, l)| (d.shelf, l.before.clone()));
             let mut rows = div()
                 .id("home-rows")
                 .role(Role::ListBox)
@@ -1920,7 +1920,7 @@ impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.search_focused = self.has_keys(&self.search, window, cx);
         // A drag in home let go of anywhere but its list.
-        if self.home_drag.is_some() && !cx.has_active_drag() {
+        if self.home_drag.carried.is_some() && !cx.has_active_drag() {
             self.end_home_drag();
         }
         self.follow_focus(window, cx);
@@ -1966,7 +1966,7 @@ impl Render for Colet {
             }))
             // Esc puts down a drag in home, before the keys reach anything else.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.home_drag.is_some() && event.keystroke.key == "escape" {
+                if this.home_drag.carried.is_some() && event.keystroke.key == "escape" {
                     cx.stop_active_drag(window);
                     this.end_home_drag();
                     cx.notify();
