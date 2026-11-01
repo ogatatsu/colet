@@ -23,9 +23,9 @@ const CLOSED: usize = 10;
 /// A tab's width while the strip has room, and the least it narrows to before the strip scrolls.
 const TAB_WIDTH: f32 = 220.;
 const TAB_MIN: f32 = 100.;
-/// What the strip leaves beside the tabs: its padding, the gaps, the button for another and room to
-/// double-click.
-const BESIDE_TABS: f32 = 16. + 8. + 26. + 48.;
+/// What the strip leaves beside the tabs: its padding on the right, the gaps, the button for another
+/// and room to double-click.
+const BESIDE_TABS: f32 = 8. + 8. + 26. + 48.;
 
 /// A tab out of sight, kept as it was.
 pub struct Parked {
@@ -409,7 +409,7 @@ impl Colet {
         let p = self.palette;
         // The tabs share the room there is, down to their least; past that the strip scrolls.
         let count = self.tabs.list.len() as f32;
-        let room = f32::from(window.viewport_size().width) - BESIDE_TABS - 4. * (count - 1.);
+        let room = f32::from(window.viewport_size().width) - BESIDE_TABS;
         let width = (room / count).clamp(TAB_MIN, TAB_WIDTH);
         if std::mem::take(&mut self.tabs.reveal) {
             self.tabs.scroll.scroll_to_item(self.tabs.current);
@@ -420,24 +420,23 @@ impl Colet {
             .h(px(36.))
             .flex_none()
             .w_full()
-            .px_2()
-            .pt(px(4.))
+            .relative()
+            .pr_2()
             .flex()
-            .items_end()
+            .items_center()
             .gap_1()
             .bg(p.sidebar)
-            .border_b_1()
-            .border_color(p.border)
             .role(Role::TabList)
             .aria_label("タブ")
+            // The line under the strip, drawn first so the front tab's own line lies over it.
+            .child(div().absolute().left_0().right_0().bottom_0().h(px(1.)).bg(p.border))
             .child(
                 div()
                     .id("tab-strip")
                     .flex()
                     .min_w_0()
                     .h_full()
-                    .items_end()
-                    .gap_1()
+                    .items_start()
                     .overflow_x_scroll()
                     .track_scroll(&self.tabs.scroll)
                     .children(tabs),
@@ -446,7 +445,6 @@ impl Colet {
                 div()
                     .id("new-tab")
                     .flex_none()
-                    .mb(px(3.))
                     .size(px(26.))
                     .flex()
                     .items_center()
@@ -485,20 +483,26 @@ impl Colet {
         let dragged = DraggedTab { id, name: name.clone(), glyph, palette: p };
         div()
             .id(("tab", id as usize))
-            .h(px(32.))
+            // Only the front tab reaches over the line under the strip; the others stop above it, so
+            // a hover leaves it whole.
+            .h(px(if current { 36. } else { 35. }))
             .flex_none()
             .w(px(width))
+            .relative()
             .pl(px(10.))
             .pr(px(4.))
             .flex()
             .items_center()
             .gap(px(6.))
-            .rounded_t(px(6.))
+            .border_r_1()
+            .border_color(p.border)
             .role(Role::Tab)
             .aria_label(name.clone())
             .aria_selected(current)
             .text_color(if current { p.text } else { p.text_muted })
-            .when(current, |d| d.bg(p.bg).border_1().border_b_0().border_color(p.border))
+            .when(current, |d| {
+                d.bg(p.bg).child(div().absolute().left_0().right_0().bottom_0().h(px(2.)).bg(p.accent))
+            })
             .when(!current, |d| d.hover(|d| d.bg(p.hover)))
             .tip(tip)
             .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if current { p.accent } else { p.text_muted }))
