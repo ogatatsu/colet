@@ -221,15 +221,9 @@ impl Colet {
             let home = self.state.columns[0].id;
             self.load(home, 0, true, cx);
         }
-        self.settings_changes += 1;
-        let change = self.settings_changes;
         cx.notify();
-        if self.settings_saver.is_some() {
-            // A later change has its own save coming.
-            Self::save_later(cx, move |this| {
-                let saver = this.settings_saver.as_ref().filter(|_| this.settings_changes == change)?;
-                Some(saver.save(this.settings.clone()))
-            });
+        if let Some(change) = self.settings_saves.changed() {
+            Self::save_later(cx, move |this| this.settings_saves.save_if_last(change, &this.settings));
         }
     }
 
@@ -237,14 +231,9 @@ impl Colet {
     /// are written.
     pub fn update_sorts(&mut self, change: impl FnOnce(&mut Sorts), cx: &mut Context<Self>) {
         change(&mut self.sorts);
-        self.sorts_changes += 1;
-        let change = self.sorts_changes;
         cx.notify();
-        if self.sorts_saver.is_some() {
-            Self::save_later(cx, move |this| {
-                let saver = this.sorts_saver.as_ref().filter(|_| this.sorts_changes == change)?;
-                Some(saver.save(this.sorts.clone()))
-            });
+        if let Some(change) = self.sorts_saves.changed() {
+            Self::save_later(cx, move |this| this.sorts_saves.save_if_last(change, &this.sorts));
         }
     }
 
@@ -265,10 +254,8 @@ impl Colet {
     /// Writes the settings and the columns' orders now, as the window closes, once the saves before are
     /// written; the saves still waiting out a burst are dropped.
     pub fn flush_settings(&mut self) -> Result<(), String> {
-        self.settings_changes += 1;
-        self.sorts_changes += 1;
-        let settings = self.settings_saver.as_ref().map(|saver| saver.save(self.settings.clone()));
-        let sorts = self.sorts_saver.as_ref().map(|saver| saver.save(self.sorts.clone()));
+        let settings = self.settings_saves.save_now(&self.settings);
+        let sorts = self.sorts_saves.save_now(&self.sorts);
         let settings = settings.map_or(Ok(()), written);
         let sorts = sorts.map_or(Ok(()), written);
         settings.and(sorts)

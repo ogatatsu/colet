@@ -458,6 +458,39 @@ impl<T: Send + 'static> Saver<T> {
     }
 }
 
+/// The saves of a kept file: a save waiting out a burst of changes goes only for the last of them. None
+/// are written when the file read at start could not be read and is still there, so it is never written
+/// over this session.
+pub struct Saves<T> {
+    saver: Option<Saver<T>>,
+    /// Counts the changes.
+    changes: u64,
+}
+
+impl<T: Clone + Send + 'static> Saves<T> {
+    pub fn new(saver: Option<Saver<T>>) -> Self {
+        Self { saver, changes: 0 }
+    }
+
+    /// Notes a change: the number a save of it waits with, none when nothing is written.
+    pub fn changed(&mut self) -> Option<u64> {
+        self.changes += 1;
+        self.saver.as_ref().map(|_| self.changes)
+    }
+
+    /// Queues `kept` unless a change came after `change`, which has its own save coming.
+    pub fn save_if_last(&self, change: u64, kept: &T) -> Option<mpsc::Receiver<Result<(), String>>> {
+        let saver = self.saver.as_ref().filter(|_| self.changes == change)?;
+        Some(saver.save(kept.clone()))
+    }
+
+    /// Queues `kept` now, dropping the saves still waiting out a burst.
+    pub fn save_now(&mut self, kept: &T) -> Option<mpsc::Receiver<Result<(), String>>> {
+        self.changes += 1;
+        self.saver.as_ref().map(|saver| saver.save(kept.clone()))
+    }
+}
+
 /// How a save went, once it is written; a saver that stopped never says.
 pub fn written(result: mpsc::Receiver<Result<(), String>>) -> Result<(), String> {
     result.recv().unwrap_or_else(|_| Err("設定を保存できません".into()))

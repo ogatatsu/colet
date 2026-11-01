@@ -38,7 +38,7 @@ use crate::{
     menus::Popup,
     ops::{ClipboardLane, HistoryEntry, Running},
     places::{Dialog, HomeDrag, HomeRows, Landing, home_entries, home_groups, places},
-    settings::{LoadError, Saver, Settings, everything_query, narrowed_query},
+    settings::{LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, State, filter_words, room_for_a_word},
     theme::Palette,
@@ -295,16 +295,11 @@ pub struct Colet {
     searched_at: Option<Instant>,
     search_refresh: bool,
     pub settings: Settings,
-    /// Writes the settings; none when the file read at start could not be read and is still there, so
-    /// it is never written over this session.
-    pub(crate) settings_saver: Option<Saver<Settings>>,
-    /// Counts the changes to the settings: a save waiting out a burst goes only for the last.
-    pub(crate) settings_changes: u64,
+    pub(crate) settings_saves: Saves<Settings>,
     /// The orders the columns are given apart from `settings.sort`, kept in a file of their own and
     /// written as the settings are.
     pub sorts: Sorts,
-    pub(crate) sorts_saver: Option<Saver<Sorts>>,
-    pub(crate) sorts_changes: u64,
+    pub(crate) sorts_saves: Saves<Sorts>,
     /// What the latest operation sent away, by path key: a listing that finds it gone takes it as
     /// Colet's own doing.
     pub(crate) departed: HashSet<OsString>,
@@ -493,11 +488,9 @@ impl Colet {
             searched_at: None,
             search_refresh: false,
             settings,
-            settings_saver,
-            settings_changes: 0,
+            settings_saves: Saves::new(settings_saver),
             sorts,
-            sorts_saver,
-            sorts_changes: 0,
+            sorts_saves: Saves::new(sorts_saver),
             departed: HashSet::new(),
             dialog: None,
             dialog_subscriptions: Vec::new(),
