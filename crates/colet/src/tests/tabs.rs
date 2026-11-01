@@ -178,6 +178,9 @@ fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mu
     let key = favorite_key(Path::new(r"D:\work"), Some("pdf"));
     ui.view.update(cx, |v, cx| v.open_in_tab(0, &key, cx));
     settle(cx);
+    // Named for the folder it opened while still behind, not for home.
+    let name = ui.read(cx, |v| crate::tabs::title(&v.tabs.list[1].parked.as_ref().unwrap().state).name);
+    assert_eq!(name, "work");
     ui.press(cx, "ctrl-tab");
     let last = ui.read(cx, |v| v.state.columns.len() - 1);
     assert!(ui.filter_focused(cx, last));

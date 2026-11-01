@@ -311,14 +311,18 @@ impl Colet {
 
     /// Opens the row `path` of the column at `index` in a tab of its own, right of this one and behind it:
     /// a row of home as picking it there opens it, anything else where it lives. A folder or a search opened
-    /// has the keys in the field narrowing its column once the tab comes to the front; a file, on its row.
+    /// has the keys in the field narrowing its column once the tab comes to the front, and is worked in, and
+    /// so named, from the start; a file, on its row.
     pub fn open_in_tab(&mut self, index: usize, path: &Path, cx: &mut Context<Self>) {
         let Some(c) = self.state.columns.get(index) else { return };
         let Some(entry) = c.entry(path) else { return };
-        let state = if c.kind == Kind::Home { State::opening_home(c, &entry.path) } else { State::opening(&entry.path, entry.directory) };
+        let mut state = if c.kind == Kind::Home { State::opening_home(c, &entry.path) } else { State::opening(&entry.path, entry.directory) };
         let filter = if state.pinned() { state.search_filter.clone() } else { None };
-        let opened = state.columns.last().filter(|last| last.kind != Kind::Home && (entry.directory || state.pinned()));
-        let keys = opened.map_or(Keys::Column, |last| Keys::Filter(last.id));
+        let opened = state.columns.last().filter(|last| last.kind != Kind::Home && (entry.directory || state.pinned())).map(|last| last.id);
+        if opened.is_some() {
+            state.set_active(state.columns.len() - 1);
+        }
+        let keys = opened.map_or(Keys::Column, Keys::Filter);
         let tab = self.tabs.tab(Some(Parked::new(state, filter, keys)));
         self.tabs.list.insert(self.tabs.current + 1, tab);
         self.keep_tabs(cx);
