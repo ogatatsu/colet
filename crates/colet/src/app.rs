@@ -306,6 +306,7 @@ pub struct Colet {
     /// Colet's own doing.
     pub(crate) departed: HashSet<OsString>,
     pub dialog: Option<Dialog>,
+    /// What the open dialog listens to, its fields: let go of by [`Colet::begin_dialog`] and on closing.
     pub(crate) dialog_subscriptions: Vec<Subscription>,
     /// Takes the keys in a dialog with no field.
     pub dialog_focus: FocusHandle,

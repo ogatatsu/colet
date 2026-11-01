@@ -474,6 +474,7 @@ impl Colet {
 
     /// The name dialog for `request`, starting from its name with the first `select_end` bytes selected.
     fn ask_name(&mut self, request: Request, select_end: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.begin_dialog();
         let input = cx.new(|cx| InputState::new(window, cx).default_value(request.name.clone()));
         let subscription = cx.subscribe_in(&input, window, |this: &mut Self, _, event, window, cx| match event {
             InputEvent::PressEnter { .. } => this.submit_name(window, cx),
@@ -603,7 +604,7 @@ impl Colet {
             _ => {
                 let files: Vec<PathBuf> = picked.into_iter().filter(|e| !e.directory).map(|e| e.path).collect();
                 if files.len() >= ASK_TO_OPEN {
-                    self.dialog_subscriptions.clear();
+                    self.begin_dialog();
                     self.dialog = Some(Dialog::Open { paths: files });
                     self.stop("confirm-open", cx).focus(window, cx);
                     cx.notify();

@@ -542,6 +542,7 @@ impl Colet {
         let Some((query, filter, narrow)) = saved_query(key) else { return };
         let Some(found) = self.settings.saved(query, filter, narrow).cloned() else { return };
         self.take_menu();
+        self.begin_dialog();
         let name = self.edit_field(found.name.clone(), found.query.clone(), Self::submit_edit, window, cx);
         let query = self.edit_field(found.query.clone(), String::new(), Self::submit_edit, window, cx);
         let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), "なし".into(), Self::submit_edit, window, cx);
@@ -618,6 +619,7 @@ impl Colet {
         let (path, narrow) = favorite_parts(key);
         let Some(found) = self.settings.favorite(&path, narrow.as_deref()).cloned() else { return };
         self.take_menu();
+        self.begin_dialog();
         let name = self.edit_field(found.name.clone(), shown(folder_name(&found.path)), Self::submit_favorite_edit, window, cx);
         let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), "なし".into(), Self::submit_favorite_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
@@ -666,6 +668,7 @@ impl Colet {
     }
 
     pub fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.begin_dialog();
         // The theme now chosen takes the keys, as a radio group's checked one does.
         self.stop(format!("theme:{:?}", self.settings.theme), cx).focus(window, cx);
         self.dialog = Some(Dialog::Preferences);
@@ -693,6 +696,12 @@ impl Colet {
             .ok();
         })
         .detach();
+    }
+
+    /// Lets go of what the dialog before listened to. Called first by whatever opens one, before it makes
+    /// the fields the new dialog listens to.
+    pub(crate) fn begin_dialog(&mut self) {
+        self.dialog_subscriptions.clear();
     }
 
     /// The keys go back to the column they came from.
