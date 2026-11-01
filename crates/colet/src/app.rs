@@ -231,6 +231,68 @@ pub enum Tone {
     Error,
 }
 
+/// The listings asked for, by column: each answer is told apart from those it was overtaken by.
+#[derive(Default)]
+struct Listings {
+    last_request: u64,
+    /// The columns listed at least once.
+    listed: HashSet<ColumnId>,
+    /// The latest listing still out for each column.
+    pending: HashMap<ColumnId, u64>,
+    /// What stops each folder's listing still out.
+    cancels: HashMap<ColumnId, Arc<AtomicBool>>,
+}
+
+impl Listings {
+    /// True the first time `id` is asked about: it is to be listed.
+    fn first(&mut self, id: ColumnId) -> bool {
+        self.listed.insert(id)
+    }
+
+    fn loading(&self, id: ColumnId) -> bool {
+        self.pending.contains_key(&id)
+    }
+
+    /// A listing of `id`, overtaking any still out: its number.
+    fn start(&mut self, id: ColumnId) -> u64 {
+        self.last_request += 1;
+        self.pending.insert(id, self.last_request);
+        self.last_request
+    }
+
+    /// What stops the folder listing of `id` just started; the one before it is stopped.
+    fn cancel_before(&mut self, id: ColumnId) -> Arc<AtomicBool> {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        if let Some(previous) = self.cancels.insert(id, cancelled.clone()) {
+            previous.store(true, Ordering::Relaxed);
+        }
+        cancelled
+    }
+
+    /// The answer to `request` came: true when it is the latest for `id`, which is then no longer out.
+    fn answered(&mut self, id: ColumnId, request: u64) -> bool {
+        let current = self.pending.get(&id) == Some(&request);
+        if current {
+            self.pending.remove(&id);
+        }
+        current
+    }
+
+    /// Only the columns `live` holds: a column gone stops its listing, and a late answer finds no column
+    /// and is dropped.
+    fn keep(&mut self, live: &HashSet<ColumnId>) {
+        self.cancels.retain(|id, cancelled| {
+            let keep = live.contains(id);
+            if !keep {
+                cancelled.store(true, Ordering::Relaxed);
+            }
+            keep
+        });
+        self.listed.retain(|id| live.contains(id));
+        self.pending.retain(|id, _| live.contains(id));
+    }
+}
+
 /// The rows of each column, scrolled up and down apart from the others.
 #[derive(Default)]
 pub struct RowScrolls {
@@ -289,10 +351,7 @@ pub struct Colet {
     pub sideways: Sideways,
     pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
-    request: u64,
-    requested: HashSet<ColumnId>,
-    pending: HashMap<ColumnId, u64>,
-    cancels: HashMap<ColumnId, Arc<AtomicBool>>,
+    listings: Listings,
     pub(crate) watching: Watching,
     searched_at: Option<Instant>,
     search_refresh: bool,
@@ -443,10 +502,7 @@ impl Colet {
             sideways: Sideways::default(),
             owner,
             backend,
-            request: 0,
-            requested: HashSet::new(),
-            pending: HashMap::new(),
-            cancels: HashMap::new(),
+            listings: Listings::default(),
             watching: Watching::default(),
             searched_at: None,
             search_refresh: false,
@@ -555,21 +611,11 @@ impl Colet {
                 });
             });
         }
-        // A column gone stops its listing; a late answer finds no column and is dropped.
-        self.cancels.retain(|id, cancelled| {
-            let keep = live.contains(id);
-            if !keep {
-                cancelled.store(true, Ordering::Relaxed);
-            }
-            keep
-        });
-        self.requested.retain(|id| live.contains(id));
-        self.pending.retain(|id, _| live.contains(id));
+        self.listings.keep(&live);
         self.rows.keep(&live);
         let fresh: Vec<(ColumnId, Kind)> =
-            self.state.columns.iter().filter(|c| !self.requested.contains(&c.id)).map(|c| (c.id, c.kind)).collect();
+            self.state.columns.iter().filter(|c| self.listings.first(c.id)).map(|c| (c.id, c.kind)).collect();
         for (id, kind) in fresh {
-            self.requested.insert(id);
             if kind == Kind::Search {
                 // Typing makes a new search per key; only the one still there after a pause runs.
                 cx.spawn(async move |this, cx| {
@@ -668,12 +714,10 @@ impl Colet {
     /// Lists the column `id` from `offset` on; `quiet` keeps what it shows meanwhile.
     pub fn load(&mut self, id: ColumnId, offset: usize, quiet: bool, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
-        if offset > 0 && self.pending.contains_key(&id) {
+        if offset > 0 && self.listings.loading(id) {
             return;
         }
-        self.request += 1;
-        let request = self.request;
-        self.pending.insert(id, request);
+        let request = self.listings.start(id);
         self.state.load(id, request, quiet);
         let c = &self.state.columns[index];
         let sort = self.order_of(c);
@@ -709,10 +753,7 @@ impl Colet {
             }
             Kind::Folder => {
                 let path = c.path.clone();
-                let cancelled = Arc::new(AtomicBool::new(false));
-                if let Some(previous) = self.cancels.insert(id, cancelled.clone()) {
-                    previous.store(true, Ordering::Relaxed);
-                }
+                let cancelled = self.listings.cancel_before(id);
                 cx.background_executor().spawn(async move {
                     let entries = backend.list(&path, sort, &cancelled)?;
                     let total = entries.len();
@@ -729,10 +770,7 @@ impl Colet {
     }
 
     fn listed(&mut self, id: ColumnId, kind: Kind, request: u64, offset: usize, result: Listing, cx: &mut Context<Self>) {
-        let current = self.pending.get(&id) == Some(&request);
-        if current {
-            self.pending.remove(&id);
-        }
+        let current = self.listings.answered(id, request);
         match result {
             Ok((entries, total, connection, whole)) => {
                 if let Some(whole) = whole {
@@ -990,7 +1028,7 @@ impl Colet {
                             this.search_refresh = false;
                             return false;
                         };
-                        if this.pending.contains_key(&search) {
+                        if this.listings.loading(search) {
                             return true;
                         }
                         this.search_refresh = false;
