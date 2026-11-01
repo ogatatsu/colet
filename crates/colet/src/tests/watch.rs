@@ -13,7 +13,7 @@ fn reloads_only_the_folders_a_change_names(cx: &mut TestAppContext) {
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
     fake.lists.lock().unwrap().clear();
     fake.folders.lock().unwrap().get_mut(r"D:\a").unwrap().push(file(r"D:\a\new.txt"));
-    let changed = ui.read(cx, |v| v.changed.clone());
+    let changed = ui.read(cx, |v| v.watching.changed.clone());
     *changed.lock().unwrap() = Changes::Paths(HashSet::from([PathBuf::from(r"D:\a\new.txt")]));
     settle(cx);
     assert_eq!(*fake.lists.lock().unwrap(), [r"D:\a"]);
@@ -44,15 +44,15 @@ fn reloads_the_results_when_everything_says_they_changed(cx: &mut TestAppContext
 fn lets_go_of_the_folders_at_or_inside_what_an_operation_moves() {
     let folders: Vec<PathBuf> = [r"D:\", r"D:\work", r"D:\work\a", r"D:\work\a\b", r"D:\work\ab"].into_iter().map(PathBuf::from).collect();
     let released = HashSet::from([colet_core::paths::path_key(Path::new(r"d:\WORK\a"))]);
-    assert_eq!(texts(&crate::app::kept_watching(folders.clone(), &released)), [r"D:\", r"D:\work", r"D:\work\ab"]);
-    assert_eq!(crate::app::kept_watching(folders.clone(), &HashSet::new()), folders);
+    assert_eq!(texts(&crate::watching::kept_watching(folders.clone(), &released)), [r"D:\", r"D:\work", r"D:\work\ab"]);
+    assert_eq!(crate::watching::kept_watching(folders.clone(), &HashSet::new()), folders);
 }
 
 #[gpui_kit::test]
 fn watches_again_once_an_operation_ends(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "delete");
-    assert!(ui.read(cx, |v| v.running.is_none() && v.released.is_empty()));
+    assert!(ui.read(cx, |v| v.running.is_none() && v.watching.released.is_empty()));
 }
 
 #[gpui_kit::test]

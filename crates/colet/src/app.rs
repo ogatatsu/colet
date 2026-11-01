@@ -7,7 +7,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, mpsc,
+        Arc, mpsc,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -17,9 +17,9 @@ use colet_core::{
     entry::{Entry, Order, Sort},
     everything::PAGE,
     operations::message,
-    paths::{ancestors, parent_folder, path_key, shown},
+    paths::{parent_folder, path_key, shown},
     quick_look, shell,
-    watch::{Changes, FolderWatcher},
+    watch::Changes,
 };
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::component::{
@@ -42,6 +42,7 @@ use crate::{
     sorts::Sorts,
     state::{Column, ColumnId, Kind, State, filter_words, room_for_a_word},
     theme::Palette,
+    watching::Watching,
 };
 
 actions!(
@@ -290,17 +291,7 @@ pub struct Colet {
     requested: HashSet<ColumnId>,
     pending: HashMap<ColumnId, u64>,
     cancels: HashMap<ColumnId, Arc<AtomicBool>>,
-    watcher: Option<FolderWatcher>,
-    watched: Vec<PathBuf>,
-    /// What the running operation moves or deletes, by path key: the folders at or inside it go unwatched
-    /// until it ends, as Windows keeps a folder in place while a folder inside it is watched.
-    pub(crate) released: HashSet<OsString>,
-    /// Folders already said to go unwatched, each said once.
-    unwatched: HashSet<OsString>,
-    /// What the watcher saw change, collected until the UI takes it.
-    pub(crate) changed: Arc<Mutex<Changes>>,
-    /// Folders the watcher could list but not watch, until the UI says so.
-    missed: Arc<Mutex<Vec<PathBuf>>>,
+    pub(crate) watching: Watching,
     searched_at: Option<Instant>,
     search_refresh: bool,
     pub settings: Settings,
@@ -498,12 +489,7 @@ impl Colet {
             requested: HashSet::new(),
             pending: HashMap::new(),
             cancels: HashMap::new(),
-            watcher: None,
-            watched: Vec::new(),
-            released: HashSet::new(),
-            unwatched: HashSet::new(),
-            changed: Arc::default(),
-            missed: Arc::default(),
+            watching: Watching::default(),
             searched_at: None,
             search_refresh: false,
             settings,
@@ -937,9 +923,7 @@ impl Colet {
 
     // ---- Watching ----
 
-    /// Watches the folders the columns could read, one level deep, but those `released` lets go. The
-    /// watcher opens them on its own thread, so a share slow to answer never holds up the window; the
-    /// receiver hears once it has, when there was anything to change.
+    /// Watches the folders the columns could read, one level deep, as [`Watching::set`] does.
     pub(crate) fn watch(&mut self, cx: &mut Context<Self>) -> Option<mpsc::Receiver<()>> {
         let paths: Vec<PathBuf> = self
             .state
@@ -948,29 +932,15 @@ impl Colet {
             .filter(|c| c.kind == Kind::Folder && c.error.is_none())
             .map(|c| c.path.clone())
             .collect();
-        let paths = kept_watching(paths, &self.released);
-        if paths == self.watched {
-            return None;
-        }
-        self.watched = paths.clone();
-        if self.watcher.is_none() {
-            let missed = self.missed.clone();
-            let watcher = FolderWatcher::new(self.changed.clone(), move |paths| missed.lock().unwrap().extend(paths));
-            match watcher {
-                Ok(watcher) => self.watcher = Some(watcher),
-                Err(error) => {
-                    self.notify(error, Tone::Error, cx);
-                    return None;
-                }
-            }
-        }
-        self.watcher.as_ref().map(|watcher| watcher.set(paths))
+        self.watching.set(paths).unwrap_or_else(|error| {
+            self.notify(error, Tone::Error, cx);
+            None
+        })
     }
 
     /// Says which folders the watcher could list but not watch, each once.
     fn take_missed(&mut self, cx: &mut Context<Self>) {
-        let missed = std::mem::take(&mut *self.missed.lock().unwrap());
-        let fresh: Vec<PathBuf> = missed.into_iter().filter(|p| self.unwatched.insert(path_key(p))).collect();
+        let fresh = self.watching.take_missed();
         if !fresh.is_empty() {
             let names: String = fresh.iter().map(|p| format!("「{}」", shown(colet_core::paths::folder_name(p)))).collect();
             self.notify(format!("{names}の変更を監視できません。F5で更新できます。"), Tone::Error, cx);
@@ -980,7 +950,7 @@ impl Colet {
     /// Takes in what changed, every 200ms: folder changes reload the columns showing them, and what the
     /// watch on Everything heard of the results.
     fn poll(&mut self, cx: &mut Context<Self>) {
-        let changed = self.changed.clone();
+        let changed = self.watching.changed.clone();
         let backend = self.backend.clone();
         cx.spawn(async move |this, cx| {
             loop {
@@ -1516,12 +1486,4 @@ impl EntityInputHandler for Colet {
     fn character_index_for_point(&mut self, _: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
         None
     }
-}
-
-/// `folders` but those at or inside one `released` holds, by path key.
-pub(crate) fn kept_watching(folders: Vec<PathBuf>, released: &HashSet<OsString>) -> Vec<PathBuf> {
-    if released.is_empty() {
-        return folders;
-    }
-    folders.into_iter().filter(|folder| !ancestors(folder).iter().any(|a| released.contains(&path_key(a)))).collect()
 }

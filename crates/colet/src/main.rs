@@ -18,6 +18,7 @@ mod state;
 mod tests;
 mod theme;
 mod view;
+mod watching;
 
 use std::borrow::Cow;
 
