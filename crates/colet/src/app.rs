@@ -32,14 +32,13 @@ use gpui_kit::component::{
 use gpui_kit::*;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-use colet_core::shell::clipboard::ClipboardFiles;
-
 use crate::{
     backend::{self, Search},
+    clipboard::Clipboard,
     crumbs::Trail,
     icons::Icons,
     menus::Popup,
-    ops::{ClipboardLane, History, Running},
+    ops::{History, Running},
     places::{Dialog, HomeDragging, home_entries, home_groups, places},
     settings::{LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
@@ -329,19 +328,10 @@ pub struct Colet {
     pub focused_row: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The file operation under way; they go one at a time.
     pub running: Option<Running>,
-    /// Copies and cuts still being put on the clipboard.
-    pub(crate) clipboard_writes: usize,
-    pub(crate) clipboard_lane: ClipboardLane,
-    /// A paste asked for while they were, into this folder: run once they are done, so it pastes them.
-    pub(crate) paste_waiting: Option<PathBuf>,
     /// The settings could not be written as the window closed: the next close goes without them.
     pub(crate) unsaved_close: bool,
     pub history: History,
-    /// The files on the clipboard, marked in their rows until it changes.
-    pub clipboard: ClipboardFiles,
-    /// The clipboard's paths by path key: another app may write them in another case.
-    pub held: HashSet<OsString>,
-    clipboard_changed: Arc<AtomicBool>,
+    pub clipboard: Clipboard,
     /// What QuickLook was last told to show: a preview open follows the keys from it.
     quick_looked: Option<PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -485,14 +475,9 @@ impl Colet {
             menu_view: None,
             focused_row: Default::default(),
             running: None,
-            clipboard_writes: 0,
-            clipboard_lane: Default::default(),
-            paste_waiting: None,
             unsaved_close: false,
             history: History::default(),
-            clipboard: ClipboardFiles::default(),
-            held: HashSet::new(),
-            clipboard_changed: Arc::new(AtomicBool::new(true)),
+            clipboard: Clipboard::default(),
             quick_looked: None,
             _subscriptions: subscriptions,
         };
@@ -504,7 +489,7 @@ impl Colet {
         let colet = cx.entity();
         this._subscriptions.push(cx.observe_in(&colet, window, |this, _, window, cx| this.sync_dialog(window, cx)));
         crate::theme::apply(window, this.settings.theme, cx);
-        let changed = this.clipboard_changed.clone();
+        let changed = this.clipboard.changed_flag();
         this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
         this.search.update(cx, |input, cx| input.focus(window, cx));
         this.sync(cx);
@@ -949,18 +934,17 @@ impl Colet {
         if self.take_operation_events() {
             cx.notify();
         }
-        if self.clipboard_changed.swap(false, Ordering::Relaxed) {
+        if self.clipboard.take_changed() {
             let backend = self.backend.clone();
             let read = cx.background_executor().spawn(async move { backend.clipboard_files() });
             cx.spawn(async move |this, cx| {
                 // None while another app holds it: try again next time.
                 match read.await {
                     Some(files) => this.update(cx, |this, cx| {
-                        this.held = files.paths.iter().map(|p| path_key(p)).collect();
-                        this.clipboard = files;
+                        this.clipboard.set_files(files);
                         cx.notify();
                     }),
-                    None => this.update(cx, |this, _| this.clipboard_changed.store(true, Ordering::Relaxed)),
+                    None => this.update(cx, |this, _| this.clipboard.read_again()),
                 }
                 .ok();
             })

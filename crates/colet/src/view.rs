@@ -2,7 +2,7 @@
 //! and the status bar beside it.
 use std::{ops::Range, rc::Rc, time::Instant};
 
-use colet_core::{entry::{Entry, Sort, direction_label}, paths::{folder_name, id_text, path_key, shown}, time};
+use colet_core::{entry::{Entry, Sort, direction_label}, paths::{folder_name, id_text, shown}, time};
 use gpui_kit::base::input::{self, Input, InputState};
 use gpui_kit::component::{button::{Button, ButtonVariants}, status_bar::StatusBar, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -420,8 +420,8 @@ impl Colet {
             .then(|| saved.map(|(_, _, n)| n.map(str::to_owned)).unwrap_or_else(|| narrowed_folder(&entry.path).map(|(_, n)| n)))
             .flatten();
         // On the clipboard, cut or copied, whoever put it there.
-        let held = !self.held.is_empty() && self.held.contains(&path_key(&entry.path));
-        let cut = held && self.clipboard.cut;
+        let held = self.clipboard.holds(&entry.path);
+        let cut = held && self.clipboard.files.cut;
         let faded = (entry.hidden || cut) && !selected;
         // The keys are on it: ringed, selected or not, while they are in this column.
         let focused = marked && self.keys_in_column && c.focused.as_ref() == Some(&entry.path);

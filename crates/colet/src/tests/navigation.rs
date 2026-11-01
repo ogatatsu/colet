@@ -286,7 +286,7 @@ fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppC
     let search = ui.read(cx, |v| v.search.clone());
     ui.act(cx, |window, cx| search.update(cx, |input, cx| input.focus(window, cx)));
     ui.click(cx, "cut");
-    assert!(ui.read(cx, |v| v.clipboard.cut && texts(&v.clipboard.paths) == [r"D:\work\b.txt"]));
+    assert!(ui.read(cx, |v| v.clipboard.files.cut && texts(&v.clipboard.files.paths) == [r"D:\work\b.txt"]));
     assert!(ui.act(cx, |window, cx| search.read(cx).focus_handle(cx).is_focused(window)));
 }
 

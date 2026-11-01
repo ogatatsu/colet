@@ -5,7 +5,7 @@ use std::{
     collections::HashSet,
     ffi::OsString,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -372,8 +372,7 @@ impl Colet {
         done: String,
         cx: &mut Context<Self>,
     ) {
-        self.clipboard_writes += 1;
-        let result = self.clipboard_lane.write(work);
+        let result = self.clipboard.write(work);
         // A lane that stopped, as after a write panicked, never says.
         let task = cx
             .background_executor()
@@ -386,13 +385,7 @@ impl Colet {
                     Ok(()) => this.notify(done, Tone::Info, cx),
                     Err(error) => this.notify(error, Tone::Error, cx),
                 }
-                this.clipboard_writes -= 1;
-                // The paste waits on the last write: failed, the clipboard still holds what was there
-                // before, never what it was meant to paste.
-                if this.clipboard_writes == 0
-                    && let Some(destination) = this.paste_waiting.take()
-                    && written
-                {
+                if let Some(destination) = this.clipboard.write_ended(written) {
                     this.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
                 }
             })
@@ -431,11 +424,9 @@ impl Colet {
             Some(reason) => self.refuse("貼り付け", reason, cx),
             None => {
                 let destination = self.destination().unwrap_or_default();
-                if self.clipboard_writes > 0 {
-                    self.paste_waiting = Some(destination);
-                    return;
+                if let Some(destination) = self.clipboard.paste_into(destination) {
+                    self.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
                 }
-                self.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
             }
         }
     }
@@ -726,7 +717,7 @@ impl Colet {
         // What leaves its place goes unwatched first, with the folders inside it.
         let leaving = match request.kind {
             Kind::Recycle | Kind::Delete | Kind::Rename => request.paths.as_slice(),
-            Kind::Paste if self.clipboard.cut => self.clipboard.paths.as_slice(),
+            Kind::Paste if self.clipboard.files.cut => self.clipboard.files.paths.as_slice(),
             Kind::Paste | Kind::NewFolder => &[],
         };
         self.watching.released = leaving.iter().map(|p| path_key(p)).collect();
@@ -905,34 +896,6 @@ impl Colet {
                 self.focus_active(window, cx);
             }
         }
-    }
-}
-
-/// Puts things on the clipboard on a thread of its own, one write after another in the order asked, so
-/// an earlier copy never lands over a later one.
-pub struct ClipboardLane(mpsc::Sender<Box<dyn FnOnce() + Send>>);
-
-impl Default for ClipboardLane {
-    fn default() -> Self {
-        let (writes, queued) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
-        // Ends once the lane is dropped and the writes sent before are done.
-        std::thread::spawn(move || {
-            for write in queued {
-                write();
-            }
-        });
-        Self(writes)
-    }
-}
-
-impl ClipboardLane {
-    /// Queues `work` behind the writes before it; the receiver hears how it went.
-    fn write(&self, work: impl FnOnce() -> Result<(), String> + Send + 'static) -> mpsc::Receiver<Result<(), String>> {
-        let (done, result) = mpsc::channel();
-        let _ = self.0.send(Box::new(move || {
-            let _ = done.send(work());
-        }));
-        result
     }
 }
 

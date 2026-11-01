@@ -37,7 +37,7 @@ fn marks_the_rows_the_clipboard_holds(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-x");
     settle(cx);
-    assert!(ui.read(cx, |v| v.clipboard.cut && texts(&v.clipboard.paths) == [r"D:\work\a.txt"]));
+    assert!(ui.read(cx, |v| v.clipboard.files.cut && texts(&v.clipboard.files.paths) == [r"D:\work\a.txt"]));
     assert!(ui.act(cx, |window, _| window.try_find(SharedString::from(r"held:D:\work\a.txt")).is_some()));
 }
 
