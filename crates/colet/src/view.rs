@@ -13,7 +13,7 @@ use crate::{
     crumbs::Crumb,
     places::{HomeDrag, movable},
     state::{favorite_key, narrowed_folder, saved_query},
-    reveal::{Cell, on_screen, refit, reveal_target, uncover_target},
+    reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
     state::{Column, ColumnId, Kind},
 };
 
@@ -247,11 +247,11 @@ impl Colet {
     pub fn on_screen(&self) -> OnScreen {
         let first = if self.state.pinned() { 2 } else { 1 } + self.state.folded_away();
         let count = self.state.columns.len().saturating_sub(first);
-        let view = f32::from(self.columns_scroll.bounds().size.width);
+        let view = f32::from(self.sideways.scroll.bounds().size.width);
         // A wheel moves the offset past its bounds until the next layout brings it back: read it as it
         // will be drawn, so the edges' shades do not flash on.
-        let max = f32::from(self.columns_scroll.max_offset().x).max(self.hold);
-        let from = (-f32::from(self.columns_scroll.offset().x)).clamp(0., max);
+        let max = f32::from(self.sideways.scroll.max_offset().x).max(self.sideways.hold);
+        let from = self.sideways.offset().clamp(0., max);
         let cells: Vec<Cell> = (0..count).map(|i| Cell { start: i as f32 * self.widths.column, width: self.widths.column }).collect();
         OnScreen { first, count, span: on_screen(from, view, &cells) }
     }
@@ -1525,7 +1525,7 @@ impl Colet {
         let content = count as f32 * self.widths.column;
         let screen = self.on_screen();
         let (hidden_left, hidden_right) = (screen.hidden_left(), screen.hidden_right());
-        let hold = self.hold;
+        let hold = self.sideways.hold;
         let fit = cx.entity().downgrade();
         self.filter_fields(window, cx);
         let pinned_column = pinned.then(|| self.render_column(1, window, cx));
@@ -1622,7 +1622,7 @@ impl Colet {
                             .overflow_x_scroll()
                             // A wheel turned down scrolls the column under it, not the columns sideways.
                             .restrict_scroll_to_axis()
-                            .track_scroll(&self.columns_scroll)
+                            .track_scroll(&self.sideways.scroll)
                             // The crumbs' bar and the edges' shades follow the columns as they scroll.
                             .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
                             .child(div().h_full().w(px(content)).flex().children(columns))
@@ -1639,7 +1639,7 @@ impl Colet {
                         div()
                             .absolute()
                             .inset_0()
-                            .child(scrollbar(gpui_kit::base::Scrollbar::horizontal(&self.columns_scroll), p)),
+                            .child(scrollbar(gpui_kit::base::Scrollbar::horizontal(&self.sideways.scroll), p)),
                     )
                     .when(hidden_left, |d| {
                         d.child(
@@ -1782,14 +1782,14 @@ impl Colet {
 
     /// Slides the columns toward where they should rest, a frame at a time.
     fn reveal(&mut self, window: &mut Window) {
-        let view = f32::from(self.columns_scroll.bounds().size.width);
-        let mut from = -f32::from(self.columns_scroll.offset().x);
+        let view = f32::from(self.sideways.scroll.bounds().size.width);
+        let mut from = self.sideways.offset();
         let fold = self.state.fold.map(|f| (f.anchor, self.state.folded_away()));
-        let came_out = match (self.drawn_fold, fold) {
+        let came_out = match (self.sideways.drawn_fold, fold) {
             (Some((was, away)), Some((anchor, 0))) if was == anchor && away > 0 => Some(away),
             _ => None,
         };
-        self.drawn_fold = fold;
+        self.sideways.drawn_fold = fold;
         let mut keep = None;
         if let Some(away) = came_out
             && view > 0.
@@ -1798,12 +1798,10 @@ impl Colet {
             // room of the strip and past the left edge, and slide in from there.
             let shift = away as f32 * self.widths.column - FOLD_WIDTH;
             from += shift;
-            self.columns_scroll.set_offset(point(px(-from), px(0.)));
-            self.hold = self.hold.max(from);
-            if let Some(slide) = &mut self.slide {
-                slide.origin += shift;
-                slide.position += shift;
-                slide.target += shift;
+            self.sideways.set_offset(from);
+            self.sideways.hold = self.sideways.hold.max(from);
+            if let Some(slide) = &mut self.sideways.slide {
+                slide.shift(shift);
             }
             // Brought out by the strip rather than by going into one of them, as many as fit stand beside
             // the column worked in, or the anchor while the results or home are.
@@ -1813,62 +1811,48 @@ impl Colet {
                 let first = if self.state.pinned() { 2 } else { 1 };
                 keep = Some(self.state.active.max(f.to) - first);
             }
-            self.reveal_pending.get_or_insert(true);
+            self.sideways.ask();
         }
-        if let Some(smooth) = self.reveal_pending.take() {
+        if let Some(smooth) = self.sideways.pending.take() {
             if view <= 0. {
                 // Not laid out yet: ask again next frame.
-                self.reveal_pending = Some(smooth);
+                self.sideways.pending = Some(smooth);
                 window.request_animation_frame();
                 return;
             }
             let (cells, active) = self.scrolling();
-            let start = self.slide.as_ref().map_or(from, |s| s.target);
+            let start = self.sideways.slide.as_ref().map_or(from, |s| s.target);
             let shown: Vec<ColumnId> =
                 self.state.columns[self.state.columns.len() - cells.len()..].iter().map(|c| c.id).collect();
             let target = match keep {
                 Some(keep) => uncover_target(view, &cells, keep),
                 // Home or the pinned results taken up again beside the same columns, as ← brings the keys
                 // there, leave the columns where they are.
-                None if active.is_none() && shown == self.revealed => start,
+                None if active.is_none() && shown == self.sideways.revealed => start,
                 None => reveal_target(start, view, &cells, active),
             };
-            self.revealed = shown;
-            self.hold = target.max(from);
-            self.fitted = (view, self.widths.column);
+            self.sideways.revealed = shown;
+            self.sideways.hold = target.max(from);
+            self.sideways.fitted = (view, self.widths.column);
             if (target - from).abs() >= 0.5 {
-                match &mut self.slide {
+                match &mut self.sideways.slide {
                     Some(slide) => {
                         slide.origin = start;
                         slide.target = target;
                         slide.keep = keep;
                     }
-                    None => {
-                        self.slide = Some(Slide { origin: start, position: from, target, velocity: 0., time: None, keep })
-                    }
+                    None => self.sideways.slide = Some(Slide::new(start, from, target, keep)),
                 }
             }
         }
-        let Some(slide) = &mut self.slide else { return };
-        // Critically damped: settles in about 350ms without overshooting. A frame held up counts as at
-        // most two, so the slide slows there rather than leaping most of the way.
-        let stiffness = 27.;
-        let now = Instant::now();
-        let t = slide.time.map_or(1. / 60., |then| (now - then).as_secs_f32().clamp(0., 1. / 30.));
-        slide.time = Some(now);
-        let x = slide.position - slide.target;
-        let k = slide.velocity + stiffness * x;
-        let decay = (-stiffness * t).exp();
-        slide.position = slide.target + (x + k * t) * decay;
-        slide.velocity = (slide.velocity - stiffness * k * t) * decay;
-        let done = (slide.position - slide.target).abs() < 0.5 && slide.velocity.abs() < 20.;
-        let position = if done { slide.target } else { slide.position };
-        self.columns_scroll.set_offset(point(px(-position), px(0.)));
+        let Some(slide) = &mut self.sideways.slide else { return };
+        let (position, done) = slide.step(Instant::now());
+        self.sideways.set_offset(position);
         if done {
             // At rest, the room held for the slide goes: left past the last column, it would scroll the
             // columns off to the left.
-            self.hold = position;
-            self.slide = None;
+            self.sideways.hold = position;
+            self.sideways.slide = None;
         } else {
             window.request_animation_frame();
         }
@@ -1888,29 +1872,29 @@ impl Colet {
     /// to where [`refit`] puts them, as a window or a width is dragged; sliding, as when the folders
     /// folded away come out and their strip goes, they slide on to where they would now rest.
     pub fn fit(&mut self, view: f32, cx: &mut Context<Self>) {
-        let (was, was_width) = self.fitted;
+        let (was, was_width) = self.sideways.fitted;
         if view <= 0. || ((view - was).abs() < 0.5 && was_width == self.widths.column) {
             return;
         }
-        self.fitted = (view, self.widths.column);
+        self.sideways.fitted = (view, self.widths.column);
         // The first layout: nothing rests anywhere yet.
         if was <= 0. {
             return;
         }
         let (cells, active) = self.scrolling();
-        match &mut self.slide {
+        let sideways = &mut self.sideways;
+        match &mut sideways.slide {
             Some(slide) => {
                 slide.target = match slide.keep {
                     Some(keep) => uncover_target(view, &cells, keep),
                     None => reveal_target(slide.origin, view, &cells, active),
                 };
-                self.hold = slide.target.max(slide.position);
+                sideways.hold = slide.target.max(slide.position);
             }
             None => {
-                let from = -f32::from(self.columns_scroll.offset().x);
-                let target = refit(from, was, cells.len() as f32 * was_width, view, &cells, active);
-                self.columns_scroll.set_offset(point(px(-target), px(0.)));
-                self.hold = target;
+                let target = refit(sideways.offset(), was, cells.len() as f32 * was_width, view, &cells, active);
+                sideways.set_offset(target);
+                sideways.hold = target;
             }
         }
         cx.notify();

@@ -2,6 +2,88 @@
 //! When they must move, the last column ends flush with the right edge, so no room is left empty past it,
 //! unless that would hide the column worked in. Picking along a column, which opens and closes the one
 //! beside it, leaves them where they are.
+use std::time::Instant;
+
+use gpui_kit::ScrollHandle;
+
+use crate::state::ColumnId;
+
+/// Where the scrolling columns sit sideways, and how they get where they should rest.
+#[derive(Default)]
+pub struct Sideways {
+    pub scroll: ScrollHandle,
+    pub slide: Option<Slide>,
+    /// Asks the next frame to bring the active column on screen, sliding there when true.
+    pub pending: Option<bool>,
+    /// The scroll offset the columns were last brought to, which holds their scroll width while columns
+    /// beside them close and they slide back; once at rest, where they rest.
+    pub hold: f32,
+    /// The view's width and the columns' that the columns were last brought to rest, or set sliding, for.
+    pub fitted: (f32, f32),
+    /// The anchor of the fold last drawn, and how many folders it held away, to tell when they come out.
+    pub drawn_fold: Option<(ColumnId, usize)>,
+    /// The scrolling columns the columns were last brought on screen with, to tell home or the pinned
+    /// results taken up again beside the same columns from a pick there opening others.
+    pub revealed: Vec<ColumnId>,
+}
+
+impl Sideways {
+    /// Brings the active column on screen next frame, sliding there, unless that is already asked.
+    pub fn ask(&mut self) {
+        self.pending.get_or_insert(true);
+    }
+
+    /// The scroll offset, as a distance from the left.
+    pub fn offset(&self) -> f32 {
+        -f32::from(self.scroll.offset().x)
+    }
+
+    pub fn set_offset(&self, at: f32) {
+        self.scroll.set_offset(gpui_kit::point(gpui_kit::px(-at), gpui_kit::px(0.)));
+    }
+}
+
+/// The columns sliding to where they should rest; see `Colet::reveal`.
+pub struct Slide {
+    /// Where the target was reckoned from, to reckon it again should the view change under it.
+    pub origin: f32,
+    pub position: f32,
+    pub target: f32,
+    pub velocity: f32,
+    pub time: Option<Instant>,
+    /// Folders brought out by their strip: the column held at the right edge as they slide in.
+    pub keep: Option<usize>,
+}
+
+impl Slide {
+    pub fn new(origin: f32, position: f32, target: f32, keep: Option<usize>) -> Self {
+        Self { origin, position, target, velocity: 0., time: None, keep }
+    }
+
+    /// Moves all of it by `by`, as the columns under it are.
+    pub fn shift(&mut self, by: f32) {
+        self.origin += by;
+        self.position += by;
+        self.target += by;
+    }
+
+    /// One frame's step at `now`: where the columns stand, and whether they are at rest there.
+    ///
+    /// Critically damped: settles in about 350ms without overshooting. A frame held up counts as at most
+    /// two, so the slide slows there rather than leaping most of the way.
+    pub fn step(&mut self, now: Instant) -> (f32, bool) {
+        let stiffness = 27.;
+        let t = self.time.map_or(1. / 60., |then| (now - then).as_secs_f32().clamp(0., 1. / 30.));
+        self.time = Some(now);
+        let x = self.position - self.target;
+        let k = self.velocity + stiffness * x;
+        let decay = (-stiffness * t).exp();
+        self.position = self.target + (x + k * t) * decay;
+        self.velocity = (self.velocity - stiffness * k * t) * decay;
+        let done = (self.position - self.target).abs() < 0.5 && self.velocity.abs() < 20.;
+        (if done { self.target } else { self.position }, done)
+    }
+}
 
 /// A scrolling column's place: where it starts and how wide it is.
 #[derive(Clone, Copy, Debug, PartialEq)]

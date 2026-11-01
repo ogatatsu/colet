@@ -530,7 +530,7 @@ fn rest(ui: &Ui, cx: &mut TestAppContext) {
         std::thread::sleep(Duration::from_millis(16));
         ui.act(cx, |_, _| ());
         settle(cx);
-        if ui.read(cx, |v| v.slide.is_none()) {
+        if ui.read(cx, |v| v.sideways.slide.is_none()) {
             break;
         }
     }

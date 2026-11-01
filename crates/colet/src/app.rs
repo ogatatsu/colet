@@ -40,6 +40,7 @@ use crate::{
     menus::Popup,
     ops::{History, Running},
     places::{Dialog, HomeDragging, home_entries, home_groups, places},
+    reveal::Sideways,
     settings::{LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, State, filter_words, room_for_a_word},
@@ -230,16 +231,29 @@ pub enum Tone {
     Error,
 }
 
-/// The columns sliding to where they should rest; see [`Colet::reveal`].
-pub struct Slide {
-    /// Where the target was reckoned from, to reckon it again should the view change under it.
-    pub origin: f32,
-    pub position: f32,
-    pub target: f32,
-    pub velocity: f32,
-    pub time: Option<Instant>,
-    /// Folders brought out by their strip: the column held at the right edge as they slide in.
-    pub keep: Option<usize>,
+/// The rows of each column, scrolled up and down apart from the others.
+#[derive(Default)]
+pub struct RowScrolls {
+    pub handles: HashMap<ColumnId, UniformListScrollHandle>,
+    /// The row each column was last scrolled to bring in sight.
+    scrolled_to: HashMap<ColumnId, PathBuf>,
+}
+
+impl RowScrolls {
+    pub fn handle(&mut self, id: ColumnId) -> &UniformListScrollHandle {
+        self.handles.entry(id).or_default()
+    }
+
+    /// The rows of `id` moved: the focused one is brought in sight again.
+    pub fn moved(&mut self, id: ColumnId) {
+        self.scrolled_to.remove(&id);
+    }
+
+    /// Only the columns `live` holds.
+    fn keep(&mut self, live: &HashSet<ColumnId>) {
+        self.handles.retain(|id, _| live.contains(id));
+        self.scrolled_to.retain(|id, _| live.contains(id));
+    }
 }
 
 /// What a listing came back with: the entries, how many in all, and for a search what answered it, and
@@ -271,22 +285,8 @@ pub struct Colet {
     window: AnyWindowHandle,
     pub(crate) next_toast: u64,
     pub resizing: Option<Resize>,
-    pub lists: HashMap<ColumnId, UniformListScrollHandle>,
-    scrolled_to: HashMap<ColumnId, PathBuf>,
-    pub columns_scroll: ScrollHandle,
-    pub slide: Option<Slide>,
-    /// Asks the next frame to bring the active column on screen, sliding there when true.
-    pub reveal_pending: Option<bool>,
-    /// The scroll offset the columns were last brought to, which holds their scroll width while columns
-    /// beside them close and they slide back; once at rest, where they rest.
-    pub hold: f32,
-    /// The view's width and the columns' that the columns were last brought to rest, or set sliding, for.
-    pub fitted: (f32, f32),
-    /// The anchor of the fold last drawn, and how many folders it held away, to tell when they come out.
-    pub drawn_fold: Option<(ColumnId, usize)>,
-    /// The scrolling columns the columns were last brought on screen with, to tell home or the pinned
-    /// results taken up again beside the same columns from a pick there opening others.
-    pub revealed: Vec<ColumnId>,
+    pub rows: RowScrolls,
+    pub sideways: Sideways,
     pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
     request: u64,
@@ -439,15 +439,8 @@ impl Colet {
             window: Window::window_handle(window),
             next_toast: 0,
             resizing: None,
-            lists: HashMap::new(),
-            scrolled_to: HashMap::new(),
-            columns_scroll: ScrollHandle::new(),
-            slide: None,
-            reveal_pending: None,
-            hold: 0.,
-            fitted: (0., 0.),
-            drawn_fold: None,
-            revealed: Vec::new(),
+            rows: RowScrolls::default(),
+            sideways: Sideways::default(),
             owner,
             backend,
             request: 0,
@@ -539,9 +532,7 @@ impl Colet {
     pub fn changed(&mut self, cx: &mut Context<Self>) {
         self.sync(cx);
         self.follow_quick_look();
-        if self.reveal_pending.is_none() {
-            self.reveal_pending = Some(true);
-        }
+        self.sideways.ask();
         cx.notify();
     }
 
@@ -574,8 +565,7 @@ impl Colet {
         });
         self.requested.retain(|id| live.contains(id));
         self.pending.retain(|id, _| live.contains(id));
-        self.lists.retain(|id, _| live.contains(id));
-        self.scrolled_to.retain(|id, _| live.contains(id));
+        self.rows.keep(&live);
         let fresh: Vec<(ColumnId, Kind)> =
             self.state.columns.iter().filter(|c| !self.requested.contains(&c.id)).map(|c| (c.id, c.kind)).collect();
         for (id, kind) in fresh {
@@ -1261,7 +1251,7 @@ impl Colet {
             .detach();
         }
         // The rows move: the focused one is brought in sight again.
-        self.scrolled_to.remove(&id);
+        self.rows.moved(id);
         self.changed(cx);
     }
 
@@ -1299,7 +1289,7 @@ impl Colet {
             field.applied.clear();
             field.input.clone().update(cx, |input, cx| input.set_value("", window, cx));
         }
-        self.scrolled_to.remove(&id);
+        self.rows.moved(id);
         self.leave_filter(id, window, cx);
     }
 
@@ -1350,7 +1340,7 @@ impl Colet {
     pub fn scroll_rows(&mut self) {
         for c in &self.state.columns {
             let Some(path) = c.focused.as_ref().or(c.highlight.as_ref()) else { continue };
-            if self.scrolled_to.get(&c.id) == Some(path) {
+            if self.rows.scrolled_to.get(&c.id) == Some(path) {
                 continue;
             }
             let Some(index) = c.entries.iter().position(|e| &e.path == path) else { continue };
@@ -1365,15 +1355,15 @@ impl Colet {
                     row += entries.len();
                 }
             } else {
-                let handle = self.lists.entry(c.id).or_default();
+                let handle = self.rows.handle(c.id);
                 handle.scroll_to_item(index, ScrollStrategy::Nearest);
             }
-            self.scrolled_to.insert(c.id, path.clone());
+            self.rows.scrolled_to.insert(c.id, path.clone());
         }
     }
 
     pub fn list_handle(&mut self, id: ColumnId) -> UniformListScrollHandle {
-        self.lists.entry(id).or_default().clone()
+        self.rows.handle(id).clone()
     }
 }
 
