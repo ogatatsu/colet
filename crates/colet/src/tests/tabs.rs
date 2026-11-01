@@ -178,12 +178,79 @@ fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mu
     let key = favorite_key(Path::new(r"D:\work"), Some("pdf"));
     ui.view.update(cx, |v, cx| v.open_in_tab(0, &key, cx));
     settle(cx);
-    // Named for the folder it opened while still behind, not for home.
-    let name = ui.read(cx, |v| crate::tabs::title(&v.tabs.list[1].parked.as_ref().unwrap().state).name);
-    assert_eq!(name, "work");
+    // Named for the favorite it opened while still behind, not for home.
+    let (glyph, name) = ui.read(cx, |v| {
+        let title = crate::tabs::title(&v.tabs.list[1].parked.as_ref().unwrap().state, &v.settings);
+        (title.glyph, title.name)
+    });
+    assert_eq!((glyph, name.as_str()), ("star", "work"));
     ui.press(cx, "ctrl-tab");
     let last = ui.read(cx, |v| v.state.columns.len() - 1);
     assert!(ui.filter_focused(cx, last));
     ui.input(cx, " a");
     assert_eq!(ui.typed(cx, last), "pdf a");
+    // Narrowed otherwise, it is the favorite no more.
+    assert_eq!(ui.title(cx).0, "folder");
+}
+
+impl Ui {
+    /// The front tab's icon, name and tip.
+    fn title(&self, cx: &mut TestAppContext) -> (&'static str, String, String) {
+        self.read(cx, |v| {
+            let title = crate::tabs::title(&v.state, &v.settings);
+            (title.glyph, title.name, title.tip)
+        })
+    }
+}
+
+#[gpui_kit::test]
+fn names_a_tab_for_the_favorite_it_opened_however_deep_it_goes(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\work")]), (r"D:\work", vec![file(r"D:\work\a.txt")])])
+    });
+    fake.settings.lock().unwrap().favorites = vec![crate::settings::Favorite { name: "データ".into(), ..crate::settings::Favorite::new(r"D:\") }];
+    let ui = open(cx, fake);
+    ui.click(cx, row(r"D:\"));
+    // Picked in home, it is named so already.
+    assert_eq!(ui.title(cx), ("star", "データ".into(), r"D:\".into()));
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    assert_eq!(ui.title(cx), ("star", "データ".into(), r"D:\work".into()));
+    // Renamed, it follows; kept no more, the column worked in names it.
+    ui.view.update(cx, |v, _| v.settings.favorites[0].name = "倉庫".into());
+    assert_eq!(ui.title(cx).1, "倉庫");
+    ui.view.update(cx, |v, _| v.settings.favorites.clear());
+    assert_eq!(ui.title(cx), ("folder", "work".into(), r"D:\work".into()));
+}
+
+#[gpui_kit::test]
+fn names_a_tab_for_its_search_or_the_saved_one_it_runs_however_deep_it_goes(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![folder(r"D:\work")]).with_folders(&[(r"D:\work", vec![file(r"D:\work\a.txt")])]));
+    fake.settings.lock().unwrap().saved_searches =
+        vec![crate::settings::SavedSearch { name: "仕事".into(), query: "wo".into(), filter: None, narrow: None }];
+    let ui = open(cx, fake);
+    ui.input(cx, "wo");
+    assert_eq!(ui.title(cx), ("search", "仕事".into(), "wo".into()));
+    // Searched otherwise, it is the search no more.
+    ui.input(cx, "r");
+    assert_eq!(ui.title(cx), ("search", "wor".into(), "wor".into()));
+    ui.click(cx, row(r"D:\work"));
+    ui.press(cx, "right");
+    assert_eq!(ui.title(cx), ("search", "wor".into(), r"D:\work".into()));
+}
+
+#[gpui_kit::test]
+fn names_a_tab_for_the_place_picked_in_home_while_home_is_worked_in(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let drive = colet_core::paths::shown(colet_core::paths::folder_name(Path::new(r"D:\")));
+    assert_eq!(ui.title(cx), ("folder", "work".into(), r"D:\work".into()));
+    // Back in home, it is the place picked there, not the folder gone deepest into.
+    ui.press(cx, "left");
+    ui.press(cx, "left");
+    assert_eq!(ui.active(cx), 0);
+    assert_eq!(ui.title(cx), ("folder", drive, r"D:\".into()));
+    // Nothing picked in home: it is home.
+    ui.press(cx, "ctrl-t");
+    assert_eq!(ui.title(cx), ("house", "ホーム".into(), "ホーム".into()));
 }

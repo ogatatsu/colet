@@ -3,7 +3,7 @@
 //! front again, when they are listed afresh.
 use std::{collections::HashMap, path::Path};
 
-use colet_core::paths::{folder_name, shown};
+use colet_core::paths::{folder_name, path_key, shown};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -11,8 +11,8 @@ use crate::{
     app::{Colet, FilterField, RowScrolls},
     menus::Popup,
     reveal::Sideways,
-    settings::KeptTab,
-    state::{ColumnId, Kind, State},
+    settings::{KeptTab, Settings},
+    state::{ColumnId, Kind, State, favorite_parts},
     view::TipExt,
 };
 
@@ -93,17 +93,51 @@ impl Tabs {
     }
 }
 
-/// What a tab is called, from the column worked in, its icon, and what its tip says in full.
+/// What a tab is called, its icon, and what its tip says in full.
 pub struct Title {
     pub glyph: &'static str,
     pub name: String,
     pub tip: String,
 }
 
-pub fn title(state: &State) -> Title {
-    let c = &state.columns[state.active.min(state.columns.len() - 1)];
+/// A tab is called for what it started from in home, as long as that leads it: the saved search it runs,
+/// else the search it made, else the favorite it opened, however deep it has gone since. Else, for the
+/// column worked in, or, while home is, for the place picked in it. The tip tells the column worked in, or
+/// what home opened while home is worked in.
+pub fn title(state: &State, settings: &Settings) -> Title {
+    let active = state.active.min(state.columns.len() - 1);
+    let (name, tip) = column_title(state, active);
+    if state.pinned() {
+        let tip = if active == 0 { column_title(state, 1).1 } else { tip };
+        let saved = settings.saved(&state.query, state.search_filter.as_deref(), state.search_narrowing().as_deref());
+        let name = saved.map_or_else(|| column_title(state, 1).0, |s| s.label().to_owned());
+        return Title { glyph: "search", name, tip };
+    }
+    // The column the row picked in home opened, while it is open still; the folders above it may be folded
+    // before it.
+    let opened = match state.columns[0].selected.as_slice() {
+        [key] => {
+            let path = favorite_parts(key).0;
+            state.columns.iter().rposition(|c| c.kind == Kind::Folder && path_key(&c.path) == path_key(&path))
+        }
+        _ => None,
+    };
+    let Some(at) = opened else { return Title { glyph: if active == 0 { "house" } else { "folder" }, name, tip } };
+    let opened = &state.columns[at];
+    let (place, place_tip) = column_title(state, at);
+    let tip = if active == 0 { place_tip } else { tip };
+    match settings.favorite(&opened.path, opened.narrowing().as_deref()) {
+        Some(favorite) => Title { glyph: "star", name: favorite.label(), tip },
+        None if active == 0 => Title { glyph: "folder", name: place, tip },
+        None => Title { glyph: "folder", name, tip },
+    }
+}
+
+/// The name and tip of the column at `index`, alone.
+fn column_title(state: &State, index: usize) -> (String, String) {
+    let c = &state.columns[index];
     match c.kind {
-        Kind::Home => Title { glyph: "house", name: "ホーム".into(), tip: "ホーム".into() },
+        Kind::Home => ("ホーム".into(), "ホーム".into()),
         Kind::Search => {
             let filter = state.search_filter.as_deref();
             let name = if state.query.is_empty() { filter.unwrap_or_default().to_owned() } else { state.query.clone() };
@@ -111,9 +145,9 @@ pub fn title(state: &State) -> Title {
                 Some(filter) if !state.query.is_empty() => format!("{filter} {}", state.query),
                 _ => name.clone(),
             };
-            Title { glyph: "search", name, tip }
+            (name, tip)
         }
-        Kind::Folder => Title { glyph: "folder", name: shown(folder_name(&c.path)), tip: shown(&c.path) },
+        Kind::Folder => (shown(folder_name(&c.path)), shown(&c.path)),
     }
 }
 
@@ -528,7 +562,7 @@ impl Colet {
         let tab = &self.tabs.list[index];
         let id = tab.id;
         let current = index == self.tabs.current;
-        let Title { glyph, name, tip } = title(tab.parked.as_ref().map_or(&self.state, |parked| &parked.state));
+        let Title { glyph, name, tip } = title(tab.parked.as_ref().map_or(&self.state, |parked| &parked.state), &self.settings);
         let dragged = DraggedTab { id, name: name.clone(), glyph, palette: p };
         div()
             .id(("tab", id as usize))
