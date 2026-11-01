@@ -19,7 +19,7 @@ use colet_core::{
     entry::{Entry, Order, Sort},
     everything::PAGE,
     operations::message,
-    paths::{parent_folder, path_key, shown},
+    paths::{path_key, shown},
     quick_look, shell,
     watch::Changes,
 };
@@ -997,7 +997,7 @@ impl Colet {
         }
     }
 
-    /// The folder columns a changed item shows in: the folder holding it, and its own when it is one.
+    /// Reloads the folder columns whose listings changed.
     fn files_changed(&mut self, changes: Changes, cx: &mut Context<Self>) {
         let paths = match changes {
             Changes::Nothing => return,
@@ -1007,14 +1007,7 @@ impl Colet {
                 return;
             }
         };
-        let folders: HashSet<OsString> = paths
-            .iter()
-            .flat_map(|path| {
-                let key = path_key(path);
-                let parent = parent_folder(Path::new(&key)).unwrap_or(Path::new("")).as_os_str().to_owned();
-                [key, parent]
-            })
-            .collect();
+        let folders: HashSet<OsString> = paths.iter().map(|path| path_key(path)).collect();
         let ids: Vec<ColumnId> = self
             .state
             .columns

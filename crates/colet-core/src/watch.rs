@@ -9,7 +9,7 @@ use std::{
 
 use notify::{RecursiveMode, Watcher as _};
 
-use crate::paths::path_key;
+use crate::paths::{parent_folder, path_key};
 
 /// Both path keys.
 fn inside(path: &OsString, folder: &OsString) -> bool {
@@ -28,11 +28,25 @@ fn repair_paths(paths: &[OsString], folders: &[OsString]) -> Vec<OsString> {
     paths.iter().filter(|path| folders.iter().any(|folder| inside(folder, path))).cloned().collect()
 }
 
+/// The folders whose listings changed for an event on `paths`: the folder holding each, and the item
+/// itself only when it came, went or was renamed. A folder's times changing, as Windows updates them
+/// lazily for what changed inside it, changes only the listing that shows it.
+fn listings(paths: Vec<PathBuf>, came_or_went: bool) -> Vec<PathBuf> {
+    paths
+        .into_iter()
+        .flat_map(|path| {
+            let holder = parent_folder(&path).map(|p| p.to_owned());
+            holder.into_iter().chain(came_or_went.then_some(path))
+        })
+        .collect()
+}
+
 /// What changed since the batch was last taken.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Changes {
     #[default]
     Nothing,
+    /// The folders whose listings changed.
     Paths(HashSet<PathBuf>),
     /// Anything may have: an unnamed change, which outweighs the named ones around it.
     All,
@@ -117,7 +131,7 @@ impl FolderWatcher {
             if reset && (paths.is_empty() || !repairs.is_empty()) {
                 let _ = repair.send(WatchCommand::Repair(repairs));
             }
-            changes.lock().unwrap().add(if error { Vec::new() } else { paths });
+            changes.lock().unwrap().add(if error { Vec::new() } else { listings(paths, reset) });
         })
         .map_err(|e| e.to_string())?;
         // Dropping the handle sends Stop: the callback also has a sender, so disconnection alone
@@ -248,6 +262,13 @@ mod tests {
             .into_iter().map(|p| path_key(Path::new(p))).collect();
         assert_eq!(repair_paths(&paths, &folders), [paths[0].clone(), paths[1].clone(), paths[2].clone(), paths[4].clone()]);
         assert!(paths.iter().take(3).all(|p| relevant(p, &folders[0])));
+    }
+
+    #[test]
+    fn a_change_names_the_folder_holding_it_and_what_came_or_went_itself() {
+        let paths = || vec![PathBuf::from(r"D:\work\a"), PathBuf::from(r"D:\")];
+        assert_eq!(listings(paths(), false), [PathBuf::from(r"D:\work")]);
+        assert_eq!(listings(paths(), true), [PathBuf::from(r"D:\work"), PathBuf::from(r"D:\work\a"), PathBuf::from(r"D:\")]);
     }
 
     #[test]

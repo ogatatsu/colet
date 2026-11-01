@@ -14,7 +14,7 @@ fn reloads_only_the_folders_a_change_names(cx: &mut TestAppContext) {
     fake.lists.lock().unwrap().clear();
     fake.folders.lock().unwrap().get_mut(r"D:\a").unwrap().push(file(r"D:\a\new.txt"));
     let changed = ui.read(cx, |v| v.watching.changed.clone());
-    *changed.lock().unwrap() = Changes::Paths(HashSet::from([PathBuf::from(r"D:\a\new.txt")]));
+    *changed.lock().unwrap() = Changes::Paths(HashSet::from([PathBuf::from(r"D:\a")]));
     settle(cx);
     assert_eq!(*fake.lists.lock().unwrap(), [r"D:\a"]);
     assert_eq!(ui.read(cx, |v| v.state.columns[2].entries.len()), 2);

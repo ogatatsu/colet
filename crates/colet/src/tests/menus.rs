@@ -117,7 +117,8 @@ fn closes_the_menu_and_returns_the_keys_when_its_column_vanishes(cx: &mut TestAp
     ui.press(cx, "shift-f10");
     fake.remove(Path::new(r"D:\work"));
     let changed = ui.read(cx, |v| v.watching.changed.clone());
-    *changed.lock().unwrap() = Changes::Paths(HashSet::from([r"D:\work".into()]));
+    // Gone, it is named along with the folder that held it.
+    *changed.lock().unwrap() = Changes::Paths(HashSet::from([r"D:\".into(), r"D:\work".into()]));
     settle(cx);
     ui.act(cx, |_, _| ());
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
