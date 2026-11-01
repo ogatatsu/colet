@@ -8,7 +8,7 @@ version = "0.1.0"
 publish = false
 
 [workspace.dependencies]
-gpui-kit = "=0.8.0"
+gpui-kit = "=0.8.1"
 # Kept on the version gpui's Windows backend uses, so one copy is built.
 windows = "0.62"
 windows-core = "0.62"

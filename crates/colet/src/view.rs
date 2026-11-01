@@ -1623,7 +1623,7 @@ impl Colet {
                             .restrict_scroll_to_axis()
                             .track_scroll(&self.columns_scroll)
                             // The crumbs' bar and the edges' shades follow the columns as they scroll.
-                            .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
+                            .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
                             .child(div().h_full().w(px(content)).flex().children(columns))
                             // The room past the last column is no column's: a press there leaves the keys where
                             // they are, rather than the columns' focus sending them beside home.
