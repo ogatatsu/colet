@@ -576,6 +576,7 @@ impl Colet {
         let (at, id, label, width) = match self.popup.as_ref()? {
             Popup::File(menu) => (menu.at, "menu", "ファイル操作", 240.),
             Popup::Text(menu) => (menu.at, "text-menu", "編集", 200.),
+            Popup::Tab { at, .. } => (*at, "tab-menu", "タブ", 220.),
             _ => return None,
         };
         let menu = self.menu_element(id, label, cx)?;

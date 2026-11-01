@@ -44,6 +44,7 @@ use crate::{
     settings::{LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, State, filter_words, room_for_a_word},
+    tabs::Tabs,
     theme::Palette,
     watching::Watching,
 };
@@ -95,6 +96,12 @@ actions!(
         Unfold,
         FocusHome,
         QuickLook,
+        NewTab,
+        CloseTab,
+        NextTab,
+        PreviousTab,
+        ReopenTab,
+        OpenInNewTab,
     ]
 );
 
@@ -164,6 +171,12 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", OpenSort, Some(SORT)),
         KeyBinding::new("space", OpenSort, Some(SORT)),
         KeyBinding::new("down", OpenSort, Some(SORT)),
+        KeyBinding::new("ctrl-t", NewTab, None),
+        KeyBinding::new("ctrl-w", CloseTab, None),
+        KeyBinding::new("ctrl-tab", NextTab, None),
+        KeyBinding::new("ctrl-shift-tab", PreviousTab, None),
+        KeyBinding::new("ctrl-shift-t", ReopenTab, None),
+        KeyBinding::new("ctrl-enter", OpenInNewTab, Some(COLUMNS)),
         KeyBinding::new("backspace", TrimFilter, Some(COLUMNS)),
         KeyBinding::new("escape", ClearFilter, Some(COLUMNS)),
     ]);
@@ -360,7 +373,11 @@ pub struct FilterField {
 }
 
 pub struct Colet {
+    /// The tab in front's; the other tabs are parked in `tabs`, with the fields below kept for each.
     pub state: State,
+    /// The filter the next search in the tab in front is narrowed by, by name.
+    pub chosen_filter: Option<String>,
+    pub tabs: Tabs,
     pub widths: Widths,
     pub palette: Palette,
     pub search: Entity<InputState>,
@@ -459,6 +476,8 @@ impl Colet {
         };
         let mut this = Self {
             state: State::new(),
+            chosen_filter: None,
+            tabs: Tabs::default(),
             widths: Widths {
                 sidebar: settings.sidebar_width,
                 search: settings.search_width,
@@ -512,6 +531,7 @@ impl Colet {
             this.notify(problem, Tone::Error, cx);
         }
         this.palette.style_input(&this.search, cx);
+        this.restore_tabs(window, cx);
         // The window's dialog follows `dialog` as each change to Colet settles.
         let colet = cx.entity();
         this._subscriptions.push(cx.observe_in(&colet, window, |this, _, window, cx| this.sync_dialog(window, cx)));
@@ -531,7 +551,7 @@ impl Colet {
         let typed = cx.subscribe_in(&search, window, |this: &mut Self, input, event, window, cx| match event {
             InputEvent::Change => {
                 let query = input.read(cx).value().to_string();
-                this.state.set_search(&query, this.settings.filter.clone());
+                this.state.set_search(&query, this.chosen_filter.clone());
                 this.changed(cx);
             }
             InputEvent::PressEnter { .. } => this.leave_search(window, cx),
@@ -549,7 +569,7 @@ impl Colet {
 
     /// Whether the window may close: not while a file operation runs. The settings are written at once,
     /// rather than a moment after the last change; when that fails, the next close goes without them.
-    fn may_close(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn may_close(&mut self, cx: &mut Context<Self>) -> bool {
         if self.running.is_some() {
             self.notify("ファイル操作中です。完了を待つか、進捗ダイアログでキャンセルしてから閉じてください。", Tone::Info, cx);
             return false;
@@ -609,6 +629,7 @@ impl Colet {
         self.sync(cx);
         self.follow_quick_look();
         self.sideways.ask();
+        self.keep_tabs(cx);
         cx.notify();
     }
 
@@ -815,6 +836,18 @@ impl Colet {
             }
         }
         self.changed(cx);
+    }
+
+    /// The tab come to the front lists all its columns again: what it showed stays meanwhile, and what it
+    /// never listed shows as loading. What the tab before it still had out is let go of.
+    pub(crate) fn relist(&mut self, cx: &mut Context<Self>) {
+        self.listings.keep(&HashSet::new());
+        self.search_refresh = false;
+        let columns: Vec<(ColumnId, bool)> = self.state.columns.iter().map(|c| (c.id, c.request != 0)).collect();
+        for (id, listed) in columns {
+            self.listings.first(id);
+            self.load(id, 0, listed, cx);
+        }
     }
 
     /// Reloads every column, keeping what each shows meanwhile.
@@ -1086,7 +1119,7 @@ impl Colet {
     /// Empties the field; the filter chosen, if any, still shows all it lets through.
     pub fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.update(cx, |input, cx| input.set_value("", window, cx));
-        self.state.set_search("", self.settings.filter.clone());
+        self.state.set_search("", self.chosen_filter.clone());
         self.changed(cx);
     }
 
@@ -1097,7 +1130,7 @@ impl Colet {
             input.focus(window, cx);
         });
         self.state.set_search(query, filter);
-        self.adopt_filter(cx);
+        self.adopt_filter();
         self.changed(cx);
     }
 
@@ -1369,15 +1402,14 @@ impl Colet {
         if self.search.read(cx).value().as_ref() != query {
             self.search.update(cx, |input, cx| input.set_value(query, window, cx));
         }
-        self.adopt_filter(cx);
+        self.adopt_filter();
         self.changed(cx);
     }
 
     /// The results shown, a saved search's or those gone back to, choose their filter for the next search.
-    fn adopt_filter(&mut self, cx: &mut Context<Self>) {
-        if self.state.pinned() && self.state.search_filter != self.settings.filter {
-            let filter = self.state.search_filter.clone();
-            self.update_settings(|s| s.filter = filter, cx);
+    fn adopt_filter(&mut self) {
+        if self.state.pinned() && self.state.search_filter != self.chosen_filter {
+            self.chosen_filter = self.state.search_filter.clone();
         }
     }
 

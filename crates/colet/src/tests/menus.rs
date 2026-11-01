@@ -79,6 +79,7 @@ fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) 
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "down");
+    ui.press(cx, "down");
     ui.press(cx, "enter");
     assert_eq!(texts(&fake.clipboard.lock().unwrap().paths), [r"D:\work\a.txt"]);
     assert!(ui.read(cx, |v| v.menu().is_none()));

@@ -1,7 +1,6 @@
 //! What Colet keeps between runs: the widths, the favorites, the saved searches, what is pinned in home,
-//! the search filters and
-//! the one chosen, the sort order, which Everything to ask, the theme, and where the window was. Searches typed, history and the columns open
-//! are not kept.
+//! the search filters, the tabs with what each searched and the folders open, the sort order, the theme,
+//! and where the window was. The way back and forth and what is picked besides are not kept.
 use std::{
     path::{Path, PathBuf},
     sync::mpsc,
@@ -16,7 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     app::{COLUMN_WIDTHS, SIDEBAR_WIDTHS},
-    state::{favorite_key, favorite_parts, filter_words, narrowed_folder, narrowing, saved_query, search_key},
+    state::{Kept, favorite_key, favorite_parts, filter_words, narrowed_folder, narrowing, saved_query, search_key},
 };
 
 /// A search kept in home. An empty name shows the query itself.
@@ -138,6 +137,13 @@ impl Theme {
     }
 }
 
+/// A tab kept between starts: where it was, and the filter its next search is narrowed by, by name.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct KeptTab {
+    pub place: Kept,
+    pub filter: Option<String>,
+}
+
 /// The window's place in logical pixels, and whether it was maximized over it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Placement {
@@ -165,8 +171,10 @@ pub struct Settings {
     #[serde(with = "paths")]
     pub pinned: Vec<PathBuf>,
     pub filters: Vec<SearchFilter>,
-    /// The filter the next search is narrowed by, by name.
-    pub filter: Option<String>,
+    /// The tabs, in their order, and the one in front.
+    #[serde(with = "tabs")]
+    pub tabs: Vec<KeptTab>,
+    pub tab: usize,
     /// The one order the folders and the search results share.
     #[serde(with = "order")]
     pub sort: Order,
@@ -184,7 +192,8 @@ impl Default for Settings {
             saved_searches: Vec::new(),
             pinned: Vec::new(),
             filters: Vec::new(),
-            filter: None,
+            tabs: Vec::new(),
+            tab: 0,
             sort: Order::default(),
             theme: Theme::System,
             window: None,
@@ -205,9 +214,15 @@ impl Settings {
         let mut names = std::collections::HashSet::new();
         self.filters.retain(|f| !f.name.trim().is_empty() && !f.query.trim().is_empty() && names.insert(f.name.clone()));
         let known = |name: &Option<String>| name.as_ref().is_none_or(|name| names.contains(name));
-        if !known(&self.filter) {
-            self.filter = None;
+        for tab in &mut self.tabs {
+            if !known(&tab.filter) {
+                tab.filter = None;
+            }
+            if let Some(name) = tab.place.search_filter.clone().filter(|name| !names.contains(name)) {
+                tab.place.rename_search_filter(&name, None);
+            }
         }
+        self.tab = self.tab.min(self.tabs.len().saturating_sub(1));
         for search in &mut self.saved_searches {
             let was = search.key();
             if !known(&search.filter) {
@@ -370,6 +385,87 @@ pub(crate) mod favorites {
         let Some(path) = value.get_mut("path").map(Value::take) else { return paths::read(value).map(Favorite::new) };
         let text = |value: &Value, field: &str| value.get(field).and_then(Value::as_str).map(str::to_owned);
         Some(Favorite { path: paths::read(path)?, name: text(&value, "name").unwrap_or_default(), narrow: text(&value, "narrow") })
+    }
+}
+
+/// The tabs, each as `{"query": ..., "search_filter": ..., "filter": ..., "folders": [{"path": ...,
+/// "highlight": ...}], "picks": [...], "active": ..., "fold": {"anchor": ..., "open": ...}}`, its paths as
+/// [`paths`] writes one and what it lacks left out. Read leniently: what is missing or not read goes without
+/// it, and a tab read no way at all (a file edited by hand) is left out alone.
+pub(crate) mod tabs {
+    use serde_json::{Map, Value};
+
+    use super::*;
+
+    pub fn serialize<S: Serializer>(tabs: &[KeptTab], serializer: S) -> Result<S::Ok, S::Error> {
+        tabs.iter().map(kept).collect::<Vec<_>>().serialize(serializer)
+    }
+
+    fn kept(tab: &KeptTab) -> Value {
+        let place = &tab.place;
+        let mut kept = Map::new();
+        if !place.query.is_empty() {
+            kept.insert("query".into(), place.query.clone().into());
+        }
+        if let Some(name) = &place.search_filter {
+            kept.insert("search_filter".into(), name.clone().into());
+        }
+        if let Some(name) = &tab.filter {
+            kept.insert("filter".into(), name.clone().into());
+        }
+        let folders = place
+            .folders
+            .iter()
+            .map(|(path, highlight)| {
+                let mut folder = Map::new();
+                folder.insert("path".into(), paths::kept(path));
+                if let Some(highlight) = highlight {
+                    folder.insert("highlight".into(), paths::kept(highlight));
+                }
+                Value::Object(folder)
+            })
+            .collect();
+        kept.insert("folders".into(), Value::Array(folders));
+        kept.insert("picks".into(), place.picks.iter().map(|pick| pick.as_deref().map_or(Value::Null, paths::kept)).collect());
+        kept.insert("active".into(), place.active.into());
+        if let Some((anchor, open)) = place.fold {
+            kept.insert("fold".into(), serde_json::json!({ "anchor": anchor, "open": open }));
+        }
+        Value::Object(kept)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<KeptTab>, D::Error> {
+        let values = Vec::<Value>::deserialize(deserializer)?;
+        Ok(values.into_iter().filter_map(read).collect())
+    }
+
+    fn read(mut value: Value) -> Option<KeptTab> {
+        value.as_object()?;
+        let text = |value: &Value, field: &str| value.get(field).and_then(Value::as_str).map(str::to_owned);
+        let folders: Vec<(PathBuf, Option<PathBuf>)> = match value.get_mut("folders").map(Value::take) {
+            Some(Value::Array(folders)) => folders
+                .into_iter()
+                .filter_map(|mut folder| {
+                    let path = paths::read(folder.get_mut("path")?.take())?;
+                    Some((path, folder.get_mut("highlight").map(Value::take).and_then(paths::read)))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let picks = match value.get_mut("picks").map(Value::take) {
+            Some(Value::Array(picks)) => picks.into_iter().map(paths::read).collect(),
+            _ => Vec::new(),
+        };
+        let fold = value.get("fold").and_then(|fold| Some((fold.get("anchor")?.as_u64()? as usize, fold.get("open")?.as_bool()?)));
+        let place = Kept {
+            query: text(&value, "query").unwrap_or_default(),
+            search_filter: text(&value, "search_filter"),
+            fold: fold.filter(|(anchor, _)| *anchor < folders.len()),
+            folders,
+            picks,
+            active: value.get("active").and_then(Value::as_u64).unwrap_or_default() as usize,
+        };
+        Some(KeptTab { place, filter: text(&value, "filter") })
     }
 }
 
@@ -769,13 +865,13 @@ mod tests {
         let search = |query: &str, filter: Option<&str>| SavedSearch { name: String::new(), query: query.into(), filter: filter.map(Into::into), narrow: None };
         let mut settings = Settings {
             filters: vec![filter("画像", "ext:jpg;png"), filter("", "ext:mp3"), filter("動画", " "), filter("画像", "ext:gif")],
-            filter: Some("動画".into()),
+            tabs: vec![KeptTab { filter: Some("動画".into()), ..KeptTab::default() }],
             saved_searches: vec![search("cat", Some("画像")), search("cat", None), search("cat", Some("動画")), search("cat", Some("画像"))],
             ..Settings::default()
         };
         settings.normalize();
         assert_eq!(settings.filters, [filter("画像", "ext:jpg;png")]);
-        assert_eq!(settings.filter, None);
+        assert_eq!(settings.tabs[0].filter, None);
         // The one saved with a filter gone is the one saved with none, already there.
         assert_eq!(settings.saved_searches, [search("cat", Some("画像")), search("cat", None)]);
         assert!(settings.saved("cat", Some("画像"), None).is_some());
@@ -786,7 +882,7 @@ mod tests {
     fn keeps_the_filters_and_the_one_chosen() {
         let settings = Settings {
             filters: vec![SearchFilter { name: "画像".into(), query: "ext:jpg".into() }],
-            filter: Some("画像".into()),
+            tabs: vec![KeptTab { filter: Some("画像".into()), ..KeptTab::default() }],
             saved_searches: vec![SavedSearch { name: String::new(), query: "cat".into(), filter: None, narrow: None }],
             ..Settings::default()
         };

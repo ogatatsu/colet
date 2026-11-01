@@ -13,6 +13,7 @@ use crate::{
     ops::{Menu, NEEDS_FILE, ONE_ITEM, Reasons},
     places::Dialog,
     state::{ColumnId, Kind, saved_query},
+    tabs::TabId,
     view::TipExt,
 };
 
@@ -20,6 +21,8 @@ use crate::{
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Open,
+    /// The row picked opens in a tab of its own, behind this one.
+    OpenInTab(std::path::PathBuf),
     Explorer,
     Copy,
     Cut,
@@ -47,6 +50,12 @@ pub enum Command {
     EditFilters,
     /// An edit of a text field's text.
     Edit(Edit),
+    CloseTab(TabId),
+    /// Every tab but this one, or those right of it.
+    CloseOtherTabs(TabId),
+    CloseTabsRight(TabId),
+    DuplicateTab(TabId),
+    ReopenTab,
 }
 
 /// What a text field's menu does to its text, as the field's own keys do.
@@ -136,6 +145,8 @@ pub enum Popup {
     Crumbs,
     /// A text field's, opened by a right-click in it or the menu key.
     Text(TextMenu),
+    /// A tab's, opened by a right-click on it.
+    Tab { tab: TabId, at: Point<Pixels> },
 }
 
 impl Colet {
@@ -281,13 +292,25 @@ impl Colet {
             return lines;
         }
         if self.filter_open() {
-            let chosen = self.settings.filter.as_deref();
+            let chosen = self.chosen_filter.as_deref();
             let mut lines = vec![choice("filter-none", "なし", Command::SearchFilter(None), chosen.is_none())];
             lines.extend(self.settings.filters.iter().enumerate().map(|(i, f)| {
                 choice(("filter", i), f.name.clone(), Command::SearchFilter(Some(f.name.clone())), chosen == Some(f.name.as_str()))
             }));
             lines.push(line("edit-filters", "pencil-line", "フィルターを編集…", None, None, Command::EditFilters).grouped());
             return lines;
+        }
+        if let Some(Popup::Tab { tab, .. }) = self.popup {
+            let at = self.tabs.list.iter().position(|t| t.id == tab).unwrap_or_default();
+            let count = self.tabs.list.len();
+            let reopen = self.can_reopen_tab();
+            return vec![
+                line("tab-close", "x", "閉じる", Some("Ctrl+W"), None, Command::CloseTab(tab)),
+                plain("tab-close-others", "他のタブを閉じる", "", count > 1, Command::CloseOtherTabs(tab)),
+                plain("tab-close-right", "右のタブを閉じる", "", at + 1 < count, Command::CloseTabsRight(tab)),
+                line("tab-duplicate", "copy", "複製", None, None, Command::DuplicateTab(tab)).grouped(),
+                Line { off: (!reopen).then_some(""), ..line("tab-reopen", "rotate-ccw", "閉じたタブを開き直す", Some("Ctrl+Shift+T"), None, Command::ReopenTab) },
+            ];
         }
         if self.menu().is_none() {
             return Vec::new();
@@ -308,8 +331,13 @@ impl Colet {
             1 => None,
             _ => entries.iter().all(|e| e.directory).then_some(NEEDS_FILE),
         };
+        let in_tab = match entries.as_slice() {
+            [entry] => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(entry.path.clone())),
+            _ => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), quiet(Some(ONE_ITEM)), Command::OpenInTab(Default::default())),
+        };
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), open_off, Command::Open),
+            in_tab,
             line("menu-explorer", "folder-open", "Explorerで表示", None, reasons.explorer, Command::Explorer),
             line("menu-copy", "copy", "コピー", Some("Ctrl+C"), quiet(reasons.copy), Command::Copy).grouped(),
             line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), Command::Cut),
@@ -349,9 +377,11 @@ impl Colet {
         } else {
             line("menu-pin", "pin", "ピン留め", None, None, Command::Pin(path.clone()))
         };
+        let in_tab = line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(path.clone()));
         if saved_query(&path).is_some() {
             return vec![
                 line("menu-open", "external-link", "開く", Some("Enter"), None, Command::Open),
+                in_tab,
                 line("menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None, Command::CopyPath).grouped(),
                 line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, Command::EditSearch(path.clone())).grouped(),
                 pin,
@@ -360,6 +390,7 @@ impl Colet {
         }
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), None, Command::Open),
+            in_tab,
             line("menu-explorer", "folder-open", "Explorerで表示", None, reasons.explorer, Command::Explorer),
             line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, Command::CopyPath).grouped(),
         ];
@@ -377,7 +408,7 @@ impl Colet {
             None,
             Command::Favorite(path),
         ));
-        lines[3].group = true;
+        lines[4].group = true;
         lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows).grouped());
         lines
     }
@@ -389,6 +420,24 @@ impl Colet {
             window.dispatch_action(edit.action(), cx);
             return;
         }
+        // A tab's: the menu goes first, as it holds the tabs where they are.
+        if let Some(tab) = match &command {
+            Command::CloseTab(tab) | Command::CloseOtherTabs(tab) | Command::CloseTabsRight(tab) | Command::DuplicateTab(tab) => Some(Some(*tab)),
+            Command::ReopenTab => Some(None),
+            _ => None,
+        } {
+            self.close_menus(true, window, cx);
+            let index = tab.and_then(|tab| self.tabs.list.iter().position(|t| t.id == tab));
+            match (command, index) {
+                (Command::CloseTab(_), Some(index)) => self.close_tab(index, window, cx),
+                (Command::CloseOtherTabs(_), Some(index)) => self.close_tabs_but(index, false, window, cx),
+                (Command::CloseTabsRight(_), Some(index)) => self.close_tabs_but(index, true, window, cx),
+                (Command::DuplicateTab(_), Some(index)) => self.duplicate_tab(index, window, cx),
+                (Command::ReopenTab, _) => self.reopen_tab(window, cx),
+                _ => {}
+            }
+            return;
+        }
         if let Some(column) = self.menu().map(|menu| menu.column) {
             let Some(index) = self.state.index_of(column) else {
                 self.close_menus(true, window, cx);
@@ -398,6 +447,10 @@ impl Colet {
         }
         match command {
             Command::Open => self.open_picked(window, cx),
+            Command::OpenInTab(path) => {
+                let index = self.state.active;
+                self.open_in_tab(index, &path, cx);
+            }
             Command::Explorer => self.reveal_in_explorer(cx),
             Command::Copy => self.copy(false, cx),
             Command::Cut => self.copy(true, cx),
@@ -427,6 +480,9 @@ impl Colet {
             Command::SearchFilter(name) => self.choose_filter(name, cx),
             Command::EditFilters => self.open_filters(window, cx),
             Command::Edit(_) => unreachable!("a field's edit is done above"),
+            Command::CloseTab(_) | Command::CloseOtherTabs(_) | Command::CloseTabsRight(_) | Command::DuplicateTab(_) | Command::ReopenTab => {
+                unreachable!("a tab's is done above")
+            }
         }
         // What the line opened, a dialog, takes the keys; otherwise they go back to the column.
         let to_column = self.dialog.is_none();

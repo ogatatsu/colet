@@ -715,7 +715,7 @@ impl Colet {
         let id = self.history.start(request.clone());
         self.departed.clear();
         let events = OperationEvents::default();
-        self.running = Some(Running { id, events: events.clone(), made: None, placed: Vec::new() });
+        self.running = Some(Running { id, tab: self.current_tab(), events: events.clone(), made: None, placed: Vec::new() });
         // What leaves its place goes unwatched first, with the folders inside it.
         let leaving = match request.kind {
             Kind::Recycle | Kind::Delete | Kind::Rename => request.paths.as_slice(),
@@ -767,7 +767,7 @@ impl Colet {
 
     fn finished(&mut self, request: Request, result: Result<(), String>, cx: &mut Context<Self>) {
         self.take_operation_events();
-        let Some(Running { id, made, placed: pasted, .. }) = self.running.take() else { return };
+        let Some(Running { id, tab, made, placed: pasted, .. }) = self.running.take() else { return };
         // Watched again by the refresh below, which lists what changed while they were not.
         self.watching.released.clear();
         let Request { kind, paths, destination, name } = request;
@@ -780,8 +780,11 @@ impl Colet {
             .then(|| paths.first().map(|p| child(parent_folder(p).unwrap_or(Path::new("")), &name)))
             .flatten();
         if let Some(to) = &renamed {
-            // Carry the selection over to the new name before the listing drops the old one.
-            self.state.renamed(&paths[0], to);
+            // Carry the selection over to the new name before the listing drops the old one, in the tab it
+            // was renamed from; a tab closed since has no selection to carry.
+            if let Some(state) = self.state_in(tab) {
+                state.renamed(&paths[0], to);
+            }
             // Home's favorites and pins at it or inside it follow it, as the refresh below lists home again.
             // A narrowed favorite's folder moves under its narrowing.
             let from = &paths[0];
@@ -811,7 +814,9 @@ impl Colet {
         }
         if kind == Kind::NewFolder && result.is_ok() {
             // The shell says where it made the folder, which a name clash may have changed.
-            self.state.created(&destination, &made.unwrap_or_else(|| child(&destination, &name)));
+            if let Some(state) = self.state_in(tab) {
+                state.created(&destination, &made.unwrap_or_else(|| child(&destination, &name)));
+            }
         }
         let Some(index) = self.history.entries.iter().position(|e| e.id == id) else { return };
         let entry = &mut self.history.entries[index];
@@ -847,8 +852,10 @@ impl Colet {
             self.notify_entry(format!("「{}」: {problem}", kind.title()), id, cx);
         }
         // Like Explorer, what was pasted is picked once listed, under the names it got.
-        if kind == Kind::Paste && !pasted.is_empty() {
-            self.state.pasted(&destination, &pasted);
+        if kind == Kind::Paste && !pasted.is_empty()
+            && let Some(state) = self.state_in(tab)
+        {
+            state.pasted(&destination, &pasted);
         }
         self.refresh(cx);
         self.changed(cx);
@@ -907,6 +914,8 @@ type OperationEvents = Arc<Mutex<Vec<Event>>>;
 /// The file operation under way; they go one at a time.
 pub struct Running {
     id: u64,
+    /// The tab it started in, which picks what it made once listed.
+    tab: crate::tabs::TabId,
     events: OperationEvents,
     /// Where its last item ended, as a new folder's.
     made: Option<PathBuf>,

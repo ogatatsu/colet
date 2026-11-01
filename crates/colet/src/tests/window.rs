@@ -37,7 +37,7 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
     {
         let mut settings = fake.settings.lock().unwrap();
         settings.filters = vec![SearchFilter { name: "去年の夏に撮ったとても大きな写真".into(), query: "ext:jpg".into() }];
-        settings.filter = Some("去年の夏に撮ったとても大きな写真".into());
+        settings.tabs = vec![crate::settings::KeptTab { filter: Some("去年の夏に撮ったとても大きな写真".into()), ..Default::default() }];
         // Home's pane dragged as wide as it goes.
         settings.sidebar_width = 480.;
     }

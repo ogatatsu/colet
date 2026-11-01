@@ -405,6 +405,14 @@ impl Colet {
                     this.open(index, &path, window, cx);
                 }
             }))
+            // The row the keys are on opens in a tab of its own, behind this one.
+            .on_action(cx.listener(|this, _: &OpenInNewTab, _, cx| {
+                let index = this.state.active;
+                let c = &this.state.columns[index];
+                if let Some(path) = c.focused.clone().or_else(|| c.highlight.clone()) {
+                    this.open_in_tab(index, &path, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &TrimFilter, window, cx| {
                 if !this.trim_filter(window, cx) {
                     cx.propagate();
@@ -498,6 +506,7 @@ impl Colet {
             (None, None) => div().size(px(16.)).flex_none().into_any_element(),
         };
         let menu_path = entry.path.clone();
+        let tab_path = entry.path.clone();
         let focused_row = (marked && c.focused.as_ref() == Some(&entry.path)).then(|| self.focused_row.clone());
         div()
             .id(SharedString::from(id_text(&entry.path)))
@@ -510,6 +519,14 @@ impl Colet {
                     let selected = this.state.columns.get(index).is_some_and(|c| c.selected.contains(&menu_path));
                     let paths = (!selected).then(|| vec![menu_path.clone()]);
                     this.open_menu(index, paths, event.position, window, cx);
+                }),
+            )
+            // As in a browser, the middle button opens it in a tab of its own, behind this one.
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.open_in_tab(index, &tab_path, cx);
                 }),
             )
             .relative()
@@ -1274,7 +1291,7 @@ impl Colet {
                         .on_action(cx.listener(|this, _: &input::Escape, window, cx| {
                             if !this.state.query.is_empty() {
                                 this.clear_search(window, cx);
-                            } else if this.settings.filter.is_some() {
+                            } else if this.chosen_filter.is_some() {
                                 this.choose_filter(None, cx);
                             }
                         }))
@@ -1360,7 +1377,7 @@ impl Colet {
     fn filter_button(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let focus = self.stop("search-filter", cx);
-        let chosen = self.settings.filter.clone();
+        let chosen = self.chosen_filter.clone();
         let on = chosen.is_some();
         let label = format!("検索フィルター: {}", chosen.as_deref().unwrap_or("なし"));
         // In a narrow window its name gives way to the search field, down to the funnel and the chevron;
@@ -1770,7 +1787,7 @@ impl Colet {
                                 .child(div().text_color(p.accent).font_family("Consolas").child(query))
                                 .child(label)
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    let filter = this.settings.filter.clone();
+                                    let filter = this.chosen_filter.clone();
                                     this.search_for(query, filter, window, cx)
                                 }))
                                 .test_support(),
@@ -1976,6 +1993,7 @@ impl Render for Colet {
         self.scroll_rows();
         self.reveal(window);
         let p = self.palette;
+        let tabbar = self.render_tabbar(window, cx);
         let sidebar = self.render_sidebar(window, cx);
         let toolbar = self.render_toolbar(window, cx);
         let pathbar = self.render_pathbar(window, cx);
@@ -1985,6 +2003,7 @@ impl Render for Colet {
             .size_full()
             .relative()
             .flex()
+            .flex_col()
             .bg(p.bg)
             .text_color(p.text)
             .font_family("Segoe UI")
@@ -2022,6 +2041,14 @@ impl Render for Colet {
                     cx.stop_propagation();
                 }
             }))
+            .on_action(cx.listener(|this, _: &NewTab, window, cx| this.new_tab(window, cx)))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
+                let current = this.tabs.current;
+                this.close_tab(current, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.step_tab(1, window, cx)))
+            .on_action(cx.listener(|this, _: &PreviousTab, window, cx| this.step_tab(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &ReopenTab, window, cx| this.reopen_tab(window, cx)))
             .on_action(cx.listener(|this, _: &RefreshAll, _, cx| this.refresh(cx)))
             .on_action(cx.listener(|this, _: &SaveCurrent, _, cx| {
                 if this.dialog.is_none() {
@@ -2059,18 +2086,20 @@ impl Render for Colet {
                         }),
                     )
             })
-            .child(sidebar)
+            .child(tabbar)
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .child(toolbar)
-                    .child(pathbar)
-                    .child(main)
-                    .child(self.render_statusbar(cx)),
+                div().flex_1().min_h_0().w_full().flex().child(sidebar).child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .flex()
+                        .flex_col()
+                        .child(toolbar)
+                        .child(pathbar)
+                        .child(main)
+                        .child(self.render_statusbar(cx)),
+                ),
             )
             // Over a dialog, a field's menu is drawn with it.
             .children(if self.dialog.is_none() { self.render_menu(cx) } else { None })

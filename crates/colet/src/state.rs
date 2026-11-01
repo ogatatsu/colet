@@ -265,6 +265,38 @@ struct Location {
     fold: Option<Fold<usize>>,
 }
 
+/// A tab as it is kept between starts: what it searched, the folders open, what each column picked where
+/// it leads on, the column worked in, and the fold. What is picked besides, the narrowings and the way back
+/// and forth are not kept.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Kept {
+    pub query: String,
+    pub search_filter: Option<String>,
+    /// Each folder column's folder, and the item it points at.
+    pub folders: Vec<(PathBuf, Option<PathBuf>)>,
+    /// What each column picked where it leads on, home's first.
+    pub picks: Vec<Option<PathBuf>>,
+    pub active: usize,
+    /// The anchor counted among the folders, and whether the folders above it are out.
+    pub fold: Option<(usize, bool)>,
+}
+
+impl Kept {
+    /// The search filter `from` is named `to` now, or is gone, as [`State::rename_search_filter`] has it.
+    pub fn rename_search_filter(&mut self, from: &str, to: Option<&str>) {
+        if self.search_filter.as_deref() != Some(from) {
+            return;
+        }
+        self.search_filter = to.map(Into::into);
+        if to.is_none() && self.query.is_empty() {
+            if self.picks.len() > 1 {
+                self.picks.remove(1);
+            }
+            self.active = self.active.saturating_sub(1);
+        }
+    }
+}
+
 /// The folder columns folded above the anchor: from `from` up to `to`, where it stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Folded {
@@ -343,6 +375,7 @@ pub fn favorite_parts(key: &Path) -> (Cow<'_, Path>, Option<String>) {
 /// How far back it goes.
 const HISTORY: usize = 50;
 
+#[derive(Clone)]
 pub struct State {
     pub query: String,
     /// The search filter the results are narrowed by, by name; with one, they show with no query too.
@@ -506,6 +539,67 @@ impl State {
         self.active = location.active.min(columns.len() - 1);
         self.columns = columns;
         self.fold = anchor;
+    }
+
+    /// What a tab keeps between starts: each column's pick only where it leads on to the next.
+    pub fn kept(&self) -> Kept {
+        let folders: Vec<&Column> = self.columns.iter().filter(|c| c.kind == Kind::Folder).collect();
+        let last = self.columns.len() - 1;
+        let picks = self
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(i, c)| match c.selected.as_slice() {
+                [one] if i < last => Some(one.clone()),
+                _ => None,
+            })
+            .collect();
+        Kept {
+            query: self.query.clone(),
+            search_filter: self.search_filter.clone(),
+            folders: folders.iter().map(|c| (c.path.clone(), c.highlight.clone())).collect(),
+            picks,
+            active: self.active,
+            fold: self.fold.and_then(|fold| Some((folders.iter().position(|c| c.id == fold.anchor)?, fold.open))),
+        }
+    }
+
+    /// A tab as it was kept, its columns yet to be listed.
+    pub fn from_kept(kept: Kept) -> Self {
+        let mut state = Self::new();
+        let Kept { query, search_filter, folders, picks, active, fold } = kept;
+        let selections = picks.into_iter().map(|pick| pick.into_iter().collect()).collect();
+        let fold = fold.map(|(anchor, open)| Fold { anchor, open });
+        state.restore(Location { query, search_filter, folders, selections, active, fold });
+        state.note_folder();
+        state
+    }
+
+    /// A tab of its own for an item: where it lives, with the folders above it folded away, as a search
+    /// result opens; the column pointing at a file, or a folder's own, has the keys. There is no way back
+    /// from it.
+    pub fn opening(path: &Path, directory: bool) -> Self {
+        let mut state = Self::new();
+        state.reveal(path, directory);
+        state.past.clear();
+        if state.columns.len() > 2 {
+            let last = state.columns.len() - 1;
+            state.fold = Some(Fold { anchor: state.columns[last].id, open: false });
+            state.active = last;
+            state.note_folder();
+        }
+        state
+    }
+
+    /// A tab of its own for a row of `home`, as picking it there opens it: a place, a favorite narrowed as
+    /// it keeps, or a saved search run. There is no way back from it.
+    pub fn opening_home(home: &Column, key: &Path) -> Self {
+        let mut state = Self::new();
+        let id = state.columns[0].id;
+        state.columns[0] = Column { id, selected: Vec::new(), focused: None, hid: None, anchor: None, base: None, pick: None, ..home.clone() };
+        state.select(0, vec![key.to_owned()]);
+        state.past.clear();
+        state
     }
 
     /// Searches for `query` within the search filter already in use.

@@ -48,6 +48,7 @@ mod settings;
 mod file_ops;
 mod menus;
 mod quick_look;
+mod tabs;
 
 #[derive(Default)]
 struct Fake {

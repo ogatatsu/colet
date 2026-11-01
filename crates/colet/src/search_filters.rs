@@ -16,10 +16,7 @@ impl Colet {
     /// Searches within `name`, or none, from now on: what is typed, or with nothing typed all the filter
     /// lets through; with neither, home shows alone.
     pub fn choose_filter(&mut self, name: Option<String>, cx: &mut Context<Self>) {
-        if self.settings.filter != name {
-            let chosen = name.clone();
-            self.update_settings(|s| s.filter = chosen, cx);
-        }
+        self.chosen_filter = name.clone();
         let query = self.state.query.clone();
         self.state.set_search(&query, name);
         self.changed(cx);
@@ -78,8 +75,8 @@ impl Colet {
         }
     }
 
-    /// Keeps the filter edited. Renamed, what names it follows: the filter chosen, the saved searches and
-    /// the way back and forth. The results within it ask again for its new query.
+    /// Keeps the filter edited. Renamed, what names it follows: the saved searches, and in every tab the
+    /// filter chosen and the way back and forth. The results within it ask again for its new query.
     pub fn submit_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.filter_problem(cx).is_some() {
             return;
@@ -103,7 +100,6 @@ impl Colet {
                             *named = Some(to.clone());
                         }
                     };
-                    follow(&mut s.filter);
                     for saved in &mut s.saved_searches {
                         follow(&mut saved.filter);
                     }
@@ -121,7 +117,7 @@ impl Colet {
         );
         if let Some(from) = &original {
             if *from != name {
-                self.state.rename_search_filter(from, Some(&name));
+                self.rename_filter_in_tabs(from, Some(&name));
             }
             if before.as_deref() != Some(query.as_str()) && self.state.search_filter.as_deref() == Some(name.as_str()) {
                 self.state.reset_search();
@@ -149,7 +145,7 @@ impl Colet {
         let Some(Dialog::Filters { deleting: Some(name), .. }) = &self.dialog else { return };
         let name = name.clone();
         self.update_settings(|s| s.filters.retain(|f| f.name != name), cx);
-        self.state.rename_search_filter(&name, None);
+        self.rename_filter_in_tabs(&name, None);
         // Its buttons' stops go with it.
         self.stops.retain(|key, _| !(key.starts_with("filter-") && key.ends_with(&format!(":{name}"))));
         self.changed(cx);

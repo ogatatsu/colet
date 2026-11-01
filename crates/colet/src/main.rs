@@ -15,6 +15,7 @@ mod search_filters;
 mod settings;
 mod sorts;
 mod state;
+mod tabs;
 #[cfg(test)]
 mod tests;
 mod theme;
@@ -42,7 +43,10 @@ gpui_kit::assets::icon_assets!(ExtraIcons, [
         Trash,
         Clock,
         Funnel,
-        ArrowUpDown
+        ArrowUpDown,
+        House,
+        AppWindow,
+        RotateCcw
     ]);
 
 /// GPUI Kit's icons, and the few more Colet draws.

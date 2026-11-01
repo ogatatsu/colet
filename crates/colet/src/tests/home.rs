@@ -313,11 +313,11 @@ fn offers_in_home_only_what_its_rows_can_do(cx: &mut TestAppContext) {
     ui.press(cx, "shift-f10");
     assert!(ui.read(cx, |v| v.menu().is_none()));
     menu(&ui, cx, r"D:\a");
-    assert_eq!(lines(&ui, cx), ["開く", "Explorerで表示", "| パスをコピー", "| 編集", "ピン留め", "お気に入りを解除", "| その他のオプションを確認"]);
+    assert_eq!(lines(&ui, cx), ["開く", "新しいタブで開く", "Explorerで表示", "| パスをコピー", "| 編集", "ピン留め", "お気に入りを解除", "| その他のオプションを確認"]);
     menu(&ui, cx, r"D:\");
-    assert_eq!(lines(&ui, cx), ["開く", "Explorerで表示", "| パスをコピー", "| ピン留め", "お気に入りに追加", "| その他のオプションを確認"]);
+    assert_eq!(lines(&ui, cx), ["開く", "新しいタブで開く", "Explorerで表示", "| パスをコピー", "| ピン留め", "お気に入りに追加", "| その他のオプションを確認"]);
     menu(&ui, cx, "search:one");
-    assert_eq!(lines(&ui, cx), ["開く", "| 検索文字列をコピー", "| 編集", "ピン留め", "保存した検索を解除"]);
+    assert_eq!(lines(&ui, cx), ["開く", "新しいタブで開く", "| 検索文字列をコピー", "| 編集", "ピン留め", "保存した検索を解除"]);
     // Nor do the keys copy from home.
     ui.press(cx, "escape");
     ui.click(cx, row(r"D:\a"));
@@ -392,12 +392,12 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     assert_eq!(fake.settings.lock().unwrap().saved_searches, [saved(Some("画像")), saved(None)]);
     // Run from home, it chooses its filter again.
     ui.click(cx, row(search_key("cat", Some("画像"), None)));
-    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("画像"));
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
     assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
     // Back, the filter of the search before comes back with it.
     ui.press(cx, "alt-left");
     assert_eq!(ui.read(cx, |v| v.state.search_filter.clone()), None);
-    assert_eq!(fake.settings.lock().unwrap().filter, None);
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter, None);
     // Its query alone is copied.
     ui.click(cx, row(search_key("cat", Some("画像"), None)));
     ui.press(cx, "ctrl-shift-c");
@@ -416,5 +416,5 @@ fn changes_the_filter_a_saved_search_runs_within_from_its_edit(cx: &mut TestAppC
     assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter.as_deref(), Some("動画"));
     // The search showing follows it.
     assert_eq!(last_query(&fake), "<ext:mp4> <cat>");
-    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("動画"));
 }

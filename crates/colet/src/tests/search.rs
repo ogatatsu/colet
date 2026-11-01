@@ -126,7 +126,7 @@ fn searches_within_the_filter_chosen_with_nothing_typed_too(cx: &mut TestAppCont
     assert!(ui.read(cx, |v| v.filter_open()));
     ui.click(cx, ("filter", 0usize));
     assert!(!ui.read(cx, |v| v.filter_open()));
-    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("画像"));
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
     assert_eq!(last_query(&fake), "<ext:jpg;png>");
     assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 1);
     // What is typed is searched within it.
@@ -139,7 +139,7 @@ fn searches_within_the_filter_chosen_with_nothing_typed_too(cx: &mut TestAppCont
     assert_eq!(last_query(&fake), "<ext:jpg;png>");
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
     ui.press(cx, "escape");
-    assert_eq!(fake.settings.lock().unwrap().filter, None);
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter, None);
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 1);
     // Without one, what is typed is searched as it stands.
     ui.input(cx, "cat");
@@ -158,12 +158,12 @@ fn chooses_a_filter_from_the_keys_and_hands_them_back_to_the_field(cx: &mut Test
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "enter");
-    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("動画"));
     assert!(ui.search_field_focused(cx));
     ui.press(cx, "ctrl-shift-f");
     ui.press(cx, "escape");
     assert!(!ui.read(cx, |v| v.filter_open()));
-    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("動画"));
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("動画"));
     ui.press(cx, "ctrl-shift-f");
     ui.press(cx, "shift-f10");
     assert!(!ui.read(cx, |v| v.filter_open()));
@@ -208,7 +208,7 @@ fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAp
     ui.type_filter(cx, "写真", "ext:jpg");
     ui.click(cx, "save-filter");
     assert_eq!(names(&fake), ["写真", "動画"]);
-    assert_eq!(fake.settings.lock().unwrap().filter.as_deref(), Some("写真"));
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("写真"));
     assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter.as_deref(), Some("写真"));
     assert_eq!(ui.read(cx, |v| v.state.search_filter.clone()).as_deref(), Some("写真"));
     assert_eq!(last_query(&fake), "<ext:jpg> <cat>");
@@ -221,7 +221,7 @@ fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAp
     assert!(ui.read(cx, |v| matches!(&v.dialog, Some(Dialog::Filters { deleting: Some(name), .. }) if name == "写真")));
     ui.click(cx, "delete-filter");
     assert_eq!(names(&fake), ["動画"]);
-    assert_eq!(fake.settings.lock().unwrap().filter, None);
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter, None);
     assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter, None);
     assert_eq!(last_query(&fake), "cat");
     ui.press(cx, "escape");

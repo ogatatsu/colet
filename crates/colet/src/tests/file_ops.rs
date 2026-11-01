@@ -291,7 +291,7 @@ fn shows_a_folder_columns_own_folder_in_explorer_from_its_empty_space(cx: &mut T
     let work = ui.read(cx, |v| v.state.columns[2].id);
     ui.act(cx, |window, cx| window.right_click(("column", work), cx));
     settle(cx);
-    let explorer = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.menu_lines()[1].off);
+    let explorer = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.menu_lines()[2].off);
     assert_eq!(explorer(&ui, cx), None);
     ui.click(cx, "menu-explorer");
     assert_eq!(*fake.opened.lock().unwrap(), [r"D:\work"]);
@@ -310,7 +310,7 @@ fn shows_several_picked_in_one_folder_together_in_explorer(cx: &mut TestAppConte
     let (fake, ui) = in_work(cx);
     ui.press(cx, "ctrl-a");
     ui.press(cx, "shift-f10");
-    let explorer = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.menu_lines()[1].off);
+    let explorer = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.menu_lines()[2].off);
     assert_eq!(explorer(&ui, cx), None);
     ui.click(cx, "menu-explorer");
     assert_eq!(*fake.revealed.lock().unwrap(), [vec![r"D:\work\a.txt".to_owned(), r"D:\work\b.txt".into(), r"D:\work\c.txt".into()]]);
@@ -323,7 +323,7 @@ fn shows_several_in_explorer_only_from_one_folder(cx: &mut TestAppContext) {
         ..Fake::default().with_results(vec![file(r"D:\a\x.txt"), file(r"D:\b\y.txt")])
     });
     let ui = open(cx, fake.clone());
-    let explorer = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.menu_lines()[1].off);
+    let explorer = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.menu_lines()[2].off);
     // Results from two folders.
     ui.input(cx, "x");
     ui.press(cx, "down");
