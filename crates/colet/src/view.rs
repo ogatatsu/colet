@@ -1400,12 +1400,10 @@ impl Colet {
 
     /// The trail from the search or the drive down to the deepest folder; when it outgrows the bar, the
     /// crumbs furthest from the deepest fold into a menu so the nearest stay readable.
-    fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let file_actions = self.render_actions(cx);
-        let p = self.palette;
-        let results = self.state.pinned();
-        let mut crumbs: Vec<Crumb> = Vec::new();
-        if results {
+    /// The crumbs of the trail: the results' own while they are pinned, then each folder column's.
+    fn trail(&self) -> Vec<Crumb> {
+        let mut crumbs = Vec::new();
+        if self.state.pinned() {
             let searched = match (&self.state.search_filter, self.state.query.as_str()) {
                 (Some(filter), "") => format!("フィルター: {filter}"),
                 (Some(filter), query) => format!("{query}（フィルター: {filter}）"),
@@ -1416,22 +1414,33 @@ impl Colet {
         for (index, c) in self.state.columns.iter().enumerate().filter(|(_, c)| c.kind == Kind::Folder) {
             crumbs.push(Crumb { column: index, name: shown(folder_name(&c.path)), path: shown(&c.path) });
         }
-        let active = self.state.active;
-        // Each crumb's whole width as drawn: its 12px name, padding, the search icon on the results' own,
-        // the chevron before it and the gap after.
+        crumbs
+    }
+
+    /// Each crumb's whole width as drawn: its 12px name, padding, the search icon on the results' own,
+    /// the chevron before it and the gap after.
+    fn crumb_widths(&self, crumbs: &[Crumb], window: &Window) -> Vec<f32> {
+        let results = self.state.pinned();
         let font = font("Segoe UI");
-        let widths: Vec<f32> = crumbs
+        crumbs
             .iter()
             .enumerate()
             .map(|(k, Crumb { name: label, .. })| {
-                let run = TextRun { len: label.len(), font: font.clone(), color: p.text, background_color: None, underline: None, strikethrough: None };
+                let run = TextRun { len: label.len(), font: font.clone(), color: self.palette.text, background_color: None, underline: None, strikethrough: None };
                 let shaped = window.text_system().shape_line(label.clone().into(), px(12.), &[run], None);
                 let icon = if results && k == 0 { 12. + 4. } else { 0. };
                 // The first stands at the bar's start, with no chevron or gap before it.
                 let before = if k == 0 { 0. } else { crate::crumbs::SEPARATOR + crate::crumbs::GAP };
                 f32::from(shaped.width).ceil() + 12. + icon + before
             })
-            .collect();
+            .collect()
+    }
+
+    fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let file_actions = self.render_actions(cx);
+        let p = self.palette;
+        let crumbs = self.trail();
+        let widths = self.crumb_widths(&crumbs, window);
         // The room the bar was last drawn with; before the first frame, what the window leaves it.
         let room = match self.crumbs.row.get() {
             Some(row) => f32::from(row.size.width),
@@ -1445,11 +1454,9 @@ impl Colet {
             self.stop(format!("crumb:{index}"), cx);
         }
         let shown: Vec<Crumb> = crumbs[folded..].to_vec();
-        let menu_current = crumbs[..folded].iter().any(|c| c.column == active);
+        let menu_current = crumbs[..folded].iter().any(|c| c.column == self.state.active);
         self.crumbs.folded = crumbs[..folded].to_vec();
-        let crumb_menu_open = self.crumbs_open();
-        let crumb_menu = if crumb_menu_open { self.menu_element("crumb-menu", "上の階層", cx) } else { None };
-        let fold_focus = self.stop("crumb-fold", cx);
+        let fold = (folded > 0).then(|| self.crumb_fold(menu_current, cx));
         div()
             .h(px(36.))
             .flex_none()
@@ -1486,80 +1493,93 @@ impl Colet {
                         .size_full()
                     })
                     .children(self.crumb_bar())
-                    .when(folded > 0, |d| {
-                        d.child(
-                            div()
-                                .relative()
-                                .child(
-                                    ring(div().id("crumb-fold").track_focus(&fold_focus), p)
-                                        .role(Role::Button)
-                                        .aria_label("上の階層")
-                                        .aria_expanded(crumb_menu_open)
-                                        .size(px(24.))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(4.))
-                                        .hover(|d| d.bg(p.hover))
-                                        .tip("上の階層")
-                                        .child(icon("ellipsis", 14., if menu_current { p.text } else { p.text_muted }))
-                                        .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                                            if this.crumbs_open() {
-                                                this.close_crumb_menu(event.is_keyboard(), window, cx);
-                                            } else {
-                                                this.open_crumb_menu(window, cx);
-                                            }
-                                        })),
-                                )
-                                .when_some(crumb_menu, |d, menu| {
-                                    d.child(deferred(div().absolute().top(px(28.)).left_0().min_w(px(160.)).child(menu)).with_priority(1))
-                                }),
-                        )
-                    })
-                    .children(shown.into_iter().enumerate().map(|(k, Crumb { column: index, name: label, path })| {
-                        let current = index == active;
-                        let query = results && index == 1;
-                        let crumb_focus = self.stops.get(&format!("crumb:{index}")).cloned().unwrap_or_else(|| self.columns_focus.clone());
-                        let is_last = folded + k == last;
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(2.))
-                            .when(is_last, |d| d.min_w_0().max_w(px(room / 2.)))
-                            .when(!is_last, |d| d.flex_none())
-                            .when(k > 0 || folded > 0, |d| d.child(icon("chevron-right", 12., p.text_faint)))
-                            .child(
-                                ring(div().id(("crumb", index)).track_focus(&crumb_focus), p)
-                                    .role(Role::Button)
-                                    .aria_label(label.clone())
-                                    .relative()
-                                    .child({
-                                        let crumbs = self.crumbs.bounds.clone();
-                                        canvas(move |bounds, _, _| {
-                                            crumbs.borrow_mut().insert(index, bounds);
-                                        }, |_, _, _, _| {})
-                                        .absolute()
-                                        .size_full()
-                                    })
-                                    .h(px(24.))
-                                    .px(px(6.))
-                                    .flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .min_w_0()
-                                    .rounded(px(4.))
-                                    .text_color(if current { p.text } else { p.text_muted })
-                                    .hover(|d| d.bg(p.hover))
-                                    .tip(path)
-                                    .when(query, |d| d.child(icon("search", 12., p.text_faint)))
-                                    .child(div().truncate().child(label))
-                                    .on_click(cx.listener(move |this, _, window, cx| this.go_to(index, window, cx)))
-                                    .test_support(),
-                            )
+                    .children(fold)
+                    .children(shown.into_iter().enumerate().map(|(k, crumb)| {
+                        let max_width = (folded + k == last).then_some(room / 2.);
+                        self.crumb(crumb, k > 0 || folded > 0, max_width, cx)
                     })),
             )
             .child(file_actions.1)
             .into_any_element()
+    }
+
+    /// The "…" button the crumbs folded off the trail go into, with their menu while it is open;
+    /// `current` while the column worked in is among them.
+    fn crumb_fold(&mut self, current: bool, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let open = self.crumbs_open();
+        let menu = if open { self.menu_element("crumb-menu", "上の階層", cx) } else { None };
+        let focus = self.stop("crumb-fold", cx);
+        div()
+            .relative()
+            .child(
+                ring(div().id("crumb-fold").track_focus(&focus), p)
+                    .role(Role::Button)
+                    .aria_label("上の階層")
+                    .aria_expanded(open)
+                    .size(px(24.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(4.))
+                    .hover(|d| d.bg(p.hover))
+                    .tip("上の階層")
+                    .child(icon("ellipsis", 14., if current { p.text } else { p.text_muted }))
+                    .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                        if this.crumbs_open() {
+                            this.close_crumb_menu(event.is_keyboard(), window, cx);
+                        } else {
+                            this.open_crumb_menu(window, cx);
+                        }
+                    })),
+            )
+            .when_some(menu, |d, menu| d.child(deferred(div().absolute().top(px(28.)).left_0().min_w(px(160.)).child(menu)).with_priority(1)))
+            .into_any_element()
+    }
+
+    /// A crumb on the trail, a chevron before it unless it stands first; the last is clipped to
+    /// `max_width`, the others keep their whole names.
+    fn crumb(&self, crumb: Crumb, chevron: bool, max_width: Option<f32>, cx: &mut Context<Self>) -> Div {
+        let p = self.palette;
+        let Crumb { column: index, name: label, path } = crumb;
+        let current = index == self.state.active;
+        let query = self.state.pinned() && index == 1;
+        let focus = self.stops.get(&format!("crumb:{index}")).cloned().unwrap_or_else(|| self.columns_focus.clone());
+        div()
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .when_some(max_width, |d, width| d.min_w_0().max_w(px(width)))
+            .when(max_width.is_none(), |d| d.flex_none())
+            .when(chevron, |d| d.child(icon("chevron-right", 12., p.text_faint)))
+            .child(
+                ring(div().id(("crumb", index)).track_focus(&focus), p)
+                    .role(Role::Button)
+                    .aria_label(label.clone())
+                    .relative()
+                    .child({
+                        let crumbs = self.crumbs.bounds.clone();
+                        canvas(move |bounds, _, _| {
+                            crumbs.borrow_mut().insert(index, bounds);
+                        }, |_, _, _, _| {})
+                        .absolute()
+                        .size_full()
+                    })
+                    .h(px(24.))
+                    .px(px(6.))
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .min_w_0()
+                    .rounded(px(4.))
+                    .text_color(if current { p.text } else { p.text_muted })
+                    .hover(|d| d.bg(p.hover))
+                    .tip(path)
+                    .when(query, |d| d.child(icon("search", 12., p.text_faint)))
+                    .child(div().truncate().child(label))
+                    .on_click(cx.listener(move |this, _, window, cx| this.go_to(index, window, cx)))
+                    .test_support(),
+            )
     }
 
     fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
