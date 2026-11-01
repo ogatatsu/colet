@@ -651,50 +651,63 @@ impl State {
     fn select_rows(&mut self, index: usize, paths: Vec<PathBuf>) {
         let Some(c) = self.columns.get(index) else { return };
         let here = self.snapshot();
-        // A saved search in home runs its query beside it, narrowed as it was kept. Home keeps the pick and
-        // the focus, so the next one is a keystroke away.
         if c.kind == Kind::Home
             && let [path] = paths.as_slice()
-            && let Some((query, filter, narrow)) = saved_query(path)
+            && saved_query(path).is_some()
         {
-            let same = self.query == query && self.search_filter.as_deref() == filter && self.search_narrowing().as_deref() == narrow;
-            if same && self.columns.len() == 2 && c.selected == paths {
-                self.active = index;
-                return;
-            }
             let path = path.clone();
-            let (query, filter, narrow) = (query.to_owned(), filter.map(str::to_owned), narrow.map(str::to_owned));
-            let mut home = self.columns.swap_remove(0);
-            home.selected = vec![path.clone()];
-            home.focused = Some(path);
-            let search = self.column(Kind::Search, Path::new(""), None);
-            self.columns = vec![home, search];
-            self.set_filter(1, narrow.as_deref());
-            self.query = query;
-            self.search_filter = filter;
-            self.active = index;
-            self.fold = None;
-            self.remember(here);
-            return;
-        }
-        // Picking a place in home while searching leaves the search, as a sidebar does in Finder; one
-        // step back returns to the results.
-        if c.kind == Kind::Home
+            self.run_saved_search(index, path, here);
+        } else if c.kind == Kind::Home
             && self.pinned()
             && paths.len() == 1
             && c.entries.iter().any(|e| e.path == paths[0])
         {
-            let past = std::mem::take(&mut self.past);
-            self.query.clear();
-            self.search_filter = None;
-            self.columns.truncate(1);
-            self.active = 0;
-            self.fold = None;
-            self.select(0, paths);
-            self.past = past;
-            self.remember(here);
+            self.leave_search_for(paths, here);
+        } else {
+            self.pick_rows(index, paths, here);
+        }
+    }
+
+    /// A saved search in home runs its query beside it, narrowed as it was kept. Home keeps the pick and
+    /// the focus, so the next one is a keystroke away.
+    fn run_saved_search(&mut self, index: usize, path: PathBuf, here: Location) {
+        let Some((query, filter, narrow)) = saved_query(&path) else { return };
+        let same = self.query == query && self.search_filter.as_deref() == filter && self.search_narrowing().as_deref() == narrow;
+        if same && self.columns.len() == 2 && self.columns[index].selected == [path.clone()] {
+            self.active = index;
             return;
         }
+        let (query, filter, narrow) = (query.to_owned(), filter.map(str::to_owned), narrow.map(str::to_owned));
+        let mut home = self.columns.swap_remove(0);
+        home.selected = vec![path.clone()];
+        home.focused = Some(path);
+        let search = self.column(Kind::Search, Path::new(""), None);
+        self.columns = vec![home, search];
+        self.set_filter(1, narrow.as_deref());
+        self.query = query;
+        self.search_filter = filter;
+        self.active = index;
+        self.fold = None;
+        self.remember(here);
+    }
+
+    /// Picking a place in home while searching leaves the search, as a sidebar does in Finder; one step
+    /// back returns to the results.
+    fn leave_search_for(&mut self, paths: Vec<PathBuf>, here: Location) {
+        let past = std::mem::take(&mut self.past);
+        self.query.clear();
+        self.search_filter = None;
+        self.columns.truncate(1);
+        self.active = 0;
+        self.fold = None;
+        self.select(0, paths);
+        self.past = past;
+        self.remember(here);
+    }
+
+    /// Picks `paths` in the column at `index`, opening to its right what a single pick shows.
+    fn pick_rows(&mut self, index: usize, paths: Vec<PathBuf>, here: Location) {
+        let c = &self.columns[index];
         let kind = c.kind;
         // Like Finder, only a single selection opens a column to the right.
         let entry = (paths.len() == 1).then(|| c.entry(&paths[0]).cloned()).flatten();
@@ -719,8 +732,37 @@ impl State {
             }
             Some(_) => Vec::new(),
         };
-        // Columns already showing the same folder are kept, so stepping through results under a shared
-        // ancestor does not reload it.
+        let (next, unchanged) = self.chain_after(index, specs);
+        // A folder reopened from a folder column keeps what was open below it; a search result or
+        // favorite always shows exactly its own chain.
+        if unchanged && (kind == Kind::Folder || self.columns.len() == index + 1 + next.len()) {
+            self.active = index;
+            self.note_folder();
+            return;
+        }
+        // Another pick in the results or home shows something else, even in the folders it keeps.
+        if kind != Kind::Folder {
+            self.last_folder = None;
+        }
+        let anchor = next.last().map(|c| c.id);
+        self.columns.truncate(index + 1);
+        self.columns.extend(next);
+        self.active = index;
+        self.note_folder();
+        // Only a pick that opens something is a place to come back to.
+        if entry.is_some() {
+            // Picked afresh from the results or home, its own column stands alone.
+            if kind != Kind::Folder {
+                self.fold = anchor.map(|anchor| Fold { anchor, open: false });
+            }
+            self.remember(here);
+        }
+    }
+
+    /// The columns `specs` asks for after the one at `index`, and whether those already there show just
+    /// that. Columns already showing the same folder are kept, so stepping through results under a shared
+    /// ancestor does not reload it.
+    fn chain_after(&mut self, index: usize, specs: Vec<Spec>) -> (Vec<Column>, bool) {
         let mut next = Vec::with_capacity(specs.len());
         let mut unchanged = !specs.is_empty();
         for (k, spec) in specs.into_iter().enumerate() {
@@ -747,30 +789,7 @@ impl State {
                 }
             }
         }
-        // A folder reopened from a folder column keeps what was open below it; a search result or
-        // favorite always shows exactly its own chain.
-        if unchanged && (kind == Kind::Folder || self.columns.len() == index + 1 + next.len()) {
-            self.active = index;
-            self.note_folder();
-            return;
-        }
-        // Another pick in the results or home shows something else, even in the folders it keeps.
-        if kind != Kind::Folder {
-            self.last_folder = None;
-        }
-        let anchor = next.last().map(|c| c.id);
-        self.columns.truncate(index + 1);
-        self.columns.extend(next);
-        self.active = index;
-        self.note_folder();
-        // Only a pick that opens something is a place to come back to.
-        if entry.is_some() {
-            // Picked afresh from the results or home, its own column stands alone.
-            if kind != Kind::Folder {
-                self.fold = anchor.map(|anchor| Fold { anchor, open: false });
-            }
-            self.remember(here);
-        }
+        (next, unchanged)
     }
 
     /// The column ← or → leads to from `index`, if any. From search results or home, → goes back to the
