@@ -20,6 +20,14 @@ use colet_core::{
     shell::{self, MenuThread, Owner, ShowMenu, clipboard::{self, ClipboardFiles}},
 };
 
+/// What a path names on disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathKind {
+    Folder,
+    File,
+    Gone,
+}
+
 /// A search: the query, the sort, and from where how many results to load; `refresh` searches afresh.
 pub struct Search {
     pub query: String,
@@ -62,7 +70,7 @@ pub trait Backend: Send + Sync + 'static {
     fn reveal(&self, paths: &[PathBuf]) -> Result<(), String>;
     /// Whether `path` is a folder, a file, or gone. It touches the disk, which a share can keep waiting for
     /// seconds: never ask it on the UI thread.
-    fn path_kind(&self, path: &Path) -> Option<bool>;
+    fn path_kind(&self, path: &Path) -> PathKind;
     /// The Windows context menu at screen point `at`, for `paths` or the folder `background`.
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String>;
     /// Asks QuickLook to show `path`, in the order asked; what it returns tells how that went.
@@ -177,13 +185,16 @@ impl Backend for Live {
         shell::reveal(paths).map_err(said)
     }
 
-    fn path_kind(&self, path: &Path) -> Option<bool> {
+    fn path_kind(&self, path: &Path) -> PathKind {
         use std::os::windows::fs::MetadataExt;
         const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
         // Asked once, of the item itself: a junction or link to a folder is one, even when what it points
         // to is gone, and a share slow to answer is waited on once rather than twice.
-        let metadata = std::fs::symlink_metadata(path).ok()?;
-        Some(metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0)
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 => PathKind::Folder,
+            Ok(_) => PathKind::File,
+            Err(_) => PathKind::Gone,
+        }
     }
 
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String> {
@@ -268,10 +279,10 @@ mod tests {
         std::fs::remove_dir(&folder).unwrap();
         let live = Live::default();
         let kind = |path: &Path| live.path_kind(path);
-        assert_eq!(kind(&file), Some(false));
-        assert_eq!(kind(dir.path()), Some(true));
+        assert_eq!(kind(&file), PathKind::File);
+        assert_eq!(kind(dir.path()), PathKind::Folder);
         // Still there, and still a folder, though what it points to is gone.
-        assert_eq!(kind(&junction), Some(true));
-        assert_eq!(kind(&folder), None);
+        assert_eq!(kind(&junction), PathKind::Folder);
+        assert_eq!(kind(&folder), PathKind::Gone);
     }
 }

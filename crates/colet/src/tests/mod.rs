@@ -27,7 +27,7 @@ use gpui_kit::{
 
 use crate::{
     app::{Colet, Engine},
-    backend::{Backend, Search},
+    backend::{Backend, PathKind, Search},
     ops::ItemStatus,
     places::Dialog,
     settings::{LoadError, SavedSearch, SearchFilter, Settings, Theme},
@@ -292,9 +292,13 @@ impl Backend for Fake {
         Ok(())
     }
 
-    fn path_kind(&self, path: &Path) -> Option<bool> {
+    fn path_kind(&self, path: &Path) -> PathKind {
         let folders = self.folders.lock().unwrap();
-        folders.values().flatten().find(|e| e.path == path).map(|e| e.directory)
+        match folders.values().flatten().find(|e| e.path == path) {
+            Some(e) if e.directory => PathKind::Folder,
+            Some(_) => PathKind::File,
+            None => PathKind::Gone,
+        }
     }
 
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, _: (i32, i32), _: Owner) -> Result<(), String> {

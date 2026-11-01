@@ -331,9 +331,25 @@ impl RowScrolls {
     }
 }
 
-/// What a listing came back with: the entries, how many in all, and for a search what answered it, and
-/// how many it finds without the filter that narrows it.
-type Listing = Result<(Vec<Entry>, usize, Option<String>, Option<usize>), String>;
+/// What a listing came back with.
+struct Listed {
+    entries: Vec<Entry>,
+    /// How many in all, loaded or not.
+    total: usize,
+    /// For a search, the Everything that answered it.
+    connection: Option<String>,
+    /// For a narrowed search's first page, how many it finds without the filter.
+    whole: Option<usize>,
+}
+
+impl Listed {
+    /// A listing loaded whole at once, as home's and a folder's are.
+    fn all(entries: Vec<Entry>) -> Self {
+        Listed { total: entries.len(), entries, connection: None, whole: None }
+    }
+}
+
+type Listing = Result<Listed, String>;
 
 /// The field narrowing a column, and what it last narrowed it to: the column lifting the filter on
 /// its own, for what was made or pasted there, tells from that, not from text typed and yet to be told.
@@ -730,9 +746,7 @@ impl Colet {
             Kind::Home => {
                 let settings = self.settings.clone();
                 cx.background_executor().spawn(async move {
-                    let entries = home_entries(&settings, places(backend.roots(), backend.indexed_roots()));
-                    let total = entries.len();
-                    Ok((entries, total, None, None))
+                    Ok(Listed::all(home_entries(&settings, places(backend.roots(), backend.indexed_roots()))))
                 })
             }
             Kind::Search => {
@@ -752,16 +766,14 @@ impl Colet {
                 cx.background_executor().spawn(async move {
                     let (page, connection) = backend.search(search)?;
                     let whole = whole.and_then(|query| backend.count(&query).ok());
-                    Ok((page.entries, page.total, Some(connection), whole))
+                    Ok(Listed { entries: page.entries, total: page.total, connection: Some(connection), whole })
                 })
             }
             Kind::Folder => {
                 let path = c.path.clone();
                 let cancelled = self.listings.cancel_before(id);
                 cx.background_executor().spawn(async move {
-                    let entries = backend.list(&path, sort, &cancelled)?;
-                    let total = entries.len();
-                    Ok((entries, total, None, None))
+                    Ok(Listed::all(backend.list(&path, sort, &cancelled)?))
                 })
             }
         };
@@ -776,7 +788,7 @@ impl Colet {
     fn listed(&mut self, id: ColumnId, kind: Kind, request: u64, offset: usize, result: Listing, cx: &mut Context<Self>) {
         let current = self.listings.answered(id, request);
         match result {
-            Ok((entries, total, connection, whole)) => {
+            Ok(Listed { entries, total, connection, whole }) => {
                 if let Some(whole) = whole {
                     self.state.counted(id, request, whole);
                 }

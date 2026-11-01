@@ -19,6 +19,7 @@ use gpui_kit::*;
 
 use crate::{
     app::{Colet, Tone},
+    backend::PathKind,
     places::Dialog,
     settings::Favorite,
     state::{Column, ColumnId, Kind as ColumnKind, favorite_key, favorite_parts, home_path, saved_query},
@@ -535,7 +536,7 @@ impl Colet {
             let target = child(parent, &name);
             *checking = Some(name.clone());
             let (backend, dialog) = (self.backend.clone(), input.entity_id());
-            let asked = cx.background_executor().spawn(async move { backend.path_kind(&target).is_some() });
+            let asked = cx.background_executor().spawn(async move { backend.path_kind(&target) != PathKind::Gone });
             cx.spawn_in(window, async move |this, cx| {
                 let exists = asked.await;
                 this.update_in(cx, |this, window, cx| this.name_checked(dialog, name, exists, window, cx)).ok();
@@ -880,7 +881,7 @@ impl Colet {
 
     /// The answer for the item last pressed in the history, while the history is still open: another pressed
     /// since, or the history closed, has moved on from it.
-    fn history_item_found(&mut self, path: PathBuf, kind: Option<bool>, window: &mut Window, cx: &mut Context<Self>) {
+    fn history_item_found(&mut self, path: PathBuf, kind: PathKind, window: &mut Window, cx: &mut Context<Self>) {
         if self.history.revealing.as_ref() != Some(&path) {
             return;
         }
@@ -889,10 +890,10 @@ impl Colet {
             return;
         }
         match kind {
-            None => self.notify(format!("「{}」はもうありません", shown(folder_name(&path))), Tone::Info, cx),
-            Some(directory) => {
+            PathKind::Gone => self.notify(format!("「{}」はもうありません", shown(folder_name(&path))), Tone::Info, cx),
+            PathKind::Folder | PathKind::File => {
                 self.show_history(false, None, window, cx);
-                self.state.reveal(&path, directory);
+                self.state.reveal(&path, kind == PathKind::Folder);
                 self.sync_search_field(window, cx);
                 self.focus_active(window, cx);
             }
