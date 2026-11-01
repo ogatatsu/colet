@@ -321,10 +321,14 @@ mod tests {
         assert!(reported(a.path(), &changes));
         watcher.set(vec![path(&b)]);
         assert!(reported(b.path(), &changes));
-        // Let go of, `a` reports nothing more.
+        // Let go of, `a` reports nothing more. `b` itself may still turn up: its parent, watched for a
+        // folder taking its place, tells of it whenever Windows gets round to updating the folder's times.
         drain(&changes, Duration::from_millis(300));
         std::fs::write(a.path().join("later.txt"), "x").unwrap();
-        assert!(next(&changes, Duration::from_millis(500)).is_none());
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        while let Some(paths) = next(&changes, deadline.saturating_duration_since(std::time::Instant::now())) {
+            assert!(!paths.is_empty() && !paths.iter().any(|p| p.starts_with(a.path())), "{paths:?}");
+        }
         assert!(unwatched.try_recv().is_err());
     }
 
