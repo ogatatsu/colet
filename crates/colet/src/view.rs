@@ -702,34 +702,12 @@ impl Colet {
     }
 
     /// What a column lists, or why it lists nothing.
+    /// The column at `index` under its headings: its rows, or why it has none.
     fn column_body(&mut self, index: usize, marked: bool, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
         let c = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
         if let Some(error) = c.error.clone() {
-            return self
-                .message("circle-alert", error)
-                .child(
-                    keep_focus(Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label("再試行")).on_click(cx.listener(
-                        move |this, event: &ClickEvent, window, cx| {
-                            // The button goes as the column loads: the keys go back to the columns.
-                            if event.is_keyboard() {
-                                this.focus_active(window, cx);
-                            }
-                            this.load(id, 0, false, cx);
-                        },
-                    )),
-                )
-                .when(kind == Kind::Search, |d| {
-                    d.child(
-                        Button::new("search-settings")
-                            .outline()
-                            .icon(glyph("sliders-horizontal"))
-                            .label("設定")
-                            .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
-                    )
-                })
-                .into_any_element();
+            return self.column_error(id, kind, error, cx);
         }
         if c.unread() {
             return self.loading().into_any_element();
@@ -746,70 +724,108 @@ impl Colet {
             return self.message(name, text.into()).into_any_element();
         }
         if kind == Kind::Home {
-            // A handful of places: no need to virtualize. The kinds stand under headings, so they don't
-            // read as one list.
-            let entries = c.entries.clone();
-            let groups = crate::places::home_groups(&self.settings, &entries);
-            // Drawn afresh below, for a drag to find its place.
-            self.home_drag.rows.borrow_mut().clear();
-            // The line where a drag would land: above the row it goes before, or below its kind's last.
-            let landing = self.home_drag.carried.as_ref().zip(self.home_drag.landing.as_ref()).map(|(d, l)| (d.shelf, l.before.clone()));
-            let mut rows = div()
-                .id("home-rows")
-                .role(Role::ListBox)
-                .aria_label("ホーム")
-                .size_full()
-                .overflow_y_scroll()
-                .track_scroll(&self.home_scroll)
-                .on_drag_move(cx.listener(|this, event: &DragMoveEvent<HomeDrag>, _, cx| {
-                    this.drag_home(event.event.position, event.bounds, cx)
-                }))
-                .on_drop(cx.listener(|this, drag: &HomeDrag, _, cx| this.drop_home(drag, cx)))
-                .test_support();
-            for (k, (title, items)) in groups.into_iter().enumerate() {
-                rows = rows.child(
-                    div()
-                        // Set off from the kind above, so the kinds read apart.
-                        .when(k > 0, |d| d.mt(px(8.)))
-                        .h(px(28.))
-                        .px_3()
-                        .pb(px(6.))
-                        .flex()
-                        .items_end()
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(p.text_muted)
-                        .child(title),
-                );
-                for (i, entry) in items.iter().enumerate() {
-                    let line = landing.as_ref().and_then(|(shelf, before)| match before {
-                        Some(before) => (*before == entry.path).then_some(true),
-                        None => (i + 1 == items.len() && movable(&self.settings, &entry.path) == Some(*shelf)).then_some(false),
-                    });
-                    rows = rows.child(div().px_1().relative().child(self.row(0, entry, marked, cx)).when_some(line, |d, above| {
-                        d.child(
-                            div()
-                                .absolute()
-                                .left(px(6.))
-                                .right(px(6.))
-                                .h(px(2.))
-                                .rounded(px(1.))
-                                .bg(p.accent)
-                                .when(above, |l| l.top(px(-1.)))
-                                .when(!above, |l| l.bottom(px(-1.))),
-                        )
-                    }));
-                }
-            }
-            return div()
-                .flex_1()
-                .min_h_0()
-                .relative()
-                .child(rows)
-                .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&self.home_scroll), p)))
-                .into_any_element();
+            return self.home_rows(marked, cx);
         }
-        let count = c.entries.len();
+        self.column_rows(index, marked, cx)
+    }
+
+    /// Why the column `id` could not be listed, with a button to try again; the search's, with one to
+    /// the preferences too, where Everything is reconnected.
+    fn column_error(&self, id: ColumnId, kind: Kind, error: String, cx: &mut Context<Self>) -> AnyElement {
+        self.message("circle-alert", error)
+            .child(
+                keep_focus(Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label("再試行")).on_click(cx.listener(
+                    move |this, event: &ClickEvent, window, cx| {
+                        // The button goes as the column loads: the keys go back to the columns.
+                        if event.is_keyboard() {
+                            this.focus_active(window, cx);
+                        }
+                        this.load(id, 0, false, cx);
+                    },
+                )),
+            )
+            .when(kind == Kind::Search, |d| {
+                d.child(
+                    Button::new("search-settings")
+                        .outline()
+                        .icon(glyph("sliders-horizontal"))
+                        .label("設定")
+                        .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// Home's rows: a handful of places, so no need to virtualize. The kinds stand under headings, so they
+    /// don't read as one list; a drag among them shows where it would land.
+    fn home_rows(&mut self, marked: bool, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let entries = self.state.columns[0].entries.clone();
+        let groups = crate::places::home_groups(&self.settings, &entries);
+        // Drawn afresh below, for a drag to find its place.
+        self.home_drag.rows.borrow_mut().clear();
+        // The line where a drag would land: above the row it goes before, or below its kind's last.
+        let landing = self.home_drag.carried.as_ref().zip(self.home_drag.landing.as_ref()).map(|(d, l)| (d.shelf, l.before.clone()));
+        let mut rows = div()
+            .id("home-rows")
+            .role(Role::ListBox)
+            .aria_label("ホーム")
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.home_scroll)
+            .on_drag_move(cx.listener(|this, event: &DragMoveEvent<HomeDrag>, _, cx| this.drag_home(event.event.position, event.bounds, cx)))
+            .on_drop(cx.listener(|this, drag: &HomeDrag, _, cx| this.drop_home(drag, cx)))
+            .test_support();
+        for (k, (title, items)) in groups.into_iter().enumerate() {
+            rows = rows.child(
+                div()
+                    // Set off from the kind above, so the kinds read apart.
+                    .when(k > 0, |d| d.mt(px(8.)))
+                    .h(px(28.))
+                    .px_3()
+                    .pb(px(6.))
+                    .flex()
+                    .items_end()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(p.text_muted)
+                    .child(title),
+            );
+            for (i, entry) in items.iter().enumerate() {
+                let line = landing.as_ref().and_then(|(shelf, before)| match before {
+                    Some(before) => (*before == entry.path).then_some(true),
+                    None => (i + 1 == items.len() && movable(&self.settings, &entry.path) == Some(*shelf)).then_some(false),
+                });
+                rows = rows.child(div().px_1().relative().child(self.row(0, entry, marked, cx)).when_some(line, |d, above| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .left(px(6.))
+                            .right(px(6.))
+                            .h(px(2.))
+                            .rounded(px(1.))
+                            .bg(p.accent)
+                            .when(above, |l| l.top(px(-1.)))
+                            .when(!above, |l| l.bottom(px(-1.))),
+                    )
+                }));
+            }
+        }
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .child(rows)
+            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&self.home_scroll), p)))
+            .into_any_element()
+    }
+
+    /// The rows of a folder or the results: only those in sight are drawn, and the results load their
+    /// next page as the list nears the end of what it has.
+    fn column_rows(&mut self, index: usize, marked: bool, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let c = &self.state.columns[index];
+        let (id, count) = (c.id, c.entries.len());
         let view = cx.entity();
         let handle = self.list_handle(id);
         let mut list = uniform_list(("list", id), count, move |range, _, cx| {
@@ -1588,16 +1604,11 @@ impl Colet {
         let away = self.state.folded_away();
         let first = if pinned { 2 } else { 1 } + away;
         let only_home = self.state.columns.len() == 1;
-        let unfold_focus = self.stop("unfold", cx);
-        let count = self.state.columns.len().saturating_sub(first);
-        let content = count as f32 * self.widths.column;
-        let screen = self.on_screen();
-        let (hidden_left, hidden_right) = (screen.hidden_left(), screen.hidden_right());
-        let hold = self.sideways.hold;
-        let fit = cx.entity().downgrade();
         self.filter_fields(window, cx);
         let pinned_column = pinned.then(|| self.render_column(1, window, cx));
+        let strip = (away > 0).then(|| self.unfold_strip(away, cx));
         let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, window, cx)).collect();
+        let scrolling = self.scrolling_columns(columns, cx);
         let main = div()
             .id("main")
             .track_focus(&self.columns_focus)
@@ -1608,130 +1619,115 @@ impl Colet {
             .bg(p.bg)
             .child(self.takes_text(&self.columns_focus, cx))
             .children(pinned_column)
-            .when(away > 0, |d| {
-                d.child(
-                    div()
-                        .id("unfold-strip")
-                        .w(px(FOLD_WIDTH))
-                        .h_full()
-                        .flex_none()
-                        .relative()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .bg(p.sidebar)
-                        .border_r_1()
-                        .border_color(p.border)
-                        .hover(|d| d.bg(p.hover))
-                        // In line with the columns' headings, where the eye runs, and how many it holds below.
-                        .child(
-                            div()
-                                .id("unfold-head")
-                                .h(px(34.))
-                                .w_full()
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .border_b_1()
-                                .border_color(p.border)
-                                .child(icon("chevrons-left", 14., p.text_muted))
-                                .test_support(),
-                        )
-                        .child(
-                            div()
-                                .id("unfold-count")
-                                .pt_2()
-                                .text_size(px(12.))
-                                .text_color(p.text_muted)
-                                .child(away.to_string())
-                                .test_support(),
-                        )
-                        // The button laid over the whole strip: its ring's room would push the heading's line
-                        // off the columns'.
-                        .child(
-                            // Gone once pressed: the keys stay where they were rather than go with it.
-                            keep_focus(ring(div().id("unfold").track_focus(&unfold_focus), p))
-                                .role(Role::Button)
-                                .aria_label(format!("上の階層を表示（{away}階層）"))
-                                .absolute()
-                                .inset_0()
-                                .tip(format!("上の階層を表示（{away}階層）"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.state.unfold();
-                                    this.changed(cx);
-                                }))
-                                .test_support(),
-                        ),
-                )
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .relative()
-                    // Laid out with the columns' view and prepainted ahead of it: where the columns rest
-                    // follows a change in its width before they are drawn.
-                    .child(
-                        canvas(
-                            move |bounds, _, cx| {
-                                fit.update(cx, |this, cx| this.fit(f32::from(bounds.size.width), cx)).ok();
-                            },
-                            |_, _, _, _| {},
-                        )
-                        .absolute()
-                        .inset_0(),
-                    )
-                    .child(
-                        div()
-                            .id("columns-scroll")
-                            .size_full()
-                            .overflow_x_scroll()
-                            // A wheel turned down scrolls the column under it, not the columns sideways.
-                            .restrict_scroll_to_axis()
-                            .track_scroll(&self.sideways.scroll)
-                            // The crumbs' bar and the edges' shades follow the columns as they scroll.
-                            .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
-                            .child(div().h_full().w(px(content)).flex().children(columns))
-                            // The room past the last column is no column's: a press there leaves the keys where
-                            // they are, rather than the columns' focus sending them beside home.
-                            .child(keep_focus(div().id("columns-rest")).absolute().top_0().bottom_0().left(px(content)).right_0().test_support())
-                            // Room up to a view's width past where the columns were brought, so the scroll
-                            // width cannot shrink under them while they slide back. A view wide however
-                            // wide layout makes it: reckoned here, it would be the last frame's.
-                            .child(div().absolute().top_0().left(px(hold)).w_full().h(px(0.)))
-                            .test_support(),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .child(scrollbar(gpui_kit::base::Scrollbar::horizontal(&self.sideways.scroll), p)),
-                    )
-                    .when(hidden_left, |d| {
-                        d.child(
-                            div().absolute().top_0().bottom_0().left_0().w(px(28.)).bg(linear_gradient(
-                                90.,
-                                linear_color_stop(p.shade, 0.),
-                                linear_color_stop(p.shade.opacity(0.), 1.),
-                            )),
-                        )
-                    })
-                    .when(hidden_right, |d| {
-                        d.child(
-                            div().absolute().top_0().bottom_0().right_0().w(px(28.)).bg(linear_gradient(
-                                270.,
-                                linear_color_stop(p.shade, 0.),
-                                linear_color_stop(p.shade.opacity(0.), 1.),
-                            )),
-                        )
-                    }),
-            )
+            .children(strip)
+            .child(scrolling)
             // Nothing searched or opened leaves this side dark; show where to start.
             .when(only_home, |d| d.child(self.home_hint(window, cx)));
-        let _ = window;
         self.column_keys(main, cx).into_any_element()
+    }
+
+    /// The strip the `away` folders folded above a result stand in for, which brings them out.
+    fn unfold_strip(&mut self, away: usize, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let focus = self.stop("unfold", cx);
+        div()
+            .id("unfold-strip")
+            .w(px(FOLD_WIDTH))
+            .h_full()
+            .flex_none()
+            .relative()
+            .flex()
+            .flex_col()
+            .items_center()
+            .bg(p.sidebar)
+            .border_r_1()
+            .border_color(p.border)
+            .hover(|d| d.bg(p.hover))
+            // In line with the columns' headings, where the eye runs, and how many it holds below.
+            .child(
+                div()
+                    .id("unfold-head")
+                    .h(px(34.))
+                    .w_full()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .border_b_1()
+                    .border_color(p.border)
+                    .child(icon("chevrons-left", 14., p.text_muted))
+                    .test_support(),
+            )
+            .child(div().id("unfold-count").pt_2().text_size(px(12.)).text_color(p.text_muted).child(away.to_string()).test_support())
+            // The button laid over the whole strip: its ring's room would push the heading's line off the
+            // columns'.
+            .child(
+                // Gone once pressed: the keys stay where they were rather than go with it.
+                keep_focus(ring(div().id("unfold").track_focus(&focus), p))
+                    .role(Role::Button)
+                    .aria_label(format!("上の階層を表示（{away}階層）"))
+                    .absolute()
+                    .inset_0()
+                    .tip(format!("上の階層を表示（{away}階層）"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.unfold();
+                        this.changed(cx);
+                    }))
+                    .test_support(),
+            )
+            .into_any_element()
+    }
+
+    /// The scrolling `columns` in their sideways scroll, with its scrollbar and a shade on each edge that
+    /// cuts a column.
+    fn scrolling_columns(&self, columns: Vec<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let screen = self.on_screen();
+        let content = screen.count as f32 * self.widths.column;
+        let hold = self.sideways.hold;
+        let fit = cx.entity().downgrade();
+        let shade = |angle: f32| linear_gradient(angle, linear_color_stop(p.shade, 0.), linear_color_stop(p.shade.opacity(0.), 1.));
+        div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .relative()
+            // Laid out with the columns' view and prepainted ahead of it: where the columns rest follows a
+            // change in its width before they are drawn.
+            .child(
+                canvas(
+                    move |bounds, _, cx| {
+                        fit.update(cx, |this, cx| this.fit(f32::from(bounds.size.width), cx)).ok();
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .child(
+                div()
+                    .id("columns-scroll")
+                    .size_full()
+                    .overflow_x_scroll()
+                    // A wheel turned down scrolls the column under it, not the columns sideways.
+                    .restrict_scroll_to_axis()
+                    .track_scroll(&self.sideways.scroll)
+                    // The crumbs' bar and the edges' shades follow the columns as they scroll.
+                    .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
+                    .child(div().h_full().w(px(content)).flex().children(columns))
+                    // The room past the last column is no column's: a press there leaves the keys where they
+                    // are, rather than the columns' focus sending them beside home.
+                    .child(keep_focus(div().id("columns-rest")).absolute().top_0().bottom_0().left(px(content)).right_0().test_support())
+                    // Room up to a view's width past where the columns were brought, so the scroll width
+                    // cannot shrink under them while they slide back. A view wide however wide layout makes
+                    // it: reckoned here, it would be the last frame's.
+                    .child(div().absolute().top_0().left(px(hold)).w_full().h(px(0.)))
+                    .test_support(),
+            )
+            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::horizontal(&self.sideways.scroll), p)))
+            .when(screen.hidden_left(), |d| d.child(div().absolute().top_0().bottom_0().left_0().w(px(28.)).bg(shade(90.))))
+            .when(screen.hidden_right(), |d| d.child(div().absolute().top_0().bottom_0().right_0().w(px(28.)).bg(shade(270.))))
+            .into_any_element()
     }
 
     fn home_hint(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
