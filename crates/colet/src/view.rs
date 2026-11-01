@@ -217,6 +217,32 @@ fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
 }
 
+/// How a row stands, from the column, the clipboard, the menu and a drag in home; see [`Colet::row_look`].
+struct RowLook {
+    selected: bool,
+    /// A search result or favorite points at it, or it is the saved search running.
+    highlighted: bool,
+    /// Marked by a bar at its edge.
+    barred: bool,
+    /// Filled with the accent: selected in the column worked in.
+    lit: bool,
+    /// Ringed: the keys are on it.
+    focused: bool,
+    /// What the menu was opened on, apart from the selection.
+    target: bool,
+    /// The menu acts apart from the selection, which steps back.
+    aside: bool,
+    /// On the clipboard, and cut there.
+    held: bool,
+    cut: bool,
+    /// Hidden, or cut: drawn faint.
+    faded: bool,
+    /// Being dragged in home: faint where it was.
+    dragged: bool,
+    within: Option<String>,
+    narrow: Option<String>,
+}
+
 /// What of the scrolling columns is on screen.
 pub struct OnScreen {
     /// The column index the first scrolling column has.
@@ -402,8 +428,8 @@ impl Colet {
             .size_full()
     }
 
-    fn row(&mut self, index: usize, entry: &Entry, marked: bool, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+    /// How the row of `entry` in the column at `index` stands, `marked` while that column is worked in.
+    fn row_look(&self, index: usize, entry: &Entry, marked: bool) -> RowLook {
         let c = &self.state.columns[index];
         let kind = c.kind;
         let selected = c.selected.contains(&entry.path);
@@ -413,36 +439,51 @@ impl Colet {
             || saved.is_some_and(|(q, f, n)| {
                 self.state.pinned() && q == self.state.query && f == self.state.search_filter.as_deref() && n == self.state.search_narrowing().as_deref()
             });
-        // The filter a saved search runs within, faint beside its name.
-        let within = saved.and_then(|(_, f, _)| f).map(str::to_owned);
-        // What a favorite or saved search opens narrowed to, fainter after it.
-        let narrow = (kind == Kind::Home)
-            .then(|| saved.map(|(_, _, n)| n.map(str::to_owned)).unwrap_or_else(|| narrowed_folder(&entry.path).map(|(_, n)| n)))
-            .flatten();
         // On the clipboard, cut or copied, whoever put it there.
         let held = self.clipboard.holds(&entry.path);
         let cut = held && self.clipboard.files.cut;
-        let faded = (entry.hidden || cut) && !selected;
-        // The keys are on it: ringed, selected or not, while they are in this column.
-        let focused = marked && self.keys_in_column && c.focused.as_ref() == Some(&entry.path);
-        // What a right-click opened the menu on, which it leaves unselected: ringed, as in Finder, until it closes.
-        let target = self
-            .menu()
-            .is_some_and(|m| m.column == c.id && m.paths.as_deref() == Some(std::slice::from_ref(&entry.path)));
-        // The item a search result or favorite points at: a bar, which wins over the selection but not
-        // over the one in the column worked in. Home marks its pick so while the columns are worked in.
-        let barred = (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked);
         // The menu acts on a row outside the selection, or the folder itself: the selection steps back, so
         // only what the menu acts on stands out.
         let aside = self.menu().is_some_and(|m| m.column == c.id && m.paths.is_some());
-        let lit = selected && marked && !aside;
+        RowLook {
+            selected,
+            highlighted,
+            // The item a search result or favorite points at: a bar, which wins over the selection but not
+            // over the one in the column worked in. Home marks its pick so while the columns are worked in.
+            barred: (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked),
+            lit: selected && marked && !aside,
+            // The keys are on it: ringed, selected or not, while they are in this column.
+            focused: marked && self.keys_in_column && c.focused.as_ref() == Some(&entry.path),
+            // What a right-click opened the menu on, which it leaves unselected: ringed, as in Finder, until
+            // it closes.
+            target: self.menu().is_some_and(|m| m.column == c.id && m.paths.as_deref() == Some(std::slice::from_ref(&entry.path))),
+            aside,
+            held,
+            cut,
+            faded: (entry.hidden || cut) && !selected,
+            dragged: kind == Kind::Home && self.home_drag.carried.as_ref().is_some_and(|d| d.path == entry.path),
+            // The filter a saved search runs within, faint beside its name.
+            within: saved.and_then(|(_, f, _)| f).map(str::to_owned),
+            // What a favorite or saved search opens narrowed to, fainter after it.
+            narrow: (kind == Kind::Home)
+                .then(|| saved.map(|(_, _, n)| n.map(str::to_owned)).unwrap_or_else(|| narrowed_folder(&entry.path).map(|(_, n)| n)))
+                .flatten(),
+        }
+    }
+
+    fn row(&mut self, index: usize, entry: &Entry, marked: bool, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let RowLook { selected, highlighted, barred, lit, focused, target, aside, held, cut, faded, dragged, within, narrow } =
+            self.row_look(index, entry, marked);
+        let c = &self.state.columns[index];
+        let kind = c.kind;
+        let saved = saved_query(&entry.path);
         // A narrowed favorite's is its folder's: a drive's own, say.
         let image = match narrowed_folder(&entry.path) {
             Some((path, _)) => self.icons.get(&Entry { path, ..entry.clone() }, cx),
             None => self.icons.get(entry, cx),
         };
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
-        let ink = if lit { p.on_accent } else { p.text };
         let path = entry.path.clone();
         // A pinned row, favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
         // Narrowed, home hides some of its kind, and where among them it would land is not to be seen.
@@ -450,7 +491,6 @@ impl Colet {
             .then(|| movable(&self.settings, &entry.path))
             .flatten()
             .map(|shelf| (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_drag.rows.clone(), cx.entity().downgrade()));
-        let dragged = kind == Kind::Home && self.home_drag.carried.as_ref().is_some_and(|d| d.path == entry.path);
         let name = entry.name.clone();
         let picture = match (saved, image) {
             (Some(_), _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
@@ -512,63 +552,7 @@ impl Colet {
             .when(faded, |r| r.text_color(p.text_muted))
             // The selection in home while the columns are worked in: marked at its edge, as in a sidebar.
             .child(div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .when(barred && highlighted, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
-                                    .child(with_marks(&entry.name, &entry.marks.name)),
-                            )
-                            // A badge, tinted with the row's own ink so it shows on any of its fills.
-                            .when_some(within, |d, filter| {
-                                d.child(
-                                    div()
-                                        .flex_shrink_0()
-                                        .max_w(px(96.))
-                                        .px(px(6.))
-                                        .rounded(px(4.))
-                                        .border_1()
-                                        .border_color(ink.opacity(0.3))
-                                        .bg(ink.opacity(0.1))
-                                        .truncate()
-                                        .text_size(px(11.))
-                                        .line_height(px(16.))
-                                        .text_color(ink)
-                                        .child(filter),
-                                )
-                            })
-                            .when_some(narrow, |d, narrow| {
-                                d.child(
-                                    div()
-                                        .id(SharedString::from(format!("narrow:{}", id_text(&entry.path))))
-                                        .min_w(px(24.))
-                                        .flex_shrink_1()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(2.))
-                                        .tip(format!("絞り込み：{narrow}"))
-                                        .child(icon("funnel", 11., muted))
-                                        .child(div().min_w_0().truncate().text_size(px(11.)).text_color(muted).child(narrow)),
-                                )
-                            }),
-                    )
-                    .when(kind == Kind::Search, |d| {
-                        d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(with_marks(&entry.parent, &entry.marks.parent)))
-                    }),
-            )
+            .child(self.row_name(entry, kind, barred && highlighted, lit, within, narrow))
             // Out of the name, so the name stays the file's own: a fade alone would read as hidden.
             .when(held, |r| {
                 r.child(
@@ -579,49 +563,113 @@ impl Colet {
                         .test_support(),
                 )
             })
-            // Each in a set width, flush left under its heading, so they read down the column as a table's
-            // would. A folder has no size of its own; like Explorer, it leaves the cell blank.
-            .when(kind != Kind::Home, |r| {
-                let size = if entry.directory { String::new() } else { time::size(entry.size) };
-                let modified = entry.modified.and_then(time::date_minute).unwrap_or_else(|| "—".into());
-                let cell = |width: f32, text: String| {
-                    div().flex_none().w(px(width)).flex().whitespace_nowrap().text_size(px(12.)).text_color(muted).child(text)
-                };
-                r.child(cell(SIZE_WIDTH, size)).child(cell(MODIFIED_WIDTH, modified))
-            })
-            // A file keeps the chevron's room, so its date lines up with a folder's.
-            .when(kind != Kind::Home, |r| {
-                r.child(if entry.directory {
-                    icon("chevron-right", 13., if lit { p.on_accent_muted } else { p.text_faint }).into_any_element()
-                } else {
-                    div().w(px(13.)).flex_none().into_any_element()
-                })
-            })
-            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                let modifiers = event.modifiers();
-                if event.click_count() >= 2 {
-                    this.open(index, &path, window, cx);
-                } else if kind == Kind::Home {
-                    // Home picks one row at a time, whatever is held.
-                    this.pick(index, path.clone(), window, cx);
-                } else if modifiers.control && modifiers.shift {
-                    this.state.add_range(index, &path);
-                    this.state.set_active(index);
-                    this.changed(cx);
-                } else if modifiers.control {
-                    this.state.toggle(index, &path);
-                    this.state.set_active(index);
-                    this.changed(cx);
-                } else if modifiers.shift {
-                    this.state.extend(index, &path);
-                    this.state.set_active(index);
-                    this.changed(cx);
-                } else {
-                    this.pick(index, path.clone(), window, cx);
-                }
-            }))
+            .when(kind != Kind::Home, |r| r.children(Self::row_cells(entry, lit, muted, p)))
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| this.click_row(index, kind, &path, event, window, cx)))
             .test_support()
             .into_any_element()
+    }
+
+    /// The name, with the filter a saved search runs within and what a favorite or saved search opens
+    /// narrowed to beside it, and a search result's folder under it.
+    fn row_name(&self, entry: &Entry, kind: Kind, accented: bool, lit: bool, within: Option<String>, narrow: Option<String>) -> Div {
+        let p = self.palette;
+        let ink = if lit { p.on_accent } else { p.text };
+        let muted = if lit { p.on_accent_muted } else { p.text_muted };
+        div()
+            .flex_1()
+            .min_w_0()
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .when(accented, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
+                            .child(with_marks(&entry.name, &entry.marks.name)),
+                    )
+                    // A badge, tinted with the row's own ink so it shows on any of its fills.
+                    .when_some(within, |d, filter| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .max_w(px(96.))
+                                .px(px(6.))
+                                .rounded(px(4.))
+                                .border_1()
+                                .border_color(ink.opacity(0.3))
+                                .bg(ink.opacity(0.1))
+                                .truncate()
+                                .text_size(px(11.))
+                                .line_height(px(16.))
+                                .text_color(ink)
+                                .child(filter),
+                        )
+                    })
+                    .when_some(narrow, |d, narrow| {
+                        d.child(
+                            div()
+                                .id(SharedString::from(format!("narrow:{}", id_text(&entry.path))))
+                                .min_w(px(24.))
+                                .flex_shrink_1()
+                                .flex()
+                                .items_center()
+                                .gap(px(2.))
+                                .tip(format!("絞り込み：{narrow}"))
+                                .child(icon("funnel", 11., muted))
+                                .child(div().min_w_0().truncate().text_size(px(11.)).text_color(muted).child(narrow)),
+                        )
+                    }),
+            )
+            .when(kind == Kind::Search, |d| {
+                d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(with_marks(&entry.parent, &entry.marks.parent)))
+            })
+    }
+
+    /// The size and the date, each in a set width, flush left under its heading, so they read down the
+    /// column as a table's would; then the chevron. A folder has no size of its own; like Explorer, it
+    /// leaves the cell blank. A file keeps the chevron's room, so its date lines up with a folder's.
+    fn row_cells(entry: &Entry, lit: bool, muted: Hsla, p: crate::theme::Palette) -> [AnyElement; 3] {
+        let size = if entry.directory { String::new() } else { time::size(entry.size) };
+        let modified = entry.modified.and_then(time::date_minute).unwrap_or_else(|| "—".into());
+        let cell = |width: f32, text: String| {
+            div().flex_none().w(px(width)).flex().whitespace_nowrap().text_size(px(12.)).text_color(muted).child(text).into_any_element()
+        };
+        let chevron = if entry.directory {
+            icon("chevron-right", 13., if lit { p.on_accent_muted } else { p.text_faint }).into_any_element()
+        } else {
+            div().w(px(13.)).flex_none().into_any_element()
+        };
+        [cell(SIZE_WIDTH, size), cell(MODIFIED_WIDTH, modified), chevron]
+    }
+
+    /// A click on the row of `path` in the column at `index`: a double one opens it; home picks one row at
+    /// a time, whatever is held; elsewhere Ctrl and Shift pick as they do in Explorer.
+    fn click_row(&mut self, index: usize, kind: Kind, path: &std::path::Path, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let modifiers = event.modifiers();
+        if event.click_count() >= 2 {
+            self.open(index, path, window, cx);
+            return;
+        }
+        if kind == Kind::Home || !(modifiers.control || modifiers.shift) {
+            self.pick(index, path.to_owned(), window, cx);
+            return;
+        }
+        if modifiers.control && modifiers.shift {
+            self.state.add_range(index, path);
+        } else if modifiers.control {
+            self.state.toggle(index, path);
+        } else {
+            self.state.extend(index, path);
+        }
+        self.state.set_active(index);
+        self.changed(cx);
     }
 
     fn message(&self, icon_name: &'static str, text: String) -> Div {
