@@ -293,6 +293,19 @@ impl Listings {
     }
 }
 
+/// A file kept between starts as it was `read`, or the defaults with what to say of it, and its saves
+/// through `write`: none while the file could not be read and is still there, so it is never written over.
+fn kept<T: Default + Clone + Send + 'static>(
+    read: Result<T, LoadError>,
+    write: impl Fn(&T) -> Result<(), String> + Send + 'static,
+) -> (T, Saves<T>, Option<String>) {
+    let (value, problem, still_there) = match read {
+        Ok(value) => (value, None, false),
+        Err(error) => (T::default(), Some(error.message), error.kept),
+    };
+    (value, Saves::new((!still_there).then(|| Saver::new(write))), problem)
+}
+
 /// The rows of each column, scrolled up and down apart from the others.
 #[derive(Default)]
 pub struct RowScrolls {
@@ -407,75 +420,23 @@ impl Colet {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Everythingで検索（Ctrl+F）"));
+        let (search, typed) = Self::search_field(window, cx);
         let subscriptions = vec![
-            cx.subscribe_in(&search, window, |this: &mut Self, input, event, window, cx| match event {
-                // What is typed is searched within the filter chosen, as is an empty field while one is.
-                InputEvent::Change => {
-                    let query = input.read(cx).value().to_string();
-                    this.state.set_search(&query, this.settings.filter.clone());
-                    this.changed(cx);
-                }
-                InputEvent::PressEnter { .. } => this.leave_search(window, cx),
-                InputEvent::Focus => {
-                    this.search_focused = true;
-                    cx.notify();
-                }
-                InputEvent::Blur => {
-                    this.search_focused = false;
-                    cx.notify();
-                }
-            }),
+            typed,
             // Followed only while the theme follows Windows.
             cx.observe_window_appearance(window, |this, window, cx| this.apply_theme(window, cx)),
             cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
         ];
-        // Written at once as the window closes, rather than a moment after the last change.
         let view = cx.entity().downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
-            let Some(view) = view.upgrade() else { return true };
-            view.update(cx, |this, cx| {
-                if this.running.is_some() {
-                    this.notify(
-                        "ファイル操作中です。完了を待つか、進捗ダイアログでキャンセルしてから閉じてください。",
-                        Tone::Info,
-                        cx,
-                    );
-                    return false;
-                }
-                if this.unsaved_close {
-                    return true;
-                }
-                match this.flush_settings() {
-                    Ok(()) => true,
-                    Err(error) => {
-                        this.unsaved_close = true;
-                        this.notify(
-                            format!("{error}。もう一度閉じると、設定を保存せずに終了します。"),
-                            Tone::Error,
-                            cx,
-                        );
-                        false
-                    }
-                }
-            })
-        });
-        let (settings, problem, keep_file) = match settings {
-            Ok(settings) => (settings, None, false),
-            Err(error) => (Settings::default(), Some(error.message), error.kept),
-        };
-        let settings_saver = (!keep_file).then(|| {
+        window.on_window_should_close(cx, move |_, cx| view.upgrade().is_none_or(|view| view.update(cx, |this, cx| this.may_close(cx))));
+        let (settings, settings_saves, problem) = {
             let backend = backend.clone();
-            Saver::new(move |settings| backend.save_settings(settings))
-        });
-        let (sorts, sorts_problem, keep_sorts) = match sorts {
-            Ok(sorts) => (sorts, None, false),
-            Err(error) => (Sorts::default(), Some(error.message), error.kept),
+            kept(settings, move |settings| backend.save_settings(settings))
         };
-        let sorts_saver = (!keep_sorts).then(|| {
+        let (sorts, sorts_saves, sorts_problem) = {
             let backend = backend.clone();
-            Saver::new(move |sorts| backend.save_sorts(sorts))
-        });
+            kept(sorts, move |sorts| backend.save_sorts(sorts))
+        };
         let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
             Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
             _ => 0,
@@ -507,9 +468,9 @@ impl Colet {
             searched_at: None,
             search_refresh: false,
             settings,
-            settings_saves: Saves::new(settings_saver),
+            settings_saves,
             sorts,
-            sorts_saves: Saves::new(sorts_saver),
+            sorts_saves,
             departed: HashSet::new(),
             dialog: None,
             dialog_subscriptions: Vec::new(),
@@ -545,6 +506,49 @@ impl Colet {
         this.sync(cx);
         this.poll(cx);
         this
+    }
+
+    /// The search field, and what it tells: what is typed is searched within the filter chosen, as is an
+    /// empty field while one is; Enter leaves it for the results.
+    fn search_field(window: &mut Window, cx: &mut Context<Self>) -> (Entity<InputState>, Subscription) {
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Everythingで検索（Ctrl+F）"));
+        let typed = cx.subscribe_in(&search, window, |this: &mut Self, input, event, window, cx| match event {
+            InputEvent::Change => {
+                let query = input.read(cx).value().to_string();
+                this.state.set_search(&query, this.settings.filter.clone());
+                this.changed(cx);
+            }
+            InputEvent::PressEnter { .. } => this.leave_search(window, cx),
+            InputEvent::Focus => {
+                this.search_focused = true;
+                cx.notify();
+            }
+            InputEvent::Blur => {
+                this.search_focused = false;
+                cx.notify();
+            }
+        });
+        (search, typed)
+    }
+
+    /// Whether the window may close: not while a file operation runs. The settings are written at once,
+    /// rather than a moment after the last change; when that fails, the next close goes without them.
+    fn may_close(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.running.is_some() {
+            self.notify("ファイル操作中です。完了を待つか、進捗ダイアログでキャンセルしてから閉じてください。", Tone::Info, cx);
+            return false;
+        }
+        if self.unsaved_close {
+            return true;
+        }
+        match self.flush_settings() {
+            Ok(()) => true,
+            Err(error) => {
+                self.unsaved_close = true;
+                self.notify(format!("{error}。もう一度閉じると、設定を保存せずに終了します。"), Tone::Error, cx);
+                false
+            }
+        }
     }
 
     /// Takes the colors the theme now gives, in the fields too, the dialog's among them.
