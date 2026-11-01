@@ -2,10 +2,12 @@
 //! folders, and takes the keys. `view.rs` draws it.
 use std::{
     borrow::Cow,
+    cell::Cell,
     collections::{HashMap, HashSet},
     ffi::OsString,
     ops::Range,
     path::{Path, PathBuf},
+    rc::Rc,
     sync::{
         Arc, mpsc,
         atomic::{AtomicBool, Ordering},
@@ -34,6 +36,7 @@ use colet_core::shell::clipboard::ClipboardFiles;
 
 use crate::{
     backend::{self, Search},
+    crumbs::Trail,
     icons::Icons,
     menus::Popup,
     ops::{ClipboardLane, History, Running},
@@ -321,16 +324,9 @@ pub struct Colet {
     pub menu_view: Option<(Entity<gpui_kit::component::menu::PopupMenu>, FocusHandle, Subscription)>,
     /// The sort order's button, a stop for Tab.
     pub sort_focus: FocusHandle,
-    /// The crumbs folded off the trail as it was last drawn, for its menu: each column's index, name and path.
-    pub folded_crumbs: Vec<(usize, String, String)>,
-    /// Where each crumb was drawn, by its column, and the row they stand in: the bar under them follows
-    /// the columns on screen.
-    pub crumb_bounds: std::rc::Rc<std::cell::RefCell<HashMap<usize, Bounds<Pixels>>>>,
-    pub crumbs_row: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
-    /// The width the crumbs were last folded for.
-    pub crumbs_room: std::rc::Rc<std::cell::Cell<f32>>,
+    pub crumbs: Trail,
     /// Where the focused row of the active column was drawn, for the menu key.
-    pub focused_row: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    pub focused_row: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The file operation under way; they go one at a time.
     pub running: Option<Running>,
     /// Copies and cuts still being put on the clipboard.
@@ -485,12 +481,9 @@ impl Colet {
             keys_in_column: false,
             popup: None,
             sort_focus: cx.focus_handle().tab_stop(true),
-            folded_crumbs: Vec::new(),
+            crumbs: Trail::default(),
             menu_view: None,
             focused_row: Default::default(),
-            crumb_bounds: Default::default(),
-            crumbs_row: Default::default(),
-            crumbs_room: Default::default(),
             running: None,
             clipboard_writes: 0,
             clipboard_lane: Default::default(),

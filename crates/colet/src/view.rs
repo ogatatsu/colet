@@ -10,6 +10,7 @@ use gpui_kit::*;
 
 use crate::{
     app::*,
+    crumbs::Crumb,
     places::{HomeDrag, movable},
     state::{favorite_key, narrowed_folder, saved_query},
     reveal::{Cell, on_screen, refit, reveal_target, uncover_target},
@@ -263,8 +264,8 @@ impl Colet {
         if !(screen.hidden_left() || screen.hidden_right() || self.state.folded_away() > 0) {
             return None;
         }
-        let row = self.crumbs_row.get()?;
-        let bounds = self.crumb_bounds.borrow();
+        let row = self.crumbs.row.get()?;
+        let bounds = self.crumbs.bounds.borrow();
         let head = screen.first + s0.floor() as usize;
         let tail = screen.first + (s1.ceil() as usize).saturating_sub(1);
         // Crumbs folded into the menu have no place to mark: start at the first one shown.
@@ -1355,17 +1356,17 @@ impl Colet {
         let file_actions = self.render_actions(cx);
         let p = self.palette;
         let results = self.state.pinned();
-        let mut crumbs: Vec<(usize, String, String)> = Vec::new();
+        let mut crumbs: Vec<Crumb> = Vec::new();
         if results {
             let searched = match (&self.state.search_filter, self.state.query.as_str()) {
                 (Some(filter), "") => format!("フィルター: {filter}"),
                 (Some(filter), query) => format!("{query}（フィルター: {filter}）"),
                 (None, query) => query.to_owned(),
             };
-            crumbs.push((1, "検索結果".into(), searched));
+            crumbs.push(Crumb { column: 1, name: "検索結果".into(), path: searched });
         }
         for (index, c) in self.state.columns.iter().enumerate().filter(|(_, c)| c.kind == Kind::Folder) {
-            crumbs.push((index, shown(folder_name(&c.path)), shown(&c.path)));
+            crumbs.push(Crumb { column: index, name: shown(folder_name(&c.path)), path: shown(&c.path) });
         }
         let active = self.state.active;
         // Each crumb's whole width as drawn: its 12px name, padding, the search icon on the results' own,
@@ -1374,7 +1375,7 @@ impl Colet {
         let widths: Vec<f32> = crumbs
             .iter()
             .enumerate()
-            .map(|(k, (_, label, _))| {
+            .map(|(k, Crumb { name: label, .. })| {
                 let run = TextRun { len: label.len(), font: font.clone(), color: p.text, background_color: None, underline: None, strikethrough: None };
                 let shaped = window.text_system().shape_line(label.clone().into(), px(12.), &[run], None);
                 let icon = if results && k == 0 { 12. + 4. } else { 0. };
@@ -1384,20 +1385,20 @@ impl Colet {
             })
             .collect();
         // The room the bar was last drawn with; before the first frame, what the window leaves it.
-        let room = match self.crumbs_row.get() {
+        let room = match self.crumbs.row.get() {
             Some(row) => f32::from(row.size.width),
             None => f32::from(window.viewport_size().width) - self.sidebar_width(window) - 26. - 16. - file_actions.0,
         };
-        self.crumbs_room.set(room);
+        self.crumbs.room.set(room);
         let folded = crate::crumbs::folded(&widths, room);
         let last = crumbs.len().saturating_sub(1);
-        self.crumb_bounds.borrow_mut().retain(|index, _| crumbs[folded..].iter().any(|c| c.0 == *index));
-        for (index, ..) in &crumbs[folded..] {
+        self.crumbs.bounds.borrow_mut().retain(|index, _| crumbs[folded..].iter().any(|c| c.column == *index));
+        for Crumb { column: index, .. } in &crumbs[folded..] {
             self.stop(format!("crumb:{index}"), cx);
         }
-        let shown: Vec<(usize, String, String)> = crumbs[folded..].to_vec();
-        let menu_current = crumbs[..folded].iter().any(|(index, ..)| *index == active);
-        self.folded_crumbs = crumbs[..folded].to_vec();
+        let shown: Vec<Crumb> = crumbs[folded..].to_vec();
+        let menu_current = crumbs[..folded].iter().any(|c| c.column == active);
+        self.crumbs.folded = crumbs[..folded].to_vec();
         let crumb_menu_open = self.crumbs_open();
         let crumb_menu = if crumb_menu_open { self.menu_element("crumb-menu", "上の階層", cx) } else { None };
         let fold_focus = self.stop("crumb-fold", cx);
@@ -1423,7 +1424,7 @@ impl Colet {
                     .min_w_0()
                     .overflow_hidden()
                     .child({
-                        let (row, room) = (self.crumbs_row.clone(), self.crumbs_room.clone());
+                        let (row, room) = (self.crumbs.row.clone(), self.crumbs.room.clone());
                         canvas(
                             move |bounds, window, _| {
                                 row.set(Some(bounds));
@@ -1467,7 +1468,7 @@ impl Colet {
                                 }),
                         )
                     })
-                    .children(shown.into_iter().enumerate().map(|(k, (index, label, path))| {
+                    .children(shown.into_iter().enumerate().map(|(k, Crumb { column: index, name: label, path })| {
                         let current = index == active;
                         let query = results && index == 1;
                         let crumb_focus = self.stops.get(&format!("crumb:{index}")).cloned().unwrap_or_else(|| self.columns_focus.clone());
@@ -1485,7 +1486,7 @@ impl Colet {
                                     .aria_label(label.clone())
                                     .relative()
                                     .child({
-                                        let crumbs = self.crumb_bounds.clone();
+                                        let crumbs = self.crumbs.bounds.clone();
                                         canvas(move |bounds, _, _| {
                                             crumbs.borrow_mut().insert(index, bounds);
                                         }, |_, _, _, _| {})

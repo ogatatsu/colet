@@ -1,8 +1,10 @@
 //! The places Colet keeps for the user: favorites and saved searches in home, the widths and the window,
 //! which Everything to ask; and the dialogs that edit them.
 use std::{
+    cell::RefCell,
     ffi::OsString,
     path::{Path, PathBuf},
+    rc::Rc,
     sync::mpsc::Receiver,
     time::Duration,
 };
@@ -137,7 +139,7 @@ pub struct Landing {
 }
 
 /// Where each of home's favorites and saved searches was drawn, by its path.
-pub type HomeRows = std::rc::Rc<std::cell::RefCell<Vec<(PathBuf, Bounds<Pixels>)>>>;
+pub type HomeRows = Rc<RefCell<Vec<(PathBuf, Bounds<Pixels>)>>>;
 
 /// A drag in home, putting a favorite, saved search or pinned row in order among its kind.
 #[derive(Default)]

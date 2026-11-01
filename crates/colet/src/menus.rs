@@ -461,10 +461,11 @@ impl Colet {
         let active = self.state.active;
         let colet = cx.weak_entity();
         let items = self
-            .folded_crumbs
+            .crumbs
+            .folded
             .iter()
-            .map(|(index, label, path)| {
-                let (index, label, path) = (*index, label.clone(), path.clone());
+            .map(|crumb| {
+                let (index, label, path) = (crumb.column, crumb.name.clone(), crumb.path.clone());
                 let colet = colet.clone();
                 PopupMenuItem::element(move |_, _| div().id(("crumb-item", index)).test_support().tip(path.clone()).child(label.clone()))
                     .icon(crate::view::glyph(if index == 1 && results { "search" } else { "folder" }))

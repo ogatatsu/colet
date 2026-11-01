@@ -1,6 +1,34 @@
 //! How many crumbs fold into the "…" menu, as the old app's: when the trail outgrows the bar, the crumbs
 //! furthest from the deepest folder fold first so the nearest stay readable. Names are never shortened,
 //! but the last crumb's, which always stays, clipped to half the bar at most.
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
+
+use gpui_kit::{Bounds, Pixels};
+
+/// A crumb on the trail: the column it goes to, its name, and the path its tip shows.
+#[derive(Clone)]
+pub struct Crumb {
+    pub column: usize,
+    pub name: String,
+    pub path: String,
+}
+
+/// The trail as it was last drawn, shared with what measures it as it is painted.
+#[derive(Default)]
+pub struct Trail {
+    /// The crumbs folded into the "…" menu.
+    pub folded: Vec<Crumb>,
+    /// Where each crumb was drawn, by its column, and the row they stand in: the bar under them follows
+    /// the columns on screen.
+    pub bounds: Rc<RefCell<HashMap<usize, Bounds<Pixels>>>>,
+    pub row: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// The width the crumbs were last folded for.
+    pub room: Rc<Cell<f32>>,
+}
 
 /// The gap between crumbs.
 pub const GAP: f32 = 2.;
