@@ -118,3 +118,69 @@ fn keeps_the_tabs_in_the_settings(cx: &mut TestAppContext) {
     assert_eq!(state.active, 2);
     drop(ui);
 }
+
+impl Ui {
+    /// The field narrowing the column at `index` has the keys.
+    fn filter_focused(&self, cx: &mut TestAppContext, index: usize) -> bool {
+        let id = self.read(cx, |v| v.state.columns[index].id);
+        let input = self.view.read_with(cx, |v, _| v.filters.get(&id).map(|field| field.input.clone()));
+        input.is_some_and(|input| self.has_focus(cx, &input))
+    }
+
+    fn typed(&self, cx: &mut TestAppContext, index: usize) -> String {
+        let id = self.read(cx, |v| v.state.columns[index].id);
+        self.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string())
+    }
+}
+
+#[gpui_kit::test]
+fn opens_a_folder_in_a_tab_with_the_keys_in_its_field_and_keeps_them_there(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "left");
+    ui.press(cx, "ctrl-enter");
+    // In front, the folder opened takes the keys in its field.
+    ui.press(cx, "ctrl-tab");
+    assert_eq!(ui.paths(cx), [r"D:\", r"D:\work"]);
+    assert_eq!(ui.read(cx, |v| v.state.active), 2);
+    assert!(ui.filter_focused(cx, 2));
+    ui.input(cx, "b");
+    assert_eq!(ui.typed(cx, 2), "b");
+    // Away and back, they are there still; in the other tab, on its rows.
+    ui.press(cx, "ctrl-tab");
+    assert!(ui.columns_focused(cx));
+    ui.press(cx, "ctrl-tab");
+    assert!(ui.filter_focused(cx, 2));
+    assert_eq!(ui.typed(cx, 2), "b");
+}
+
+#[gpui_kit::test]
+fn opens_a_file_in_a_tab_with_the_keys_on_its_row(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "ctrl-enter");
+    ui.press(cx, "ctrl-tab");
+    assert!(ui.columns_focused(cx));
+    assert!(!ui.filter_focused(cx, 2));
+}
+
+#[gpui_kit::test]
+fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mut TestAppContext) {
+    use crate::settings::Favorite;
+    use crate::state::favorite_key;
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\work")]),
+            (r"D:\work", vec![file(r"D:\work\a.pdf"), file(r"D:\work\b.txt")]),
+        ])
+    });
+    fake.settings.lock().unwrap().favorites = vec![Favorite { narrow: Some("pdf".into()), ..Favorite::new(r"D:\work") }];
+    let ui = open(cx, fake);
+    let key = favorite_key(Path::new(r"D:\work"), Some("pdf"));
+    ui.view.update(cx, |v, cx| v.open_in_tab(0, &key, cx));
+    settle(cx);
+    ui.press(cx, "ctrl-tab");
+    let last = ui.read(cx, |v| v.state.columns.len() - 1);
+    assert!(ui.filter_focused(cx, last));
+    ui.input(cx, " a");
+    assert_eq!(ui.typed(cx, last), "pdf a");
+}

@@ -36,12 +36,21 @@ pub struct Parked {
     rows: RowScrolls,
     sideways: Sideways,
     home_scroll: ScrollHandle,
-    /// The search field had the keys as it went, and has them again as it comes back.
-    search_keys: bool,
+    /// Where the keys were as it went, and go again as it comes back.
+    keys: Keys,
+}
+
+/// Where a tab's keys are.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Keys {
+    Search,
+    Column,
+    /// The field narrowing the column.
+    Filter(ColumnId),
 }
 
 impl Parked {
-    fn new(state: State, filter: Option<String>, search_keys: bool) -> Self {
+    fn new(state: State, filter: Option<String>, keys: Keys) -> Self {
         Self {
             state,
             filter,
@@ -49,7 +58,7 @@ impl Parked {
             rows: RowScrolls::default(),
             sideways: Sideways::default(),
             home_scroll: ScrollHandle::new(),
-            search_keys,
+            keys,
         }
     }
 }
@@ -162,7 +171,7 @@ impl Colet {
                 let tab = self.tabs.tab(None);
                 self.tabs.list.push(tab);
             } else {
-                let tab = self.tabs.tab(Some(Parked::new(state, filter, false)));
+                let tab = self.tabs.tab(Some(Parked::new(state, filter, Keys::Column)));
                 self.tabs.list.push(tab);
             }
         }
@@ -212,9 +221,20 @@ impl Colet {
         }
     }
 
-    /// Puts `parked` in front, handing back the tab that was.
-    fn swap_in(&mut self, parked: Parked) -> Parked {
-        let Parked { state, filter, filters, rows, sideways, home_scroll, search_keys: _ } = parked;
+    /// Where the keys are in the tab in front.
+    fn keys(&self, window: &Window, cx: &App) -> Keys {
+        if self.search_focused {
+            return Keys::Search;
+        }
+        match self.filters.iter().find(|(_, field)| self.has_keys(&field.input, window, cx)) {
+            Some((id, _)) => Keys::Filter(*id),
+            None => Keys::Column,
+        }
+    }
+
+    /// Puts `parked` in front, handing back the tab that was with the keys where they are in it.
+    fn swap_in(&mut self, parked: Parked, keys: Keys) -> Parked {
+        let Parked { state, filter, filters, rows, sideways, home_scroll, keys: _ } = parked;
         Parked {
             state: std::mem::replace(&mut self.state, state),
             filter: std::mem::replace(&mut self.chosen_filter, filter),
@@ -222,7 +242,7 @@ impl Colet {
             rows: std::mem::replace(&mut self.rows, rows),
             sideways: std::mem::replace(&mut self.sideways, sideways),
             home_scroll: std::mem::replace(&mut self.home_scroll, home_scroll),
-            search_keys: self.search_focused,
+            keys,
         }
     }
 
@@ -233,8 +253,8 @@ impl Colet {
             return;
         }
         let Some(incoming) = self.tabs.list.get_mut(index).and_then(|tab| tab.parked.take()) else { return };
-        let search_keys = incoming.search_keys;
-        let outgoing = self.swap_in(incoming);
+        let keys = incoming.keys;
+        let outgoing = self.swap_in(incoming, self.keys(window, cx));
         let current = self.tabs.current;
         self.tabs.list[current].parked = Some(outgoing);
         self.tabs.current = index;
@@ -242,12 +262,34 @@ impl Colet {
         let query = self.state.query.clone();
         self.search.update(cx, |input, cx| input.set_value(query, window, cx));
         self.relist(cx);
-        if search_keys {
-            self.search.update(cx, |input, cx| input.focus(window, cx));
-            self.changed(cx);
-        } else {
-            self.focus_active(window, cx);
+        match keys {
+            Keys::Search => {
+                self.search.update(cx, |input, cx| input.focus(window, cx));
+                self.changed(cx);
+            }
+            Keys::Column => self.focus_active(window, cx),
+            Keys::Filter(id) => self.focus_filter(id, window, cx),
         }
+    }
+
+    /// The keys go to the field narrowing the column `id`, which becomes the active one; a field made just
+    /// now, for a tab never in front before, has the caret after what it holds. With the column gone, they
+    /// go to the active one.
+    fn focus_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.state.index_of(id) else { return self.focus_active(window, cx) };
+        let fresh = !self.filters.contains_key(&id);
+        self.filter_fields(window, cx);
+        let Some(field) = self.filters.get(&id) else { return self.focus_active(window, cx) };
+        let input = field.input.clone();
+        self.state.set_active(index);
+        input.update(cx, |input, cx| {
+            if fresh {
+                input.set_cursor_position(gpui_kit::base::input::Position::new(0, u32::MAX), window, cx);
+            } else {
+                input.focus(window, cx);
+            }
+        });
+        self.changed(cx);
     }
 
     /// Ctrl+Tab and Ctrl+Shift+Tab: the next tab along the strip, or the one before, round from the end.
@@ -262,19 +304,22 @@ impl Colet {
         if self.tabs_held() {
             return;
         }
-        let tab = self.tabs.tab(Some(Parked::new(State::new(), None, true)));
+        let tab = self.tabs.tab(Some(Parked::new(State::new(), None, Keys::Search)));
         self.tabs.list.push(tab);
         self.switch_tab(self.tabs.list.len() - 1, window, cx);
     }
 
     /// Opens the row `path` of the column at `index` in a tab of its own, right of this one and behind it:
-    /// a row of home as picking it there opens it, anything else where it lives.
+    /// a row of home as picking it there opens it, anything else where it lives. A folder or a search opened
+    /// has the keys in the field narrowing its column once the tab comes to the front; a file, on its row.
     pub fn open_in_tab(&mut self, index: usize, path: &Path, cx: &mut Context<Self>) {
         let Some(c) = self.state.columns.get(index) else { return };
         let Some(entry) = c.entry(path) else { return };
         let state = if c.kind == Kind::Home { State::opening_home(c, &entry.path) } else { State::opening(&entry.path, entry.directory) };
         let filter = if state.pinned() { state.search_filter.clone() } else { None };
-        let tab = self.tabs.tab(Some(Parked::new(state, filter, false)));
+        let opened = state.columns.last().filter(|last| last.kind != Kind::Home && (entry.directory || state.pinned()));
+        let keys = opened.map_or(Keys::Column, |last| Keys::Filter(last.id));
+        let tab = self.tabs.tab(Some(Parked::new(state, filter, keys)));
         self.tabs.list.insert(self.tabs.current + 1, tab);
         self.keep_tabs(cx);
         cx.notify();
@@ -356,7 +401,7 @@ impl Colet {
             Some(parked) => (parked.state.clone(), parked.filter.clone()),
             None => (self.state.clone(), self.chosen_filter.clone()),
         };
-        let tab = self.tabs.tab(Some(Parked::new(state, filter, false)));
+        let tab = self.tabs.tab(Some(Parked::new(state, filter, Keys::Column)));
         self.tabs.list.insert(index + 1, tab);
         if index < self.tabs.current {
             self.tabs.current += 1;
