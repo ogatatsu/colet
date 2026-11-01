@@ -10,7 +10,7 @@ fn copies_and_pastes_picking_what_was_pasted(cx: &mut TestAppContext) {
     ui.press(cx, "ctrl-v");
     // Into its own folder: a copy named as Explorer names it, picked once listed.
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt - コピー"]);
-    let entry = ui.read(cx, |v| v.history[0].clone());
+    let entry = ui.read(cx, |v| v.history.entries[0].clone());
     assert_eq!(entry.items[0].path, Path::new(r"D:\work\a.txt - コピー"));
     assert_eq!(entry.items[0].from.as_deref(), Some(Path::new(r"D:\work\a.txt")));
     // Paths as text, one a line.
@@ -23,7 +23,7 @@ fn picks_what_the_shell_writes_out_by_its_name_once_it_is_listed(cx: &mut TestAp
     let (fake, ui) = in_work(cx);
     *fake.clipboard.lock().unwrap() = ClipboardFiles { contents: vec!["添付.txt".into()], sequence: 2, ..Default::default() };
     ui.press(cx, "ctrl-v");
-    let entry = ui.read(cx, |v| v.history[0].clone());
+    let entry = ui.read(cx, |v| v.history.entries[0].clone());
     assert_eq!((entry.items[0].path.to_str().unwrap(), entry.items[0].status), (r"D:\work\添付.txt", ItemStatus::Handed));
     assert!(!entry.has_problems());
     // Written out after the paste returned: picked once the listing shows it.
@@ -139,11 +139,11 @@ fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the
             v.reveal_from_history(r"D:\work\a.txt".into(), window, cx);
             v.reveal_from_history(r"D:\work\c.txt".into(), window, cx);
             // The history stays up while the disk is asked.
-            assert!(v.history_open);
+            assert!(v.history.open);
         });
     });
     settle(cx);
-    assert!(ui.read(cx, |v| !v.history_open));
+    assert!(ui.read(cx, |v| !v.history.open));
     assert_eq!(highlight(cx).as_deref(), Some(Path::new(r"D:\work\c.txt")));
     // Closed before the answer came, the history has moved on from it.
     ui.act(cx, |window, cx| {
@@ -163,7 +163,7 @@ fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the
         });
     });
     settle(cx);
-    assert!(ui.read(cx, |v| v.history_open));
+    assert!(ui.read(cx, |v| v.history.open));
     assert!(ui.toasts(cx).iter().any(|t| t == "「gone.txt」はもうありません"), "{:?}", ui.toasts(cx));
 }
 
@@ -218,7 +218,7 @@ fn sends_to_the_bin_leaving_the_asking_to_the_shell_and_picks_the_next_row(cx: &
     let asked = fake.operations.lock().unwrap()[0].clone();
     assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![PathBuf::from(r"D:\work\b.txt")]));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\c.txt"]);
-    let entry = ui.read(cx, |v| v.history[0].clone());
+    let entry = ui.read(cx, |v| v.history.entries[0].clone());
     assert!(entry.items[0].gone);
     assert_eq!(entry.items[0].status, crate::ops::ItemStatus::Done);
 }
@@ -228,14 +228,14 @@ fn deletes_outright_on_shift_delete_and_says_so_of_what_the_bin_could_not_take(c
     let (fake, ui) = in_work(cx);
     ui.press(cx, "shift-delete");
     assert_eq!(fake.operations.lock().unwrap()[0].kind, Operation::Delete);
-    let entry = ui.read(cx, |v| v.history[0].clone());
+    let entry = ui.read(cx, |v| v.history.entries[0].clone());
     assert_eq!(entry.request.kind.title(), "完全に削除");
     assert_eq!(entry.items[0].status.label(), "完全に削除");
     // Sent to the bin, one it could not take is told apart from the rest.
     fake.unbinnable.lock().unwrap().push(r"D:\work\c.txt".into());
     ui.press(cx, "ctrl-a");
     ui.press(cx, "delete");
-    let entry = ui.read(cx, |v| v.history[0].clone());
+    let entry = ui.read(cx, |v| v.history.entries[0].clone());
     assert_eq!(entry.request.kind, Operation::Recycle);
     let statuses: Vec<_> = entry.items.iter().map(|i| (colet_core::paths::shown(folder_name(&i.path)), i.status.label())).collect();
     assert_eq!(statuses, [("b.txt".to_owned(), "完了"), ("c.txt".to_owned(), "完全に削除")]);
@@ -249,7 +249,7 @@ fn leaves_no_trace_of_a_deletion_turned_down_at_the_shells_question(cx: &mut Tes
     ui.press(cx, "delete");
     ui.press(cx, "shift-delete");
     assert_eq!(fake.operations.lock().unwrap().len(), 2);
-    assert!(ui.read(cx, |v| v.history.is_empty() && v.unseen == 0));
+    assert!(ui.read(cx, |v| v.history.entries.is_empty() && v.history.unseen == 0));
     assert!(ui.toasts(cx).is_empty(), "{:?}", ui.toasts(cx));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
 }
@@ -272,16 +272,16 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     fake.stuck.lock().unwrap().push(r"D:\work\a.txt".into());
     ui.press(cx, "delete");
     assert!(ui.toasts(cx).iter().any(|t| t == "「ごみ箱へ移動」: 1 件失敗"), "{:?}", ui.toasts(cx));
-    assert_eq!(ui.read(cx, |v| v.unseen), 1);
+    assert_eq!(ui.read(cx, |v| v.history.unseen), 1);
     let toast = ui.read(cx, |v| v.next_toast);
     ui.click(cx, ("toast-details", toast as usize));
-    assert!(ui.read(cx, |v| v.history_open && v.unseen == 0));
-    let entry = ui.read(cx, |v| v.history[0].clone());
-    assert!(ui.read(cx, |v| v.expanded.contains(&entry.id)));
+    assert!(ui.read(cx, |v| v.history.open && v.history.unseen == 0));
+    let entry = ui.read(cx, |v| v.history.entries[0].clone());
+    assert!(ui.read(cx, |v| v.history.expanded.contains(&entry.id)));
     assert_eq!(entry.items[0].error.as_deref(), Some("アクセスが拒否されました。"));
     // Still there: its name opens it in the columns.
     ui.click(cx, ("history-item", entry.id << 16));
-    assert!(ui.read(cx, |v| !v.history_open));
+    assert!(ui.read(cx, |v| !v.history.open));
     assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().highlight.clone()).as_deref(), Some(Path::new(r"D:\work\a.txt")));
 }
 

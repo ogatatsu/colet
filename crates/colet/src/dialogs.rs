@@ -624,7 +624,7 @@ impl Colet {
     /// with problems not seen yet.
     pub fn history_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let unseen = self.unseen;
+        let unseen = self.history.unseen;
         let label = if unseen > 0 { format!("操作履歴（問題のある操作 {unseen} 件）") } else { "操作履歴".to_owned() };
         Button::new("history-button")
             .ghost()
@@ -651,7 +651,7 @@ impl Colet {
                 )
             })
             .on_click(cx.listener(|this, _, window, cx| {
-                let open = !this.history_open;
+                let open = !this.history.open;
                 this.show_history(open, None, window, cx);
             }))
             .into_any_element()
@@ -659,26 +659,27 @@ impl Colet {
 
     /// The file operations run since Colet opened, newest first.
     pub fn render_history(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.history_open {
+        if !self.history.open {
             return None;
         }
         let p = self.palette;
         // Each row and each item that opens a stop for Tab; the mouse leaves the keys
         // where they are, as before.
         let mut keys = Vec::new();
-        for entry in &self.history {
+        for entry in &self.history.entries {
             keys.push(format!("history-entry:{}", entry.id));
-            if self.expanded.contains(&entry.id) {
+            if self.history.expanded.contains(&entry.id) {
                 keys.extend(entry.items.iter().enumerate().filter(|(_, item)| !item.gone).map(|(k, _)| format!("history-item:{}:{k}", entry.id)));
             }
         }
         let stops: std::collections::HashMap<String, FocusHandle> = keys.into_iter().map(|key| (key.clone(), self.stop(key, cx))).collect();
         let entries: Vec<AnyElement> = self
             .history
+            .entries
             .iter()
             .map(|entry| {
                 let id = entry.id;
-                let open = self.expanded.contains(&id);
+                let open = self.history.expanded.contains(&id);
                 let problems = entry.has_problems();
                 div()
                     .flex()
@@ -703,8 +704,8 @@ impl Colet {
                             .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(entry.target()))
                             .child(div().text_color(if problems { p.danger } else { p.text_muted }).child(entry.outcome()))
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                if !this.expanded.remove(&id) {
-                                    this.expanded.insert(id);
+                                if !this.history.expanded.remove(&id) {
+                                    this.history.expanded.insert(id);
                                 }
                                 cx.notify();
                             }))
@@ -765,7 +766,7 @@ impl Colet {
                     .into_any_element()
             })
             .collect();
-        let clearable = self.history.iter().any(|e| e.status != Status::Running);
+        let clearable = self.history.entries.iter().any(|e| e.status != Status::Running);
         Some(
             deferred(
                 div()
@@ -796,7 +797,7 @@ impl Colet {
                             .child(
                                 crate::view::keep_focus(push("clear-history", "履歴を消去", false, clearable).ghost().small()).on_click(
                                     cx.listener(|this, _, _, cx| {
-                                        this.history.retain(|e| e.status == Status::Running);
+                                        this.history.entries.retain(|e| e.status == Status::Running);
                                         // The rows' stops go with them; a running one's comes back as it is drawn.
                                         this.stops.retain(|key, _| !key.starts_with("history-"));
                                         cx.notify();

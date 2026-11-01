@@ -175,6 +175,49 @@ impl HistoryEntry {
     }
 }
 
+/// The file operations run since Colet opened, and how the history shows them.
+#[derive(Default)]
+pub struct History {
+    last_id: u64,
+    /// Newest first.
+    pub entries: Vec<HistoryEntry>,
+    /// Operations with problems since the history was last opened.
+    pub unseen: usize,
+    pub open: bool,
+    /// The operations the history shows opened.
+    pub expanded: HashSet<u64>,
+    /// The item last pressed in the history, while the disk is asked whether it is still there.
+    pub(crate) revealing: Option<PathBuf>,
+}
+
+impl History {
+    /// Keeps an operation just started at the top, running; its id.
+    pub fn start(&mut self, request: Request) -> u64 {
+        self.last_id += 1;
+        let id = self.last_id;
+        let entry = HistoryEntry { id, request, started: now(), status: Status::Running, error: None, items: Vec::new(), more: 0 };
+        self.entries.insert(0, entry);
+        self.entries.truncate(MAX_ENTRIES);
+        id
+    }
+
+    pub fn entry_mut(&mut self, id: u64) -> Option<&mut HistoryEntry> {
+        self.entries.iter_mut().find(|e| e.id == id)
+    }
+
+    /// Opened, with `entry` shown opened, it has been seen; closed, a lookup still out for an item pressed
+    /// is over, and opening it again does not revive it.
+    pub fn set_open(&mut self, open: bool, entry: Option<u64>) {
+        self.open = open;
+        self.expanded = entry.into_iter().collect();
+        if open {
+            self.unseen = 0;
+        } else {
+            self.revealing = None;
+        }
+    }
+}
+
 /// Where a menu opened by a right-click or the menu key stands, and what it acts on.
 pub struct Menu {
     pub column: ColumnId,
@@ -676,24 +719,10 @@ impl Colet {
             self.refuse(request.kind.title(), BUSY, cx);
             return;
         }
-        self.next_operation += 1;
-        let id = self.next_operation;
+        let id = self.history.start(request.clone());
         self.departed.clear();
         let events = OperationEvents::default();
         self.running = Some(Running { id, events: events.clone(), made: None, placed: Vec::new() });
-        self.history.insert(
-            0,
-            HistoryEntry {
-                id,
-                request: request.clone(),
-                started: now(),
-                status: Status::Running,
-                error: None,
-                items: Vec::new(),
-                more: 0,
-            },
-        );
-        self.history.truncate(MAX_ENTRIES);
         // What leaves its place goes unwatched first, with the folders inside it.
         let leaving = match request.kind {
             Kind::Recycle | Kind::Delete | Kind::Rename => request.paths.as_slice(),
@@ -724,7 +753,7 @@ impl Colet {
         if events.is_empty() {
             return false;
         }
-        let mut entry = self.history.iter_mut().find(|e| e.id == running.id);
+        let mut entry = self.history.entry_mut(running.id);
         for event in events {
             match &event {
                 Event::Done { path } => running.made = Some(path.clone()),
@@ -791,8 +820,8 @@ impl Colet {
             // The shell says where it made the folder, which a name clash may have changed.
             self.state.created(&destination, &made.unwrap_or_else(|| child(&destination, &name)));
         }
-        let Some(index) = self.history.iter().position(|e| e.id == id) else { return };
-        let entry = &mut self.history[index];
+        let Some(index) = self.history.entries.iter().position(|e| e.id == id) else { return };
+        let entry = &mut self.history.entries[index];
         let counts = entry.item_problems();
         // A cut pasted where it already was moved nothing, and a deletion turned down at the shell's
         // question deleted nothing: no trace, as in Explorer.
@@ -802,7 +831,7 @@ impl Colet {
             && entry.more == 0
             && entry.items.iter().all(|i| i.status == ItemStatus::Cancelled);
         if moved_nothing || declined {
-            self.history.remove(index);
+            self.history.entries.remove(index);
         } else {
             if let Some(to) = renamed
                 && let Some(item) = entry.items.first_mut().filter(|i| i.status == ItemStatus::Done)
@@ -821,7 +850,7 @@ impl Colet {
         }
         let problem = if counts.is_empty() { problem } else { Some(counts.join("・")) };
         if let Some(problem) = problem {
-            self.unseen += 1;
+            self.history.unseen += 1;
             self.notify_entry(format!("「{}」: {problem}", kind.title()), id, cx);
         }
         // Like Explorer, what was pasted is picked once listed, under the names it got.
@@ -834,13 +863,8 @@ impl Colet {
 
     /// Opened, the history has been seen; closed, the keys go back to the column.
     pub fn show_history(&mut self, open: bool, entry: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
-        self.history_open = open;
-        self.expanded = entry.into_iter().collect();
-        if open {
-            self.unseen = 0;
-        } else {
-            // A lookup still out for an item pressed is over: opening the history again does not revive it.
-            self.revealing = None;
+        self.history.set_open(open, entry);
+        if !open {
             self.column_focus(self.state.active).focus(window, cx);
         }
         cx.notify();
@@ -849,7 +873,7 @@ impl Colet {
     /// Only what is still there: an item moved on or deleted since says so. Whether it is, is asked off the UI
     /// thread, as a share can keep it waiting.
     pub fn reveal_from_history(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        self.revealing = Some(path.clone());
+        self.history.revealing = Some(path.clone());
         let backend = self.backend.clone();
         let asked = {
             let path = path.clone();
@@ -865,11 +889,11 @@ impl Colet {
     /// The answer for the item last pressed in the history, while the history is still open: another pressed
     /// since, or the history closed, has moved on from it.
     fn history_item_found(&mut self, path: PathBuf, kind: Option<bool>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.revealing.as_ref() != Some(&path) {
+        if self.history.revealing.as_ref() != Some(&path) {
             return;
         }
-        self.revealing = None;
-        if !self.history_open {
+        self.history.revealing = None;
+        if !self.history.open {
             return;
         }
         match kind {

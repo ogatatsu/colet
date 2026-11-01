@@ -36,7 +36,7 @@ use crate::{
     backend::{self, Search},
     icons::Icons,
     menus::Popup,
-    ops::{ClipboardLane, HistoryEntry, Running},
+    ops::{ClipboardLane, History, Running},
     places::{Dialog, HomeDrag, HomeRows, Landing, home_entries, home_groups, places},
     settings::{LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
@@ -348,16 +348,7 @@ pub struct Colet {
     pub(crate) paste_waiting: Option<PathBuf>,
     /// The settings could not be written as the window closed: the next close goes without them.
     pub(crate) unsaved_close: bool,
-    pub(crate) next_operation: u64,
-    /// The file operations run since Colet opened, newest first.
-    pub history: Vec<HistoryEntry>,
-    /// Operations with problems since the history was last opened.
-    pub unseen: usize,
-    pub history_open: bool,
-    /// The item last pressed in the history, while the disk is asked whether it is still there.
-    pub(crate) revealing: Option<PathBuf>,
-    /// The operations the history shows opened.
-    pub expanded: HashSet<u64>,
+    pub history: History,
     /// The files on the clipboard, marked in their rows until it changes.
     pub clipboard: ClipboardFiles,
     /// The clipboard's paths by path key: another app may write them in another case.
@@ -517,12 +508,7 @@ impl Colet {
             clipboard_lane: Default::default(),
             paste_waiting: None,
             unsaved_close: false,
-            next_operation: 0,
-            history: Vec::new(),
-            unseen: 0,
-            history_open: false,
-            revealing: None,
-            expanded: HashSet::new(),
+            history: History::default(),
             clipboard: ClipboardFiles::default(),
             held: HashSet::new(),
             clipboard_changed: Arc::new(AtomicBool::new(true)),
