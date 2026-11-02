@@ -71,6 +71,57 @@ fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &m
 }
 
 #[gpui_kit::test]
+fn copies_the_path_of_a_folder_column_and_opens_it_in_a_tab_from_its_empty_space(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    let empty_space = |cx: &mut TestAppContext| {
+        ui.act(cx, |window, cx| window.right_click(("column", work), cx));
+        settle(cx);
+    };
+    empty_space(cx);
+    let on = ui.lines_on(cx);
+    assert!(on.contains(&"新しいタブで開く".to_owned()) && on.contains(&"パスをコピー".to_owned()));
+    ui.click(cx, "menu-copy-path");
+    settle(cx);
+    assert_eq!(*fake.text.lock().unwrap(), r"D:\work");
+    // Narrowed, it opens so in a tab of its own, behind this one.
+    ui.view.update(cx, |v, cx| {
+        v.state.set_filter(2, Some("b"));
+        cx.notify();
+    });
+    empty_space(cx);
+    ui.click(cx, "menu-open-tab");
+    assert_eq!(ui.read(cx, |v| (v.tabs.list.len(), v.tabs.current)), (2, 0));
+    ui.press(cx, "ctrl-tab");
+    settle(cx);
+    let last = ui.read(cx, |v| v.state.columns.last().map(|c| (text(&c.path), c.filter.as_ref().map(|f| f.text.clone()))));
+    assert_eq!(last, Some((r"D:\work".to_owned(), Some("b".to_owned()))));
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>()), [r"D:\work\b.txt"]);
+}
+
+#[gpui_kit::test]
+fn copies_the_path_of_a_folder_column_and_opens_it_in_a_tab_by_keys_with_nothing_picked(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.view.update(cx, |v, cx| {
+        let c = &mut v.state.columns[2];
+        c.selected.clear();
+        c.focused = None;
+        c.highlight = None;
+        cx.notify();
+    });
+    settle(cx);
+    assert_eq!(ui.read(cx, |v| v.state.active), 2);
+    assert_eq!(ui.read(cx, |v| v.reasons().copy_path), None);
+    ui.press(cx, "ctrl-shift-c");
+    settle(cx);
+    assert_eq!(*fake.text.lock().unwrap(), r"D:\work");
+    ui.press(cx, "ctrl-enter");
+    ui.press(cx, "ctrl-tab");
+    settle(cx);
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().map(|c| text(&c.path))), Some(r"D:\work".to_owned()));
+}
+
+#[gpui_kit::test]
 fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "shift-f10");

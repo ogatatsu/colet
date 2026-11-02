@@ -339,7 +339,8 @@ impl Colet {
             } else {
                 None
             },
-            copy_path: none.then_some(NEEDS_SELECTION),
+            // With nothing picked, the folder column's own folder.
+            copy_path: if none { self.destination().is_none().then_some(NEEDS_FOLDER) } else { None },
         }
     }
 
@@ -396,9 +397,12 @@ impl Colet {
     }
 
     /// The paths as text, one a line; a saved search's is the query it runs, a narrowed favorite's its
-    /// folder's.
+    /// folder's. With nothing picked, the folder column's own.
     pub fn copy_paths(&mut self, cx: &mut Context<Self>) {
-        let picked = self.picked();
+        let mut picked = self.picked();
+        if picked.is_empty() {
+            picked.extend(self.destination());
+        }
         self.take_menu();
         if picked.is_empty() {
             return;

@@ -10,7 +10,7 @@ use gpui_kit::*;
 
 use crate::{
     app::Colet,
-    ops::{Menu, NEEDS_FILE, ONE_ITEM, Reasons},
+    ops::{Menu, NEEDS_FILE, NEEDS_FOLDER, ONE_ITEM, Reasons},
     places::Dialog,
     state::{ColumnId, Kind, saved_query},
     tabs::TabId,
@@ -331,9 +331,14 @@ impl Colet {
             1 => None,
             _ => entries.iter().all(|e| e.directory).then_some(NEEDS_FILE),
         };
-        let in_tab = match entries.as_slice() {
-            [entry] => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(entry.path.clone())),
-            _ => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), quiet(Some(ONE_ITEM)), Command::OpenInTab(Default::default())),
+        // From empty space, the folder column's own folder, narrowed as it is.
+        let in_tab = match (entries.as_slice(), self.destination().filter(|_| !some)) {
+            ([entry], _) => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(entry.path.clone())),
+            (_, Some(folder)) => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(folder)),
+            _ => {
+                let off = if some { ONE_ITEM } else { NEEDS_FOLDER };
+                line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), Some(off), Command::OpenInTab(Default::default()))
+            }
         };
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), open_off, Command::Open),
@@ -342,7 +347,7 @@ impl Colet {
             line("menu-copy", "copy", "コピー", Some("Ctrl+C"), quiet(reasons.copy), Command::Copy).grouped(),
             line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), Command::Cut),
             line("menu-paste", "clipboard-paste", "貼り付け", Some("Ctrl+V"), reasons.paste, Command::Paste),
-            line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), quiet(reasons.copy_path), Command::CopyPath),
+            line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, Command::CopyPath),
             line("menu-rename", "pencil-line", "名前を変更", Some("F2"), quiet(reasons.rename), Command::Rename).grouped(),
             line("menu-new-folder", "folder-plus", "新規フォルダー", Some("Ctrl+Shift+N"), reasons.paste, Command::NewFolder),
             line("menu-recycle", "trash", "ごみ箱へ移動", Some("Delete"), quiet(reasons.delete), Command::Recycle),

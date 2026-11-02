@@ -405,11 +405,13 @@ impl Colet {
                     this.open(index, &path, window, cx);
                 }
             }))
-            // The row the keys are on opens in a tab of its own, behind this one.
+            // The row the keys are on opens in a tab of its own, behind this one; with none, the folder
+            // column's own folder.
             .on_action(cx.listener(|this, _: &OpenInNewTab, _, cx| {
                 let index = this.state.active;
                 let c = &this.state.columns[index];
-                if let Some(path) = c.focused.clone().or_else(|| c.highlight.clone()) {
+                let own = (c.kind == Kind::Folder).then(|| c.path.clone());
+                if let Some(path) = c.focused.clone().or_else(|| c.highlight.clone()).or(own) {
                     this.open_in_tab(index, &path, cx);
                 }
             }))
