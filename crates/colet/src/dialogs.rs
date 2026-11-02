@@ -16,7 +16,7 @@ use crate::{
     ops::{ItemStatus, Menu, Status},
     places::Dialog,
     search_filters::FilterEdit,
-    settings::Theme,
+    settings::{Favorite, Theme},
     state::Kind,
     theme::Palette,
     view::TipExt,
@@ -145,7 +145,6 @@ impl Colet {
     }
 
     fn dialog_parts(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(&'static str, Div, Vec<AnyElement>)> {
-        let p = self.palette;
         let title = match self.dialog.as_ref()? {
             Dialog::Name { request: Request { kind: Operation::NewFolder, .. }, .. } => "新規フォルダー",
             Dialog::Name { .. } => "名前を変更",
@@ -158,356 +157,395 @@ impl Colet {
             Dialog::Preferences => "設定",
             Dialog::Open { .. } => "開く",
         };
-        let confirm_open = self.stop("confirm-open", cx);
-        // Each theme a stop for Tab, kept across frames.
-        let themes: Vec<(Theme, FocusHandle)> =
-            Theme::ALL.into_iter().map(|theme| (theme, self.stop(format!("theme:{theme:?}"), cx))).collect();
-        // The saved search's choice of filter, none first.
-        let choices: Vec<Option<String>> =
-            std::iter::once(None).chain(self.settings.filters.iter().map(|f| Some(f.name.clone()))).collect();
+        // Each drawn by a function of its own: in a debug build one function drawing them all takes the room
+        // of every one of them at once, past what the window's thread has.
         let (content, buttons) = match self.dialog.as_ref()? {
-            Dialog::Name { request: Request { kind, paths, destination, .. }, input, checking, .. } => {
-                let checking = checking.is_some();
-                let problem = self.name_problem(cx);
-                let empty = input.read(cx).value().trim().is_empty();
-                // Where the name goes: a rename may come from the results, far from its folder.
-                let (place, submit) = match kind {
-                    Operation::NewFolder => (format!("作成先：{}", shown(destination)), "作成"),
-                    _ => (format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).map(shown).unwrap_or_default()), "保存"),
-                };
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(div().text_size(px(12.)).text_color(p.text_faint).child(place))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(label(p, "名前"))
-                            .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
-                            .when_some(problem, |d, problem| d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))),
-                    );
-                let buttons = vec![
-                    push("cancel", "キャンセル", false, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .into_any_element(),
-                    // While the folder is asked whether the name is free, the press is in and waits.
-                    push("submit-name", if checking { "確認中…" } else { submit }, true, !empty && problem.is_none() && !checking)
-                        .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx)))
-                        .into_any_element(),
-                ];
-                (content, buttons)
-            }
-            Dialog::EditFavorite { original, name, narrow } => {
-                let problem = self.favorite_edit_problem(cx);
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(div().text_size(px(12.)).text_color(p.text_faint).child(format!("フォルダー：{}", shown(&original.path))))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(label(p, "名前"))
-                            .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
-                            .child(div().text_size(px(12.)).text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
-                    )
-                    .child(self.narrow_field(narrow, problem, window, cx));
-                let buttons = vec![
-                    push("cancel", "キャンセル", false, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .into_any_element(),
-                    push("save-favorite", "保存", true, problem.is_none())
-                        .on_click(cx.listener(|this, _, window, cx| this.submit_favorite_edit(window, cx)))
-                        .into_any_element(),
-                ];
-                (content, buttons)
-            }
-            Dialog::EditSearch { name, query, filter, narrow, .. } => {
-                let problem = self.edit_problem(cx);
-                let chosen = filter.clone();
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(label(p, "名前"))
-                            .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
-                            .child(div().text_size(px(12.)).text_color(p.text_faint).child("空欄なら検索文字列をそのまま表示します")),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(label(p, "検索文字列"))
-                            .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
-                            .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                                d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
-                            }),
-                    )
-                    .child(
-                        div().flex().flex_col().gap_1().child(label(p, "検索フィルター")).child(
-                            div()
-                                .id("edit-search-filters")
-                                .flex()
-                                .flex_wrap()
-                                .gap(px(2.))
-                                .role(Role::RadioGroup)
-                                .aria_label("検索フィルター")
-                                .children(choices.into_iter().enumerate().map(|(i, choice)| {
-                                    let text = choice.clone().unwrap_or_else(|| "なし".into());
-                                    filter_choice(("edit-search-filter", i).into(), &text, choice == chosen)
-                                        .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(choice.clone(), cx)))
-                                })),
-                        ),
-                    )
-                    .child(self.narrow_field(narrow, None, window, cx));
-                let buttons = vec![
-                    push("cancel", "キャンセル", false, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .into_any_element(),
-                    push("save-search", "保存", true, problem.is_none())
-                        .on_click(cx.listener(|this, _, window, cx| this.submit_edit(window, cx)))
-                        .into_any_element(),
-                ];
-                (content, buttons)
-            }
-            Dialog::Filters { edit: Some(FilterEdit { name, query, .. }), .. } => {
-                let problem = self.filter_problem(cx);
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(label(p, "名前"))
-                            .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
-                            .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                                d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(label(p, "検索文字列"))
-                            .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
-                            .child(div().text_size(px(12.)).text_color(p.text_faint).child(
-                                "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
-                            )),
-                    );
-                let buttons = vec![
-                    push("cancel", "キャンセル", false, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
-                        .into_any_element(),
-                    push("save-filter", "保存", true, problem.is_none())
-                        .on_click(cx.listener(|this, _, window, cx| this.submit_filter(window, cx)))
-                        .into_any_element(),
-                ];
-                (content, buttons)
-            }
-            Dialog::Filters { deleting: Some(name), .. } => {
-                let users = self.filter_users(name);
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .text_size(px(13.))
-                    .child(format!("「{name}」を削除しますか？"))
-                    .when(users > 0, |d| {
-                        d.child(div().text_size(px(12.)).text_color(p.text_muted).child(format!(
-                            "このフィルターを使う保存した検索が{users}件あります。削除すると、それらはフィルターなしで検索します。"
-                        )))
-                    });
-                let buttons = vec![
-                    push("cancel", "キャンセル", false, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
-                        .into_any_element(),
-                    push("delete-filter", "削除", true, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.delete_filter(window, cx)))
-                        .into_any_element(),
-                ];
-                (content, buttons)
-            }
-            Dialog::Filters { .. } => {
-                let filters = self.settings.filters.clone();
-                let last = filters.len().saturating_sub(1);
-                let rows: Vec<AnyElement> = filters
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, f)| {
-                        let name = f.name.clone();
-                        let (up_name, down_name, edit_name) = (name.clone(), name.clone(), name.clone());
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .py_1()
-                            .border_b_1()
-                            .border_color(p.border)
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .child(div().truncate().text_size(px(13.)).child(f.name.clone()))
-                                    .child(div().truncate().text_size(px(12.)).text_color(p.text_muted).font_family("Consolas").child(f.query.clone())),
-                            )
-                            .child(
-                                tool(("filter-up", i).into(), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
-                                    .when(i > 0, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&up_name, -1, cx)))),
-                            )
-                            .child(
-                                tool(("filter-down", i).into(), "arrow-down", format!("「{}」を下へ", f.name), i < last)
-                                    .when(i < last, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&down_name, 1, cx)))),
-                            )
-                            .child(
-                                tool(("filter-edit", i).into(), "pencil-line", format!("「{}」を編集", f.name), true)
-                                    .on_click(cx.listener(move |this, _, window, cx| this.edit_filter(Some(edit_name.clone()), window, cx))),
-                            )
-                            .child(
-                                tool(("filter-delete", i).into(), "trash", format!("「{}」を削除", f.name), true)
-                                    .on_click(cx.listener(move |this, _, window, cx| this.ask_delete_filter(name.clone(), window, cx))),
-                            )
-                            .into_any_element()
-                    })
-                    .collect();
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(div().text_size(px(12.)).text_color(p.text_muted).child(
-                        "検索に加えるEverythingの検索式を登録し、検索欄の右のボタン（Ctrl+Shift+F）で1つ選んで使います。",
-                    ))
-                    .child(if rows.is_empty() {
-                        div().py_2().text_size(px(12.)).text_color(p.text_faint).child("フィルターはまだありません").into_any_element()
-                    } else {
-                        div().flex().flex_col().children(rows).into_any_element()
-                    });
-                let buttons = vec![
-                    push("add-filter", "追加", false, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.edit_filter(None, window, cx)))
-                        .into_any_element(),
-                    push("close-filters", "閉じる", true, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .into_any_element(),
-                ];
-                (content, buttons)
-            }
-            Dialog::Preferences => {
-                let (engine, said) = self.engine.describe();
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    // Taken at once as one is picked, and kept.
-                    .child(
-                        div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(
-                            // Ringed as the fields are; the rings' room makes up most of the gaps.
-                            div().id("themes").flex().gap(px(2.)).role(Role::RadioGroup).aria_label("テーマ").children(themes.into_iter().map(
-                                |(theme, focus)| {
-                                    let chosen = self.settings.theme == theme;
-                                    crate::view::frame(p, crate::view::keyed(&focus, window)).child(
-                                        button(p, ("theme", theme as usize), theme.label(), chosen, true)
-                                            .track_focus(&focus)
-                                            .role(Role::RadioButton)
-                                            .aria_label(theme.label())
-                                            .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
-                                            .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
-                                            .test_support(),
-                                    )
-                                },
-                            )),
-                        ),
-                    )
-                    .child(
-                        div().flex().flex_col().gap_1().child(label(p, "Everything")).child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .id("engine-state")
-                                        .flex_1()
-                                        .min_w_0()
-                                        .overflow_hidden()
-                                        .whitespace_nowrap()
-                                        .text_ellipsis()
-                                        .text_size(px(13.))
-                                        .text_color(p.text)
-                                        .role(Role::Status)
-                                        .aria_label(said.clone())
-                                        .tip(said)
-                                        .child(format!("接続先：{engine}")),
-                                )
-                                .child(
-                                    push("reconnect", "再接続", false, true)
-                                        .on_click(cx.listener(|this, _, _, cx| this.reconnect(cx))),
-                                ),
-                        ),
-                    )
-                    .child(div().text_size(px(12.)).text_color(p.text_muted).child(
-                        "Everything 1.5.0.1424以降を起動してお使いください。つながらないときは「再接続」を押してください。",
-                    ))
-                    .child(div().pt_1().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
-                    .child(div().flex().flex_col().gap_1().text_size(px(12.)).children(SHORTCUTS.map(|(key, what)| {
-                        div()
-                            .flex()
-                            .gap_3()
-                            .child(div().w(px(180.)).flex_none().text_color(p.text).child(key))
-                            // Wrapped in the room left, rather than cut at the dialog's edge.
-                            .child(div().flex_1().min_w_0().text_color(p.text_muted).child(what))
-                    })));
-                let buttons = vec![
-                    push("close-preferences", "閉じる", true, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .into_any_element(),
-                ];
-                (content, buttons)
-            }
+            Dialog::Name { request, input, checking, .. } => self.name_dialog(request, input, checking.is_some(), window, cx),
+            Dialog::EditFavorite { original, name, narrow } => self.favorite_dialog(original, name, narrow, window, cx),
+            Dialog::EditSearch { name, query, filter, narrow, .. } => self.search_dialog(name, query, filter, narrow, window, cx),
+            Dialog::Filters { edit: Some(edit), .. } => self.filter_edit_dialog(edit, window, cx),
+            Dialog::Filters { deleting: Some(name), .. } => self.filter_delete_dialog(name, cx),
+            Dialog::Filters { .. } => self.filters_dialog(cx),
+            Dialog::Preferences => self.preferences_dialog(window, cx),
             Dialog::Open { paths } => {
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .text_size(px(13.))
-                    .child(format!("{} 項目を開きますか？", paths.len()))
-                    .child(div().text_size(px(12.)).text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"));
-                let buttons = vec![
-                    push("cancel", "キャンセル", false, true)
-                        .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
-                        .into_any_element(),
-                    // It takes the keys as the dialog opens, so Enter goes on as it was pressed to open them.
-                    crate::view::frame(p, crate::view::keyed(&confirm_open, window))
-                        .child(
-                            button(p, "confirm-open", "開く", true, true)
-                                .track_focus(&confirm_open)
-                                .role(Role::Button)
-                                .aria_label("開く")
-                                .on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx)))
-                                .test_support(),
-                        )
-                        .into_any_element(),
-                ];
-                (content, buttons)
+                let count = paths.len();
+                self.open_dialog(count, window, cx)
             }
         };
         Some((title, content, buttons))
+    }
+
+    /// A new folder's name, or a rename's.
+    fn name_dialog(&self, request: &Request, input: &Entity<InputState>, checking: bool, window: &Window, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+        let p = self.palette;
+        let Request { kind, paths, destination, .. } = request;
+        let problem = self.name_problem(cx);
+        let empty = input.read(cx).value().trim().is_empty();
+        // Where the name goes: a rename may come from the results, far from its folder.
+        let (place, submit) = match kind {
+            Operation::NewFolder => (format!("作成先：{}", shown(destination)), "作成"),
+            _ => (format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).map(shown).unwrap_or_default()), "保存"),
+        };
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(div().text_size(px(12.)).text_color(p.text_faint).child(place))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "名前"))
+                    .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
+                    .when_some(problem, |d, problem| d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))),
+            );
+        let buttons = vec![
+            push("cancel", "キャンセル", false, true)
+                .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                .into_any_element(),
+            // While the folder is asked whether the name is free, the press is in and waits.
+            push("submit-name", if checking { "確認中…" } else { submit }, true, !empty && problem.is_none() && !checking)
+                .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx)))
+                .into_any_element(),
+        ];
+        (content, buttons)
+    }
+
+    /// A favorite's name and narrowing.
+    fn favorite_dialog(&self, original: &Favorite, name: &Entity<InputState>, narrow: &Entity<InputState>, window: &Window, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+        let p = self.palette;
+        let problem = self.favorite_edit_problem(cx);
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(div().text_size(px(12.)).text_color(p.text_faint).child(format!("フォルダー：{}", shown(&original.path))))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "名前"))
+                    .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                    .child(div().text_size(px(12.)).text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
+            )
+            .child(self.narrow_field(narrow, problem, window, cx));
+        let buttons = vec![
+            push("cancel", "キャンセル", false, true)
+                .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                .into_any_element(),
+            push("save-favorite", "保存", true, problem.is_none())
+                .on_click(cx.listener(|this, _, window, cx| this.submit_favorite_edit(window, cx)))
+                .into_any_element(),
+        ];
+        (content, buttons)
+    }
+
+    /// A saved search's name, query, filter and narrowing.
+    fn search_dialog(&self, name: &Entity<InputState>, query: &Entity<InputState>, filter: &Option<String>, narrow: &Entity<InputState>, window: &Window, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+        let p = self.palette;
+        // The saved search's choice of filter, none first.
+        let choices: Vec<Option<String>> =
+            std::iter::once(None).chain(self.settings.filters.iter().map(|f| Some(f.name.clone()))).collect();
+        let problem = self.edit_problem(cx);
+        let chosen = filter.clone();
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "名前"))
+                    .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                    .child(div().text_size(px(12.)).text_color(p.text_faint).child("空欄なら検索文字列をそのまま表示します")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "検索文字列"))
+                    .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
+                    .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
+                        d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
+                    }),
+            )
+            .child(
+                div().flex().flex_col().gap_1().child(label(p, "検索フィルター")).child(
+                    div()
+                        .id("edit-search-filters")
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(2.))
+                        .role(Role::RadioGroup)
+                        .aria_label("検索フィルター")
+                        .children(choices.into_iter().enumerate().map(|(i, choice)| {
+                            let text = choice.clone().unwrap_or_else(|| "なし".into());
+                            filter_choice(("edit-search-filter", i).into(), &text, choice == chosen)
+                                .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(choice.clone(), cx)))
+                        })),
+                ),
+            )
+            .child(self.narrow_field(narrow, None, window, cx));
+        let buttons = vec![
+            push("cancel", "キャンセル", false, true)
+                .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                .into_any_element(),
+            push("save-search", "保存", true, problem.is_none())
+                .on_click(cx.listener(|this, _, window, cx| this.submit_edit(window, cx)))
+                .into_any_element(),
+        ];
+        (content, buttons)
+    }
+
+    /// A search filter added or edited.
+    fn filter_edit_dialog(&self, edit: &FilterEdit, window: &Window, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+        let p = self.palette;
+        let FilterEdit { name, query, .. } = edit;
+        let problem = self.filter_problem(cx);
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "名前"))
+                    .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                    .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
+                        d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "検索文字列"))
+                    .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
+                    .child(div().text_size(px(12.)).text_color(p.text_faint).child(
+                        "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
+                    )),
+            );
+        let buttons = vec![
+            push("cancel", "キャンセル", false, true)
+                .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
+                .into_any_element(),
+            push("save-filter", "保存", true, problem.is_none())
+                .on_click(cx.listener(|this, _, window, cx| this.submit_filter(window, cx)))
+                .into_any_element(),
+        ];
+        (content, buttons)
+    }
+
+    /// Whether the search filter `name` is to go.
+    fn filter_delete_dialog(&self, name: &str, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+        let p = self.palette;
+        let users = self.filter_users(name);
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .text_size(px(13.))
+            .child(format!("「{name}」を削除しますか？"))
+            .when(users > 0, |d| {
+                d.child(div().text_size(px(12.)).text_color(p.text_muted).child(format!(
+                    "このフィルターを使う保存した検索が{users}件あります。削除すると、それらはフィルターなしで検索します。"
+                )))
+            });
+        let buttons = vec![
+            push("cancel", "キャンセル", false, true)
+                .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
+                .into_any_element(),
+            push("delete-filter", "削除", true, true)
+                .on_click(cx.listener(|this, _, window, cx| this.delete_filter(window, cx)))
+                .into_any_element(),
+        ];
+        (content, buttons)
+    }
+
+    /// The search filters, in their order.
+    fn filters_dialog(&self, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+        let p = self.palette;
+        let filters = self.settings.filters.clone();
+        let last = filters.len().saturating_sub(1);
+        let rows: Vec<AnyElement> = filters
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let name = f.name.clone();
+                let (up_name, down_name, edit_name) = (name.clone(), name.clone(), name.clone());
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .py_1()
+                    .border_b_1()
+                    .border_color(p.border)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(div().truncate().text_size(px(13.)).child(f.name.clone()))
+                            .child(div().truncate().text_size(px(12.)).text_color(p.text_muted).font_family("Consolas").child(f.query.clone())),
+                    )
+                    .child(
+                        tool(("filter-up", i).into(), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
+                            .when(i > 0, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&up_name, -1, cx)))),
+                    )
+                    .child(
+                        tool(("filter-down", i).into(), "arrow-down", format!("「{}」を下へ", f.name), i < last)
+                            .when(i < last, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&down_name, 1, cx)))),
+                    )
+                    .child(
+                        tool(("filter-edit", i).into(), "pencil-line", format!("「{}」を編集", f.name), true)
+                            .on_click(cx.listener(move |this, _, window, cx| this.edit_filter(Some(edit_name.clone()), window, cx))),
+                    )
+                    .child(
+                        tool(("filter-delete", i).into(), "trash", format!("「{}」を削除", f.name), true)
+                            .on_click(cx.listener(move |this, _, window, cx| this.ask_delete_filter(name.clone(), window, cx))),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(div().text_size(px(12.)).text_color(p.text_muted).child(
+                "検索に加えるEverythingの検索式を登録し、検索欄の右のボタン（Ctrl+Shift+F）で1つ選んで使います。",
+            ))
+            .child(if rows.is_empty() {
+                div().py_2().text_size(px(12.)).text_color(p.text_faint).child("フィルターはまだありません").into_any_element()
+            } else {
+                div().flex().flex_col().children(rows).into_any_element()
+            });
+        let buttons = vec![
+            push("add-filter", "追加", false, true)
+                .on_click(cx.listener(|this, _, window, cx| this.edit_filter(None, window, cx)))
+                .into_any_element(),
+            push("close-filters", "閉じる", true, true)
+                .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                .into_any_element(),
+        ];
+        (content, buttons)
+    }
+
+    /// The theme, the connection to Everything, and the keys.
+    fn preferences_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+        let p = self.palette;
+        // Each theme a stop for Tab, kept across frames.
+        let themes: Vec<(Theme, FocusHandle)> =
+            Theme::ALL.into_iter().map(|theme| (theme, self.stop(format!("theme:{theme:?}"), cx))).collect();
+        let (engine, said) = self.engine.describe();
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            // Taken at once as one is picked, and kept.
+            .child(
+                div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(
+                    // Ringed as the fields are; the rings' room makes up most of the gaps.
+                    div().id("themes").flex().gap(px(2.)).role(Role::RadioGroup).aria_label("テーマ").children(themes.into_iter().map(
+                        |(theme, focus)| {
+                            let chosen = self.settings.theme == theme;
+                            crate::view::frame(p, crate::view::keyed(&focus, window)).child(
+                                button(p, ("theme", theme as usize), theme.label(), chosen, true)
+                                    .track_focus(&focus)
+                                    .role(Role::RadioButton)
+                                    .aria_label(theme.label())
+                                    .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
+                                    .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
+                                    .test_support(),
+                            )
+                        },
+                    )),
+                ),
+            )
+            .child(
+                div().flex().flex_col().gap_1().child(label(p, "Everything")).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .id("engine-state")
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(13.))
+                                .text_color(p.text)
+                                .role(Role::Status)
+                                .aria_label(said.clone())
+                                .tip(said)
+                                .child(format!("接続先：{engine}")),
+                        )
+                        .child(
+                            push("reconnect", "再接続", false, true)
+                                .on_click(cx.listener(|this, _, _, cx| this.reconnect(cx))),
+                        ),
+                ),
+            )
+            .child(div().text_size(px(12.)).text_color(p.text_muted).child(
+                "Everything 1.5.0.1424以降を起動してお使いください。つながらないときは「再接続」を押してください。",
+            ))
+            .child(div().pt_1().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
+            // One by one: an array of them all would lie whole on the stack, past what a debug build has.
+            .child(div().flex().flex_col().gap_1().text_size(px(12.)).children(SHORTCUTS.iter().map(|&(key, what)| {
+                div()
+                    .flex()
+                    .gap_3()
+                    .child(div().w(px(180.)).flex_none().text_color(p.text).child(key))
+                    // Wrapped in the room left, rather than cut at the dialog's edge.
+                    .child(div().flex_1().min_w_0().text_color(p.text_muted).child(what))
+            })));
+        let buttons = vec![
+            push("close-preferences", "閉じる", true, true)
+                .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                .into_any_element(),
+        ];
+        (content, buttons)
+    }
+
+    /// Whether to open `count` files together.
+    fn open_dialog(&mut self, count: usize, window: &mut Window, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+        let p = self.palette;
+        let confirm_open = self.stop("confirm-open", cx);
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .text_size(px(13.))
+            .child(format!("{count} 項目を開きますか？"))
+            .child(div().text_size(px(12.)).text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"));
+        let buttons = vec![
+            push("cancel", "キャンセル", false, true)
+                .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
+                .into_any_element(),
+            // It takes the keys as the dialog opens, so Enter goes on as it was pressed to open them.
+            crate::view::frame(p, crate::view::keyed(&confirm_open, window))
+                .child(
+                    button(p, "confirm-open", "開く", true, true)
+                        .track_focus(&confirm_open)
+                        .role(Role::Button)
+                        .aria_label("開く")
+                        .on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx)))
+                        .test_support(),
+                )
+                .into_any_element(),
+        ];
+        (content, buttons)
     }
 
     /// The dialog as the window draws it: the heading and the buttons stay, and what lies between scrolls
