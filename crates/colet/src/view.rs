@@ -212,6 +212,8 @@ fn with_marks(text: &str, marks: &[Range<usize>]) -> StyledText {
 /// The widths a row's size and modified time take: `1023.9 MB` and `2026/12/31 23:59`, at 12px.
 const SIZE_WIDTH: f32 = 56.;
 const MODIFIED_WIDTH: f32 = 96.;
+/// What the pointer is on for a row's icon to turn to its checkbox.
+const CHECK_GROUP: &str = "check";
 
 fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
@@ -570,7 +572,14 @@ impl Colet {
             .when(!selected && !highlighted, |r| r.hover(|r| r.bg(p.hover)))
             .when(faded, |r| r.text_color(p.text_muted))
             // The selection in home while the columns are worked in: marked at its edge, as in a sidebar.
-            .child(div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture))
+            .map(|r| {
+                let picture = div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture);
+                if kind == Kind::Home {
+                    r.child(picture)
+                } else {
+                    r.child(self.check(index, entry, selected, lit, picture, cx))
+                }
+            })
             .child(self.row_name(entry, kind, barred && highlighted, lit, within, narrow))
             // Out of the name, so the name stays the file's own: a fade alone would read as hidden.
             .when(held, |r| {
@@ -586,6 +595,72 @@ impl Colet {
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| this.click_row(index, kind, &path, event, window, cx)))
             .test_support()
             .into_any_element()
+    }
+
+    /// The icon, which turns to a checkbox while its row is one of several selected or the pointer is on it,
+    /// as Explorer's item check boxes do: one alone is the row gone into, not a set being gathered. It takes
+    /// the row's edge and the gap after it, to be easy to hit.
+    fn check(&self, index: usize, entry: &Entry, selected: bool, lit: bool, picture: Div, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let p = self.palette;
+        let path = entry.path.clone();
+        let boxed = selected && self.state.columns[index].selected.len() > 1;
+        // Ringed on the row's own fill, filled on any other.
+        let (fill, mark) = if lit { (p.on_accent, p.accent_fill) } else { (p.accent_fill, p.on_accent) };
+        let check = div()
+            .size(px(14.))
+            .rounded(px(3.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .map(|b| if selected { b.bg(fill).child(icon("check", 11., mark)) } else { b.border_1().border_color(p.text_muted) });
+        div()
+            .id(SharedString::from(format!("check:{}", id_text(&entry.path))))
+            .group(CHECK_GROUP)
+            .relative()
+            .flex_none()
+            .h_full()
+            .flex()
+            .items_center()
+            // Out over the row's padding and ring, and the gap to the name.
+            .ml(px(-10.))
+            .pl(px(10.))
+            .mr(px(-8.))
+            .pr(px(8.))
+            .role(Role::CheckBox)
+            .aria_label("選択")
+            .aria_toggled(if selected { Toggled::True } else { Toggled::False })
+            .child(picture.when(boxed, |d| d.invisible()).group_hover(CHECK_GROUP, |s| s.invisible()))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(10.))
+                    .w(px(16.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(!boxed, |d| d.invisible().group_hover(CHECK_GROUP, |s| s.visible()))
+                    .child(check),
+            )
+            .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                cx.stop_propagation();
+                this.click_check(index, &path, event, cx);
+            }))
+            .test_support()
+    }
+
+    /// A click on the checkbox of `path`: it adds the row to the selection or takes it out, as Ctrl+click
+    /// does, and with Shift adds the rows from the anchor, as Ctrl+Shift+click does. Clicked twice, it
+    /// does so twice, opening nothing.
+    fn click_check(&mut self, index: usize, path: &std::path::Path, event: &ClickEvent, cx: &mut Context<Self>) {
+        if event.modifiers().shift {
+            self.state.add_range(index, path);
+        } else {
+            self.state.toggle(index, path);
+        }
+        self.state.set_active(index);
+        self.changed(cx);
     }
 
     /// The name, with the filter a saved search runs within and what a favorite or saved search opens

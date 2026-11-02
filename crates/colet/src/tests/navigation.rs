@@ -271,6 +271,28 @@ fn picks_rows_apart_from_the_keys(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn picks_rows_with_their_checkboxes_as_ctrl_does(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    let check = |path: &str| ElementId::Name(format!("check:{}", id_text(Path::new(path))).into());
+    // Home picks one row at a time, and has none.
+    assert!(ui.act(cx, |window, _| window.try_find(check(r"D:\")).is_none()));
+    ui.click(cx, check(r"D:\work\c.txt"));
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt", r"D:\work\c.txt"]);
+    ui.click(cx, check(r"D:\work\a.txt"));
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\c.txt"]);
+    // With Shift, the rows from the one last clicked, a, are added.
+    ui.click_with(cx, check(r"D:\work\c.txt"), Modifiers::shift());
+    let mut picked = ui.selected(cx, 2);
+    picked.sort();
+    assert_eq!(picked, [r"D:\work\a.txt", r"D:\work\b.txt", r"D:\work\c.txt"]);
+    // Twice in a row it takes the row out and back, opening nothing.
+    ui.act(cx, |window, cx| window.double_click(check(r"D:\work\b.txt"), cx));
+    settle(cx);
+    assert_eq!(ui.selected(cx, 2).len(), 3);
+    assert!(fake.opened.lock().unwrap().is_empty());
+}
+
+#[gpui_kit::test]
 fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     assert!(ui.columns_focused(cx));
