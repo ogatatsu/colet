@@ -1174,6 +1174,7 @@ impl Colet {
         let c = &self.state.columns[index];
         let id = c.id;
         let order = self.order_of(c);
+        let check_all = (c.kind != Kind::Home).then(|| self.check_all(index, cx));
         let heading = |by: Sort, name: &'static str| {
             let chosen = order.by == by;
             let label = if chosen { format!("{}で並べ替え（{}）", by.label(), direction_label(order.descending)) } else { format!("{}で並べ替え", by.label()) };
@@ -1205,11 +1206,52 @@ impl Colet {
             .border_b_1()
             .border_color(p.border)
             .text_size(px(11.))
+            .children(check_all)
             .child(heading(Sort::Name, "sort-by-name").flex_1().min_w_0())
             .child(heading(Sort::Size, "sort-by-size").w(px(SIZE_WIDTH + 8.)).flex_none())
             .child(heading(Sort::Modified, "sort-by-modified").w(px(MODIFIED_WIDTH + 8.)).flex_none())
             .child(div().w(px(13. + 8.)).flex_none())
             .into_any_element()
+    }
+
+    /// The checkbox heading the rows' own, over them: checked while every row shown is picked, a click
+    /// then picks none, and otherwise all. Faded, and pressed in vain, while there are no rows.
+    fn check_all(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let p = self.palette;
+        let c = &self.state.columns[index];
+        let (id, empty, all) = (c.id, c.entries.is_empty(), c.all_selected());
+        let check = div()
+            .size(px(14.))
+            .rounded(px(3.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .map(|b| if all { b.bg(p.accent_fill).child(icon("check", 11., p.on_accent)) } else { b.border_1().border_color(p.text_muted) });
+        div()
+            .id(("check-all", id))
+            .flex_none()
+            .h_full()
+            // Where the rows' checkboxes stand, then the gap to their names less the heading's own 4px.
+            .ml(px(4.))
+            .mr(px(4.))
+            .w(px(16.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .role(Role::CheckBox)
+            .aria_label("すべて選択")
+            .aria_toggled(if all { Toggled::True } else { Toggled::False })
+            .when(empty, |d| d.opacity(0.4))
+            .child(check)
+            .when(!empty, |d| {
+                d.on_click(cx.listener(move |this, _, _, cx| {
+                    let Some(index) = this.state.index_of(id) else { return };
+                    this.state.toggle_all(index);
+                    this.state.set_active(index);
+                    this.changed(cx);
+                }))
+            })
+            .test_support()
     }
 
     /// The field narrowing the column `id` to the names holding what is typed there.

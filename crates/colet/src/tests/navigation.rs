@@ -293,6 +293,27 @@ fn picks_rows_with_their_checkboxes_as_ctrl_does(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn picks_every_row_or_none_with_the_checkbox_over_them(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    // Home picks one row at a time, and has none.
+    let home = ui.read(cx, |v| v.state.columns[0].id);
+    assert!(ui.act(cx, |window, _| window.try_find(("check-all", home)).is_none()));
+    ui.click(cx, ("check-all", work));
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt", r"D:\work\b.txt", r"D:\work\c.txt"]);
+    assert_eq!(ui.read(cx, |v| v.state.active), 2);
+    // Every row picked, it picks none, the keys staying on their row.
+    let focused = ui.read(cx, |v| v.state.columns[2].focused.clone());
+    ui.click(cx, ("check-all", work));
+    assert!(ui.selected(cx, 2).is_empty());
+    assert_eq!(ui.read(cx, |v| v.state.columns[2].focused.clone()), focused);
+    // Some picked, it picks them all.
+    ui.click(cx, ElementId::Name(format!("check:{}", id_text(Path::new(r"D:\work\b.txt"))).into()));
+    ui.click(cx, ("check-all", work));
+    assert_eq!(ui.selected(cx, 2).len(), 3);
+}
+
+#[gpui_kit::test]
 fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     assert!(ui.columns_focused(cx));

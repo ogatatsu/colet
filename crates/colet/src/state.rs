@@ -213,6 +213,11 @@ impl Column {
         Some((anchor, range))
     }
 
+    /// Every row it shows is picked, and it shows some.
+    pub fn all_selected(&self) -> bool {
+        !self.entries.is_empty() && self.entries.iter().all(|e| self.selected.contains(&e.path))
+    }
+
     /// Loading with nothing listed yet: its total is not known, not 0.
     pub fn unread(&self) -> bool {
         self.loading && self.entries.is_empty()
@@ -1062,6 +1067,19 @@ impl State {
         if focused.is_some() {
             self.columns[index].focused = focused;
         }
+    }
+
+    /// The checkbox heading a column: with every row it shows picked, picks none, the keys staying on
+    /// their row; with any left out, picks them all, as Ctrl+A does.
+    pub fn toggle_all(&mut self, index: usize) {
+        let Some(c) = self.columns.get(index) else { return };
+        if !c.all_selected() {
+            self.select_all(index);
+            return;
+        }
+        let focused = c.focused.clone();
+        self.select(index, Vec::new());
+        self.columns[index].focused = focused;
     }
 
     /// Shows an item where it lives, as from the history, leaving the search; the column pointing at
