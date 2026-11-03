@@ -1035,6 +1035,7 @@ impl Colet {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
                     if let Some(index) = this.state.index_of(id) {
                         this.open_menu(index, Some(Vec::new()), event.position, window, cx);
                     }

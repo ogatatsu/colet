@@ -418,3 +418,21 @@ fn takes_the_keys_into_a_field_right_clicked_from_elsewhere_with_what_it_had_pic
     ui.press(cx, "escape");
     assert!(ui.has_focus(cx, &search));
 }
+
+#[gpui_kit::test]
+fn keeps_the_keys_in_the_menu_from_a_row_or_the_folder_s_empty_space(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    for target in [ElementId::from(row(r"D:\work\c.txt")), ElementId::from(("column", work))] {
+        ui.act(cx, |window, cx| window.right_click(target.clone(), cx));
+        settle(cx);
+        let view = ui.view.clone();
+        assert!(ui.act(cx, |window, cx| view.read(cx).menu_has_keys(window, cx)));
+        // What is typed over the menu goes nowhere, not on in the column's field.
+        ui.input(cx, "b");
+        let typed = ui.view.read_with(cx, |v, cx| v.filters.get(&work).map(|f| f.input.read(cx).value().to_string()));
+        assert_eq!(typed.unwrap_or_default(), "");
+        assert!(ui.read(cx, |v| v.menu().is_some()));
+        ui.press(cx, "escape");
+    }
+}
