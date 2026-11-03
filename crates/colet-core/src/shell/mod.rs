@@ -1,16 +1,18 @@
-//! The Windows shell: icons, the Explorer context menu and file operations with the shell's own dialogs.
+//! The Windows shell: icons, the Explorer context menu, Send To, and file operations with the shell's own dialogs.
 pub mod clipboard;
 mod drop;
 mod icon;
 mod menu;
 mod open;
 mod operation;
+mod send_to;
 
-pub use drop::{Dropped, drop_clipboard};
+pub use drop::{Dropped, drop_clipboard, send_to};
 pub use icon::{Icon, IconSource, icon};
 pub use menu::{BUSY_ERROR as MENU_BUSY, MenuThread, ShowMenu};
 pub use open::{open, reveal};
 pub use operation::{Item, Operation, operate, operate_clipboard};
+pub use send_to::{SendTarget, send_targets};
 
 use std::path::{Path, PathBuf};
 

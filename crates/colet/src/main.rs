@@ -46,7 +46,8 @@ gpui_kit::assets::icon_assets!(ExtraIcons, [
         ArrowUpDown,
         House,
         AppWindow,
-        RotateCcw
+        RotateCcw,
+        Send
     ]);
 
 /// GPUI Kit's icons, and the few more Colet draws.

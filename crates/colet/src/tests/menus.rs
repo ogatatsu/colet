@@ -141,6 +141,79 @@ fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) 
     assert!(ui.columns_focused(cx));
 }
 
+fn send_targets(fake: &Fake) {
+    *fake.send_targets.lock().unwrap() = vec![
+        SendTarget { name: "圧縮 (zip 形式) フォルダー".into(), path: r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget".into() },
+        SendTarget { name: "USB".into(), path: r"C:\SendTo\USB.lnk".into() },
+    ];
+}
+
+/// The lines of the file menu's "送る": whether it is on, and those of its menu.
+fn send_lines(ui: &Ui, cx: &mut TestAppContext) -> (bool, Vec<String>) {
+    ui.read(cx, |v| {
+        let lines = v.menu_lines();
+        let send = lines.iter().find(|l| l.id == ElementId::from("menu-send-to")).expect("送る");
+        (send.off.is_none(), send.sub.iter().flatten().map(|l| l.text.to_string()).collect())
+    })
+}
+
+#[gpui_kit::test]
+fn offers_what_send_to_holds_once_read_and_only_for_something_picked(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "shift-f10");
+    assert_eq!(send_lines(&ui, cx), (false, vec![]));
+    ui.press(cx, "escape");
+    // Read afresh as the menu opens, and shown in it once read.
+    send_targets(&fake);
+    ui.press(cx, "shift-f10");
+    settle(cx);
+    assert_eq!(send_lines(&ui, cx), (true, vec!["圧縮 (zip 形式) フォルダー".to_owned(), "USB".to_owned()]));
+    ui.press(cx, "escape");
+    // From the folder's empty space, nothing is sent.
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.act(cx, |window, cx| window.right_click(("column", work), cx));
+    settle(cx);
+    assert!(!send_lines(&ui, cx).0);
+}
+
+#[gpui_kit::test]
+fn sends_by_keys_from_the_file_menu(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    send_targets(&fake);
+    ui.press(cx, "shift-f10");
+    settle(cx);
+    // Under the open lines, it opens its own menu to the right, on its first line.
+    for key in ["down", "down", "down", "down", "right", "down", "enter"] {
+        ui.press(cx, key);
+    }
+    settle(cx);
+    assert_eq!(*fake.sent.lock().unwrap(), [(r"C:\SendTo\USB.lnk".to_owned(), vec![r"D:\work\a.txt".to_owned()], false)]);
+    assert!(ui.read(cx, |v| v.menu().is_none()));
+    assert!(ui.columns_focused(cx));
+}
+
+#[gpui_kit::test]
+fn sends_results_from_several_folders_moved_with_shift(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a\x.txt"), file(r"D:\b\y.txt")]));
+    send_targets(&fake);
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "x");
+    ui.press(cx, "enter");
+    ui.press(cx, "ctrl-a");
+    ui.press(cx, "shift-f10");
+    settle(cx);
+    assert!(send_lines(&ui, cx).0);
+    // Past "開く", over the lines off for items from several folders.
+    ui.press(cx, "down");
+    ui.press(cx, "down");
+    ui.press(cx, "right");
+    settle(cx);
+    ui.click_with(cx, ("send-to", 0usize), Modifiers::shift());
+    let sent = fake.sent.lock().unwrap().clone();
+    let all = vec![r"D:\a\x.txt".to_owned(), r"D:\b\y.txt".to_owned()];
+    assert_eq!(sent, [(r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget".to_owned(), all, true)]);
+}
+
 #[gpui_kit::test]
 fn opens_the_file_menu_on_the_menu_key_and_closes_it_on_either_menu_key(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);

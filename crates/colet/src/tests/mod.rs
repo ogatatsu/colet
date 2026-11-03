@@ -16,7 +16,7 @@ use colet_core::{
     operations::{CANCELLED, Event, Kind as Operation, Request},
     paths::{ancestors, child, folder_name, id_text, parent_folder},
     quick_look::{Error as QuickLookError, Message as QuickLookMessage},
-    shell::{Owner, clipboard::ClipboardFiles},
+    shell::{Dropped, Owner, SendTarget, clipboard::ClipboardFiles},
     watch::Changes,
 };
 use gpui_kit::test::TestWindowExt;
@@ -93,6 +93,9 @@ struct Fake {
     /// What each Explorer window was asked to show selected.
     revealed: Mutex<Vec<Vec<String>>>,
     menus: Mutex<Vec<(Vec<String>, String)>>,
+    /// What Send To offers, and each send: where to, what, and with Shift held or not.
+    send_targets: Mutex<Vec<SendTarget>>,
+    sent: Mutex<Vec<(String, Vec<String>, bool)>>,
     /// What QuickLook was told, in order; it is not running while `no_quick_look` is set.
     quick_looks: Mutex<Vec<(QuickLookMessage, String)>>,
     no_quick_look: AtomicBool,
@@ -305,6 +308,15 @@ impl Backend for Fake {
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, _: (i32, i32), _: Owner) -> Result<(), String> {
         self.menus.lock().unwrap().push((paths.iter().map(|p| text(p)).collect(), text(&background)));
         Ok(())
+    }
+
+    fn send_targets(&self) -> Vec<SendTarget> {
+        self.send_targets.lock().unwrap().clone()
+    }
+
+    fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, _: Owner) -> Result<Dropped, String> {
+        self.sent.lock().unwrap().push((text(target), paths.iter().map(|p| text(p)).collect(), shift));
+        Ok(if shift { Dropped::Moved } else { Dropped::Copied })
     }
 
     fn quick_look(&self, message: QuickLookMessage, path: PathBuf) -> mpsc::Receiver<Result<(), QuickLookError>> {

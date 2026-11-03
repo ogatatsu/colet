@@ -607,6 +607,8 @@ impl Colet {
         };
         self.popup = Some(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
         self.show_menu(window, cx);
+        // Read afresh for each menu, so one added since is there.
+        self.load_send_targets(window, cx);
     }
 
     /// The file menu, or a text field's, where it was opened; over a dialog too, for its fields'.

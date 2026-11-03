@@ -2,7 +2,7 @@
 //! mouse and the keys pick alike: ↑↓ move, Enter picks, Esc closes, and the keys go back to where they were.
 use std::path::PathBuf;
 
-use colet_core::entry::{Sort, direction_label};
+use colet_core::{entry::{Sort, direction_label}, shell::IconSource};
 use gpui_kit::base::input::{self, InputState};
 use gpui_kit::component::{ActiveTheme, menu::{PopupMenu, PopupMenuItem}};
 use gpui_kit::prelude::FluentBuilder;
@@ -34,6 +34,9 @@ pub enum Command {
     /// "ごみ箱へ移動" picked with Shift held, as Explorer's Delete deletes outright then.
     Delete,
     Favorite(std::path::PathBuf),
+    /// What is picked, sent to the item of Windows' Send To at `target`: moved when `shift` is held as it
+    /// is picked.
+    SendTo { target: std::path::PathBuf, shift: bool },
     /// A row of home, pinned or put back.
     Pin(std::path::PathBuf),
     Windows,
@@ -97,6 +100,8 @@ pub struct TextMenu {
 pub struct Line {
     pub id: ElementId,
     pub glyph: Option<&'static str>,
+    /// The shell's icon, in place of a glyph.
+    pub picture: Option<IconSource>,
     pub text: SharedString,
     /// The key that does the same.
     pub hint: Option<&'static str>,
@@ -107,20 +112,22 @@ pub struct Line {
     pub group: bool,
     /// The sort in use.
     pub chosen: bool,
+    /// The lines of the menu it opens beside it, in place of doing `command`.
+    pub sub: Option<Vec<Line>>,
 }
 
 fn line(id: &'static str, glyph: &'static str, text: &'static str, hint: Option<&'static str>, off: Option<&'static str>, command: Command) -> Line {
-    Line { id: id.into(), glyph: Some(glyph), text: text.into(), hint, off, command, group: false, chosen: false }
+    Line { id: id.into(), glyph: Some(glyph), picture: None, text: text.into(), hint, off, command, group: false, chosen: false, sub: None }
 }
 
 /// A line with no glyph, off without a word unless `on`.
 fn plain(id: &'static str, text: &'static str, hint: &'static str, on: bool, command: Command) -> Line {
-    Line { id: id.into(), glyph: None, text: text.into(), hint: Some(hint), off: (!on).then_some(""), command, group: false, chosen: false }
+    Line { id: id.into(), glyph: None, picture: None, text: text.into(), hint: Some(hint), off: (!on).then_some(""), command, group: false, chosen: false, sub: None }
 }
 
 /// A line to choose, checked when it is the one in use.
 fn choice(id: impl Into<ElementId>, text: impl Into<SharedString>, command: Command, chosen: bool) -> Line {
-    Line { id: id.into(), glyph: None, text: text.into(), hint: None, off: None, command, group: false, chosen }
+    Line { id: id.into(), glyph: None, picture: None, text: text.into(), hint: None, off: None, command, group: false, chosen, sub: None }
 }
 
 impl Line {
@@ -340,10 +347,21 @@ impl Colet {
                 line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), Some(off), Command::OpenInTab(Default::default()))
             }
         };
+        // Each item of Windows' Send To, by the shell's icon for it.
+        let targets = self.send_targets.iter().enumerate().map(|(i, target)| {
+            let command = Command::SendTo { target: target.path.clone(), shift: false };
+            Line { picture: Some(IconSource::Item(target.path.clone())), ..choice(("send-to", i), target.name.clone(), command, false) }
+        });
+        let send_to = Line {
+            sub: Some(targets.collect()),
+            ..line("menu-send-to", "send", "送る", None, quiet(reasons.send_to), Command::SendTo { target: PathBuf::new(), shift: false })
+        }
+        .grouped();
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), open_off, Command::Open),
             in_tab,
             line("menu-explorer", "folder-open", "Explorerで表示", None, reasons.explorer, Command::Explorer),
+            send_to,
             line("menu-copy", "copy", "コピー", Some("Ctrl+C"), quiet(reasons.copy), Command::Copy).grouped(),
             line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), Command::Cut),
             line("menu-paste", "clipboard-paste", "貼り付け", Some("Ctrl+V"), reasons.paste, Command::Paste),
@@ -468,6 +486,7 @@ impl Colet {
             Command::Favorite(path) => {
                 self.toggle_favorite(&path, cx);
             }
+            Command::SendTo { target, shift } => self.send_to(target, shift, cx),
             Command::Pin(path) => self.toggle_pin(&path, cx),
             Command::Windows => {
                 self.show_shell_menu(window, cx);
@@ -581,39 +600,62 @@ impl Colet {
     /// Builds the open menu's lines into the component library's menu and gives it the keys: ↑↓ move,
     /// Enter picks, Esc closes, and the keys go back to where they were.
     pub fn show_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let colet = cx.weak_entity();
-        let items: Vec<PopupMenuItem> = self
-            .menu_lines()
-            .into_iter()
-            .flat_map(|line| {
-                let Line { id, glyph, text, hint, off, command, group, chosen } = line;
-                let colet = colet.clone();
-                let item = PopupMenuItem::element(move |_, cx| {
-                    div()
-                        .id(id.clone())
-                        .test_support()
-                        .flex_1()
-                        .flex()
-                        .items_center()
-                        .gap_4()
-                        .child(div().flex_1().child(text.clone()))
-                        .when_some(hint, |d, key| d.child(div().text_xs().text_color(cx.theme().muted_foreground).child(key)))
-                })
-                .when_some(glyph, |item, glyph| item.icon(crate::view::glyph(glyph)))
-                .disabled(off.is_some())
-                .checked(chosen)
-                .on_click(move |event: &ClickEvent, window, cx| {
-                    // "ごみ箱へ移動" with Shift held deletes outright, as Explorer's Delete does.
-                    let command = match &command {
-                        Command::Recycle if event.modifiers().shift => Command::Delete,
-                        command => command.clone(),
-                    };
-                    colet.update(cx, |this, cx| this.run_command(command, window, cx)).ok();
-                });
-                group.then(PopupMenuItem::separator).into_iter().chain([item])
-            })
-            .collect();
+        let items = self.menu_items(self.menu_lines(), window, cx);
         self.show_items(items, window, cx);
+    }
+
+    /// `lines` as the component library's, a line with lines of its own opening them in a menu beside it.
+    fn menu_items(&mut self, lines: Vec<Line>, window: &mut Window, cx: &mut Context<Self>) -> Vec<PopupMenuItem> {
+        let colet = cx.weak_entity();
+        let mut items = Vec::new();
+        for line in lines {
+            let Line { id, glyph, picture, text, hint, off, command, group, chosen, sub } = line;
+            if group {
+                items.push(PopupMenuItem::separator());
+            }
+            if let Some(sub) = sub {
+                let sub = self.menu_items(sub, window, cx);
+                let menu = PopupMenu::build(window, cx, |menu, _, _| sub.into_iter().fold(menu, |menu, item| menu.item(item)));
+                let item = PopupMenuItem::submenu(text, menu).when_some(glyph, |item, glyph| item.icon(crate::view::glyph(glyph)));
+                items.push(item.disabled(off.is_some()));
+                continue;
+            }
+            // Asked for now, and drawn once it has come.
+            if let Some(source) = &picture {
+                self.icons.of(source.clone(), cx);
+            }
+            let (colet, drawn) = (colet.clone(), colet.clone());
+            let item = PopupMenuItem::element(move |_, cx| {
+                let picture = picture.as_ref().map(|source| match drawn.upgrade().and_then(|c| c.read(cx).icons.peek(source)) {
+                    Some(image) => img(image).size(px(16.)).flex_none().into_any_element(),
+                    None => div().size(px(16.)).flex_none().into_any_element(),
+                });
+                div()
+                    .id(id.clone())
+                    .test_support()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .gap_4()
+                    .child(div().flex_1().flex().items_center().gap_2().children(picture).child(text.clone()))
+                    .when_some(hint, |d, key| d.child(div().text_xs().text_color(cx.theme().muted_foreground).child(key)))
+            })
+            .when_some(glyph, |item, glyph| item.icon(crate::view::glyph(glyph)))
+            .disabled(off.is_some())
+            .checked(chosen)
+            .on_click(move |event: &ClickEvent, window, cx| {
+                let command = match &command {
+                    // "ごみ箱へ移動" with Shift held deletes outright, as Explorer's Delete does.
+                    Command::Recycle if event.modifiers().shift => Command::Delete,
+                    // Sent with Shift held moves, as Explorer's Send To does.
+                    Command::SendTo { target, .. } => Command::SendTo { target: target.clone(), shift: event.modifiers().shift },
+                    command => command.clone(),
+                };
+                colet.update(cx, |this, cx| this.run_command(command, window, cx)).ok();
+            });
+            items.push(item);
+        }
+        items
     }
 
     /// Opens a menu of `items`, giving it the keys; it closes as [`Colet::close_menus`] does.

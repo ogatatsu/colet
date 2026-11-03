@@ -34,7 +34,11 @@ impl Icons {
     /// The icon for `entry`, or `None` while it is being asked for or when the shell has none; the view
     /// redraws once it arrives.
     pub fn get(&mut self, entry: &Entry, cx: &mut Context<Colet>) -> Option<Arc<RenderImage>> {
-        let source = source(entry);
+        self.of(source(entry), cx)
+    }
+
+    /// The icon for `source`, as [`Icons::get`] gives an entry's.
+    pub fn of(&mut self, source: IconSource, cx: &mut Context<Colet>) -> Option<Arc<RenderImage>> {
         if let Some(image) = self.0.get(&source) {
             return image.clone();
         }
@@ -57,6 +61,11 @@ impl Icons {
         })
         .detach();
         None
+    }
+
+    /// The icon for `source` if it has come, asking for nothing.
+    pub fn peek(&self, source: &IconSource) -> Option<Arc<RenderImage>> {
+        self.0.get(source).cloned().flatten()
     }
 }
 

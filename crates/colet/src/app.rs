@@ -438,6 +438,8 @@ pub struct Colet {
     pub(crate) unsaved_close: bool,
     pub history: History,
     pub clipboard: Clipboard,
+    /// What Windows' Send To offers, as last read: none until it is.
+    pub send_targets: Vec<shell::SendTarget>,
     /// What QuickLook was last told to show: a preview open follows the keys from it.
     quick_looked: Option<PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -524,6 +526,7 @@ impl Colet {
             unsaved_close: false,
             history: History::default(),
             clipboard: Clipboard::default(),
+            send_targets: Vec::new(),
             quick_looked: None,
             _subscriptions: subscriptions,
         };
@@ -538,6 +541,7 @@ impl Colet {
         crate::theme::apply(window, this.settings.theme, cx);
         let changed = this.clipboard.changed_flag();
         this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
+        this.load_send_targets(window, cx);
         this.search.update(cx, |input, cx| input.focus(window, cx));
         this.sync(cx);
         this.poll(cx);

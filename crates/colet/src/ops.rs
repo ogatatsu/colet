@@ -13,6 +13,7 @@ use colet_core::{
     entry::Entry,
     operations::{CANCELLED, Event, Kind, Request},
     paths::{child, folder_name, parent_folder, path_key, shown},
+    shell::Dropped,
 };
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -240,6 +241,7 @@ pub struct Reasons {
     pub explorer: Option<&'static str>,
     pub shell: Option<&'static str>,
     pub copy_path: Option<&'static str>,
+    pub send_to: Option<&'static str>,
 }
 
 const NEEDS_SELECTION: &str = "項目を選択すると使えます";
@@ -249,6 +251,7 @@ const NOT_AT_HOME: &str = "ホームでは使えません";
 pub const ONE_ITEM: &str = "1項目を選択したときに使えます";
 pub const NEEDS_FILE: &str = "ファイルを選択したときに使えます";
 pub const SAME_FOLDER: &str = "同じフォルダーの項目を選んだときに使えます";
+const NO_SEND_TARGETS: &str = "送るフォルダーに送り先がありません";
 /// The fewest files opened together that are asked about first, as Explorer stops offering to open them
 /// past 15.
 pub const ASK_TO_OPEN: usize = 16;
@@ -304,6 +307,7 @@ impl Colet {
         let busy = self.running.is_some().then_some(BUSY);
         let folder = busy.or(self.destination().is_none().then_some(NEEDS_FOLDER));
         let saved_pick = picked.len() == 1 && search;
+        let drive = picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(&home_path(p)).is_none());
         let first = picked.first().map(|p| parent_folder(p).unwrap_or(Path::new("")));
         let apart = first.is_some_and(|first| picked.iter().any(|p| parent_folder(p).unwrap_or(Path::new("")) != first));
         Reasons {
@@ -313,7 +317,7 @@ impl Colet {
                 Some(NOT_AT_HOME)
             } else if search {
                 Some("保存した検索はコピーできません")
-            } else if picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(&home_path(p)).is_none()) {
+            } else if drive {
                 Some("ドライブはコピーできません")
             } else {
                 None
@@ -341,6 +345,10 @@ impl Colet {
             },
             // With nothing picked, the folder column's own folder.
             copy_path: if none { self.destination().is_none().then_some(NEEDS_FOLDER) } else { None },
+            // From several folders too, as a drag from them.
+            send_to: item
+                .or(drive.then_some("ドライブは送れません"))
+                .or(self.send_targets.is_empty().then_some(NO_SEND_TARGETS)),
         }
     }
 
@@ -706,6 +714,58 @@ impl Colet {
             }
             // What it ran may have changed the folders.
             this.update(cx, |this, cx| this.refresh(cx)).ok();
+        })
+        .detach();
+    }
+
+    /// Reads what Windows' Send To offers off the UI thread; a file menu open as it changes is shown afresh.
+    pub fn load_send_targets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let backend = self.backend.clone();
+        let task = cx.background_executor().spawn(async move { backend.send_targets() });
+        cx.spawn_in(window, async move |this, cx| {
+            let targets = task.await;
+            this.update_in(cx, |this, window, cx| {
+                if targets != this.send_targets {
+                    this.send_targets = targets;
+                    if this.menu().is_some() {
+                        this.show_menu(window, cx);
+                    }
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Sends the picked items to `target`, one of Windows' Send To, as Explorer does: copied, or with
+    /// `shift` moved where it allows it.
+    pub fn send_to(&mut self, target: PathBuf, shift: bool, cx: &mut Context<Self>) {
+        let (picked, refused) = (self.picked(), self.reasons().send_to);
+        self.take_menu();
+        if picked.is_empty() {
+            return;
+        }
+        if let Some(reason) = refused {
+            self.refuse("送る", reason, cx);
+            return;
+        }
+        let name = self.send_targets.iter().find(|t| t.path == target).map_or_else(|| shown(folder_name(&target)), |t| t.name.clone());
+        let paths: Vec<PathBuf> = picked.iter().map(|p| home_path(p).into_owned()).collect();
+        let (backend, owner) = (self.backend.clone(), self.owner);
+        let task = cx.background_executor().spawn(async move { backend.send_to(&target, &paths, shift, owner) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(Dropped::Refused) => this.notify(format!("「{name}」は受け付けませんでした"), Tone::Info, cx),
+                    Ok(_) => {}
+                    Err(error) => this.notify(format!("「{name}」に送れません: {error}"), Tone::Error, cx),
+                }
+                // What it moved has left its folder.
+                this.refresh(cx);
+            })
+            .ok();
         })
         .detach();
     }

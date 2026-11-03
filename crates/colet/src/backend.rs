@@ -17,7 +17,7 @@ use colet_core::{
     folders,
     operations::{self, Event, Request},
     quick_look,
-    shell::{self, MenuThread, Owner, ShowMenu, clipboard::{self, ClipboardFiles}},
+    shell::{self, Dropped, MenuThread, Owner, SendTarget, ShowMenu, clipboard::{self, ClipboardFiles}},
 };
 
 /// What a path names on disk.
@@ -73,6 +73,11 @@ pub trait Backend: Send + Sync + 'static {
     fn path_kind(&self, path: &Path) -> PathKind;
     /// The Windows context menu at screen point `at`, for `paths` or the folder `background`.
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String>;
+    /// What Windows' Send To offers, from its folder; none while it cannot be read. It touches the disk.
+    fn send_targets(&self) -> Vec<SendTarget>;
+    /// Drops `paths`, from any folders, on `target`, one of [`Backend::send_targets`]: copied, or with
+    /// `shift` moved where it allows it. Blocks until the drop returns.
+    fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> Result<Dropped, String>;
     /// Asks QuickLook to show `path`, in the order asked; what it returns tells how that went.
     fn quick_look(&self, message: quick_look::Message, path: PathBuf) -> mpsc::Receiver<Result<(), quick_look::Error>>;
 }
@@ -217,6 +222,14 @@ impl Backend for Live {
             }
             Err(error) => Err(said(error)),
         }
+    }
+
+    fn send_targets(&self) -> Vec<SendTarget> {
+        shell::send_targets().unwrap_or_default()
+    }
+
+    fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> Result<Dropped, String> {
+        shell::send_to(target, paths, shift, owner).map_err(said)
     }
 
     fn quick_look(&self, message: quick_look::Message, path: PathBuf) -> mpsc::Receiver<Result<(), quick_look::Error>> {

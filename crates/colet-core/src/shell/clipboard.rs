@@ -50,7 +50,7 @@ fn preferred_effect() -> u32 {
 }
 
 /// A movable global holding `bytes`, as the clipboard takes data.
-fn global(bytes: &[u8]) -> Result<HGLOBAL> {
+pub(super) fn global(bytes: &[u8]) -> Result<HGLOBAL> {
     unsafe {
         let handle = GlobalAlloc(GMEM_MOVEABLE, bytes.len())?;
         let target = GlobalLock(handle);
@@ -87,8 +87,8 @@ impl Drop for Opened {
     }
 }
 
-/// Puts `paths` on the clipboard, cut or copied.
-pub fn write_files(paths: &[PathBuf], cut: bool, owner: Owner) -> Result<()> {
+/// `paths` as `CF_HDROP` holds them.
+pub(super) fn drop_files(paths: &[PathBuf]) -> Vec<u8> {
     let mut list: Vec<u16> = Vec::new();
     for path in paths {
         list.extend(path.as_os_str().encode_wide());
@@ -101,6 +101,12 @@ pub fn write_files(paths: &[PathBuf], cut: bool, owner: Owner) -> Result<()> {
         std::slice::from_raw_parts((&header as *const DROPFILES).cast::<u8>(), mem::size_of::<DROPFILES>())
     });
     bytes.extend(list.iter().flat_map(|c| c.to_le_bytes()));
+    bytes
+}
+
+/// Puts `paths` on the clipboard, cut or copied.
+pub fn write_files(paths: &[PathBuf], cut: bool, owner: Owner) -> Result<()> {
+    let bytes = drop_files(paths);
     let effect = if cut { DROPEFFECT_MOVE.0 } else { DROPEFFECT_COPY.0 };
     let _clipboard = Opened::new(owner)?;
     unsafe {

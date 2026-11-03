@@ -1,21 +1,26 @@
 //! What the clipboard gives only by its contents, as Outlook's attachments, pasted as Explorer pastes it:
-//! dropped on the folder, whose drop target writes the files out with the shell's own dialogs. The shell
-//! may go on reading the clipboard's data after the drop returns, so drops happen on a thread kept for the
-//! life of the process, with OLE and a message loop.
+//! dropped on the folder, whose drop target writes the files out with the shell's own dialogs; and items
+//! sent to one of Windows' Send To, dropped on it as Explorer's Send To does. The shell may go on reading
+//! the data after the drop returns, so drops happen on a thread kept for the life of the process, with OLE
+//! and a message loop.
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
 use std::thread;
 
-use windows::Win32::Foundation::{HWND, LPARAM, POINTL, WPARAM};
-use windows::Win32::System::Com::IDataObject;
-use windows::Win32::System::Ole::{DROPEFFECT_COPY, DROPEFFECT_MOVE, IDropTarget};
-use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
+use std::mem::ManuallyDrop;
+
+use windows::Win32::Foundation::{GlobalFree, HWND, LPARAM, POINTL, WPARAM};
+use windows::Win32::System::Com::{DVASPECT_CONTENT, FORMATETC, IDataObject, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL};
+use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
+use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+use windows::Win32::System::Ole::{CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_MOVE, IDropTarget, ReleaseStgMedium};
+use windows::Win32::System::SystemServices::{MK_LBUTTON, MK_SHIFT, MODIFIERKEYS_FLAGS};
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::Shell::{ILFindLastID, IShellFolder, SHBindToParent};
+use windows::Win32::UI::Shell::{ILFindLastID, IShellFolder, SHBindToParent, SHCreateDataObject};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, TranslateMessage, WM_APP,
 };
-use windows::core::{Error, Result};
+use windows::core::{Error, Result, w};
 
 use super::{Ole, Owner, Pidls, parse};
 
@@ -29,10 +34,16 @@ pub enum Dropped {
     Moved,
 }
 
+/// What is dropped: what the clipboard holds, so long as it still holds what was read as `sequence`; or
+/// the items at `paths`, with Shift held or not.
+enum Source {
+    Clipboard { sequence: u32, cut: bool },
+    Items { paths: Vec<PathBuf>, shift: bool },
+}
+
 struct Request {
-    sequence: u32,
+    source: Source,
     destination: PathBuf,
-    cut: bool,
     owner: Owner,
     done: mpsc::Sender<Result<Dropped>>,
 }
@@ -51,9 +62,20 @@ const WAKE: u32 = WM_APP;
 /// long as it still holds what was read as `sequence`.
 /// Blocks until the drop returns, which may be before the shell has written everything out.
 pub fn drop_clipboard(destination: &Path, cut: bool, sequence: u32, owner: Owner) -> Result<Dropped> {
+    request(Source::Clipboard { sequence, cut }, destination, owner)
+}
+
+/// Drops the items at `paths`, from any folders, on `target`, an item of the Send To folder, as Explorer's
+/// Send To does: copied, or with Shift held moved where the target allows it.
+/// Blocks until the drop returns, which may be before the shell has written everything out.
+pub fn send_to(target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> Result<Dropped> {
+    request(Source::Items { paths: paths.to_vec(), shift }, target, owner)
+}
+
+fn request(source: Source, destination: &Path, owner: Owner) -> Result<Dropped> {
     let dropper = dropper()?;
     let (done, result) = mpsc::channel();
-    let request = Request { sequence, destination: destination.to_owned(), cut, owner, done };
+    let request = Request { source, destination: destination.to_owned(), owner, done };
     dropper.requests.send(request).map_err(|_| Error::empty())?;
     unsafe { PostThreadMessageW(dropper.thread, WAKE, WPARAM(0), LPARAM(0))? };
     result.recv().map_err(|_| Error::empty())?
@@ -90,8 +112,18 @@ fn spawn() -> Result<Dropper> {
             }
             while unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool() {
                 if message.hwnd.is_invalid() && message.message == WAKE {
-                    for Request { sequence, destination, cut, owner, done } in incoming.try_iter() {
-                        let dropped = super::clipboard::data(sequence).and_then(|data| drop_on(&destination, cut, owner, data));
+                    for Request { source, destination, owner, done } in incoming.try_iter() {
+                        let dropped = match source {
+                            // As Explorer's paste: a cut moves where its source allows it, and copies where not.
+                            Source::Clipboard { sequence, cut } => super::clipboard::data(sequence).and_then(|data| {
+                                let allowed = if cut { DROPEFFECT_COPY | DROPEFFECT_MOVE } else { DROPEFFECT_COPY };
+                                drop_on(&destination, allowed, MODIFIERKEYS_FLAGS(0), owner, data)
+                            }),
+                            Source::Items { paths, shift } => items(&paths).and_then(|data| {
+                                let (allowed, keys) = sent(shift);
+                                drop_on(&destination, allowed, keys, owner, data)
+                            }),
+                        };
                         let _ = done.send(dropped);
                     }
                     continue;
@@ -107,24 +139,75 @@ fn spawn() -> Result<Dropper> {
     Ok(Dropper { thread, requests })
 }
 
-/// Drops `data` on the folder `destination`.
-fn drop_on(destination: &Path, cut: bool, owner: Owner, data: IDataObject) -> Result<Dropped> {
+/// What a drop sent with Shift held or not may do, and the keys it tells the target of: a copy, or with
+/// Shift a move, as a drag with it held.
+fn sent(shift: bool) -> (DROPEFFECT, MODIFIERKEYS_FLAGS) {
+    if shift { (DROPEFFECT_MOVE, MODIFIERKEYS_FLAGS(MK_SHIFT.0)) } else { (DROPEFFECT_COPY, MODIFIERKEYS_FLAGS(0)) }
+}
+
+/// The items at `paths` as one data object, by their paths as any app's drag gives them, so they need not
+/// share a folder.
+fn items(paths: &[PathBuf]) -> Result<IDataObject> {
+    let data: IDataObject = unsafe { SHCreateDataObject(None, None, None)? };
+    let format = FORMATETC {
+        cfFormat: CF_HDROP.0,
+        ptd: std::ptr::null_mut(),
+        dwAspect: DVASPECT_CONTENT.0,
+        lindex: -1,
+        tymed: TYMED_HGLOBAL.0 as u32,
+    };
+    let files = super::clipboard::global(&super::clipboard::drop_files(paths))?;
+    let medium = STGMEDIUM { tymed: TYMED_HGLOBAL.0 as u32, u: STGMEDIUM_0 { hGlobal: files }, pUnkForRelease: ManuallyDrop::new(None) };
+    // Taken by the data object once it is set.
+    if let Err(error) = unsafe { data.SetData(&format, &medium, true) } {
+        let _ = unsafe { GlobalFree(Some(files)) };
+        return Err(error);
+    }
+    Ok(data)
+}
+
+/// What the target set on `data` as done, if it did.
+fn performed(data: &IDataObject) -> Option<DROPEFFECT> {
+    let format = FORMATETC {
+        cfFormat: unsafe { RegisterClipboardFormatW(w!("Performed DropEffect")) } as u16,
+        ptd: std::ptr::null_mut(),
+        dwAspect: DVASPECT_CONTENT.0,
+        lindex: -1,
+        tymed: TYMED_HGLOBAL.0 as u32,
+    };
+    let mut medium = unsafe { data.GetData(&format) }.ok()?;
+    let effect = unsafe {
+        let held = GlobalLock(medium.u.hGlobal).cast::<u32>();
+        let effect = (!held.is_null() && GlobalSize(medium.u.hGlobal) >= size_of::<u32>()).then(|| held.read_unaligned());
+        let _ = GlobalUnlock(medium.u.hGlobal);
+        ReleaseStgMedium(&mut medium);
+        effect
+    };
+    effect.map(DROPEFFECT)
+}
+
+/// Drops `data` on `destination`, a folder or anything else that takes a drop, doing what `allowed` lets
+/// it with `keys` held.
+fn drop_on(destination: &Path, allowed: DROPEFFECT, keys: MODIFIERKEYS_FLAGS, owner: Owner, data: IDataObject) -> Result<Dropped> {
     let folder = Pidls(vec![parse(destination)?]);
     let parent: IShellFolder = unsafe { SHBindToParent(folder.0[0], None)? };
     let child = unsafe { ILFindLastID(folder.0[0]) } as *const _;
     let target: IDropTarget = unsafe { parent.GetUIObjectOf(HWND(owner as *mut _), &[child], None)? };
-    // As Explorer's paste: a cut moves where its source allows it, and copies where not.
-    let allowed = if cut { DROPEFFECT_COPY | DROPEFFECT_MOVE } else { DROPEFFECT_COPY };
     let at = POINTL::default();
     let mut effect = allowed;
-    unsafe { target.DragEnter(&data, MODIFIERKEYS_FLAGS(MK_LBUTTON.0), at, &mut effect)? };
+    unsafe { target.DragEnter(&data, MODIFIERKEYS_FLAGS(keys.0 | MK_LBUTTON.0), at, &mut effect)? };
     if effect.0 & allowed.0 == 0 {
         unsafe { target.DragLeave()? };
         return Ok(Dropped::Refused);
     }
     // Let go of the button, as a drag ends.
     let mut effect = allowed;
-    unsafe { target.Drop(&data, MODIFIERKEYS_FLAGS(0), at, &mut effect)? };
+    unsafe { target.Drop(&data, keys, at, &mut effect)? };
+    // A move the target made itself it says nothing of here, so the source deletes nothing, but in what
+    // it sets on the data.
+    if effect.0 == 0 {
+        effect = performed(&data).unwrap_or_default();
+    }
     Ok(if effect.0 & DROPEFFECT_MOVE.0 != 0 {
         Dropped::Moved
     } else if effect.0 & DROPEFFECT_COPY.0 != 0 {
@@ -294,8 +377,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let _ole = Ole::enter().unwrap();
         let data = fixtures::contents("添付.txt", b"attached");
-        let dropped = drop_on(dir.path(), false, 0, data).unwrap();
+        let dropped = drop_on(dir.path(), DROPEFFECT_COPY, MODIFIERKEYS_FLAGS(0), 0, data).unwrap();
         assert_eq!(dropped, Dropped::Copied);
         assert_eq!(std::fs::read(dir.path().join("添付.txt")).unwrap(), b"attached");
+    }
+
+    #[test]
+    fn sends_items_from_different_folders_copied_or_with_shift_moved() {
+        let (a, b, to) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (x, y) = (a.path().join("x.txt"), b.path().join("y.txt"));
+        std::fs::write(&x, "x").unwrap();
+        std::fs::write(&y, "y").unwrap();
+        let dropped = send_to(to.path(), &[x.clone(), y.clone()], false, 0).unwrap();
+        assert_eq!(dropped, Dropped::Copied);
+        assert_eq!(std::fs::read(to.path().join("x.txt")).unwrap(), b"x");
+        assert_eq!(std::fs::read(to.path().join("y.txt")).unwrap(), b"y");
+        assert!(x.exists() && y.exists());
+        let moved = tempfile::tempdir().unwrap();
+        assert_eq!(send_to(moved.path(), std::slice::from_ref(&x), true, 0).unwrap(), Dropped::Moved);
+        assert!(moved.path().join("x.txt").exists() && !x.exists());
     }
 }
