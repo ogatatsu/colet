@@ -177,6 +177,29 @@ fn offers_what_send_to_holds_once_read_and_only_for_something_picked(cx: &mut Te
 }
 
 #[gpui_kit::test]
+fn opens_nothing_beside_send_to_pointed_at_while_it_is_off(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    send_targets(&fake);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.act(cx, |window, cx| window.right_click(("column", work), cx));
+    settle(cx);
+    assert!(!send_lines(&ui, cx).0);
+    ui.act(cx, |window, cx| window.hover("menu-send-to", cx));
+    settle(cx);
+    assert!(ui.act(cx, |window, _| window.try_find(("send-to", 0usize)).is_none()));
+    ui.press(cx, "escape");
+    // On, pointed at, it opens its menu beside it.
+    use gpui_kit::test::TestQueryExt;
+    ui.act(cx, |window, cx| window.right_click(row(r"D:\work\c.txt"), cx));
+    settle(cx);
+    assert!(send_lines(&ui, cx).0);
+    let send = ui.act(cx, |window, _| window.find_by_label("送る").path().last().cloned().expect("送る"));
+    ui.act(cx, |window, cx| window.within("menu").hover(send, cx));
+    settle(cx);
+    assert!(ui.act(cx, |window, _| window.try_find(("send-to", 0usize)).is_some()));
+}
+
+#[gpui_kit::test]
 fn sends_by_keys_from_the_file_menu(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     send_targets(&fake);

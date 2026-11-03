@@ -613,7 +613,10 @@ impl Colet {
             if group {
                 items.push(PopupMenuItem::separator());
             }
-            if let Some(sub) = sub {
+            // Off, it is a line like any other, with the arrow all the same: the library opens a menu beside
+            // a line pointed at, off or not.
+            let chevron = sub.is_some();
+            if let Some(sub) = sub.filter(|_| off.is_none()) {
                 let sub = self.menu_items(sub, window, cx);
                 let menu = PopupMenu::build(window, cx, |menu, _, _| sub.into_iter().fold(menu, |menu, item| menu.item(item)));
                 let item = PopupMenuItem::submenu(text, menu).when_some(glyph, |item, glyph| item.icon(crate::view::glyph(glyph)));
@@ -639,6 +642,7 @@ impl Colet {
                     .gap_4()
                     .child(div().flex_1().flex().items_center().gap_2().children(picture).child(text.clone()))
                     .when_some(hint, |d, key| d.child(div().text_xs().text_color(cx.theme().muted_foreground).child(key)))
+                    .when(chevron, |d| d.child(svg().path("icons/chevron-right.svg").size(px(12.)).flex_none().text_color(cx.theme().muted_foreground)))
             })
             .when_some(glyph, |item, glyph| item.icon(crate::view::glyph(glyph)))
             .disabled(off.is_some())
