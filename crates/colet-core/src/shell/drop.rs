@@ -16,7 +16,10 @@ use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::Ole::{CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_MOVE, IDropTarget, ReleaseStgMedium};
 use windows::Win32::System::SystemServices::{MK_LBUTTON, MK_SHIFT, MODIFIERKEYS_FLAGS};
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::Shell::{ILFindLastID, IShellFolder, SHBindToParent, SHCreateDataObject};
+use windows::Win32::UI::Shell::Common::ITEMIDLIST;
+use windows::Win32::UI::Shell::{
+    ILClone, ILFindChild, ILFindLastID, ILIsParent, ILRemoveLastID, IShellFolder, SHBindToParent, SHCreateDataObject,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, TranslateMessage, WM_APP,
 };
@@ -145,10 +148,22 @@ fn sent(shift: bool) -> (DROPEFFECT, MODIFIERKEYS_FLAGS) {
     if shift { (DROPEFFECT_MOVE, MODIFIERKEYS_FLAGS(MK_SHIFT.0)) } else { (DROPEFFECT_COPY, MODIFIERKEYS_FLAGS(0)) }
 }
 
-/// The items at `paths` as one data object, by their paths as any app's drag gives them, so they need not
-/// share a folder.
+/// The items at `paths` as one data object, by the shell's own IDs as Explorer's selection gives them, and
+/// by their paths as any app's drag gives them. Their IDs are taken from the deepest folder they all lie
+/// in, so they need not share one; not from the desktop where it can be helped, which the desktop's
+/// shortcut maker fails on.
 fn items(paths: &[PathBuf]) -> Result<IDataObject> {
-    let data: IDataObject = unsafe { SHCreateDataObject(None, None, None)? };
+    let pidls = Pidls::parse_all(paths)?;
+    let folder = Pidls(vec![unsafe { ILClone(pidls.0[0]) }]);
+    unsafe {
+        let _ = ILRemoveLastID(Some(folder.0[0]));
+        while !pidls.0.iter().all(|pidl| ILIsParent(folder.0[0], *pidl, false).as_bool())
+            && ILRemoveLastID(Some(folder.0[0])).as_bool()
+        {}
+    }
+    let children: Vec<*const ITEMIDLIST> =
+        pidls.0.iter().map(|pidl| unsafe { ILFindChild(folder.0[0], *pidl) } as *const _).collect();
+    let data: IDataObject = unsafe { SHCreateDataObject(Some(folder.0[0]), Some(&children), None)? };
     let format = FORMATETC {
         cfFormat: CF_HDROP.0,
         ptd: std::ptr::null_mut(),
