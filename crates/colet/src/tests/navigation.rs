@@ -338,9 +338,14 @@ fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &m
     let (_, ui) = in_work(cx);
     // Three picked: one name cannot be changed for them all.
     ui.press(cx, "ctrl-a");
-    // Back from the columns, the way that keeps away from home's pane.
-    ui.press(cx, "shift-tab");
-    ui.press(cx, "shift-tab");
+    // Into the trail's buttons from its last crumb, the way that keeps away from home's pane.
+    let crumb = ui.read(cx, |v| v.stops[&format!("crumb:{}", v.state.columns.len() - 1)].clone());
+    ui.act(cx, |window, cx| crumb.focus(window, cx));
+    for _ in 0..4 {
+        ui.press(cx, "tab");
+    }
+    assert!(ui.has_keys(cx, "copy-path"));
+    ui.press(cx, "tab");
     assert!(ui.has_keys(cx, "new-folder"));
     ui.press(cx, "shift-tab");
     assert!(ui.has_keys(cx, "copy-path"), "Shift+Tab goes past rename to the one before");
@@ -405,7 +410,8 @@ fn marks_under_the_crumbs_what_is_on_screen_while_some_are_folded(cx: &mut TestA
 fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
     let ui = open(cx, Arc::new(fake));
-    cx.simulate_window_resize(ui.window, size(px(800.), px(800.)));
+    // The trail spans the window, so the window is narrow enough to fold some.
+    cx.simulate_window_resize(ui.window, size(px(560.), px(800.)));
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {
         ui.press(cx, "right");

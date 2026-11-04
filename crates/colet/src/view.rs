@@ -1597,7 +1597,7 @@ impl Colet {
         // The room the bar was last drawn with; before the first frame, what the window leaves it.
         let room = match self.crumbs.row.get() {
             Some(row) => f32::from(row.size.width),
-            None => f32::from(window.viewport_size().width) - self.sidebar_width(window) - 26. - 16. - file_actions.0,
+            None => f32::from(window.viewport_size().width) - 26. - 16. - file_actions.0,
         };
         self.crumbs.room.set(room);
         let folded = crate::crumbs::folded(&widths, room);
@@ -2207,6 +2207,8 @@ impl Render for Colet {
                     )
             })
             .child(tabbar)
+            .child(toolbar)
+            .child(pathbar)
             .child(
                 div().flex_1().min_h_0().w_full().flex().child(sidebar).child(
                     div()
@@ -2215,8 +2217,6 @@ impl Render for Colet {
                         .h_full()
                         .flex()
                         .flex_col()
-                        .child(toolbar)
-                        .child(pathbar)
                         .child(main)
                         .child(self.render_statusbar(cx)),
                 ),
