@@ -1337,16 +1337,33 @@ impl Colet {
             .bg(p.sidebar)
             .border_r_1()
             .border_color(p.border)
+            // Headed as a column is, so its filter field stands level with theirs.
             .child(
                 div()
-                    .h(px(48.))
+                    .id("home-head")
+                    .h(px(34.))
                     .flex_none()
-                    .when(marked, |d| d.border_b_2().border_color(p.accent))
-                    .px_3()
+                    .pl_3()
+                    .pr_2()
                     .flex()
                     .items_center()
-                    .when_some(field, |d, input| d.child(div().flex_1().min_w_0().child(self.filter_field(id, filtering, &input, window, cx)))),
+                    .border_b_1()
+                    .border_color(p.border)
+                    .when(marked, |d| d.border_b_2().border_color(p.accent))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(if marked { p.text } else { p.text_muted })
+                            .child("ホーム"),
+                    ),
             )
+            .when_some(field, |d, input| {
+                d.child(div().flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(self.filter_field(id, filtering, &input, window, cx)))
+            })
             .child(keys)
             .child(self.resizer("sidebar-resizer", WidthOf::Sidebar, width, cx))
             .test_support()
