@@ -1602,7 +1602,7 @@ impl Colet {
         crumbs
     }
 
-    /// Each crumb's whole width as drawn: its 12px name, padding, the search icon on the results' own,
+    /// Each crumb's whole width as drawn: its 13px name, padding, the search icon on the results' own,
     /// the chevron before it and the gap after.
     fn crumb_widths(&self, crumbs: &[Crumb], window: &Window) -> Vec<f32> {
         let results = self.state.pinned();
@@ -1612,8 +1612,8 @@ impl Colet {
             .enumerate()
             .map(|(k, Crumb { name: label, .. })| {
                 let run = TextRun { len: label.len(), font: font.clone(), color: self.palette.text, background_color: None, underline: None, strikethrough: None };
-                let shaped = window.text_system().shape_line(label.clone().into(), px(12.), &[run], None);
-                let icon = if results && k == 0 { 12. + 4. } else { 0. };
+                let shaped = window.text_system().shape_line(label.clone().into(), px(13.), &[run], None);
+                let icon = if results && k == 0 { 13. + 4. } else { 0. };
                 // The first stands at the bar's start, with no chevron or gap before it.
                 let before = if k == 0 { 0. } else { crate::crumbs::SEPARATOR + crate::crumbs::GAP };
                 f32::from(shaped.width).ceil() + 12. + icon + before
@@ -1709,7 +1709,7 @@ impl Colet {
                     .rounded(px(4.))
                     .hover(|d| d.bg(p.hover))
                     .tip("上の階層")
-                    .child(icon("ellipsis", 14., if current { p.text } else { p.text_muted }))
+                    .child(icon("ellipsis", 15., if current { p.text } else { p.text_muted }))
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         if this.crumbs_open() {
                             this.close_crumb_menu(event.is_keyboard(), window, cx);
@@ -1734,9 +1734,11 @@ impl Colet {
             .flex()
             .items_center()
             .gap(px(2.))
+            // As large as the rows' names, though the bar's buttons stay smaller.
+            .text_size(px(13.))
             .when_some(max_width, |d, width| d.min_w_0().max_w(px(width)))
             .when(max_width.is_none(), |d| d.flex_none())
-            .when(chevron, |d| d.child(icon("chevron-right", 12., p.text_faint)))
+            .when(chevron, |d| d.child(icon("chevron-right", 13., p.text_faint)))
             .child(
                 ring(div().id(("crumb", index)).track_focus(&focus), p)
                     .role(Role::Button)
@@ -1760,7 +1762,7 @@ impl Colet {
                     .text_color(if current { p.text } else { p.text_muted })
                     .hover(|d| d.bg(p.hover))
                     .tip(path)
-                    .when(query, |d| d.child(icon("search", 12., p.text_faint)))
+                    .when(query, |d| d.child(icon("search", 13., p.text_faint)))
                     .child(div().truncate().child(label))
                     .on_click(cx.listener(move |this, _, window, cx| this.go_to(index, window, cx)))
                     .test_support(),

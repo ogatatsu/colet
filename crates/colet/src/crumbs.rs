@@ -33,7 +33,7 @@ pub struct Trail {
 /// The gap between crumbs.
 pub const GAP: f32 = 2.;
 /// The chevron before a crumb, with the gap between them.
-pub const SEPARATOR: f32 = 12. + GAP;
+pub const SEPARATOR: f32 = 13. + GAP;
 /// The "…" button.
 pub const MORE: f32 = 24.;
 
