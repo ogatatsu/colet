@@ -203,6 +203,52 @@ fn leaves_the_keys_in_home_when_the_room_past_the_columns_is_pressed(cx: &mut Te
 }
 
 #[gpui_kit::test]
+fn takes_the_keys_to_home_from_a_press_in_its_head_its_field_s_room_or_its_empty_room(cx: &mut TestAppContext) {
+    let fake = Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\work")]), (r"D:\work", vec![])])
+    };
+    let ui = open(cx, Arc::new(fake));
+    let home = ui.read(cx, |v| v.state.columns[0].id);
+    let field = ui.view.read_with(cx, |v, _| v.filters[&home].input.clone());
+    // Each from the column beside home, its rows having the keys.
+    let away = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.click_in(cx, "home", row(r"D:\"));
+        ui.press(cx, "right");
+        assert_eq!(ui.active(cx), 1);
+        assert!(ui.columns_focused(cx));
+    };
+    // A press in the sidebar at `y` down the window, its offset from the sidebar's corner.
+    let press_at = |ui: &Ui, cx: &mut TestAppContext, y: fn(&mut Window) -> gpui::Pixels| {
+        ui.act(cx, |window, cx| {
+            let o = window.find("sidebar").bounds().origin;
+            let y = y(window);
+            window.click_at("sidebar", point(px(20.), y - o.y), cx)
+        });
+        settle(cx);
+    };
+    away(&ui, cx);
+    press_at(&ui, cx, |window| window.find("sidebar").bounds().top() + px(10.));
+    assert_eq!(ui.active(cx), 0, "head");
+    assert!(ui.home_focused(cx), "head");
+    // The room around the field, not the field.
+    away(&ui, cx);
+    press_at(&ui, cx, |window| window.find("home-filter").bounds().top() + px(2.));
+    assert_eq!(ui.active(cx), 0, "field's room");
+    assert!(ui.home_focused(cx), "field's room");
+    // The room below the rows.
+    away(&ui, cx);
+    press_at(&ui, cx, |window| window.find("home-rows").bounds().bottom() - px(10.));
+    assert_eq!(ui.active(cx), 0, "empty room");
+    assert!(ui.home_focused(cx), "empty room");
+    // The field keeps the keys it takes, home worked in as a column's field leaves its column.
+    away(&ui, cx);
+    ui.click(cx, ("filter", home));
+    assert_eq!(ui.active(cx), 0, "field");
+    assert!(ui.has_focus(cx, &field), "field");
+}
+
+#[gpui_kit::test]
 fn lists_the_folder_tabbing_into_the_columns_opens(cx: &mut TestAppContext) {
     let fake = Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],

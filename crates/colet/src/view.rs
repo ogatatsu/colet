@@ -1337,6 +1337,21 @@ impl Colet {
             .bg(p.sidebar)
             .border_r_1()
             .border_color(p.border)
+            // A press anywhere in it works in home, as one in a column works there: its field keeps the
+            // keys it took, the rest of it hands them to home's rows.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    if !window.default_prevented() {
+                        this.home_focus.focus(window, cx);
+                        window.prevent_default();
+                    }
+                    if this.state.active != 0 {
+                        this.state.set_active(0);
+                        this.changed(cx);
+                    }
+                }),
+            )
             // Headed as a column is, so its filter field stands level with theirs.
             .child(
                 div()
@@ -1362,7 +1377,7 @@ impl Colet {
                     ),
             )
             .when_some(field, |d, input| {
-                d.child(div().flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(self.filter_field(id, filtering, &input, window, cx)))
+                d.child(div().id("home-filter").flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(self.filter_field(id, filtering, &input, window, cx)).test_support())
             })
             .child(keys)
             .child(self.resizer("sidebar-resizer", WidthOf::Sidebar, width, cx))
