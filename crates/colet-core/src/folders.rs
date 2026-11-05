@@ -45,11 +45,16 @@ pub fn list(path: &Path, order: Order, cancelled: &AtomicBool) -> Result<Vec<Ent
             let entry = entry.map_err(|e| format!("フォルダーを最後まで読めません: {e}"))?;
             let p = entry.path();
             // The listing already holds each item's size, date and attributes; asking the item again
-            // opens it, one by one. A link or junction is still asked, for what it points to.
+            // opens it, one by one. A link or junction is still asked, for what it points to, but hides as
+            // its own attributes say, as in Explorer: "Documents and Settings" is hidden, "Users" not.
             let listed = entry.metadata();
             let item = match &listed {
                 Ok(m) if !m.file_type().is_symlink() => Ok(Entry::from_metadata(&p, m)),
-                _ => Entry::from_path(&p),
+                Ok(m) => {
+                    let hidden = is_hidden(&p, std::os::windows::fs::MetadataExt::file_attributes(m));
+                    Entry::from_path(&p).map(|e| Entry { hidden, ..e })
+                }
+                Err(_) => Entry::from_path(&p),
             };
             // Keep an item it cannot read in sight: a failure must not silently hide it.
             Ok(item.unwrap_or_else(|_| Entry {
@@ -141,6 +146,28 @@ mod tests {
         assert_eq!(entries[0].name, "z");
         assert!(entries[0].directory);
         assert_eq!(entries[1].size, Some(4));
+    }
+
+    #[test]
+    fn a_junction_hides_as_its_own_attributes_say_not_its_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        let run = |program: &str, args: &[&std::ffi::OsStr]| {
+            assert!(std::process::Command::new(program).args(args).output().unwrap().status.success());
+        };
+        let (hidden, shown) = (dir.path().join("hidden link"), dir.path().join("shown link"));
+        for link in [&hidden, &shown] {
+            run("cmd", &["/C".as_ref(), "mklink".as_ref(), "/J".as_ref(), link.as_os_str(), target.as_os_str()]);
+        }
+        // On the link itself, not what it points to.
+        run("attrib", &["+h".as_ref(), "+s".as_ref(), "/L".as_ref(), hidden.as_os_str()]);
+        let entries = list(dir.path(), Order::default(), &AtomicBool::new(false)).unwrap();
+        let hides = |name: &str| entries.iter().find(|e| e.name == name).unwrap().hidden;
+        assert!(hides("hidden link"));
+        assert!(!hides("shown link"));
+        assert!(!hides("target"));
+        assert!(entries.iter().all(|e| e.directory));
     }
 
     #[test]
