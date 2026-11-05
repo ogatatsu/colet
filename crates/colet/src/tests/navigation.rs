@@ -97,7 +97,7 @@ fn takes_the_keys_home_with_ctrl_h_on_the_row_they_were_on(cx: &mut TestAppConte
     ui.press(cx, "right");
     assert!(ui.columns_focused(cx));
     let open = ui.read(cx, |v| v.state.columns.len());
-    ui.press(cx, "ctrl-h");
+    ui.press(cx, "ctrl-0");
     assert!(ui.home_focused(cx));
     assert_eq!(ui.active(cx), 0);
     assert_eq!(ui.read(cx, |v| v.state.columns[0].focused.clone()), Some(PathBuf::from(r"D:\")));
@@ -105,7 +105,7 @@ fn takes_the_keys_home_with_ctrl_h_on_the_row_they_were_on(cx: &mut TestAppConte
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), open);
     // From the search field too.
     ui.press(cx, "ctrl-f");
-    ui.press(cx, "ctrl-h");
+    ui.press(cx, "ctrl-0");
     assert!(ui.home_focused(cx));
     assert_eq!(ui.read(cx, |v| v.state.columns[0].focused.clone()), Some(PathBuf::from(r"D:\")));
 }

@@ -213,6 +213,7 @@ impl Colet {
             let tab = self.tabs.tab(None);
             self.tabs.list.push(tab);
         }
+        self.state.set_show_hidden(self.settings.show_hidden);
         self.tabs.current = front;
         self.tabs.reveal = true;
         let query = self.state.query.clone();
@@ -268,7 +269,9 @@ impl Colet {
 
     /// Puts `parked` in front, handing back the tab that was with the keys where they are in it.
     fn swap_in(&mut self, parked: Parked, keys: Keys) -> Parked {
-        let Parked { state, filter, filters, rows, sideways, home_scroll, keys: _ } = parked;
+        let Parked { mut state, filter, filters, rows, sideways, home_scroll, keys: _ } = parked;
+        // Shown or not while it was parked, the hidden items follow the setting now.
+        state.set_show_hidden(self.settings.show_hidden);
         Parked {
             state: std::mem::replace(&mut self.state, state),
             filter: std::mem::replace(&mut self.chosen_filter, filter),

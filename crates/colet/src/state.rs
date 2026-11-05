@@ -57,7 +57,8 @@ pub struct Column {
     pub filter: Option<Filter>,
 }
 
-/// The names a column is narrowed to, those holding `text`, and all it lists, kept aside.
+/// The names a column is narrowed to, those holding `text`, and all it lists, kept aside. A folder column
+/// that leaves out the hidden items has one too, its `text` empty when nothing else narrows it.
 #[derive(Clone, Debug)]
 pub struct Filter {
     pub text: String,
@@ -65,6 +66,14 @@ pub struct Filter {
     /// The search results, which Everything narrows, keep nothing aside: how many the search finds
     /// without the filter stands for them.
     pub whole: usize,
+    /// How many of `all` are hidden items left out.
+    concealed: usize,
+}
+
+impl Filter {
+    fn new(text: impl Into<String>, all: Vec<Entry>, whole: usize) -> Self {
+        Self { text: text.into(), all, whole, concealed: 0 }
+    }
 }
 
 /// Where `needle` stands in `name`, case aside, each time it does: byte ranges of `name`.
@@ -240,6 +249,16 @@ impl Column {
         self.filter.as_ref().and_then(|f| narrowing(&f.text))
     }
 
+    /// Narrowed to some names, by its field: not just leaving out the hidden items.
+    pub fn filtering(&self) -> bool {
+        self.filter.as_ref().is_some_and(|f| !f.text.is_empty())
+    }
+
+    /// How many it lists in all, less the hidden items it leaves out.
+    pub fn shown_total(&self) -> usize {
+        self.total - self.filter.as_ref().map_or(0, |f| f.concealed)
+    }
+
     /// The picks it shows, which are what is acted on: those a filter hides stay picked only to keep what
     /// they opened open.
     pub fn shown_selected(&self) -> Cow<'_, [PathBuf]> {
@@ -398,6 +417,9 @@ pub struct State {
     /// The folder column worked in last, which → from the results or home goes back to while it stays.
     last_folder: Option<ColumnId>,
     next_id: ColumnId,
+    /// Whether the folder columns list the hidden items; leaving them out, they still show the one on the
+    /// way to where the user is: the folder open beside, or the item pointed at.
+    show_hidden: bool,
 }
 
 impl Default for State {
@@ -454,6 +476,7 @@ impl State {
             fold: None,
             last_folder: None,
             next_id: 0,
+            show_hidden: true,
         };
         let home = state.column(Kind::Home, Path::new(""), None);
         state.columns.push(home);
@@ -1176,12 +1199,41 @@ impl State {
             c.entries.push(Entry { parent: shown(parent), ..Entry::folder(path, &shown(folder_name(path))) });
             c.total += 1;
         }
-        // It shows, to be seen picked, even where the filter would hide it: the filter goes then.
-        if let Some(text) = text.filter(|text| holds(&shown(folder_name(path)), text).is_some()) {
-            c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries), whole: 0 });
-            self.narrow(index);
-        }
+        // It shows, to be seen picked, even where the filter would hide it: the filter's text goes then.
+        let text = text.filter(|text| holds(&shown(folder_name(path)), text).is_some()).unwrap_or_default();
+        self.refilter(index, text);
         self.select(index, vec![path.to_owned()]);
+    }
+
+    /// The folder columns list the hidden items, or leave them out: those left out stay picked, and what
+    /// they opened open, as a filter leaves what it hides.
+    pub fn set_show_hidden(&mut self, show: bool) {
+        if self.show_hidden == show {
+            return;
+        }
+        self.show_hidden = show;
+        for index in 0..self.columns.len() {
+            if self.columns[index].kind == Kind::Folder {
+                let text = self.columns[index].filter.as_ref().map(|f| f.text.clone());
+                self.set_filter(index, text.as_deref());
+            }
+        }
+    }
+
+    /// Whether the column at `index` leaves out the hidden items.
+    fn conceals(&self, index: usize) -> bool {
+        !self.show_hidden && self.columns[index].kind == Kind::Folder
+    }
+
+    /// Puts all the folder column at `index` lists, in its `entries` with no filter, under one of `text`,
+    /// when that or the hidden items left out narrow it.
+    fn refilter(&mut self, index: usize, text: String) {
+        if text.is_empty() && !self.conceals(index) {
+            return;
+        }
+        let c = &mut self.columns[index];
+        c.filter = Some(Filter::new(text, std::mem::take(&mut c.entries), 0));
+        self.narrow(index);
     }
 
     /// Narrows the column at `index` to the names holding the words of `text`, or with none, or no words in
@@ -1194,38 +1246,50 @@ impl State {
             c.filter = match (text, c.filter.take()) {
                 (None, _) => None,
                 (Some(text), Some(filter)) => Some(Filter { text: text.into(), ..filter }),
-                (Some(text), None) => Some(Filter { text: text.into(), all: Vec::new(), whole: c.total }),
+                (Some(text), None) => Some(Filter::new(text, Vec::new(), c.total)),
             };
             return;
         }
-        match text {
-            None => {
-                if let Some(filter) = c.filter.take() {
-                    c.entries = filter.all;
-                    // All show again: the keys go back to the row the filter took them off.
-                    let hid = c.hid.take();
-                    if c.focused.is_none() {
-                        c.focused = hid;
-                    }
+        if let Some(filter) = c.filter.take() {
+            c.entries = filter.all;
+            // All show again: the keys go back to the row the filter took them off, unless it hides it
+            // still.
+            if text.is_none() {
+                let hid = c.hid.take();
+                if c.focused.is_none() {
+                    c.focused = hid;
                 }
             }
-            Some(text) => {
-                let all = match c.filter.take() {
-                    Some(filter) => filter.all,
-                    None => std::mem::take(&mut c.entries),
-                };
-                c.filter = Some(Filter { text: text.into(), all, whole: 0 });
-                self.narrow(index);
-            }
         }
+        self.refilter(index, text.unwrap_or_default().into());
     }
 
     /// Lists what the column's filter lets through; the keys let go of a row it hides, kept to go back
     /// to once it shows again, while they have gone to no other.
     fn narrow(&mut self, index: usize) {
+        let conceal = self.conceals(index);
+        // The hidden item on the way to where the user is shows still: the folder open beside, or the item
+        // pointed at.
+        let beside = self.columns.get(index + 1).filter(|next| next.kind == Kind::Folder).map(|next| next.path.clone());
         let c = &mut self.columns[index];
-        let Some(filter) = c.filter.as_ref().filter(|_| c.kind != Kind::Search) else { return };
-        c.entries = filter.all.iter().filter_map(|e| narrowed(e, &filter.text)).collect();
+        if c.kind == Kind::Search {
+            return;
+        }
+        let Some(filter) = c.filter.as_mut() else { return };
+        let on_the_way = |path: &PathBuf| beside.as_ref() == Some(path) || c.highlight.as_ref() == Some(path);
+        let mut concealed = 0;
+        c.entries = filter
+            .all
+            .iter()
+            .filter_map(|e| {
+                if conceal && e.hidden && !on_the_way(&e.path) {
+                    concealed += 1;
+                    return None;
+                }
+                narrowed(e, &filter.text)
+            })
+            .collect();
+        filter.concealed = concealed;
         let shown: HashSet<&Path> = c.entries.iter().map(|e| e.path.as_path()).collect();
         match &c.focused {
             Some(f) if !shown.contains(f.as_path()) => c.hid = c.focused.take(),
@@ -1238,7 +1302,7 @@ impl State {
     /// Whether the folder column at `index` narrowed to its names, holds `path` but hides it.
     fn hides(&self, index: usize, path: &Path) -> bool {
         let c = &self.columns[index];
-        c.filter.as_ref().is_some_and(|f| f.all.iter().any(|e| e.path == path && narrowed(e, &f.text).is_none()))
+        c.filter.as_ref().is_some_and(|f| f.all.iter().any(|e| e.path == path && holds(&e.name, &f.text).is_none()))
     }
 
     /// Picked in the folder they went to once it lists them, while it is the column worked in.
@@ -1339,15 +1403,15 @@ impl State {
         });
         let waiting = c.pick.is_some();
         self.list(index, entries, total, offset, departed);
-        let Some(text) = text else { return };
-        let c = &mut self.columns[index];
-        // What was just pasted here shows picked, as a new folder does: the filter goes when it hides any.
+        let mut text = text.unwrap_or_default();
+        let c = &self.columns[index];
+        // What was just pasted here shows picked, as a new folder does: the filter's text goes when it hides
+        // any.
         let picked = waiting && c.pick.is_none() && index == self.active;
         if picked && c.selected.iter().any(|p| c.entry(p).is_some_and(|e| narrowed(e, &text).is_none())) {
-            return;
+            text.clear();
         }
-        c.filter = Some(Filter { text, all: std::mem::take(&mut c.entries), whole: 0 });
-        self.narrow(index);
+        self.refilter(index, text);
     }
 
     /// How many the search finds without the filter Everything narrows it by, asked along with `request`.
@@ -2411,5 +2475,70 @@ mod tests {
         assert_eq!(s.columns[1].selected, one(r"D:\a"));
         assert!(s.columns[2].selected.is_empty());
         assert_eq!(s.active, 0);
+    }
+
+    fn hidden(entry: Entry) -> Entry {
+        Entry { hidden: true, ..entry }
+    }
+
+    /// The listing of the column at `index` arrives, as from a refresh.
+    fn listed(s: &mut State, index: usize, entries: Vec<Entry>) {
+        let (id, request, total) = (s.columns[index].id, s.columns[index].request, entries.len());
+        s.page(id, request, entries, total, 0, &HashSet::new());
+    }
+
+    #[test]
+    fn leaves_out_the_hidden_items_keeping_them_picked_as_a_filter_does() {
+        let mut s = State::new();
+        with_entries(&mut s, 0, vec![folder(r"D:\")]);
+        s.select(0, one(r"D:\"));
+        let listing = vec![folder(r"D:\a"), hidden(folder(r"D:\.git")), hidden(file(r"D:\desktop.ini"))];
+        listed(&mut s, 1, listing.clone());
+        s.set_active(1);
+        s.select(1, one(r"D:\desktop.ini"));
+        s.set_show_hidden(false);
+        assert_eq!(names(&s, 1), [r"D:\a"]);
+        assert_eq!(s.columns[1].shown_total(), 1);
+        assert!(!s.columns[1].filtering());
+        // Out of sight, it stays picked, but is not what is acted on.
+        assert_eq!(s.columns[1].selected, one(r"D:\desktop.ini"));
+        assert!(s.columns[1].shown_selected().is_empty());
+        // A refresh leaves them out again; narrowing by the field, and lifting it, does too.
+        listed(&mut s, 1, listing.clone());
+        assert_eq!(names(&s, 1), [r"D:\a"]);
+        s.set_filter(1, Some("i"));
+        assert!(s.columns[1].entries.is_empty());
+        assert!(s.columns[1].filtering());
+        s.set_filter(1, None);
+        assert_eq!(names(&s, 1), [r"D:\a"]);
+        // Shown again, all are listed as before, the pick with them.
+        s.set_show_hidden(true);
+        assert_eq!(names(&s, 1).len(), 3);
+        assert!(s.columns[1].filter.is_none());
+        assert_eq!(*s.columns[1].shown_selected(), one(r"D:\desktop.ini"));
+        assert_eq!(s.columns[1].shown_total(), 3);
+    }
+
+    #[test]
+    fn a_hidden_folder_left_open_beside_keeps_its_column_and_its_row() {
+        let mut s = drive(vec![folder(r"D:\a"), hidden(folder(r"D:\.git"))]);
+        s.select(1, one(r"D:\.git"));
+        with_entries(&mut s, 2, vec![hidden(file(r"D:\.git\HEAD")), file(r"D:\.git\config")]);
+        s.set_show_hidden(false);
+        assert_eq!(s.columns.len(), 3);
+        assert_eq!(names(&s, 1), [r"D:\a", r"D:\.git"]);
+        assert_eq!(names(&s, 2), [r"D:\.git\config"]);
+    }
+
+    #[test]
+    fn going_into_a_hidden_folder_shows_the_way_there_and_not_what_else_is_hidden() {
+        let mut s = State::new();
+        s.set_show_hidden(false);
+        s.reveal(Path::new(r"D:\.git\HEAD"), false);
+        listed(&mut s, 1, vec![folder(r"D:\a"), hidden(folder(r"D:\.git")), hidden(folder(r"D:\$RECYCLE.BIN"))]);
+        listed(&mut s, 2, vec![hidden(file(r"D:\.git\HEAD")), hidden(file(r"D:\.git\index")), file(r"D:\.git\config")]);
+        assert_eq!(names(&s, 1), [r"D:\a", r"D:\.git"]);
+        assert_eq!(names(&s, 2), [r"D:\.git\HEAD", r"D:\.git\config"]);
+        assert_eq!(s.columns[2].focused.as_deref(), Some(Path::new(r"D:\.git\HEAD")));
     }
 }

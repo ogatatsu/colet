@@ -1,6 +1,6 @@
 //! What Colet keeps between runs: the widths, the favorites, the saved searches, what is pinned in home,
-//! the search filters, the tabs with what each searched and the folders open, the sort order, the theme,
-//! and where the window was. The way back and forth and what is picked besides are not kept.
+//! the search filters, the tabs with what each searched and the folders open, the sort order, the theme, whether
+//! the hidden items show, and where the window was. The way back and forth and what is picked besides are not kept.
 use std::{
     path::{Path, PathBuf},
     sync::mpsc,
@@ -179,6 +179,8 @@ pub struct Settings {
     #[serde(with = "order")]
     pub sort: Order,
     pub theme: Theme,
+    /// Whether the folders list their hidden and system items, as Explorer leaves them out by default.
+    pub show_hidden: bool,
     pub window: Option<Placement>,
 }
 
@@ -196,6 +198,7 @@ impl Default for Settings {
             tab: 0,
             sort: Order::default(),
             theme: Theme::System,
+            show_hidden: false,
             window: None,
         }
     }

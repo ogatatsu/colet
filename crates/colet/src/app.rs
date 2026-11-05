@@ -95,6 +95,7 @@ actions!(
         OpenSearchFilters,
         Unfold,
         FocusHome,
+        ToggleHidden,
         QuickLook,
         NewTab,
         CloseTab,
@@ -133,7 +134,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-l", FocusSearch, None),
         KeyBinding::new("ctrl-shift-f", OpenSearchFilters, None),
         KeyBinding::new("ctrl-u", Unfold, None),
-        KeyBinding::new("ctrl-h", FocusHome, None),
+        KeyBinding::new("ctrl-0", FocusHome, None),
+        KeyBinding::new("ctrl-h", ToggleHidden, None),
         KeyBinding::new("f2", RenameItem, Some(COLUMNS)),
         KeyBinding::new("ctrl-c", CopyItems, Some(COLUMNS)),
         KeyBinding::new("ctrl-x", CutItems, Some(COLUMNS)),
@@ -852,6 +854,19 @@ impl Colet {
             self.listings.first(id);
             self.load(id, 0, listed, cx);
         }
+    }
+
+    /// The folders list their hidden items, or leave them out, in every tab and from now on.
+    pub fn toggle_hidden(&mut self, cx: &mut Context<Self>) {
+        let show = !self.settings.show_hidden;
+        self.update_settings(|s| s.show_hidden = show, cx);
+        self.state.set_show_hidden(show);
+        // The rows move: the focused ones are brought in sight again.
+        let folders: Vec<ColumnId> = self.state.columns.iter().filter(|c| c.kind == Kind::Folder).map(|c| c.id).collect();
+        for id in folders {
+            self.rows.moved(id);
+        }
+        self.changed(cx);
     }
 
     /// Reloads every column, keeping what each shows meanwhile.

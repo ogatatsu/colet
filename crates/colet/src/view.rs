@@ -4,7 +4,7 @@ use std::{ops::Range, rc::Rc, time::Instant};
 
 use colet_core::{entry::{Entry, Sort, direction_label}, paths::{folder_name, id_text, shown}, time};
 use gpui_kit::base::input::{self, Input, InputState};
-use gpui_kit::component::{button::{Button, ButtonVariants}, status_bar::StatusBar, Disableable, Sizable};
+use gpui_kit::component::{button::{Button, ButtonVariants}, status_bar::StatusBar, Disableable, Selectable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -424,7 +424,7 @@ impl Colet {
             }))
             .on_action(cx.listener(|this, _: &ClearFilter, window, cx| {
                 let c = &this.state.columns[this.state.active];
-                if c.filter.is_some() {
+                if c.filtering() {
                     this.close_filter(c.id, window, cx);
                 } else {
                     cx.propagate();
@@ -812,7 +812,8 @@ impl Colet {
                 Kind::Search => ("search", "一致する項目はありません"),
                 Kind::Home if c.filter.is_some() => ("funnel", "一致する項目はありません"),
                 Kind::Home => ("hard-drive", "場所もお気に入りもありません"),
-                Kind::Folder if c.total > 0 && c.filter.is_some() => ("funnel", "一致する項目はありません"),
+                Kind::Folder if c.shown_total() > 0 && c.filtering() => ("funnel", "一致する項目はありません"),
+                Kind::Folder if c.total > 0 => ("eye-off", "隠しファイルのみがあります"),
                 Kind::Folder => ("folder", "このフォルダーは空です"),
             };
             return self.message(name, text.into()).into_any_element();
@@ -1004,10 +1005,10 @@ impl Colet {
             _ if c.error.is_some() || c.unread() => String::new(),
             // Everything narrows the results: how many it lets through, of how many the search finds.
             Some(f) if kind == Kind::Search => format!("{} / {}", time::count(c.total as u64), time::count(f.whole as u64)),
-            Some(f) if !f.text.is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.total as u64)),
-            _ => time::count(c.total as u64),
+            Some(f) if !f.text.is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.shown_total() as u64)),
+            _ => time::count(c.shown_total() as u64),
         };
-        let filtering = c.filter.as_ref().is_some_and(|f| !f.text.is_empty());
+        let filtering = c.filtering();
         let field = self.filters.get(&id).map(|field| field.input.clone());
         let path = shown(&c.path);
         let (star_key, narrowing) = (favorite_key(&c.path, c.narrowing().as_deref()), c.narrowing());
@@ -1513,6 +1514,16 @@ impl Colet {
                     .flex()
                     .flex_none()
                     .gap(px(2.))
+                    .child({
+                        // Pressed while the hidden items show.
+                        let show = self.settings.show_hidden;
+                        keep_focus(
+                            Self::icon_button("show-hidden", if show { "eye" } else { "eye-off" }, "隠しファイルを表示", "隠しファイルを表示（Ctrl+H）", true)
+                                .selected(show)
+                                .toggled(show),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx)))
+                    })
                     .child(
                         keep_focus(Self::icon_button("refresh", "refresh-cw", "更新", "更新（F5）", true))
                             .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
@@ -2184,6 +2195,11 @@ impl Render for Colet {
             .on_action(cx.listener(|this, _: &FocusHome, window, cx| {
                 if this.dialog.is_none() {
                     this.focus_home(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleHidden, _, cx| {
+                if this.dialog.is_none() {
+                    this.toggle_hidden(cx);
                 }
             }))
             // Esc puts down a drag in home, before the keys reach anything else.

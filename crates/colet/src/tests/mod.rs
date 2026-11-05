@@ -49,6 +49,7 @@ mod file_ops;
 mod menus;
 mod quick_look;
 mod tabs;
+mod hidden;
 
 #[derive(Default)]
 struct Fake {
