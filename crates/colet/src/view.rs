@@ -1414,6 +1414,10 @@ impl Colet {
                     .child(
                         Self::icon_button("forward", "arrow-right", "進む", "進む（Alt+→）", forward)
                             .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx))),
+                    )
+                    .child(
+                        keep_focus(Self::icon_button("refresh", "refresh-cw", "更新", "更新（F5）", true))
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
                     ),
             )
             .child(
@@ -1524,10 +1528,6 @@ impl Colet {
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx)))
                     })
-                    .child(
-                        keep_focus(Self::icon_button("refresh", "refresh-cw", "更新", "更新（F5）", true))
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                    )
                     .child(
                         Self::icon_button("preferences", "sliders-horizontal", "設定", "設定", true)
                             .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
