@@ -7,7 +7,7 @@ use std::{
 use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW};
 
 use crate::{
-    entry::{Entry, Marks, Order, is_hidden, sort_entries},
+    entry::{Entry, Hiding, Marks, Order, hiding, sort_entries},
     paths::shown,
     wide::Wide,
 };
@@ -51,7 +51,7 @@ pub fn list(path: &Path, order: Order, cancelled: &AtomicBool) -> Result<Vec<Ent
             let item = match &listed {
                 Ok(m) if !m.file_type().is_symlink() => Ok(Entry::from_metadata(&p, m)),
                 Ok(m) => {
-                    let hidden = is_hidden(&p, std::os::windows::fs::MetadataExt::file_attributes(m));
+                    let hidden = hiding(&p, std::os::windows::fs::MetadataExt::file_attributes(m));
                     Entry::from_path(&p).map(|e| Entry { hidden, ..e })
                 }
                 Err(_) => Entry::from_path(&p),
@@ -65,9 +65,9 @@ pub fn list(path: &Path, order: Order, cancelled: &AtomicBool) -> Result<Vec<Ent
                 size: None,
                 modified: None,
                 // The listing's own record, which needs no access to the item.
-                hidden: listed.as_ref().is_ok_and(|m| {
-                    is_hidden(&p, std::os::windows::fs::MetadataExt::file_attributes(m))
-                }),
+                hidden: listed
+                    .as_ref()
+                    .map_or(Hiding::Shown, |m| hiding(&p, std::os::windows::fs::MetadataExt::file_attributes(m))),
                 marks: Marks::default(),
             }))
         }),
@@ -163,7 +163,7 @@ mod tests {
         // On the link itself, not what it points to.
         run("attrib", &["+h".as_ref(), "+s".as_ref(), "/L".as_ref(), hidden.as_os_str()]);
         let entries = list(dir.path(), Order::default(), &AtomicBool::new(false)).unwrap();
-        let hides = |name: &str| entries.iter().find(|e| e.name == name).unwrap().hidden;
+        let hides = |name: &str| entries.iter().find(|e| e.name == name).unwrap().hidden.is_hidden();
         assert!(hides("hidden link"));
         assert!(!hides("shown link"));
         assert!(!hides("target"));

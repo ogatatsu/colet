@@ -9,7 +9,7 @@ use std::{
 };
 
 use colet_core::{
-    entry::{Entry, Marks},
+    entry::{Entry, Hiding, Marks},
     paths::{self, ancestors, folder_name, parent_folder, path_key, shown},
 };
 
@@ -417,14 +417,32 @@ pub struct State {
     /// The folder column worked in last, which → from the results or home goes back to while it stays.
     last_folder: Option<ColumnId>,
     next_id: ColumnId,
-    /// Whether the folder columns list the hidden items; leaving them out, they still show the one on the
-    /// way to where the user is: the folder open beside, or the item pointed at.
-    show_hidden: bool,
+    /// Which hidden items the folder columns list; leaving any out, they still show the one on the way to
+    /// where the user is: the folder open beside, or the item pointed at.
+    showing: Showing,
 }
 
 impl Default for State {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Which of the hidden items the folder columns list: the protected operating system files only along
+/// with the rest, as in Explorer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Showing {
+    pub hidden: bool,
+    pub protected: bool,
+}
+
+impl Showing {
+    fn shows(self, hiding: Hiding) -> bool {
+        match hiding {
+            Hiding::Shown => true,
+            Hiding::Hidden => self.hidden,
+            Hiding::Protected => self.hidden && self.protected,
+        }
     }
 }
 
@@ -476,7 +494,7 @@ impl State {
             fold: None,
             last_folder: None,
             next_id: 0,
-            show_hidden: true,
+            showing: Showing { hidden: true, protected: true },
         };
         let home = state.column(Kind::Home, Path::new(""), None);
         state.columns.push(home);
@@ -1115,7 +1133,7 @@ impl State {
             directory,
             size: None,
             modified: None,
-            hidden: false,
+            hidden: Hiding::Shown,
             marks: Marks::default(),
         };
         let here = self.snapshot();
@@ -1205,13 +1223,13 @@ impl State {
         self.select(index, vec![path.to_owned()]);
     }
 
-    /// The folder columns list the hidden items, or leave them out: those left out stay picked, and what
-    /// they opened open, as a filter leaves what it hides.
-    pub fn set_show_hidden(&mut self, show: bool) {
-        if self.show_hidden == show {
+    /// The folder columns list the hidden items `showing` lets through, and leave out the rest: those left
+    /// out stay picked, and what they opened open, as a filter leaves what it hides.
+    pub fn set_showing(&mut self, showing: Showing) {
+        if self.showing == showing {
             return;
         }
-        self.show_hidden = show;
+        self.showing = showing;
         for index in 0..self.columns.len() {
             if self.columns[index].kind == Kind::Folder {
                 let text = self.columns[index].filter.as_ref().map(|f| f.text.clone());
@@ -1220,9 +1238,9 @@ impl State {
         }
     }
 
-    /// Whether the column at `index` leaves out the hidden items.
+    /// Whether the column at `index` leaves out any hidden items.
     fn conceals(&self, index: usize) -> bool {
-        !self.show_hidden && self.columns[index].kind == Kind::Folder
+        !(self.showing.hidden && self.showing.protected) && self.columns[index].kind == Kind::Folder
     }
 
     /// Puts all the folder column at `index` lists, in its `entries` with no filter, under one of `text`,
@@ -1267,7 +1285,7 @@ impl State {
     /// Lists what the column's filter lets through; the keys let go of a row it hides, kept to go back
     /// to once it shows again, while they have gone to no other.
     fn narrow(&mut self, index: usize) {
-        let conceal = self.conceals(index);
+        let (conceal, showing) = (self.conceals(index), self.showing);
         // The hidden item on the way to where the user is shows still: the folder open beside, or the item
         // pointed at.
         let beside = self.columns.get(index + 1).filter(|next| next.kind == Kind::Folder).map(|next| next.path.clone());
@@ -1282,7 +1300,7 @@ impl State {
             .all
             .iter()
             .filter_map(|e| {
-                if conceal && e.hidden && !on_the_way(&e.path) {
+                if conceal && !showing.shows(e.hidden) && !on_the_way(&e.path) {
                     concealed += 1;
                     return None;
                 }
@@ -1515,7 +1533,7 @@ mod tests {
             directory,
             size: None,
             modified: None,
-            hidden: false,
+            hidden: Hiding::Shown,
             marks: Marks::default(),
         }
     }
@@ -2478,7 +2496,31 @@ mod tests {
     }
 
     fn hidden(entry: Entry) -> Entry {
-        Entry { hidden: true, ..entry }
+        Entry { hidden: Hiding::Hidden, ..entry }
+    }
+
+    fn protected(entry: Entry) -> Entry {
+        Entry { hidden: Hiding::Protected, ..entry }
+    }
+
+    const NONE: Showing = Showing { hidden: false, protected: false };
+    const ALL: Showing = Showing { hidden: true, protected: true };
+
+    #[test]
+    fn shows_the_protected_files_only_along_with_the_hidden_items() {
+        let mut s = drive(vec![folder(r"D:\a"), hidden(folder(r"D:\.git")), protected(file(r"D:\pagefile.sys"))]);
+        s.columns[1].total = 3;
+        let shown = |s: &mut State, showing| {
+            s.set_showing(showing);
+            names(s, 1).into_iter().map(str::to_owned).collect::<Vec<_>>()
+        };
+        assert_eq!(shown(&mut s, Showing { hidden: true, protected: false }), [r"D:\a", r"D:\.git"]);
+        assert_eq!(s.columns[1].shown_total(), 2);
+        // Asked for alone, they stay out with the rest.
+        assert_eq!(shown(&mut s, Showing { hidden: false, protected: true }), [r"D:\a"]);
+        assert_eq!(shown(&mut s, ALL).len(), 3);
+        assert!(s.columns[1].filter.is_none());
+        assert_eq!(shown(&mut s, NONE), [r"D:\a"]);
     }
 
     /// The listing of the column at `index` arrives, as from a refresh.
@@ -2496,7 +2538,7 @@ mod tests {
         listed(&mut s, 1, listing.clone());
         s.set_active(1);
         s.select(1, one(r"D:\desktop.ini"));
-        s.set_show_hidden(false);
+        s.set_showing(NONE);
         assert_eq!(names(&s, 1), [r"D:\a"]);
         assert_eq!(s.columns[1].shown_total(), 1);
         assert!(!s.columns[1].filtering());
@@ -2512,7 +2554,7 @@ mod tests {
         s.set_filter(1, None);
         assert_eq!(names(&s, 1), [r"D:\a"]);
         // Shown again, all are listed as before, the pick with them.
-        s.set_show_hidden(true);
+        s.set_showing(ALL);
         assert_eq!(names(&s, 1).len(), 3);
         assert!(s.columns[1].filter.is_none());
         assert_eq!(*s.columns[1].shown_selected(), one(r"D:\desktop.ini"));
@@ -2524,7 +2566,7 @@ mod tests {
         let mut s = drive(vec![folder(r"D:\a"), hidden(folder(r"D:\.git"))]);
         s.select(1, one(r"D:\.git"));
         with_entries(&mut s, 2, vec![hidden(file(r"D:\.git\HEAD")), file(r"D:\.git\config")]);
-        s.set_show_hidden(false);
+        s.set_showing(NONE);
         assert_eq!(s.columns.len(), 3);
         assert_eq!(names(&s, 1), [r"D:\a", r"D:\.git"]);
         assert_eq!(names(&s, 2), [r"D:\.git\config"]);
@@ -2533,7 +2575,7 @@ mod tests {
     #[test]
     fn going_into_a_hidden_folder_shows_the_way_there_and_not_what_else_is_hidden() {
         let mut s = State::new();
-        s.set_show_hidden(false);
+        s.set_showing(NONE);
         s.reveal(Path::new(r"D:\.git\HEAD"), false);
         listed(&mut s, 1, vec![folder(r"D:\a"), hidden(folder(r"D:\.git")), hidden(folder(r"D:\$RECYCLE.BIN"))]);
         listed(&mut s, 2, vec![hidden(file(r"D:\.git\HEAD")), hidden(file(r"D:\.git\index")), file(r"D:\.git\config")]);

@@ -43,7 +43,7 @@ use crate::{
     reveal::Sideways,
     settings::{LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
-    state::{Column, ColumnId, Kind, State, filter_words, room_for_a_word},
+    state::{Column, ColumnId, Kind, Showing, State, filter_words, room_for_a_word},
     tabs::Tabs,
     theme::Palette,
     watching::Watching,
@@ -856,11 +856,28 @@ impl Colet {
         }
     }
 
+    /// Which hidden items the folders list, as the settings say.
+    pub fn showing(&self) -> Showing {
+        Showing { hidden: self.settings.show_hidden, protected: self.settings.show_protected }
+    }
+
     /// The folders list their hidden items, or leave them out, in every tab and from now on.
     pub fn toggle_hidden(&mut self, cx: &mut Context<Self>) {
         let show = !self.settings.show_hidden;
         self.update_settings(|s| s.show_hidden = show, cx);
-        self.state.set_show_hidden(show);
+        self.follow_showing(cx);
+    }
+
+    /// The protected operating system files show along with the hidden items, or stay out even then.
+    pub fn toggle_protected(&mut self, cx: &mut Context<Self>) {
+        let show = !self.settings.show_protected;
+        self.update_settings(|s| s.show_protected = show, cx);
+        self.follow_showing(cx);
+    }
+
+    /// The tab in front lists the hidden items as the settings say now; the others follow once brought back.
+    fn follow_showing(&mut self, cx: &mut Context<Self>) {
+        self.state.set_showing(self.showing());
         // The rows move: the focused ones are brought in sight again.
         let folders: Vec<ColumnId> = self.state.columns.iter().filter(|c| c.kind == Kind::Folder).map(|c| c.id).collect();
         for id in folders {

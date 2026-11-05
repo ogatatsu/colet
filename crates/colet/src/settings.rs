@@ -181,6 +181,9 @@ pub struct Settings {
     pub theme: Theme,
     /// Whether the folders list their hidden and system items, as Explorer leaves them out by default.
     pub show_hidden: bool,
+    /// Whether the protected operating system files show along with them, as Explorer leaves them out
+    /// even then by default.
+    pub show_protected: bool,
     pub window: Option<Placement>,
 }
 
@@ -199,6 +202,7 @@ impl Default for Settings {
             sort: Order::default(),
             theme: Theme::System,
             show_hidden: false,
+            show_protected: false,
             window: None,
         }
     }

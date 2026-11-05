@@ -25,9 +25,9 @@ pub struct Entry {
     pub size: Option<u64>,
     /// Milliseconds since the Unix epoch.
     pub modified: Option<u64>,
-    /// Hidden or system, as Explorer leaves out by default. A search result never says: Everything has
-    /// no attributes for it to give cheaply.
-    pub hidden: bool,
+    /// Whether Explorer leaves it out by default, and under which of its settings. A search result never
+    /// says: Everything has no attributes for it to give cheaply.
+    pub hidden: Hiding,
     /// Where a search matched it; empty outside the results.
     pub marks: Marks,
 }
@@ -67,9 +67,35 @@ pub fn marked(highlighted: &str, shown: &str) -> Vec<Range<usize>> {
 const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
 const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
 
-/// A drive root reports itself hidden and system, yet hides from no one.
-pub fn is_hidden(path: &Path, attributes: u32) -> bool {
-    attributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0 && path.file_name().is_some()
+/// Which of Explorer's settings shows an item.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Hiding {
+    /// Shown whatever they say, a system item that is not hidden as well among them.
+    #[default]
+    Shown,
+    /// Shown along with the hidden items.
+    Hidden,
+    /// Hidden and system: a protected operating system file, shown only along with those too.
+    Protected,
+}
+
+impl Hiding {
+    /// Left out unless the hidden items show: faded when they do.
+    pub fn is_hidden(self) -> bool {
+        self != Hiding::Shown
+    }
+}
+
+/// How an item with `attributes` hides. A drive root reports itself hidden and system, yet hides from no
+/// one.
+pub fn hiding(path: &Path, attributes: u32) -> Hiding {
+    if attributes & FILE_ATTRIBUTE_HIDDEN == 0 || path.file_name().is_none() {
+        Hiding::Shown
+    } else if attributes & FILE_ATTRIBUTE_SYSTEM != 0 {
+        Hiding::Protected
+    } else {
+        Hiding::Hidden
+    }
 }
 
 impl Entry {
@@ -92,7 +118,7 @@ impl Entry {
                 .ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as u64),
-            hidden: is_hidden(path, metadata.file_attributes()),
+            hidden: hiding(path, metadata.file_attributes()),
             marks: Marks::default(),
         }
     }
@@ -106,7 +132,7 @@ impl Entry {
             directory: true,
             size: None,
             modified: None,
-            hidden: false,
+            hidden: Hiding::Shown,
             marks: Marks::default(),
         }
     }
@@ -276,7 +302,7 @@ mod tests {
             directory: false,
             size,
             modified,
-            hidden: false,
+            hidden: Hiding::Shown,
             marks: Marks::default(),
         };
         let mut entries = vec![
@@ -307,7 +333,7 @@ mod tests {
             directory: false,
             size: Some(1),
             modified: None,
-            hidden: false,
+            hidden: Hiding::Shown,
             marks: Marks::default(),
         };
         let names = ["file10.txt", "File2.txt", "file1.txt", "あ10", "あ9", "ア1", "a01", "a1", "b", "ｆｉｌｅ３.txt"];
@@ -325,10 +351,11 @@ mod tests {
     }
 
     #[test]
-    fn hidden_and_system_items_are_hidden_but_drive_roots_are_not() {
-        assert!(is_hidden(Path::new(r"C:\pagefile.sys"), 0x2 | 0x4 | 0x20));
-        assert!(is_hidden(Path::new(r"C:\work\.git"), 0x2 | 0x10));
-        assert!(!is_hidden(Path::new(r"C:\work\.gitignore"), 0x20));
-        assert!(!is_hidden(Path::new(r"C:\"), 0x2 | 0x4 | 0x10));
+    fn hidden_items_hide_protected_ones_apart_but_drive_roots_and_system_items_alone_do_not() {
+        assert_eq!(hiding(Path::new(r"C:\pagefile.sys"), 0x2 | 0x4 | 0x20), Hiding::Protected);
+        assert_eq!(hiding(Path::new(r"C:\work\.git"), 0x2 | 0x10), Hiding::Hidden);
+        assert_eq!(hiding(Path::new(r"C:\work\.gitignore"), 0x20), Hiding::Shown);
+        assert_eq!(hiding(Path::new(r"C:\Windows\system.ini"), 0x4 | 0x20), Hiding::Shown);
+        assert_eq!(hiding(Path::new(r"C:\"), 0x2 | 0x4 | 0x10), Hiding::Shown);
     }
 }

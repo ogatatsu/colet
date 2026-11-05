@@ -6,7 +6,7 @@ use colet_core::{
 use std::path::PathBuf;
 
 use gpui_kit::base::input::{Input, InputState};
-use gpui_kit::component::{button::{Button, ButtonVariants}, dialog::Dialog as DialogFrame, spinner::Spinner, Disableable, Sizable};
+use gpui_kit::component::{button::{Button, ButtonVariants}, checkbox::Checkbox, dialog::Dialog as DialogFrame, spinner::Spinner, Disableable, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -471,6 +471,26 @@ impl Colet {
                     )),
                 ),
             )
+            // Taken at once, as the theme is. It counts only while the hidden items show, but is set at any time.
+            .child({
+                let colet = cx.entity().downgrade();
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "表示"))
+                    .child(
+                        Checkbox::new("show-protected")
+                            .label("保護されたシステムファイルも表示する")
+                            .checked(self.settings.show_protected)
+                            .on_click(move |_, _, cx| {
+                                colet.update(cx, |this, cx| this.toggle_protected(cx)).ok();
+                            }),
+                    )
+                    .child(
+                        div().text_size(px(12.)).text_color(p.text_muted).child("隠しファイルを表示しているときに効きます。"),
+                    )
+            })
             .child(
                 div().flex().flex_col().gap_1().child(label(p, "Everything")).child(
                     div()

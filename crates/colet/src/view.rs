@@ -472,7 +472,7 @@ impl Colet {
             aside,
             held,
             cut,
-            faded: (entry.hidden || cut) && !selected,
+            faded: (entry.hidden.is_hidden() || cut) && !selected,
             dragged: kind == Kind::Home && self.home_drag.carried.as_ref().is_some_and(|d| d.path == entry.path),
             // The filter a saved search runs within, faint beside its name.
             within: saved.and_then(|(_, f, _)| f).map(str::to_owned),

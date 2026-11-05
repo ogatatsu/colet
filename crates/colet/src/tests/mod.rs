@@ -11,7 +11,7 @@ use std::{
 };
 
 use colet_core::{
-    entry::{Entry, Marks, Order, Sort},
+    entry::{Entry, Hiding, Marks, Order, Sort},
     everything::Page,
     operations::{CANCELLED, Event, Kind as Operation, Request},
     paths::{ancestors, child, folder_name, id_text, parent_folder},
@@ -356,7 +356,7 @@ fn entry(path: &str, directory: bool) -> Entry {
         directory,
         size: (!directory).then_some(1),
         modified: None,
-        hidden: false,
+        hidden: Hiding::Shown,
         marks: Marks::default(),
     }
 }

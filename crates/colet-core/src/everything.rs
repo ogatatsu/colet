@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    entry::{Entry, Marks, Order, Sort, marked},
+    entry::{Entry, Hiding, Marks, Order, Sort, marked},
     paths::{from_wide, shown},
     wide::Wide,
 };
@@ -482,7 +482,7 @@ unsafe fn read(result: Handle, offset: usize) -> Page {
                 modified: (modified != u64::MAX)
                     .then(|| modified.checked_sub(116_444_736_000_000_000).map(|v| v / 10_000))
                     .flatten(),
-                hidden: false,
+                hidden: Hiding::Shown,
                 marks,
                 path,
             });
