@@ -23,9 +23,12 @@ const CLOSED: usize = 10;
 /// A tab's width while the strip has room, and the least it narrows to before the strip scrolls.
 const TAB_WIDTH: f32 = 220.;
 const TAB_MIN: f32 = 100.;
+const TAB_HEIGHT: f32 = 32.;
+const TAB_TOP: f32 = 4.;
+const TAB_CURVE: f32 = 8.;
 /// What the strip leaves beside the tabs: its padding on the right, the gaps, the button for another
-/// and room to double-click.
-const BESIDE_TABS: f32 = 8. + 8. + 26. + 48.;
+/// and room to double-click, and the curves at the strip's ends.
+const BESIDE_TABS: f32 = 8. + 8. + 26. + 48. + TAB_CURVE * 2.;
 
 /// A tab out of sight, kept as it was.
 pub struct Parked {
@@ -164,23 +167,79 @@ impl Render for DraggedTab {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         div()
-            .w(px(TAB_MIN + 60.))
-            .h(px(30.))
+            .w(px(TAB_MIN + 60. + TAB_CURVE * 2.))
+            .h(px(TAB_HEIGHT))
             .px_2()
-            .flex()
-            .items_center()
-            .gap_2()
-            .rounded(px(6.))
-            .border_1()
-            .border_color(p.border_strong)
-            .bg(p.raised)
+            .child(
+                div()
+                    .relative()
+                    .size_full()
+                    .pl(px(10.))
+                    .pr(px(4.))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(tab_shape(p.bg, Some(p.border)))
+                    .child(svg().path(format!("icons/{}.svg", self.glyph)).size(px(14.)).flex_none().text_color(p.text))
+                    .child(div().min_w_0().truncate().child(self.name.clone())),
+            )
             .opacity(0.8)
             .font_family("Segoe UI")
             .text_size(px(13.))
             .text_color(p.text)
-            .child(svg().path(format!("icons/{}.svg", self.glyph)).size(px(14.)).flex_none().text_color(p.text_muted))
-            .child(div().min_w_0().truncate().child(self.name.clone()))
     }
+}
+
+/// Decoration only: the tab's hitbox stays rectangular and the curves have no mouse listeners.
+fn tab_shape(background: Hsla, border: Option<Hsla>) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let mut fill = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::tolerance(0.02)));
+            trace_tab(&mut fill, bounds);
+            fill.close();
+            if let Ok(path) = fill.build() {
+                window.paint_path(path, background);
+            }
+            if let Some(border) = border {
+                let mut outline = PathBuilder::stroke(px(1.));
+                trace_tab(&mut outline, bounds);
+                // Leave the bottom open to the toolbar.
+                if let Ok(path) = outline.build() {
+                    window.paint_path(path, border);
+                }
+            }
+        },
+    )
+    .absolute()
+    .top_0()
+    .bottom_0()
+    .left(px(-TAB_CURVE))
+    .right(px(-TAB_CURVE))
+}
+
+fn trace_tab(path: &mut PathBuilder, bounds: Bounds<Pixels>) {
+    let curve = px(TAB_CURVE);
+    // Keep the one-pixel outline inside the canvas, including at the scroll viewport's ends.
+    let left = bounds.left() + px(0.5);
+    let right = bounds.right() - px(0.5);
+    let top = bounds.top() + px(0.5);
+    let bottom = bounds.bottom();
+    let tab_left = left + curve;
+    let tab_right = right - curve;
+    path.move_to(point(left, bottom));
+    tab_corner(path, point(left, bottom), point(tab_left, bottom), point(tab_left, bottom - curve));
+    path.line_to(point(tab_left, top + curve));
+    tab_corner(path, point(tab_left, top + curve), point(tab_left, top), point(tab_left + curve, top));
+    path.line_to(point(tab_right - curve, top));
+    tab_corner(path, point(tab_right - curve, top), point(tab_right, top), point(tab_right, top + curve));
+    path.line_to(point(tab_right, bottom - curve));
+    tab_corner(path, point(tab_right, bottom - curve), point(tab_right, bottom), point(right, bottom));
+}
+
+fn tab_corner(path: &mut PathBuilder, from: Point<Pixels>, corner: Point<Pixels>, to: Point<Pixels>) {
+    const K: f32 = 0.552_284_8;
+    path.cubic_bezier_to(to, from + (corner - from) * K, to + (corner - to) * K);
 }
 
 impl Colet {
@@ -505,13 +564,63 @@ impl Colet {
         let count = self.tabs.list.len() as f32;
         let room = f32::from(window.viewport_size().width) - BESIDE_TABS;
         let width = (room / count).clamp(TAB_MIN, TAB_WIDTH);
-        if std::mem::take(&mut self.tabs.reveal) {
-            self.tabs.scroll.scroll_to_item(self.tabs.current);
+        if self.tabs.reveal {
+            // Before the first prepaint the handle does not yet know that it scrolls horizontally;
+            // scroll_to_item would consume the request without moving it. Try on the next frame.
+            if self.tabs.scroll.bounds().size.width > px(0.) {
+                self.tabs.reveal = false;
+                self.tabs.scroll.scroll_to_item(self.tabs.current);
+            } else {
+                window.request_animation_frame();
+            }
         }
-        let tabs: Vec<AnyElement> = (0..self.tabs.list.len()).map(|index| self.render_tab(index, width, cx)).collect();
+        let current = self.tabs.current;
+        let count = self.tabs.list.len();
+        let mut tabs = Vec::with_capacity(count * 2);
+        for index in 0..count {
+            // Keep one cell per tab, in order, so scroll_to_item includes both curves. The selected
+            // tab is painted last, over its neighbors' hover fills, within this same scroll clip.
+            let cell = div()
+                .flex_none()
+                .w(px(width + TAB_CURVE * 2.))
+                .h_full()
+                .pt(px(TAB_TOP))
+                .px(px(TAB_CURVE))
+                .when(index + 1 < count, |d| d.mr(px(-TAB_CURVE * 2.)))
+                .when(index != current, |d| d.child(self.render_tab(index, width, cx).test_support()));
+            tabs.push(cell.into_any_element());
+        }
+        for index in 0..count.saturating_sub(1) {
+            if index == current || index + 1 == current {
+                continue;
+            }
+            // This passive hover region spans the two neighboring tab bodies. Its opacity hides
+            // their shared separator without changing hitboxes or storing pointer state.
+            tabs.push(
+                div()
+                    .id(("tab-separator", self.tabs.list[index].id as usize))
+                    .absolute()
+                    .left(px(index as f32 * width + TAB_CURVE))
+                    .top(px(TAB_TOP))
+                    .w(px(width * 2.))
+                    .h(px(TAB_HEIGHT))
+                    .hover(|s| s.opacity(0.))
+                    .drag_over::<DraggedTab>(|s, _, _, _| s.opacity(0.))
+                    .child(div().absolute().left(px(width - 1.)).top(px(8.)).w(px(1.)).h(px(16.)).bg(p.border))
+                    .into_any_element(),
+            );
+        }
+        tabs.push(
+            self.render_tab(current, width, cx)
+                .absolute()
+                .left(px(current as f32 * width + TAB_CURVE))
+                .top(px(TAB_TOP))
+                .test_support()
+                .into_any_element(),
+        );
         div()
             .id("tabbar")
-            .h(px(36.))
+            .h(px(TAB_HEIGHT + TAB_TOP))
             .flex_none()
             .w_full()
             .relative()
@@ -522,15 +631,16 @@ impl Colet {
             .bg(p.sidebar)
             .role(Role::TabList)
             .aria_label("タブ")
-            // The line under the strip, drawn first so the front tab's own line lies over it.
+            // The selected tab paints over this line to join the toolbar below.
             .child(div().absolute().left_0().right_0().bottom_0().h(px(1.)).bg(p.border))
             .child(
                 div()
                     .id("tab-strip")
+                    .relative()
                     .flex()
                     .min_w_0()
                     .h_full()
-                    .items_start()
+                    .items_end()
                     .overflow_x_scroll()
                     .track_scroll(&self.tabs.scroll)
                     .children(tabs),
@@ -568,18 +678,18 @@ impl Colet {
             .into_any_element()
     }
 
-    fn render_tab(&mut self, index: usize, width: f32, cx: &mut Context<Self>) -> AnyElement {
+    fn render_tab(&mut self, index: usize, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
         let p = self.palette;
         let tab = &self.tabs.list[index];
         let id = tab.id;
         let current = index == self.tabs.current;
+        let group = SharedString::from(format!("tab-{id}"));
         let Title { glyph, name, tip } = title(tab.parked.as_ref().map_or(&self.state, |parked| &parked.state), &self.settings);
         let dragged = DraggedTab { id, name: name.clone(), glyph, palette: p };
         div()
             .id(("tab", id as usize))
-            // Only the front tab reaches over the line under the strip; the others stop above it, so
-            // a hover leaves it whole.
-            .h(px(if current { 36. } else { 35. }))
+            .group(group.clone())
+            .h(px(TAB_HEIGHT))
             .flex_none()
             .w(px(width))
             .relative()
@@ -588,18 +698,29 @@ impl Colet {
             .flex()
             .items_center()
             .gap(px(6.))
-            .border_r_1()
-            .border_color(p.border)
             .role(Role::Tab)
             .aria_label(name.clone())
             .aria_selected(current)
+            .aria_position_in_set(index + 1)
+            .aria_size_of_set(self.tabs.list.len())
             .text_color(if current { p.text } else { p.text_muted })
-            .when(current, |d| {
-                d.bg(p.bg).child(div().absolute().left_0().right_0().bottom_0().h(px(2.)).bg(p.accent))
+            .when(current, |d| d.child(tab_shape(p.bg, Some(p.border))))
+            .when(!current, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom(px(2.))
+                        .left_0()
+                        .right_0()
+                        .invisible()
+                        .group_hover(group.clone(), |s| s.visible())
+                        .group_drag_over::<DraggedTab>(group, |s| s.visible())
+                        .child(tab_shape(p.hover, None)),
+                )
             })
-            .when(!current, |d| d.hover(|d| d.bg(p.hover)))
             .tip(tip)
-            .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if current { p.accent } else { p.text_muted }))
+            .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if current { p.text } else { p.text_muted }))
             .child(div().flex_1().min_w_0().truncate().child(name))
             .child(
                 div()
@@ -645,13 +766,10 @@ impl Colet {
                 }),
             )
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .drag_over::<DraggedTab>(move |style, _, _, _| style.bg(p.hover))
             .on_drop(cx.listener(move |this, dragged: &DraggedTab, _, cx| {
                 if let Some(to) = this.tabs.position(id) {
                     this.move_tab(dragged.id, to, cx);
                 }
             }))
-            .test_support()
-            .into_any_element()
     }
 }

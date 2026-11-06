@@ -12,6 +12,57 @@ impl Ui {
 }
 
 #[gpui_kit::test]
+fn reveals_the_restored_tab_and_its_curves_at_either_end_of_the_strip(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    {
+        let mut settings = fake.settings.lock().unwrap();
+        settings.tabs = vec![crate::settings::KeptTab::default(); 12];
+        settings.tab = 11;
+    }
+    let ui = open(cx, fake);
+    let assert_revealed = |cx: &mut TestAppContext| {
+        let id = ui.read(cx, |v| v.current_tab());
+        let tab = ui.act(cx, |window, _| window.find(("tab", id as usize)).bounds());
+        let viewport = ui.read(cx, |v| v.tabs.scroll.bounds());
+        assert!(tab.left() - px(8.) >= viewport.left() - px(0.5), "{tab:?} in {viewport:?}");
+        assert!(tab.right() + px(8.) <= viewport.right() + px(0.5), "{tab:?} in {viewport:?}");
+    };
+    assert_revealed(cx);
+    cx.simulate_window_resize(ui.window, size(px(720.), px(480.)));
+    ui.press(cx, "ctrl-tab");
+    assert_revealed(cx);
+    ui.press(cx, "ctrl-shift-tab");
+    assert_revealed(cx);
+    ui.click(cx, "new-tab");
+    assert_eq!(ui.tabs(cx), (13, 12));
+    assert_revealed(cx);
+}
+
+#[gpui_kit::test]
+fn hover_decorations_leave_tab_switching_and_both_close_buttons_pressable(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    {
+        let mut settings = fake.settings.lock().unwrap();
+        settings.tabs = vec![crate::settings::KeptTab::default(); 4];
+        settings.tab = 1;
+    }
+    let ui = open(cx, fake);
+    let ids = ui.read(cx, |v| v.tabs.list.iter().map(|tab| tab.id).collect::<Vec<_>>());
+    // The hovered tab shares a separator region with the one to its right, beside the selected tab.
+    ui.act(cx, |window, cx| window.hover(("tab", ids[2] as usize), cx));
+    ui.click(cx, ("tab-close", ids[2] as usize));
+    assert_eq!(ui.tabs(cx), (3, 1));
+    assert_eq!(ui.read(cx, |v| v.current_tab()), ids[1]);
+    ui.act(cx, |window, cx| window.hover(("tab", ids[3] as usize), cx));
+    ui.click(cx, ("tab", ids[3] as usize));
+    assert_eq!(ui.read(cx, |v| v.current_tab()), ids[3]);
+    // The selected tab is painted in front, and its close button still receives the click once.
+    ui.click(cx, ("tab-close", ids[3] as usize));
+    assert_eq!(ui.tabs(cx), (2, 1));
+    assert_eq!(ui.read(cx, |v| v.current_tab()), ids[1]);
+}
+
+#[gpui_kit::test]
 fn opens_a_tab_of_home_alone_and_goes_back_to_the_one_before_as_it_was(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-t");
