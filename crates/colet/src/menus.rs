@@ -270,7 +270,7 @@ impl Colet {
     /// dialog's.
     fn text_fields(&self) -> Vec<Entity<InputState>> {
         let mut fields = vec![self.search.clone(), self.address.field.clone()];
-        fields.extend(self.filters.values().map(|field| field.input.clone()));
+        fields.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         fields.extend(self.dialog.iter().flat_map(Dialog::fields));
         fields
     }

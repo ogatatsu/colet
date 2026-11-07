@@ -116,7 +116,7 @@ fn narrows_the_results_by_name_through_everything_keeping_the_one_picked(cx: &mu
         |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     assert_eq!(shown(&ui, cx), [r"D:\beta.txt", r"D:\alphabet.txt"]);
     // Counted against all the search finds; the one picked, hidden, stays picked with its folder open.
-    let header = ui.read(cx, |v| (v.state.columns[1].total, v.state.columns[1].filter.as_ref().map(|f| f.whole)));
+    let header = ui.read(cx, |v| (v.state.columns[1].total, v.state.columns[1].narrow.as_ref().map(|f| f.whole)));
     assert_eq!(header, (2, Some(3)));
     assert_eq!(ui.selected(cx, 1), [r"D:\alpha.txt"]);
     assert!(ui.read(cx, |v| v.state.columns.len()) > 2);
@@ -126,12 +126,12 @@ fn narrows_the_results_by_name_through_everything_keeping_the_one_picked(cx: &mu
     assert_eq!(ui.active(cx), 1);
     ui.press(cx, "escape");
     assert_eq!(shown(&ui, cx).len(), 3);
-    assert_eq!(ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string()), "");
+    assert_eq!(ui.view.read_with(cx, |v, cx| v.narrow_fields[&id].input.read(cx).value().to_string()), "");
     // Another search starts with nothing narrowed.
     ui.input(cx, "x");
     ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.search_for("b", None, window, cx)));
     settle(cx);
-    assert!(ui.read(cx, |v| v.state.columns[1].filter.is_none()));
+    assert!(ui.read(cx, |v| v.state.columns[1].narrow.is_none()));
     assert_eq!(shown(&ui, cx).len(), 3);
 }
 

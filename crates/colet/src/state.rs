@@ -54,13 +54,13 @@ pub struct Column {
     /// them may come after the paste is done.
     pub pick: Option<Vec<OsString>>,
     /// A column narrowed to some names: `entries` then holds only those.
-    pub filter: Option<Filter>,
+    pub narrow: Option<Narrowing>,
 }
 
 /// The names a column is narrowed to, those holding `text`, and all it lists, kept aside. A folder column
 /// that leaves out the hidden items has one too, its `text` empty when nothing else narrows it.
 #[derive(Clone, Debug)]
-pub struct Filter {
+pub struct Narrowing {
     pub text: String,
     all: Vec<Entry>,
     /// The search results, which Everything narrows, keep nothing aside: how many the search finds
@@ -70,7 +70,7 @@ pub struct Filter {
     concealed: usize,
 }
 
-impl Filter {
+impl Narrowing {
     fn new(text: impl Into<String>, all: Vec<Entry>, whole: usize) -> Self {
         Self { text: text.into(), all, whole, concealed: 0 }
     }
@@ -104,7 +104,7 @@ pub fn found(name: &str, needle: &str) -> Vec<Range<usize>> {
 
 /// The words a filter's `text` asks a name to hold, apart at any space, half or full width, but in quotes,
 /// which are taken out. A quote left open is closed at the end, as Everything closes it.
-pub fn filter_words(text: &str) -> Vec<String> {
+pub fn narrow_words(text: &str) -> Vec<String> {
     let (mut words, mut word, mut quoted) = (Vec::new(), String::new(), false);
     for c in text.chars() {
         match c {
@@ -120,7 +120,7 @@ pub fn filter_words(text: &str) -> Vec<String> {
 /// A filter's `text` as a favorite or saved search keeps it: the spaces at its ends gone, and each run of
 /// them between its words one; those in quotes, part of a word, as they are. None when it holds no word.
 pub fn narrowing(text: &str) -> Option<String> {
-    if filter_words(text).is_empty() {
+    if narrow_words(text).is_empty() {
         return None;
     }
     let (mut kept, mut quoted, mut space) = (String::new(), false, false);
@@ -154,7 +154,7 @@ pub fn room_for_a_word(held: &str) -> String {
 /// of them, those that meet as one. No words, nothing marked, are held by any name.
 pub fn holds(name: &str, text: &str) -> Option<Vec<Range<usize>>> {
     let mut ranges = Vec::new();
-    for word in filter_words(text) {
+    for word in narrow_words(text) {
         let at = found(name, &word);
         if at.is_empty() {
             return None;
@@ -196,7 +196,7 @@ impl Column {
             anchor: None,
             base: None,
             pick: None,
-            filter: None,
+            narrow: None,
         }
     }
 
@@ -251,23 +251,23 @@ impl Column {
 
     /// What it is narrowed to, as a favorite or saved search keeps it.
     pub fn narrowing(&self) -> Option<String> {
-        self.filter.as_ref().and_then(|f| narrowing(&f.text))
+        self.narrow.as_ref().and_then(|f| narrowing(&f.text))
     }
 
     /// Narrowed to some names, by its field: not just leaving out the hidden items.
-    pub fn filtering(&self) -> bool {
-        self.filter.as_ref().is_some_and(|f| !f.text.is_empty())
+    pub fn is_narrowed(&self) -> bool {
+        self.narrow.as_ref().is_some_and(|f| !f.text.is_empty())
     }
 
     /// How many it lists in all, less the hidden items it leaves out.
     pub fn shown_total(&self) -> usize {
-        self.total - self.filter.as_ref().map_or(0, |f| f.concealed)
+        self.total - self.narrow.as_ref().map_or(0, |f| f.concealed)
     }
 
     /// The picks it shows, which are what is acted on: those a filter hides stay picked only to keep what
     /// they opened open.
     pub fn shown_selected(&self) -> Cow<'_, [PathBuf]> {
-        if self.filter.is_none() {
+        if self.narrow.is_none() {
             return Cow::Borrowed(&self.selected);
         }
         let listed: HashSet<&Path> = self.entries.iter().map(|e| e.path.as_path()).collect();
@@ -795,7 +795,7 @@ impl State {
         if let Some((path, narrow)) = opened
             && let Some(at) = self.columns.iter().rposition(|c| c.kind == Kind::Folder && c.path == path)
         {
-            self.set_filter(at, narrow.as_deref());
+            self.set_narrowing(at, narrow.as_deref());
         }
     }
 
@@ -830,7 +830,7 @@ impl State {
         home.focused = Some(path);
         let search = self.column(Kind::Search, Path::new(""), None);
         self.columns = vec![home, search];
-        self.set_filter(1, narrow.as_deref());
+        self.set_narrowing(1, narrow.as_deref());
         self.query = query;
         self.search_filter = filter;
         self.active = index;
@@ -1214,7 +1214,7 @@ impl State {
         let name = shown(folder_name(to));
         for c in &mut self.columns {
             c.path = moved(&c.path);
-            for e in c.entries.iter_mut().chain(c.filter.iter_mut().flat_map(|f| f.all.iter_mut())) {
+            for e in c.entries.iter_mut().chain(c.narrow.iter_mut().flat_map(|f| f.all.iter_mut())) {
                 if e.path == from {
                     e.name = name.clone();
                 }
@@ -1246,7 +1246,7 @@ impl State {
         // Its marks follow the new name; one the filter would hide shows without it.
         for index in 0..self.columns.len() {
             if self.hides(index, to) {
-                self.set_filter(index, None);
+                self.set_narrowing(index, None);
             } else {
                 self.narrow(index);
             }
@@ -1259,7 +1259,7 @@ impl State {
             return;
         };
         let c = &mut self.columns[index];
-        let text = c.filter.take().map(|f| {
+        let text = c.narrow.take().map(|f| {
             c.entries = f.all;
             f.text
         });
@@ -1269,7 +1269,7 @@ impl State {
         }
         // It shows, to be seen picked, even where the filter would hide it: the filter's text goes then.
         let text = text.filter(|text| holds(&shown(folder_name(path)), text).is_some()).unwrap_or_default();
-        self.refilter(index, text);
+        self.renarrow(index, text);
         self.select(index, vec![path.to_owned()]);
     }
 
@@ -1282,8 +1282,8 @@ impl State {
         self.showing = showing;
         for index in 0..self.columns.len() {
             if self.columns[index].kind == Kind::Folder {
-                let text = self.columns[index].filter.as_ref().map(|f| f.text.clone());
-                self.set_filter(index, text.as_deref());
+                let text = self.columns[index].narrow.as_ref().map(|f| f.text.clone());
+                self.set_narrowing(index, text.as_deref());
             }
         }
     }
@@ -1295,30 +1295,30 @@ impl State {
 
     /// Puts all the folder column at `index` lists, in its `entries` with no filter, under one of `text`,
     /// when that or the hidden items left out narrow it.
-    fn refilter(&mut self, index: usize, text: String) {
+    fn renarrow(&mut self, index: usize, text: String) {
         if text.is_empty() && !self.conceals(index) {
             return;
         }
         let c = &mut self.columns[index];
-        c.filter = Some(Filter::new(text, std::mem::take(&mut c.entries), 0));
+        c.narrow = Some(Narrowing::new(text, std::mem::take(&mut c.entries), 0));
         self.narrow(index);
     }
 
     /// Narrows the column at `index` to the names holding the words of `text`, or with none, or no words in
     /// it, lists them all again. What it hides stays picked, and what that opened open, while another is looked for. The
     /// search results are narrowed by Everything, asked again: they show as they are until it answers.
-    pub fn set_filter(&mut self, index: usize, text: Option<&str>) {
+    pub fn set_narrowing(&mut self, index: usize, text: Option<&str>) {
         let Some(c) = self.columns.get_mut(index) else { return };
-        let text = text.filter(|text| !filter_words(text).is_empty());
+        let text = text.filter(|text| !narrow_words(text).is_empty());
         if c.kind == Kind::Search {
-            c.filter = match (text, c.filter.take()) {
+            c.narrow = match (text, c.narrow.take()) {
                 (None, _) => None,
-                (Some(text), Some(filter)) => Some(Filter { text: text.into(), ..filter }),
-                (Some(text), None) => Some(Filter::new(text, Vec::new(), c.total)),
+                (Some(text), Some(filter)) => Some(Narrowing { text: text.into(), ..filter }),
+                (Some(text), None) => Some(Narrowing::new(text, Vec::new(), c.total)),
             };
             return;
         }
-        if let Some(filter) = c.filter.take() {
+        if let Some(filter) = c.narrow.take() {
             c.entries = filter.all;
             // All show again: the keys go back to the row the filter took them off, unless it hides it
             // still.
@@ -1329,7 +1329,7 @@ impl State {
                 }
             }
         }
-        self.refilter(index, text.unwrap_or_default().into());
+        self.renarrow(index, text.unwrap_or_default().into());
     }
 
     /// Lists what the column's filter lets through; the keys let go of a row it hides, kept to go back
@@ -1343,7 +1343,7 @@ impl State {
         if c.kind == Kind::Search {
             return;
         }
-        let Some(filter) = c.filter.as_mut() else { return };
+        let Some(filter) = c.narrow.as_mut() else { return };
         let on_the_way = |path: &PathBuf| beside.as_ref() == Some(path) || c.highlight.as_ref() == Some(path);
         let mut concealed = 0;
         c.entries = filter
@@ -1370,7 +1370,7 @@ impl State {
     /// Whether the folder column at `index` narrowed to its names, holds `path` but hides it.
     fn hides(&self, index: usize, path: &Path) -> bool {
         let c = &self.columns[index];
-        c.filter.as_ref().is_some_and(|f| f.all.iter().any(|e| e.path == path && holds(&e.name, &f.text).is_none()))
+        c.narrow.as_ref().is_some_and(|f| f.all.iter().any(|e| e.path == path && holds(&e.name, &f.text).is_none()))
     }
 
     /// Picked in the folder they went to once it lists them, while it is the column worked in.
@@ -1383,7 +1383,7 @@ impl State {
         }
         // Listed already where the filter hides them, they show without it.
         if paths.iter().any(|p| self.hides(index, p)) {
-            self.set_filter(index, None);
+            self.set_narrowing(index, None);
         }
         self.columns[index].pick = Some(paths.iter().map(|p| path_key(p)).collect());
         self.pick_listed(index);
@@ -1433,7 +1433,7 @@ impl State {
         // Everything narrowed the results already, leaving out what the filter hides; that stays picked, as
         // in the other columns, told by its name.
         if c.kind == Kind::Search {
-            let hidden: Vec<PathBuf> = match &c.filter {
+            let hidden: Vec<PathBuf> = match &c.narrow {
                 Some(filter) => c.selected.iter().filter(|p| holds(&shown(folder_name(p)), &filter.text).is_none()).cloned().collect(),
                 None => Vec::new(),
             };
@@ -1447,7 +1447,7 @@ impl State {
             if let Some(path) = keys {
                 if c.entry(&path).is_some() {
                     c.focused = Some(path);
-                } else if c.filter.as_ref().is_some_and(|f| holds(&shown(folder_name(&path)), &f.text).is_none()) {
+                } else if c.narrow.as_ref().is_some_and(|f| holds(&shown(folder_name(&path)), &f.text).is_none()) {
                     c.focused = None;
                     c.hid = Some(path);
                 }
@@ -1455,7 +1455,7 @@ impl State {
             return;
         }
         // The listing stands for all the column lists; the filter narrows it again after.
-        let text = c.filter.take().map(|f| {
+        let text = c.narrow.take().map(|f| {
             c.entries = f.all;
             f.text
         });
@@ -1469,7 +1469,7 @@ impl State {
         if picked && c.selected.iter().any(|p| c.entry(p).is_some_and(|e| narrowed(e, &text).is_none())) {
             text.clear();
         }
-        self.refilter(index, text);
+        self.renarrow(index, text);
     }
 
     /// How many the search finds without the filter Everything narrows it by, asked along with `request`.
@@ -1479,7 +1479,7 @@ impl State {
         if c.request != request {
             return;
         }
-        if let Some(filter) = &mut c.filter {
+        if let Some(filter) = &mut c.narrow {
             filter.whole = whole;
         }
     }

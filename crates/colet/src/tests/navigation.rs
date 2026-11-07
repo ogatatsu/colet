@@ -210,7 +210,7 @@ fn takes_the_keys_to_home_from_a_press_in_its_head_its_field_s_room_or_its_empty
     };
     let ui = open(cx, Arc::new(fake));
     let home = ui.read(cx, |v| v.state.columns[0].id);
-    let field = ui.view.read_with(cx, |v, _| v.filters[&home].input.clone());
+    let field = ui.view.read_with(cx, |v, _| v.narrow_fields[&home].input.clone());
     // Each from the column beside home, its rows having the keys.
     let away = |ui: &Ui, cx: &mut TestAppContext| {
         ui.click_in(cx, "home", row(r"D:\"));

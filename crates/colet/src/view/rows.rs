@@ -137,7 +137,7 @@ impl Colet {
         let path = entry.path.clone();
         // A pinned row, favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
         // Narrowed, home hides some of its kind, and where among them it would land is not to be seen.
-        let drag = (kind == Kind::Home && c.filter.is_none()).then(|| movable(&self.settings, &entry.path)).flatten().map(|shelf| {
+        let drag = (kind == Kind::Home && c.narrow.is_none()).then(|| movable(&self.settings, &entry.path)).flatten().map(|shelf| {
             (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_drag.rows.clone(), cx.entity().downgrade())
         });
         let name = entry.name.clone();

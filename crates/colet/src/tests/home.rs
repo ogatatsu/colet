@@ -57,7 +57,7 @@ fn keeps_a_folder_narrowed_as_a_favorite_of_its_own_and_opens_it_narrowed(cx: &m
             let c = v.state.columns.last().unwrap();
             (c.id, c.entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>())
         });
-        (shown, ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string()))
+        (shown, ui.view.read_with(cx, |v, cx| v.narrow_fields[&id].input.read(cx).value().to_string()))
     };
     ui.click_in(cx, "home", row(r"D:\work"));
     assert_eq!(opened(&ui, cx), (vec![r"D:\work\a.pdf".to_owned(), r"D:\work\b.txt".to_owned()], String::new()));
@@ -108,7 +108,7 @@ fn saves_a_search_narrowed_apart_and_runs_it_narrowed(cx: &mut TestAppContext) {
     ui.click_in(cx, "home", row(search_key("ext:pdf", None, Some("a"))));
     let (narrowing, id) = ui.read(cx, |v| (v.state.search_narrowing(), v.state.columns[1].id));
     assert_eq!(narrowing.as_deref(), Some("a"));
-    assert_eq!(ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string()), "a");
+    assert_eq!(ui.view.read_with(cx, |v, cx| v.narrow_fields[&id].input.read(cx).value().to_string()), "a");
 }
 
 #[gpui_kit::test]

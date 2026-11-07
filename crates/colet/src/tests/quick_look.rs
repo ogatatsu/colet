@@ -67,7 +67,7 @@ fn shows_quick_look_from_the_space_an_ime_types(cx: &mut TestAppContext) {
     assert_eq!(fake.quick_looked(), [(Toggle, r"D:\work\a.txt".into())]);
     // Nothing goes on in the field, which the keys are left out of.
     assert!(ui.columns_focused(cx));
-    assert!(ui.view.read_with(cx, |v, cx| v.filters.get(&id).is_none_or(|f| f.input.read(cx).value().is_empty())));
+    assert!(ui.view.read_with(cx, |v, cx| v.narrow_fields.get(&id).is_none_or(|f| f.input.read(cx).value().is_empty())));
 }
 
 #[gpui_kit::test]
@@ -78,6 +78,6 @@ fn leaves_space_to_a_columns_field(cx: &mut TestAppContext) {
     assert!(!ui.columns_focused(cx));
     fake.quick_looked();
     ui.press(cx, "space");
-    assert_eq!(ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string()), "a ");
+    assert_eq!(ui.view.read_with(cx, |v, cx| v.narrow_fields[&id].input.read(cx).value().to_string()), "a ");
     assert!(fake.quick_looked().iter().all(|(m, _)| *m != QuickLookMessage::Toggle));
 }

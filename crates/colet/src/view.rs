@@ -120,7 +120,7 @@ impl Colet {
         let away = self.state.folded_away();
         let first = if pinned { 2 } else { 1 } + away;
         let only_home = self.state.columns.len() == 1;
-        self.filter_fields(window, cx);
+        self.sync_narrow_fields(window, cx);
         let pinned_column = pinned.then(|| self.render_column(1, window, cx));
         let strip = (away > 0).then(|| self.unfold_strip(away, cx));
         let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, window, cx)).collect();

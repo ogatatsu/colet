@@ -45,7 +45,7 @@ use crate::{
     reveal::Sideways,
     settings::{LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
-    state::{Column, ColumnId, Kind, Showing, State, filter_words, room_for_a_word},
+    state::{Column, ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
     tabs::Tabs,
     theme::Palette,
     watching::Watching,
@@ -92,8 +92,8 @@ actions!(
         OpenTextMenu,
         CloseMenu,
         OpenSort,
-        TrimFilter,
-        ClearFilter,
+        TrimNarrowing,
+        ClearNarrowing,
         OpenSearchFilters,
         Unfold,
         FocusHome,
@@ -187,8 +187,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-shift-tab", PreviousTab, None),
         KeyBinding::new("ctrl-shift-t", ReopenTab, None),
         KeyBinding::new("ctrl-enter", OpenInNewTab, Some(COLUMNS)),
-        KeyBinding::new("backspace", TrimFilter, Some(COLUMNS)),
-        KeyBinding::new("escape", ClearFilter, Some(COLUMNS)),
+        KeyBinding::new("backspace", TrimNarrowing, Some(COLUMNS)),
+        KeyBinding::new("escape", ClearNarrowing, Some(COLUMNS)),
     ]);
 }
 
@@ -416,7 +416,7 @@ type Listing = Result<Listed, String>;
 
 /// The field narrowing a column, and what it last narrowed it to: the column lifting the filter on
 /// its own, for what was made or pasted there, tells from that, not from text typed and yet to be told.
-pub struct FilterField {
+pub struct NarrowField {
     pub input: Entity<InputState>,
     applied: String,
     _changes: Subscription,
@@ -435,7 +435,7 @@ pub struct Colet {
     pub search_focused: bool,
     pub address: Address,
     /// The field of each column, narrowing it to some names.
-    pub filters: HashMap<ColumnId, FilterField>,
+    pub narrow_fields: HashMap<ColumnId, NarrowField>,
     pub home_focus: FocusHandle,
     pub columns_focus: FocusHandle,
     pub icons: Icons,
@@ -537,7 +537,7 @@ impl Colet {
             search,
             search_focused: false,
             address: Address::new(address),
-            filters: HashMap::new(),
+            narrow_fields: HashMap::new(),
             home_focus: cx.focus_handle().tab_stop(true),
             columns_focus: cx.focus_handle().tab_stop(true),
             icons: Icons::default(),
@@ -645,7 +645,7 @@ impl Colet {
         self.palette = Palette::for_window(window, self.settings.theme);
         crate::theme::apply(window, self.settings.theme, cx);
         let mut inputs = vec![self.search.clone(), self.address.field.clone()];
-        inputs.extend(self.filters.values().map(|field| field.input.clone()));
+        inputs.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         inputs.extend(self.dialog.iter().flat_map(Dialog::fields));
         for input in &inputs {
             self.palette.style_input(input, cx);
@@ -826,7 +826,7 @@ impl Colet {
                 let filter = self.state.search_filter.as_deref().and_then(|name| self.settings.filter_query(name));
                 let whole = everything_query(&self.state.query, filter);
                 // Narrowed, the search is counted without it too, along with the first page.
-                let (query, whole) = match &c.filter {
+                let (query, whole) = match &c.narrow {
                     Some(filter) => (narrowed_query(&whole, &filter.text), (offset == 0).then_some(whole)),
                     None => (whole, None),
                 };
@@ -1293,20 +1293,20 @@ impl Colet {
         }
     }
 
-    // ---- Filters ----
+    // ---- Narrowing ----
 
     /// Each column has its field, holding what it is narrowed to: a field is made for a column new here,
     /// goes with one gone, empties where a new folder or a paste lifted the filter, and takes the narrowing
     /// a favorite or saved search opened with.
-    pub fn filter_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn sync_narrow_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let kept: HashSet<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
-        self.filters.retain(|id, _| kept.contains(id));
+        self.narrow_fields.retain(|id, _| kept.contains(id));
         // So does its order's button's stop.
         self.stops.retain(|key, _| key.strip_prefix("column-sort:").is_none_or(|id| id.parse().is_ok_and(|id| kept.contains(&id))));
         for c in &self.state.columns {
             let id = c.id;
-            match self.filters.get_mut(&id) {
-                Some(field) => match &c.filter {
+            match self.narrow_fields.get_mut(&id) {
+                Some(field) => match &c.narrow {
                     None if !field.applied.is_empty() => {
                         field.applied.clear();
                         field.input.update(cx, |input, cx| input.set_value("", window, cx));
@@ -1318,18 +1318,18 @@ impl Colet {
                     _ => {}
                 },
                 None => {
-                    let text = c.filter.as_ref().map(|f| f.text.clone()).unwrap_or_default();
+                    let text = c.narrow.as_ref().map(|f| f.text.clone()).unwrap_or_default();
                     let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む").default_value(text.clone()));
                     self.palette.style_input(&input, cx);
                     let subscription = cx.subscribe_in(&input, window, move |this: &mut Self, input, event, window, cx| match event {
                         InputEvent::Change => {
                             let text = input.read(cx).value().to_string();
-                            this.filter(id, &text, cx);
+                            this.narrow(id, &text, cx);
                         }
-                        InputEvent::PressEnter { .. } => this.open_from_filter(id, window, cx),
+                        InputEvent::PressEnter { .. } => this.open_from_narrow_field(id, window, cx),
                         InputEvent::Focus | InputEvent::Blur => cx.notify(),
                     });
-                    self.filters.insert(id, FilterField { input, applied: text, _changes: subscription });
+                    self.narrow_fields.insert(id, NarrowField { input, applied: text, _changes: subscription });
                 }
             }
         }
@@ -1338,13 +1338,13 @@ impl Colet {
     /// What is typed in the rows goes on in their column's field, which takes the keys: after what it
     /// holds, as a word of its own. What an IME is composing, `marked` with its caret, is handed on as it
     /// is, so the field takes the rest of it. A space alone starts nothing.
-    pub fn type_into_filter(&mut self, text: &str, marked: Option<Option<Range<usize>>>, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn type_into_narrowing(&mut self, text: &str, marked: Option<Option<Range<usize>>>, window: &mut Window, cx: &mut Context<Self>) {
         if text.trim().is_empty() {
             return;
         }
         let id = self.state.columns[self.state.active].id;
-        self.filter_fields(window, cx);
-        let Some(field) = self.filters.get(&id) else { return };
+        self.sync_narrow_fields(window, cx);
+        let Some(field) = self.narrow_fields.get(&id) else { return };
         field.input.clone().update(cx, |input, cx| {
             let held = room_for_a_word(&input.value());
             input.set_value(held, window, cx);
@@ -1361,9 +1361,9 @@ impl Colet {
 
     /// Backspace in the rows takes the last char off their column's field, which takes the keys; false
     /// while it holds none.
-    pub fn trim_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    pub fn trim_narrowing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let id = self.state.columns[self.state.active].id;
-        let Some(field) = self.filters.get(&id) else { return false };
+        let Some(field) = self.narrow_fields.get(&id) else { return false };
         let input = field.input.clone();
         let mut held = input.read(cx).value().to_string();
         if held.pop().is_none() {
@@ -1373,15 +1373,15 @@ impl Colet {
             input.set_value(held.clone(), window, cx);
             input.focus(window, cx);
         });
-        self.filter(id, &held, cx);
+        self.narrow(id, &held, cx);
         true
     }
 
     /// Narrows the column `id` to the names holding `text`, as it is typed.
-    pub fn filter(&mut self, id: ColumnId, text: &str, cx: &mut Context<Self>) {
+    pub fn narrow(&mut self, id: ColumnId, text: &str, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
-        self.state.set_filter(index, Some(text));
-        if let Some(field) = self.filters.get_mut(&id) {
+        self.state.set_narrowing(index, Some(text));
+        if let Some(field) = self.narrow_fields.get_mut(&id) {
             field.applied = text.into();
         }
         // Everything narrows the results, asked as the search field asks it: once typing pauses, for the
@@ -1393,8 +1393,8 @@ impl Colet {
                 this.update(cx, |this, cx| {
                     let Some(index) = this.state.index_of(id) else { return };
                     // Spaces alone, no words, ask for all as an empty field does.
-                    let applied = this.state.columns[index].filter.as_ref().map_or("", |f| f.text.as_str());
-                    if applied == text || applied.is_empty() && filter_words(&text).is_empty() {
+                    let applied = this.state.columns[index].narrow.as_ref().map_or("", |f| f.text.as_str());
+                    if applied == text || applied.is_empty() && narrow_words(&text).is_empty() {
                         this.load(id, 0, true, cx);
                     }
                 })
@@ -1408,7 +1408,7 @@ impl Colet {
     }
 
     /// From the field into the rows it lets through, landing on the first while none is picked.
-    pub fn leave_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn leave_narrow_field(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
         self.state.set_active(index);
         self.focus_active(window, cx);
@@ -1417,43 +1417,43 @@ impl Colet {
     /// ↓ or Enter in a field picks the row the keys were on, or the first it lets through, as a click does,
     /// and the keys go there; a row picked already, among others too, is not picked again. With none let
     /// through, the field keeps the keys.
-    pub fn open_from_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_from_narrow_field(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
         let c = &self.state.columns[index];
         let shown = c.focused.clone().filter(|path| c.entry(path).is_some());
         let Some(path) = shown.or_else(|| c.entries.first().map(|e| e.path.clone())) else { return };
         if c.selected.contains(&path) {
             self.state.columns[index].focused = Some(path);
-            self.leave_filter(id, window, cx);
+            self.leave_narrow_field(id, window, cx);
         } else {
             self.pick(index, path, window, cx);
         }
     }
 
     /// Lists all again and empties the field; the keys go back to the rows.
-    pub fn close_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn clear_narrowing(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
-        self.state.set_filter(index, None);
+        self.state.set_narrowing(index, None);
         if self.state.columns[index].kind == Kind::Search {
             self.load(id, 0, true, cx);
         }
-        if let Some(field) = self.filters.get_mut(&id) {
+        if let Some(field) = self.narrow_fields.get_mut(&id) {
             field.applied.clear();
             field.input.clone().update(cx, |input, cx| input.set_value("", window, cx));
         }
         self.rows.moved(id);
-        self.leave_filter(id, window, cx);
+        self.leave_narrow_field(id, window, cx);
     }
 
     /// Esc in the field: clears what it holds, or, empty, goes back to the rows.
-    pub fn escape_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(field) = self.filters.get(&id) else { return };
+    pub fn escape_narrow_field(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(field) = self.narrow_fields.get(&id) else { return };
         let input = field.input.clone();
         if input.read(cx).value().is_empty() {
-            self.leave_filter(id, window, cx);
+            self.leave_narrow_field(id, window, cx);
         } else {
             input.update(cx, |input, cx| input.set_value("", window, cx));
-            self.filter(id, "", cx);
+            self.narrow(id, "", cx);
         }
     }
 
@@ -1544,7 +1544,7 @@ impl EntityInputHandler for Colet {
             self.quick_look(cx);
             return;
         }
-        self.type_into_filter(text, None, window, cx);
+        self.type_into_narrowing(text, None, window, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -1555,7 +1555,7 @@ impl EntityInputHandler for Colet {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.type_into_filter(text, Some(caret), window, cx);
+        self.type_into_narrowing(text, Some(caret), window, cx);
     }
 
     // Where the IME shows what it composes: at the end of the field it goes on in, the column's own, not
@@ -1568,7 +1568,7 @@ impl EntityInputHandler for Colet {
         cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let id = self.state.columns[self.state.active].id;
-        let input = self.filters.get(&id)?.input.clone();
+        let input = self.narrow_fields.get(&id)?.input.clone();
         input.update(cx, |input, cx| {
             let end = input.value().encode_utf16().count();
             input.bounds_for_range(end..end, input.text_bounds()?, window, cx)

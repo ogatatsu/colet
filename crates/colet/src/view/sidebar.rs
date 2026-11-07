@@ -5,8 +5,8 @@ impl Colet {
     pub(super) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let home = &self.state.columns[0];
-        let (id, filtering) = (home.id, home.filter.is_some());
-        let field = self.filters.get(&id).map(|field| field.input.clone());
+        let (id, narrowed) = (home.id, home.narrow.is_some());
+        let field = self.narrow_fields.get(&id).map(|field| field.input.clone());
         let marked = self.state.active == 0 && !self.search_focused;
         let body = self.column_body(0, marked, cx);
         let width = self.sidebar_width(window);
@@ -80,7 +80,7 @@ impl Colet {
                         .py(px(6.))
                         .border_b_1()
                         .border_color(p.border)
-                        .child(self.filter_field(id, filtering, &input, window, cx))
+                        .child(self.column_narrow_field(id, narrowed, &input, window, cx))
                         .test_support(),
                 )
             })

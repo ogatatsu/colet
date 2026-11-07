@@ -92,15 +92,15 @@ impl Colet {
                     this.open_in_tab(index, &path, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &TrimFilter, window, cx| {
-                if !this.trim_filter(window, cx) {
+            .on_action(cx.listener(|this, _: &TrimNarrowing, window, cx| {
+                if !this.trim_narrowing(window, cx) {
                     cx.propagate();
                 }
             }))
-            .on_action(cx.listener(|this, _: &ClearFilter, window, cx| {
+            .on_action(cx.listener(|this, _: &ClearNarrowing, window, cx| {
                 let c = &this.state.columns[this.state.active];
-                if c.filtering() {
-                    this.close_filter(c.id, window, cx);
+                if c.is_narrowed() {
+                    this.clear_narrowing(c.id, window, cx);
                 } else {
                     cx.propagate();
                 }
@@ -157,11 +157,11 @@ impl Colet {
         }
         if c.entries.is_empty() {
             let (name, text) = match kind {
-                Kind::Search if c.filter.is_some() => ("funnel", "一致する項目はありません"),
+                Kind::Search if c.narrow.is_some() => ("funnel", "一致する項目はありません"),
                 Kind::Search => ("search", "一致する項目はありません"),
-                Kind::Home if c.filter.is_some() => ("funnel", "一致する項目はありません"),
+                Kind::Home if c.narrow.is_some() => ("funnel", "一致する項目はありません"),
                 Kind::Home => ("hard-drive", "場所もお気に入りもありません"),
-                Kind::Folder if c.shown_total() > 0 && c.filtering() => ("funnel", "一致する項目はありません"),
+                Kind::Folder if c.shown_total() > 0 && c.is_narrowed() => ("funnel", "一致する項目はありません"),
                 Kind::Folder if c.total > 0 => ("eye-off", "隠しファイルのみがあります"),
                 Kind::Folder => ("folder", "このフォルダーは空です"),
             };
@@ -241,15 +241,15 @@ impl Colet {
         };
         let title = c.title().into_owned();
         let header_title = title.clone();
-        let count = match &c.filter {
+        let count = match &c.narrow {
             _ if c.error.is_some() || c.unread() => String::new(),
             // Everything narrows the results: how many it lets through, of how many the search finds.
             Some(f) if kind == Kind::Search => format!("{} / {}", time::count(c.total as u64), time::count(f.whole as u64)),
             Some(f) if !f.text.is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.shown_total() as u64)),
             _ => time::count(c.shown_total() as u64),
         };
-        let filtering = c.filtering();
-        let field = self.filters.get(&id).map(|field| field.input.clone());
+        let narrowed = c.is_narrowed();
+        let field = self.narrow_fields.get(&id).map(|field| field.input.clone());
         let path = shown(&c.path);
         let (star_key, narrowing) = (favorite_key(&c.path, c.narrowing().as_deref()), c.narrowing());
         let body = self.column_body(index, marked, cx);
@@ -357,7 +357,7 @@ impl Colet {
                         .py(px(6.))
                         .border_b_1()
                         .border_color(p.border)
-                        .child(self.filter_field(id, filtering, &input, window, cx)),
+                        .child(self.column_narrow_field(id, narrowed, &input, window, cx)),
                 )
             })
             .child(headings)
@@ -504,10 +504,10 @@ impl Colet {
     }
 
     /// The field narrowing the column `id` to the names holding what is typed there.
-    pub(super) fn filter_field(
+    pub(super) fn column_narrow_field(
         &self,
         id: ColumnId,
-        filtering: bool,
+        narrowed: bool,
         input: &Entity<InputState>,
         window: &Window,
         cx: &mut Context<Self>,
@@ -531,16 +531,16 @@ impl Colet {
                 .border_color(p.border_strong)
                 .rounded(px(6.))
                 // Accented while it has the keys, or narrows the rows from out of them.
-                .child(icon("funnel", 13., if focused || filtering { p.accent } else { p.text_muted }))
+                .child(icon("funnel", 13., if focused || narrowed { p.accent } else { p.text_muted }))
                 .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(input, cx)).child(Input::new(input)))
                 // ↓ picks a row it lets through, as a click does, going there; Esc clears it, then goes there too.
                 .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
                     cx.stop_propagation();
-                    this.open_from_filter(id, window, cx);
+                    this.open_from_narrow_field(id, window, cx);
                 }))
                 .on_action(cx.listener(move |this, _: &input::Escape, window, cx| {
                     cx.stop_propagation();
-                    this.escape_filter(id, window, cx);
+                    this.escape_narrow_field(id, window, cx);
                 }))
                 // ← and → past the text's ends stay here, not going on to the next column; Enter does
                 // as ↓ does.
@@ -556,13 +556,13 @@ impl Colet {
                             .accessibility_label("フィルタをクリア")
                             .tooltip("フィルタをクリア（Esc）")
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                if let Some(field) = this.filters.get(&id) {
+                                if let Some(field) = this.narrow_fields.get(&id) {
                                     let input = field.input.clone();
                                     input.update(cx, |input, cx| {
                                         input.set_value("", window, cx);
                                         input.focus(window, cx);
                                     });
-                                    this.filter(id, "", cx);
+                                    this.narrow(id, "", cx);
                                 }
                             })),
                     )

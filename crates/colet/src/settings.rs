@@ -15,7 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     app::{COLUMN_WIDTHS, SIDEBAR_WIDTHS},
-    state::{Kept, favorite_key, favorite_parts, filter_words, narrowed_folder, narrowing, saved_query, search_key},
+    state::{Kept, favorite_key, favorite_parts, narrow_words, narrowed_folder, narrowing, saved_query, search_key},
 };
 
 /// A search kept in home. An empty name shows the query itself.
@@ -104,7 +104,7 @@ pub fn everything_query(query: &str, filter: Option<&str>) -> String {
 /// The search `query` narrowed to the names holding each word of `text` as it is, in any order, as the
 /// columns Colet narrows itself are: not the folders they are in, and with no wildcards.
 pub fn narrowed_query(query: &str, text: &str) -> String {
-    let words: String = filter_words(text).iter().map(|word| format!(" nopath:nowildcards:\"{word}\"")).collect();
+    let words: String = narrow_words(text).iter().map(|word| format!(" nopath:nowildcards:\"{word}\"")).collect();
     format!("<{}>{words}", closed(query))
 }
 

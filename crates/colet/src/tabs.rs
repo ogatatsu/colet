@@ -8,7 +8,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
-    app::{Colet, FilterField, RowScrolls},
+    app::{Colet, NarrowField, RowScrolls},
     menus::Popup,
     reveal::Sideways,
     settings::{KeptTab, Settings},
@@ -35,7 +35,7 @@ pub struct Parked {
     pub state: State,
     /// The filter its next search is narrowed by.
     pub filter: Option<String>,
-    filters: HashMap<ColumnId, FilterField>,
+    narrow_fields: HashMap<ColumnId, NarrowField>,
     rows: RowScrolls,
     sideways: Sideways,
     home_scroll: ScrollHandle,
@@ -49,7 +49,7 @@ pub enum Keys {
     Search,
     Column,
     /// The field narrowing the column.
-    Filter(ColumnId),
+    NarrowField(ColumnId),
 }
 
 impl Parked {
@@ -57,7 +57,7 @@ impl Parked {
         Self {
             state,
             filter,
-            filters: HashMap::new(),
+            narrow_fields: HashMap::new(),
             rows: RowScrolls::default(),
             sideways: Sideways::default(),
             home_scroll: ScrollHandle::new(),
@@ -320,21 +320,21 @@ impl Colet {
         if self.search_focused {
             return Keys::Search;
         }
-        match self.filters.iter().find(|(_, field)| self.has_keys(&field.input, window, cx)) {
-            Some((id, _)) => Keys::Filter(*id),
+        match self.narrow_fields.iter().find(|(_, field)| self.has_keys(&field.input, window, cx)) {
+            Some((id, _)) => Keys::NarrowField(*id),
             None => Keys::Column,
         }
     }
 
     /// Puts `parked` in front, handing back the tab that was with the keys where they are in it.
     fn swap_in(&mut self, parked: Parked, keys: Keys) -> Parked {
-        let Parked { mut state, filter, filters, rows, sideways, home_scroll, keys: _ } = parked;
+        let Parked { mut state, filter, narrow_fields: filters, rows, sideways, home_scroll, keys: _ } = parked;
         // Shown or not while it was parked, the hidden items follow the setting now.
         state.set_showing(self.showing());
         Parked {
             state: std::mem::replace(&mut self.state, state),
             filter: std::mem::replace(&mut self.chosen_filter, filter),
-            filters: std::mem::replace(&mut self.filters, filters),
+            narrow_fields: std::mem::replace(&mut self.narrow_fields, filters),
             rows: std::mem::replace(&mut self.rows, rows),
             sideways: std::mem::replace(&mut self.sideways, sideways),
             home_scroll: std::mem::replace(&mut self.home_scroll, home_scroll),
@@ -364,18 +364,18 @@ impl Colet {
                 self.changed(cx);
             }
             Keys::Column => self.focus_active(window, cx),
-            Keys::Filter(id) => self.focus_filter(id, window, cx),
+            Keys::NarrowField(id) => self.focus_narrow_field(id, window, cx),
         }
     }
 
     /// The keys go to the field narrowing the column `id`, which becomes the active one; a field made just
     /// now, for a tab never in front before, has the caret after what it holds. With the column gone, they
     /// go to the active one.
-    fn focus_filter(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+    fn focus_narrow_field(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return self.focus_active(window, cx) };
-        let fresh = !self.filters.contains_key(&id);
-        self.filter_fields(window, cx);
-        let Some(field) = self.filters.get(&id) else { return self.focus_active(window, cx) };
+        let fresh = !self.narrow_fields.contains_key(&id);
+        self.sync_narrow_fields(window, cx);
+        let Some(field) = self.narrow_fields.get(&id) else { return self.focus_active(window, cx) };
         let input = field.input.clone();
         self.state.set_active(index);
         input.update(cx, |input, cx| {
@@ -414,7 +414,7 @@ impl Colet {
         let (mut state, directory) = if c.kind == Kind::Folder && c.path == path {
             let mut state = State::opening(path, true);
             let last = state.columns.len() - 1;
-            state.set_filter(last, c.filter.as_ref().map(|f| f.text.as_str()));
+            state.set_narrowing(last, c.narrow.as_ref().map(|f| f.text.as_str()));
             (state, true)
         } else {
             let Some(entry) = c.entry(path) else { return };
@@ -427,7 +427,7 @@ impl Colet {
         if opened.is_some() {
             state.set_active(state.columns.len() - 1);
         }
-        let keys = opened.map_or(Keys::Column, Keys::Filter);
+        let keys = opened.map_or(Keys::Column, Keys::NarrowField);
         let tab = self.tabs.tab(Some(Parked::new(state, filter, keys)));
         self.tabs.list.insert(self.tabs.current + 1, tab);
         self.keep_tabs(cx);

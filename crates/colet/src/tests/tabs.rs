@@ -177,13 +177,13 @@ impl Ui {
     /// The field narrowing the column at `index` has the keys.
     fn filter_focused(&self, cx: &mut TestAppContext, index: usize) -> bool {
         let id = self.read(cx, |v| v.state.columns[index].id);
-        let input = self.view.read_with(cx, |v, _| v.filters.get(&id).map(|field| field.input.clone()));
+        let input = self.view.read_with(cx, |v, _| v.narrow_fields.get(&id).map(|field| field.input.clone()));
         input.is_some_and(|input| self.has_focus(cx, &input))
     }
 
     fn typed(&self, cx: &mut TestAppContext, index: usize) -> String {
         let id = self.read(cx, |v| v.state.columns[index].id);
-        self.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string())
+        self.view.read_with(cx, |v, cx| v.narrow_fields[&id].input.read(cx).value().to_string())
     }
 }
 

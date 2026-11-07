@@ -678,13 +678,13 @@ fn finds_every_place_a_name_holds_the_text_case_aside() {
 
 #[test]
 fn takes_the_words_apart_at_any_space_but_in_quotes() {
-    assert_eq!(filter_words(" rep\u{3000}2024  x"), ["rep", "2024", "x"]);
-    assert_eq!(filter_words("\"my doc\" a\"b c\"d"), ["my doc", "ab cd"]);
+    assert_eq!(narrow_words(" rep\u{3000}2024  x"), ["rep", "2024", "x"]);
+    assert_eq!(narrow_words("\"my doc\" a\"b c\"d"), ["my doc", "ab cd"]);
     // A quote left open is closed at the end.
-    assert_eq!(filter_words("x \"my do"), ["x", "my do"]);
-    assert!(filter_words(" \u{3000}\"\" ").is_empty());
+    assert_eq!(narrow_words("x \"my do"), ["x", "my do"]);
+    assert!(narrow_words(" \u{3000}\"\" ").is_empty());
     // Nothing else is read: a minus or a bar is a letter as any.
-    assert_eq!(filter_words("-a|b"), ["-a|b"]);
+    assert_eq!(narrow_words("-a|b"), ["-a|b"]);
 }
 
 #[test]
@@ -702,7 +702,7 @@ fn narrows_a_folder_to_the_names_holding_the_text_keeping_what_it_hides_picked()
     let mut s = drive(vec![folder(r"D:\alpha"), file(r"D:\beta.txt"), folder(r"D:\gamma")]);
     s.select(1, one(r"D:\alpha"));
     assert_eq!(s.columns.len(), 3);
-    s.set_filter(1, Some("TA"));
+    s.set_narrowing(1, Some("TA"));
     assert_eq!(names(&s, 1), [r"D:\beta.txt"]);
     assert_eq!(s.columns[1].entries[0].marks.name, [5..7]);
     // The folder it had open beside it is hidden: it stays picked, and its column open, but is not
@@ -712,21 +712,21 @@ fn narrows_a_folder_to_the_names_holding_the_text_keeping_what_it_hides_picked()
     assert!(s.columns[1].shown_selected().is_empty());
     // Of several picked, what shows is acted on.
     s.select(1, vec![PathBuf::from(r"D:\alpha"), PathBuf::from(r"D:\beta.txt")]);
-    s.set_filter(1, Some("t"));
+    s.set_narrowing(1, Some("t"));
     assert_eq!(s.columns[1].selected.len(), 2);
     assert_eq!(*s.columns[1].shown_selected(), one(r"D:\beta.txt"));
     // Ctrl+A picks only what shows.
-    s.set_filter(1, Some("a"));
+    s.set_narrowing(1, Some("a"));
     s.select_all(1);
     assert_eq!(s.columns[1].selected.len(), 3);
-    s.set_filter(1, Some("mm"));
+    s.set_narrowing(1, Some("mm"));
     s.select_all(1);
     assert_eq!(s.columns[1].selected, one(r"D:\gamma"));
     // Lifted, it lists all again, unmarked.
-    s.set_filter(1, None);
+    s.set_narrowing(1, None);
     assert_eq!(names(&s, 1).len(), 3);
     assert!(s.columns[1].entries.iter().all(|e| e.marks.name.is_empty()));
-    assert!(s.columns[1].filter.is_none());
+    assert!(s.columns[1].narrow.is_none());
 }
 
 #[test]
@@ -736,7 +736,7 @@ fn narrows_home_keeping_its_pick_and_what_it_opened() {
     s.select(0, one(r"D:\"));
     s.select(1, one(r"D:\alpha"));
     assert_eq!(s.columns.len(), 3);
-    s.set_filter(0, Some("c:"));
+    s.set_narrowing(0, Some("c:"));
     assert_eq!(names(&s, 0), [r"C:\"]);
     assert_eq!(s.columns[0].selected, one(r"D:\"));
     assert_eq!(s.columns.len(), 3);
@@ -745,7 +745,7 @@ fn narrows_home_keeping_its_pick_and_what_it_opened() {
     s.load(id, 9, true);
     s.page(id, 9, vec![folder(r"C:\"), folder(r"D:\"), folder(r"E:\")], 3, 0, &HashSet::new());
     assert_eq!(names(&s, 0), [r"C:\"]);
-    s.set_filter(0, None);
+    s.set_narrowing(0, None);
     assert_eq!(names(&s, 0).len(), 3);
 }
 
@@ -753,15 +753,15 @@ fn narrows_home_keeping_its_pick_and_what_it_opened() {
 fn narrows_each_listing_that_comes_after() {
     let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
     let id = s.columns[1].id;
-    s.set_filter(1, Some("ta"));
+    s.set_narrowing(1, Some("ta"));
     s.load(id, 3, true);
     s.page(id, 3, vec![file(r"D:\beta.txt"), file(r"D:\delta"), file(r"D:\gamma")], 3, 0, &HashSet::new());
     assert_eq!(names(&s, 1), [r"D:\beta.txt", r"D:\delta"]);
     assert_eq!(s.columns[1].total, 3);
     // Emptied, it narrows no more.
-    s.set_filter(1, Some(""));
+    s.set_narrowing(1, Some(""));
     assert_eq!(names(&s, 1).len(), 3);
-    assert!(s.columns[1].filter.is_none());
+    assert!(s.columns[1].narrow.is_none());
 }
 
 #[test]
@@ -776,21 +776,21 @@ fn narrows_the_results_as_everything_answers_keeping_what_it_hides_picked() {
     let open = s.columns.len();
     assert!(open > 2);
     // The results show as they are until Everything answers, counted from all the search finds.
-    s.set_filter(1, Some("bet"));
+    s.set_narrowing(1, Some("bet"));
     assert_eq!(names(&s, 1).len(), 3);
-    assert_eq!(s.columns[1].filter.as_ref().map(|f| f.whole), Some(3));
+    assert_eq!(s.columns[1].narrow.as_ref().map(|f| f.whole), Some(3));
     s.load(id, 2, true);
     s.counted(id, 2, 4);
     s.page(id, 2, results[1..].to_vec(), 2, 0, &HashSet::new());
     assert_eq!(names(&s, 1), [r"D:\beta.txt", r"E:\alphabet.txt"]);
-    assert_eq!((s.columns[1].total, s.columns[1].filter.as_ref().map(|f| f.whole)), (2, Some(4)));
+    assert_eq!((s.columns[1].total, s.columns[1].narrow.as_ref().map(|f| f.whole)), (2, Some(4)));
     // The one picked, hidden, stays picked, the folder it opened open.
     assert_eq!(s.columns[1].selected, one(r"D:\alpha"));
     assert_eq!(s.columns.len(), open);
     // Of several picked, those hidden stay picked too, but only what shows is acted on; a rename, which
     // narrows the others again, leaves the results be.
     s.select(1, vec![PathBuf::from(r"D:\beta.txt"), PathBuf::from(r"E:\alphabet.txt")]);
-    s.set_filter(1, Some("beta."));
+    s.set_narrowing(1, Some("beta."));
     s.load(id, 3, true);
     s.page(id, 3, results[1..2].to_vec(), 1, 0, &HashSet::new());
     assert_eq!(s.columns[1].selected, [PathBuf::from(r"D:\beta.txt"), PathBuf::from(r"E:\alphabet.txt")]);
@@ -798,11 +798,11 @@ fn narrows_the_results_as_everything_answers_keeping_what_it_hides_picked() {
     s.renamed(Path::new(r"D:\gamma"), Path::new(r"D:\delta"));
     assert_eq!(names(&s, 1), [r"D:\beta.txt"]);
     // Emptied, it narrows no more; another search starts with none.
-    s.set_filter(1, Some(""));
-    assert!(s.columns[1].filter.is_none());
-    s.set_filter(1, Some("x"));
+    s.set_narrowing(1, Some(""));
+    assert!(s.columns[1].narrow.is_none());
+    s.set_narrowing(1, Some("x"));
     s.set_query("b");
-    assert!(s.columns[1].filter.is_none());
+    assert!(s.columns[1].narrow.is_none());
 }
 
 #[test]
@@ -818,23 +818,23 @@ fn keeps_the_result_a_filter_takes_the_keys_off_to_go_back_to_once_it_shows() {
         s.load(id, request, true);
         s.page(id, request, entries.to_vec(), entries.len(), 0, &HashSet::new());
     };
-    s.set_filter(1, Some("bet"));
+    s.set_narrowing(1, Some("bet"));
     answer(&mut s, 2, &results[1..]);
     assert_eq!(s.columns[1].focused, None);
     // Shown again, loosened or lifted, the keys are back on it.
-    s.set_filter(1, Some("al"));
+    s.set_narrowing(1, Some("al"));
     answer(&mut s, 3, &[results[0].clone(), results[2].clone()]);
     assert_eq!(s.columns[1].focused, Some(PathBuf::from(r"D:\alpha")));
-    s.set_filter(1, Some("bet"));
+    s.set_narrowing(1, Some("bet"));
     answer(&mut s, 4, &results[1..]);
-    s.set_filter(1, None);
+    s.set_narrowing(1, None);
     answer(&mut s, 5, &results);
     assert_eq!(s.columns[1].focused, Some(PathBuf::from(r"D:\alpha")));
     // Gone to another meanwhile, they stay there.
-    s.set_filter(1, Some("bet"));
+    s.set_narrowing(1, Some("bet"));
     answer(&mut s, 6, &results[1..]);
     s.select(1, one(r"D:\beta.txt"));
-    s.set_filter(1, None);
+    s.set_narrowing(1, None);
     answer(&mut s, 7, &results);
     assert_eq!(s.columns[1].focused, Some(PathBuf::from(r"D:\beta.txt")));
 }
@@ -842,34 +842,34 @@ fn keeps_the_result_a_filter_takes_the_keys_off_to_go_back_to_once_it_shows() {
 #[test]
 fn lifts_the_filter_for_what_is_made_or_renamed_here_that_it_would_hide() {
     let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
-    s.set_filter(1, Some("ta"));
+    s.set_narrowing(1, Some("ta"));
     s.created(Path::new(r"D:\"), Path::new(r"D:\data"));
     assert_eq!(names(&s, 1), [r"D:\beta.txt", r"D:\data"]);
     assert_eq!(s.columns[1].selected, one(r"D:\data"));
     s.created(Path::new(r"D:\"), Path::new(r"D:\new"));
-    assert!(s.columns[1].filter.is_none());
+    assert!(s.columns[1].narrow.is_none());
     assert_eq!(s.columns[1].selected, one(r"D:\new"));
 
     let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
-    s.set_filter(1, Some("ta"));
+    s.set_narrowing(1, Some("ta"));
     s.renamed(Path::new(r"D:\beta.txt"), Path::new(r"D:\beta2.txt"));
     assert_eq!(s.columns[1].entries[0].marks.name, [2..4]);
     s.renamed(Path::new(r"D:\beta2.txt"), Path::new(r"D:\b.txt"));
-    assert!(s.columns[1].filter.is_none());
+    assert!(s.columns[1].narrow.is_none());
 
     // Pasted where it hides them, already listed or listed after.
     let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
-    s.set_filter(1, Some("ta"));
+    s.set_narrowing(1, Some("ta"));
     s.pasted(Path::new(r"D:\"), &[r"D:\gamma".into()]);
-    assert!(s.columns[1].filter.is_none());
+    assert!(s.columns[1].narrow.is_none());
     assert_eq!(s.columns[1].selected, one(r"D:\gamma"));
     let mut s = drive(vec![file(r"D:\beta.txt")]);
-    s.set_filter(1, Some("ta"));
+    s.set_narrowing(1, Some("ta"));
     s.pasted(Path::new(r"D:\"), &[r"D:\x".into()]);
     let id = s.columns[1].id;
     s.load(id, 4, true);
     s.page(id, 4, vec![file(r"D:\beta.txt"), file(r"D:\x")], 2, 0, &HashSet::new());
-    assert!(s.columns[1].filter.is_none());
+    assert!(s.columns[1].narrow.is_none());
     assert_eq!(s.columns[1].selected, one(r"D:\x"));
 }
 
@@ -970,7 +970,7 @@ fn opens_a_favorite_from_home_narrowed_as_it_was_kept() {
     // The same folder from its favorite not narrowed lists it all.
     s.select(0, one(r"D:\a"));
     let last = s.columns.last().unwrap();
-    assert_eq!((last.path.as_path(), last.filter.is_none()), (Path::new(r"D:\a"), true));
+    assert_eq!((last.path.as_path(), last.narrow.is_none()), (Path::new(r"D:\a"), true));
     // A saved search runs narrowed as it was kept.
     let search = search_key("cat", None, Some("y"));
     with_entries(&mut s, 0, vec![Entry { directory: false, ..Entry::folder(&search, "cat") }]);
@@ -1036,7 +1036,7 @@ fn shows_the_protected_files_only_along_with_the_hidden_items() {
     // Asked for alone, they stay out with the rest.
     assert_eq!(shown(&mut s, Showing { hidden: false, protected: true }), [r"D:\a"]);
     assert_eq!(shown(&mut s, ALL).len(), 3);
-    assert!(s.columns[1].filter.is_none());
+    assert!(s.columns[1].narrow.is_none());
     assert_eq!(shown(&mut s, NONE), [r"D:\a"]);
 }
 
@@ -1058,22 +1058,22 @@ fn leaves_out_the_hidden_items_keeping_them_picked_as_a_filter_does() {
     s.set_showing(NONE);
     assert_eq!(names(&s, 1), [r"D:\a"]);
     assert_eq!(s.columns[1].shown_total(), 1);
-    assert!(!s.columns[1].filtering());
+    assert!(!s.columns[1].is_narrowed());
     // Out of sight, it stays picked, but is not what is acted on.
     assert_eq!(s.columns[1].selected, one(r"D:\desktop.ini"));
     assert!(s.columns[1].shown_selected().is_empty());
     // A refresh leaves them out again; narrowing by the field, and lifting it, does too.
     listed(&mut s, 1, listing.clone());
     assert_eq!(names(&s, 1), [r"D:\a"]);
-    s.set_filter(1, Some("i"));
+    s.set_narrowing(1, Some("i"));
     assert!(s.columns[1].entries.is_empty());
-    assert!(s.columns[1].filtering());
-    s.set_filter(1, None);
+    assert!(s.columns[1].is_narrowed());
+    s.set_narrowing(1, None);
     assert_eq!(names(&s, 1), [r"D:\a"]);
     // Shown again, all are listed as before, the pick with them.
     s.set_showing(ALL);
     assert_eq!(names(&s, 1).len(), 3);
-    assert!(s.columns[1].filter.is_none());
+    assert!(s.columns[1].narrow.is_none());
     assert_eq!(*s.columns[1].shown_selected(), one(r"D:\desktop.ini"));
     assert_eq!(s.columns[1].shown_total(), 3);
 }

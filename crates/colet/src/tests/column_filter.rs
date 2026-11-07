@@ -46,7 +46,7 @@ fn types_from_the_rows_into_their_field_each_time_as_another_word(cx: &mut TestA
     ui.click(cx, row(r"D:\"));
     ui.press(cx, "right");
     let id = ui.read(cx, |v| v.state.columns[1].id);
-    let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string());
+    let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.narrow_fields[&id].input.read(cx).value().to_string());
     let shown =
         |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     // A key in the rows goes on in the field, which takes the keys.
@@ -109,7 +109,7 @@ fn hands_what_an_ime_composes_in_the_rows_on_to_their_field(cx: &mut TestAppCont
     ui.act(cx, |window, cx| view.update(cx, |v, cx| v.replace_and_mark_text_in_range(None, "しゃ", Some(2..2), window, cx)));
     settle(cx);
     assert!(!ui.columns_focused(cx));
-    let input = ui.view.read_with(cx, |v, _| v.filters[&id].input.clone());
+    let input = ui.view.read_with(cx, |v, _| v.narrow_fields[&id].input.clone());
     // The field goes on composing it, and takes what the IME settles on in its place.
     let marked = ui.act(cx, |window, cx| input.update(cx, |input, cx| input.marked_text_range(window, cx)));
     assert_eq!(marked, Some(0..2));
@@ -163,7 +163,7 @@ fn narrows_a_folder_by_name_typed_in_its_rows_and_lists_all_again_on_escape(cx: 
     // Each folder has its field from the start, an empty one too.
     assert!(ui.act(cx, |window, _| window.try_find(("filter", id)).is_some()));
     assert!(ui.act(cx, |window, _| window.try_find(("filter", alpha)).is_some()));
-    let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string());
+    let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.narrow_fields[&id].input.read(cx).value().to_string());
     // What is typed narrows the rows rather than jumping through them; the folder it hides stays picked,
     // and open, as home's place does.
     ui.input(cx, "TA");
@@ -211,7 +211,7 @@ fn narrows_a_folder_by_name_typed_in_its_rows_and_lists_all_again_on_escape(cx: 
     // Lifted for what was made or pasted, the field empties too.
     ui.input(cx, "be");
     ui.view.update(cx, |v, cx| {
-        v.state.set_filter(1, None);
+        v.state.set_narrowing(1, None);
         cx.notify();
     });
     settle(cx);

@@ -86,7 +86,7 @@ fn copies_the_path_of_a_folder_column_and_opens_it_in_a_tab_from_its_empty_space
     assert_eq!(*fake.text.lock().unwrap(), r"D:\work");
     // Narrowed, it opens so in a tab of its own, behind this one.
     ui.view.update(cx, |v, cx| {
-        v.state.set_filter(2, Some("b"));
+        v.state.set_narrowing(2, Some("b"));
         cx.notify();
     });
     empty_space(cx);
@@ -94,7 +94,7 @@ fn copies_the_path_of_a_folder_column_and_opens_it_in_a_tab_from_its_empty_space
     assert_eq!(ui.read(cx, |v| (v.tabs.list.len(), v.tabs.current)), (2, 0));
     ui.press(cx, "ctrl-tab");
     settle(cx);
-    let last = ui.read(cx, |v| v.state.columns.last().map(|c| (text(&c.path), c.filter.as_ref().map(|f| f.text.clone()))));
+    let last = ui.read(cx, |v| v.state.columns.last().map(|c| (text(&c.path), c.narrow.as_ref().map(|f| f.text.clone()))));
     assert_eq!(last, Some((r"D:\work".to_owned(), Some("b".to_owned()))));
     assert_eq!(
         ui.read(cx, |v| v.state.columns.last().unwrap().entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>()),
@@ -460,7 +460,7 @@ fn keeps_the_keys_in_the_menu_from_a_row_or_the_folder_s_empty_space(cx: &mut Te
         assert!(ui.act(cx, |window, cx| view.read(cx).menu_has_keys(window, cx)));
         // What is typed over the menu goes nowhere, not on in the column's field.
         ui.input(cx, "b");
-        let typed = ui.view.read_with(cx, |v, cx| v.filters.get(&work).map(|f| f.input.read(cx).value().to_string()));
+        let typed = ui.view.read_with(cx, |v, cx| v.narrow_fields.get(&work).map(|f| f.input.read(cx).value().to_string()));
         assert_eq!(typed.unwrap_or_default(), "");
         assert!(ui.read(cx, |v| v.menu().is_some()));
         ui.press(cx, "escape");
