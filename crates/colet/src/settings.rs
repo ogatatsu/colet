@@ -14,7 +14,7 @@ use colet_core::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    app::{COLUMN_WIDTHS, SIDEBAR_WIDTHS},
+    app::{COLUMN_WIDTHS, SEARCH_FIELD_WIDTH, SEARCH_FIELD_WIDTHS, SIDEBAR_WIDTHS},
     state::{Kept, favorite_key, favorite_parts, narrow_words, narrowed_folder, narrowing, saved_query, search_key},
 };
 
@@ -163,6 +163,8 @@ pub struct Settings {
     pub search_width: f32,
     /// Home's pane on the left.
     pub sidebar_width: f32,
+    /// The search field in the toolbar.
+    pub search_field_width: f32,
     #[serde(with = "favorites")]
     pub favorites: Vec<Favorite>,
     pub saved_searches: Vec<SavedSearch>,
@@ -193,6 +195,7 @@ impl Default for Settings {
             column_width: 320.,
             search_width: 320.,
             sidebar_width: 240.,
+            search_field_width: SEARCH_FIELD_WIDTH,
             favorites: Vec::new(),
             saved_searches: Vec::new(),
             pinned: Vec::new(),
@@ -215,6 +218,7 @@ impl Settings {
         self.column_width = clamp(self.column_width, COLUMN_WIDTHS);
         self.search_width = clamp(self.search_width, COLUMN_WIDTHS);
         self.sidebar_width = clamp(self.sidebar_width, SIDEBAR_WIDTHS);
+        self.search_field_width = clamp(self.search_field_width, SEARCH_FIELD_WIDTHS);
         // A filter is found by its name, a search by its query, filter and narrowing, and a favorite by its
         // path and narrowing: one of each, none empty. What names a filter gone goes without it. A
         // narrowing is kept as one is typed again, with no word none.
@@ -819,9 +823,11 @@ mod tests {
 
     #[test]
     fn keeps_widths_whole_and_within_bounds() {
-        let mut settings = Settings { column_width: 9000., search_width: 100.4, sidebar_width: 200.6, ..Settings::default() };
+        let mut settings =
+            Settings { column_width: 9000., search_width: 100.4, sidebar_width: 200.6, search_field_width: 1000., ..Settings::default() };
         settings.normalize();
         assert_eq!((settings.column_width, settings.search_width, settings.sidebar_width), (640., 260., 201.));
+        assert_eq!(settings.search_field_width, 640.);
     }
 
     #[test]

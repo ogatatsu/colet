@@ -100,7 +100,7 @@ impl Colet {
         // The room the bar was last drawn with; before the first frame, a guess at what the toolbar leaves it.
         let row_width = match self.crumbs.row.get() {
             Some(row) => f32::from(row.size.width),
-            None => (f32::from(window.viewport_size().width) - ADDRESS_GUESS).max(crate::crumbs::TYPING_ROOM),
+            None => (f32::from(window.viewport_size().width) - ADDRESS_GUESS - self.widths.field).max(crate::crumbs::TYPING_ROOM),
         };
         self.crumbs.room.set(row_width);
         // The crumbs leave a strip to press to type a path, however long the trail.

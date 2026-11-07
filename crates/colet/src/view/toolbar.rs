@@ -10,6 +10,7 @@ impl Colet {
         let p = self.palette;
         let focused = self.search_focused;
         let has_query = !self.state.query.is_empty();
+        let field_width = self.widths.field;
         let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());
 
         let filter_button = self.filter_button(window, cx);
@@ -43,7 +44,7 @@ impl Colet {
             .child(
                 // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row. It keeps
                 // its width while the address beside it gives way, then narrows, keeping room to type in.
-                frame(p, focused).flex_none().w(px(SEARCH_FIELD_WIDTH)).flex_shrink(1.).min_w(px(SEARCH_FIELD_MIN)).m(px(-3.)).child(
+                frame(p, focused).flex_none().w(px(field_width)).flex_shrink(1.).min_w(px(SEARCH_FIELD_WIDTHS.0)).m(px(-3.)).child(
                     div()
                         .id("search-box")
                         .w_full()
@@ -95,8 +96,7 @@ impl Colet {
                         .test_support(),
                 ),
             )
-            // From what is searched to where it is.
-            .child(div().flex_none().child(icon("chevron-right", 14., p.text_faint)))
+            .child(self.field_resizer(cx))
             .child(address)
             .child(
                 div().flex_none().child(
@@ -104,6 +104,36 @@ impl Colet {
                         .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
                 ),
             )
+            .into_any_element()
+    }
+
+    /// The chevron from what is searched to where it is, and the edge a drag widens the search field from:
+    /// over the gaps on either side, lit while pointed at or dragged.
+    fn field_resizer(&self, cx: &mut Context<Self>) -> AnyElement {
+        const ID: &str = "search-field-resizer";
+        let p = self.palette;
+        let dragging = self.resizing.as_ref().is_some_and(|r| r.of == WidthOf::Field);
+        let width = self.widths.field;
+        div()
+            .id(ID)
+            .group(ID)
+            .flex_none()
+            .h(px(metrics::CONTROL_HEIGHT))
+            .px(px(4.))
+            .mx(px(-4.))
+            .flex()
+            .items_center()
+            .cursor_col_resize()
+            .child(icon("chevron-right", 14., if dragging { p.accent } else { p.text_faint }).group_hover(ID, |s| s.text_color(p.accent)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.resizing = Some(Resize { of: WidthOf::Field, start_x: event.position.x, start_width: width });
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .test_support()
             .into_any_element()
     }
 

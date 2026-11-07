@@ -334,15 +334,16 @@ impl Colet {
         }
     }
 
-    /// A drag on a column's edge is over: keep the width it left.
+    /// A drag on an edge is over: keep the width it left.
     pub fn end_resize(&mut self, cx: &mut Context<Self>) {
         let Some(resize) = self.resizing.take() else { return };
-        let widths = (self.widths.sidebar, self.widths.search, self.widths.column);
+        let widths = (self.widths.sidebar, self.widths.search, self.widths.column, self.widths.field);
         self.update_settings(
             |s| match resize.of {
                 WidthOf::Sidebar => s.sidebar_width = widths.0,
                 WidthOf::Search => s.search_width = widths.1,
                 WidthOf::Column => s.column_width = widths.2,
+                WidthOf::Field => s.search_field_width = widths.3,
             },
             cx,
         );

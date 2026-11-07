@@ -42,6 +42,8 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
         }];
         // Home's pane dragged as wide as it goes.
         settings.sidebar_width = 480.;
+        // And the search field.
+        settings.search_field_width = 640.;
     }
     let ui = open(cx, Arc::new(fake));
     let (width, height) = crate::app::MIN_WINDOW;
@@ -66,7 +68,8 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
     // Home's pane gave way to its usual width, keeping the width it was dragged to.
     assert_eq!(sidebar.size.width, px(width - crate::app::MAIN_MIN));
     assert_eq!(ui.read(cx, |v| v.widths.sidebar), 480.);
-    assert!(field.size.width >= px(crate::app::SEARCH_FIELD_MIN - 6.), "{field:?}");
+    assert!(field.size.width >= px(crate::app::SEARCH_FIELD_WIDTHS.0 - 6.), "{field:?}");
+    assert!(field.size.width < px(640.), "{field:?}");
     // The filter's name gave way, down to the funnel and the chevron; nothing is pushed past the edge.
     assert!(filter.size.width < px(200.) && filter.size.width >= px(60.), "{filter:?}");
     assert!(last.right() <= px(width), "{last:?}");

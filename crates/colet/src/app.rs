@@ -192,11 +192,13 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
-/// The widths the user drags: home's pane, the pinned search results and the folders, which share one.
+/// The widths the user drags: home's pane, the pinned search results, the folders, which share one, and
+/// the search field.
 pub struct Widths {
     pub sidebar: f32,
     pub search: f32,
     pub column: f32,
+    pub field: f32,
 }
 
 /// At its least a column keeps some of a name beside a row's size and modified time.
@@ -209,21 +211,23 @@ pub const FOLD_WIDTH: f32 = 28.;
 pub const MAIN_MIN: f32 = 480.;
 /// The smallest the window goes: home's pane at its usual width, and the rest.
 pub const MIN_WINDOW: (f32, f32) = (240. + MAIN_MIN, 480.);
-/// The search field's width while the window has room, and the least it narrows to, the address beside it
-/// and the search filter's name giving way first.
+/// The search field's width at first, and the bounds a drag keeps it in. In a narrow window it narrows to
+/// the least, the address beside it and the search filter's name giving way first.
 pub const SEARCH_FIELD_WIDTH: f32 = 260.;
-pub const SEARCH_FIELD_MIN: f32 = 160.;
+pub const SEARCH_FIELD_WIDTHS: (f32, f32) = (200., 640.);
 /// The least the address keeps: the "…" of its folded crumbs, the last clipped, and room to press to type.
 pub const ADDRESS_MIN: f32 = 120.;
-/// What the toolbar takes from the window but the address, guessed before it is first drawn.
-pub const ADDRESS_GUESS: f32 = 500.;
+/// What the toolbar takes from the window but the address and the search field, guessed before it is first
+/// drawn.
+pub const ADDRESS_GUESS: f32 = 240.;
 
-/// Which width a drag on a column's edge changes.
+/// Which width a drag on an edge changes.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WidthOf {
     Sidebar,
     Search,
     Column,
+    Field,
 }
 
 pub struct Resize {
@@ -532,7 +536,12 @@ impl Colet {
             state: State::new(),
             chosen_filter: None,
             tabs: Tabs::default(),
-            widths: Widths { sidebar: settings.sidebar_width, search: settings.search_width, column: settings.column_width },
+            widths: Widths {
+                sidebar: settings.sidebar_width,
+                search: settings.search_width,
+                column: settings.column_width,
+                field: settings.search_field_width,
+            },
             palette: Palette::for_window(window, settings.theme),
             search,
             search_focused: false,

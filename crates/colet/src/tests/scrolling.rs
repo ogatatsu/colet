@@ -16,6 +16,32 @@ fn widens_home_by_its_edge_within_its_bounds(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn widens_the_search_field_by_the_chevron_beside_it_within_its_bounds_and_keeps_it(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    fake.settings.lock().unwrap().search_field_width = 300.;
+    let ui = open(cx, fake.clone());
+    let field = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, _| window.find("search-box").bounds().size.width);
+    let address = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, _| window.find("address").bounds().size.width);
+    let (field_before, address_before) = (field(&ui, cx), address(&ui, cx));
+    let edge = ui.act(cx, |window, _| window.find("search-field-resizer").bounds().center());
+    ui.act(cx, |window, cx| window.drag(edge, point(edge.x + px(100.4), edge.y), cx));
+    settle(cx);
+    // The field takes what the address gives.
+    assert_eq!(ui.read(cx, |v| v.widths.field), 400.);
+    assert_eq!(field(&ui, cx), field_before + px(100.));
+    assert_eq!(address(&ui, cx), address_before - px(100.));
+    assert_eq!(fake.settings.lock().unwrap().search_field_width, 400.);
+    let edge = ui.act(cx, |window, _| window.find("search-field-resizer").bounds().center());
+    ui.act(cx, |window, cx| window.drag(edge, point(px(0.), edge.y), cx));
+    settle(cx);
+    assert_eq!(ui.read(cx, |v| v.widths.field), crate::app::SEARCH_FIELD_WIDTHS.0);
+    let edge = ui.act(cx, |window, _| window.find("search-field-resizer").bounds().center());
+    ui.act(cx, |window, cx| window.drag(edge, point(edge.x + px(2000.), edge.y), cx));
+    settle(cx);
+    assert_eq!(ui.read(cx, |v| v.widths.field), crate::app::SEARCH_FIELD_WIDTHS.1);
+}
+
+#[gpui_kit::test]
 fn widens_a_column_by_an_edge_astride_its_border_even_past_it(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(drive_d()));
     ui.click(cx, row(r"D:\"));

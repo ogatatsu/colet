@@ -282,13 +282,18 @@ impl Render for Colet {
                 d.cursor_col_resize()
                     .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                         let Some(resize) = &this.resizing else { return };
-                        let (min, max) = if resize.of == WidthOf::Sidebar { SIDEBAR_WIDTHS } else { COLUMN_WIDTHS };
+                        let (min, max) = match resize.of {
+                            WidthOf::Sidebar => SIDEBAR_WIDTHS,
+                            WidthOf::Field => SEARCH_FIELD_WIDTHS,
+                            WidthOf::Search | WidthOf::Column => COLUMN_WIDTHS,
+                        };
                         // Display scaling makes the deltas fractional; widths stay whole pixels.
                         let width = (resize.start_width + f32::from(event.position.x - resize.start_x)).clamp(min, max).round();
                         match resize.of {
                             WidthOf::Sidebar => this.widths.sidebar = width,
                             WidthOf::Search => this.widths.search = width,
                             WidthOf::Column => this.widths.column = width,
+                            WidthOf::Field => this.widths.field = width,
                         }
                         cx.notify();
                     }))
