@@ -253,6 +253,10 @@ pub const ONE_ITEM: &str = "1項目を選択したときに使えます";
 pub const NEEDS_FILE: &str = "ファイルを選択したときに使えます";
 pub const SAME_FOLDER: &str = "同じフォルダーの項目を選んだときに使えます";
 const NO_SEND_TARGETS: &str = "送るフォルダーに送り先がありません";
+const NO_SEND_DRIVE: &str = "ドライブは送れません";
+const NO_COPY_SAVED: &str = "保存した検索はコピーできません";
+const NO_COPY_DRIVE: &str = "ドライブはコピーできません";
+const NOT_FOR_SAVED: &str = "保存した検索には使えません";
 /// The fewest files opened together that are asked about first, as Explorer stops offering to open them
 /// past 15.
 pub const ASK_TO_OPEN: usize = 16;
@@ -311,68 +315,37 @@ impl Colet {
     /// Asked as the buttons are drawn, each frame: it walks the selection, which may be thousands, without
     /// making a string, and stops at the first answer.
     pub fn reasons(&self) -> Reasons {
+        fn parent(p: &Path) -> &Path {
+            parent_folder(p).unwrap_or(Path::new(""))
+        }
+
         let picked = self.picked_paths();
         let at_home = self.action_column().is_none_or(|c| c.kind == ColumnKind::Home);
         let at_server = self.at_server();
         let search = picked.iter().any(|p| saved_query(p).is_some());
         let none = picked.is_empty();
-        let item = if none {
-            Some(NEEDS_SELECTION)
-        } else if at_home {
-            Some(NOT_AT_HOME)
-        } else if at_server {
-            Some(NOT_AT_SERVER)
-        } else {
-            None
-        };
-        let busy = self.running.is_some().then_some(BUSY);
-        let folder = busy.or(if at_server { Some(NOT_AT_SERVER) } else { self.destination().is_none().then_some(NEEDS_FOLDER) });
-        let here = self.folder_here().is_none().then_some(NEEDS_FOLDER);
-        let saved_pick = picked.len() == 1 && search;
         let drive = picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(&home_path(p)).is_none());
-        let first = picked.first().map(|p| parent_folder(p).unwrap_or(Path::new("")));
-        let apart = first.is_some_and(|first| picked.iter().any(|p| parent_folder(p).unwrap_or(Path::new("")) != first));
+        let apart = picked.first().map(|p| parent(p)).is_some_and(|first| picked.iter().any(|p| parent(p) != first));
+
+        // What works on the items picked needs some, and not in home or a server's shares.
+        let item = none.then_some(NEEDS_SELECTION).or(at_home.then_some(NOT_AT_HOME)).or(at_server.then_some(NOT_AT_SERVER));
+        let busy = self.running.is_some().then_some(BUSY);
+        // What works on a place: with nothing picked, the folder column's own folder; else the items', all
+        // in one folder.
+        let place = if none { self.folder_here().is_none().then_some(NEEDS_FOLDER) } else { apart.then_some(SAME_FOLDER) };
         Reasons {
-            copy: if none {
-                Some(NEEDS_SELECTION)
-            } else if at_home {
-                Some(NOT_AT_HOME)
-            } else if at_server {
-                Some(NOT_AT_SERVER)
-            } else if search {
-                Some("保存した検索はコピーできません")
-            } else if drive {
-                Some("ドライブはコピーできません")
-            } else {
-                None
-            },
+            copy: item.or(search.then_some(NO_COPY_SAVED)).or(drive.then_some(NO_COPY_DRIVE)),
             cut: item,
-            paste: folder,
-            rename: if saved_pick { None } else { busy.or(item).or((picked.len() != 1).then_some(ONE_ITEM)) },
+            paste: busy.or(at_server.then_some(NOT_AT_SERVER)).or_else(|| self.destination().is_none().then_some(NEEDS_FOLDER)),
+            // One saved search picked alone can always be renamed.
+            rename: if picked.len() == 1 && search { None } else { busy.or(item).or((picked.len() != 1).then_some(ONE_ITEM)) },
             delete: busy.or(item),
+            explorer: place,
+            shell: search.then_some(NOT_FOR_SAVED).or(at_server.then_some(NOT_AT_SERVER)).or(place),
             // With nothing picked, the folder column's own folder.
-            explorer: if none {
-                here
-            } else if apart {
-                Some(SAME_FOLDER)
-            } else {
-                None
-            },
-            shell: if search {
-                Some("保存した検索には使えません")
-            } else if at_server {
-                Some(NOT_AT_SERVER)
-            } else if none {
-                here
-            } else if apart {
-                Some(SAME_FOLDER)
-            } else {
-                None
-            },
-            // With nothing picked, the folder column's own folder.
-            copy_path: if none { here } else { None },
+            copy_path: if none { place } else { None },
             // From several folders too, as a drag from them.
-            send_to: item.or(drive.then_some("ドライブは送れません")).or(self.send_targets.is_empty().then_some(NO_SEND_TARGETS)),
+            send_to: item.or(drive.then_some(NO_SEND_DRIVE)).or(self.send_targets.is_empty().then_some(NO_SEND_TARGETS)),
         }
     }
 

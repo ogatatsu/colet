@@ -1,5 +1,17 @@
-//! A column: its heading, filter field, headings, rows and the edge that widens it.
+//! A column: its heading, narrowing field, headings, rows and the edge that widens it.
 use super::*;
+
+/// How many the column holds, in its heading: narrowed, how many show of how many in all. Nothing while it
+/// cannot be listed or has not been yet.
+fn count_text(c: &Column) -> String {
+    match &c.narrow {
+        _ if c.error.is_some() || c.unread() => String::new(),
+        // Everything narrows the results: how many it lets through, of how many the search finds.
+        Some(n) if c.kind == Kind::Search => format!("{} / {}", time::count(c.total as u64), time::count(n.whole as u64)),
+        Some(n) if !n.text.is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.shown_total() as u64)),
+        _ => time::count(c.shown_total() as u64),
+    }
+}
 
 impl Colet {
     /// Shift+↑↓, with Ctrl adding: picks rows on the way, or in home, which picks one at a time, moves as
@@ -241,17 +253,11 @@ impl Colet {
         };
         let title = c.title().into_owned();
         let header_title = title.clone();
-        let count = match &c.narrow {
-            _ if c.error.is_some() || c.unread() => String::new(),
-            // Everything narrows the results: how many it lets through, of how many the search finds.
-            Some(f) if kind == Kind::Search => format!("{} / {}", time::count(c.total as u64), time::count(f.whole as u64)),
-            Some(f) if !f.text.is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.shown_total() as u64)),
-            _ => time::count(c.shown_total() as u64),
-        };
+        let count = count_text(c);
         let narrowed = c.is_narrowed();
         let field = self.narrow_fields.get(&id).map(|field| field.input.clone());
         let path = shown(&c.path);
-        let (star_key, narrowing) = (favorite_key(&c.path, c.narrowing().as_deref()), c.narrowing());
+        let star = self.star_button(index, cx);
         let body = self.column_body(index, marked, cx);
         let sort_button = self.sort_button(index, window, cx);
         let headings = self.headings(index, cx);
@@ -318,35 +324,7 @@ impl Colet {
                     )
                     .child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_faint).child(count))
                     .child(sort_button)
-                    .child({
-                        // What it is narrowed to now is part of what is kept.
-                        let kept = match kind {
-                            Kind::Search => {
-                                self.settings.saved(&self.state.query, self.state.search_filter.as_deref(), narrowing.as_deref()).is_some()
-                            }
-                            _ => self.settings.is_favorite(&star_key),
-                        };
-                        let label = match (kind, kept) {
-                            (Kind::Search, true) => "保存した検索を解除（Ctrl+D）",
-                            (Kind::Search, false) => "検索を保存（Ctrl+D）",
-                            (_, true) => "お気に入りを解除（Ctrl+D）",
-                            (_, false) => "お気に入りに追加（Ctrl+D）",
-                        };
-                        Button::new(("star", id))
-                            .ghost()
-                            .xsmall()
-                            .icon(if kept { glyph("star-fill").text_color(p.accent) } else { glyph("star") })
-                            .accessibility_label(label)
-                            .tooltip(label)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if kind == Kind::Search {
-                                    this.toggle_saved_current(cx);
-                                } else if let Some(index) = this.state.index_of(id) {
-                                    let key = this.favorite_key_of(index);
-                                    this.toggle_favorite(&key, cx);
-                                }
-                            }))
-                    })
+                    .child(star)
                     .test_support(),
             )
             .when_some(field, |d, input| {
@@ -365,6 +343,40 @@ impl Colet {
             .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
             .test_support()
             .into_any_element()
+    }
+
+    /// The star in the column's heading: keeps the folder as a favorite, or the search as a saved one, as
+    /// it is narrowed now, or lets go of it.
+    fn star_button(&self, index: usize, cx: &mut Context<Self>) -> Button {
+        let p = self.palette;
+        let c = &self.state.columns[index];
+        let (id, kind) = (c.id, c.kind);
+        // What it is narrowed to now is part of what is kept.
+        let narrowing = c.narrowing();
+        let kept = match kind {
+            Kind::Search => self.settings.saved(&self.state.query, self.state.search_filter.as_deref(), narrowing.as_deref()).is_some(),
+            _ => self.settings.is_favorite(&favorite_key(&c.path, narrowing.as_deref())),
+        };
+        let label = match (kind, kept) {
+            (Kind::Search, true) => "保存した検索を解除（Ctrl+D）",
+            (Kind::Search, false) => "検索を保存（Ctrl+D）",
+            (_, true) => "お気に入りを解除（Ctrl+D）",
+            (_, false) => "お気に入りに追加（Ctrl+D）",
+        };
+        Button::new(("star", id))
+            .ghost()
+            .xsmall()
+            .icon(if kept { glyph("star-fill").text_color(p.accent) } else { glyph("star") })
+            .accessibility_label(label)
+            .tooltip(label)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if kind == Kind::Search {
+                    this.toggle_saved_current(cx);
+                } else if let Some(index) = this.state.index_of(id) {
+                    let key = this.favorite_key_of(index);
+                    this.toggle_favorite(&key, cx);
+                }
+            }))
     }
 
     /// The button of the column's own order, beside its star: accented while it is given one apart from
