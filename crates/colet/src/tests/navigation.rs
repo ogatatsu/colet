@@ -384,10 +384,10 @@ fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &m
     let (_, ui) = in_work(cx);
     // Three picked: one name cannot be changed for them all.
     ui.press(cx, "ctrl-a");
-    // Into the file actions from the trail's last crumb, past the sort order and the toolbar's two buttons.
+    // Into the file actions from the trail's last crumb, past the preferences' button.
     let crumb = ui.read(cx, |v| v.stops[&format!("crumb:{}", v.state.columns.len() - 1)].clone());
     ui.act(cx, |window, cx| crumb.focus(window, cx));
-    for _ in 0..7 {
+    for _ in 0..5 {
         ui.press(cx, "tab");
     }
     assert!(ui.has_keys(cx, "copy-path"));

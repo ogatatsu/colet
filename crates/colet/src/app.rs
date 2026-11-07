@@ -214,7 +214,7 @@ pub const SEARCH_FIELD_MIN: f32 = 160.;
 /// The least the address keeps: the "…" of its folded crumbs, the last clipped, and room to press to type.
 pub const ADDRESS_MIN: f32 = 120.;
 /// What the toolbar takes from the window but the address, guessed before it is first drawn.
-pub const ADDRESS_GUESS: f32 = 640.;
+pub const ADDRESS_GUESS: f32 = 500.;
 
 /// Which width a drag on a column's edge changes.
 #[derive(Clone, Copy, PartialEq, Eq)]

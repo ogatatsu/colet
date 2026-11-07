@@ -1390,10 +1390,8 @@ impl Colet {
         let p = self.palette;
         let focused = self.search_focused;
         let has_query = !self.state.query.is_empty();
-        let sort = self.settings.sort;
         let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());
 
-        let sort_keyed = keyed(&self.sort_focus, window);
         let filter_button = self.filter_button(window, cx);
         let address = self.render_address(window, cx);
         div()
@@ -1475,8 +1473,29 @@ impl Colet {
             .child(div().flex_none().child(icon("chevron-right", 14., p.text_faint)))
             .child(address)
             .child(
+                div().flex_none().child(
+                    Self::icon_button("preferences", "sliders-horizontal", "設定", "設定", true)
+                        .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
+                ),
+            )
+            .into_any_element()
+    }
+
+    /// How the columns show their items, at the file actions' row's end: the default sort order, plain as
+    /// the actions are, and whether the hidden items show.
+    fn view_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let sort = self.settings.sort;
+        let sort_keyed = keyed(&self.sort_focus, window);
+        // Pressed while the hidden items show.
+        let show = self.settings.show_hidden;
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(2.))
+            .child(
                 div()
-                    .flex_none()
                     .relative()
                     .child(
                         frame(p, sort_keyed).m(px(-3.)).child(
@@ -1489,19 +1508,16 @@ impl Colet {
                                 .aria_label(format!("既定の並び順: {}", sort.label()))
                                 .aria_expanded(self.sort_open())
                                 .tip("既定の並び順")
-                                .h(px(32.))
-                                .pl(px(10.))
-                                .pr_2()
+                                .h(px(28.))
+                                .px_2()
                                 .flex()
                                 .items_center()
                                 .gap(px(6.))
                                 .text_size(px(12.))
-                                .text_color(p.text_muted)
-                                .bg(p.surface)
-                                .border_1()
-                                .border_color(p.border_strong)
+                                .text_color(p.text)
                                 .rounded(px(6.))
                                 .hover(|d| d.bg(p.hover))
+                                .child(icon("arrow-up-down", 14., p.text_muted))
                                 .child(sort.label())
                                 .child(icon("chevron-down", 14., p.text_faint))
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -1515,28 +1531,16 @@ impl Colet {
                         ),
                     )
                     .when_some(self.menu_element("sort-menu", "既定の並び順", cx).filter(|_| self.sort_open()), |d, menu| {
-                        d.child(deferred(div().absolute().top(px(36.)).right_0().w(px(160.)).child(menu)).with_priority(1))
+                        d.child(deferred(div().absolute().top(px(32.)).right_0().w(px(160.)).child(menu)).with_priority(1))
                     }),
             )
             .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .gap(px(2.))
-                    .child({
-                        // Pressed while the hidden items show.
-                        let show = self.settings.show_hidden;
-                        keep_focus(
-                            Self::icon_button("show-hidden", if show { "eye" } else { "eye-off" }, "隠しファイルを表示", "隠しファイルを表示（Ctrl+H）", true)
-                                .selected(show)
-                                .toggled(show),
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx)))
-                    })
-                    .child(
-                        Self::icon_button("preferences", "sliders-horizontal", "設定", "設定", true)
-                            .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
-                    ),
+                keep_focus(
+                    Self::icon_button("show-hidden", if show { "eye" } else { "eye-off" }, "隠しファイルを表示", "隠しファイルを表示（Ctrl+H）", true)
+                        .selected(show)
+                        .toggled(show),
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx))),
             )
             .into_any_element()
     }
@@ -1631,18 +1635,22 @@ impl Colet {
             .collect()
     }
 
-    /// The row under the toolbar: the file actions.
-    fn render_pathbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    /// The row under the toolbar: the file actions, and at its end how the columns show their items.
+    fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
+        let controls = self.view_controls(window, cx);
         div()
             .h(px(40.))
             .flex_none()
             .px_3()
             .flex()
             .items_center()
+            .justify_between()
+            .gap_4()
             .border_b_1()
             .border_color(p.border)
             .child(self.render_actions(cx))
+            .child(controls)
             .into_any_element()
     }
 
@@ -2207,7 +2215,7 @@ impl Render for Colet {
         let tabbar = self.render_tabbar(window, cx);
         let sidebar = self.render_sidebar(window, cx);
         let toolbar = self.render_toolbar(window, cx);
-        let pathbar = self.render_pathbar(cx);
+        let pathbar = self.render_pathbar(window, cx);
         let main = self.render_main(window, cx);
         div()
             .id("colet")
