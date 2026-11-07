@@ -9,6 +9,7 @@ mod dialogs;
 mod icons;
 mod instance;
 mod menus;
+mod metrics;
 mod ops;
 mod places;
 mod reveal;

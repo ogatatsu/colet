@@ -31,7 +31,7 @@ impl Render for HomeGhost {
             .bg(p.raised)
             .opacity(0.8)
             .font_family("Segoe UI")
-            .text_size(px(13.))
+            .text_size(px(metrics::TEXT_LARGE))
             .text_color(p.text)
             .child(picture)
             .child(div().min_w_0().truncate().child(self.name.clone()))
@@ -349,7 +349,7 @@ impl Colet {
                                 .border_color(ink.opacity(0.3))
                                 .bg(ink.opacity(0.1))
                                 .truncate()
-                                .text_size(px(11.))
+                                .text_size(px(metrics::TEXT_SMALL))
                                 .line_height(px(16.))
                                 .text_color(ink)
                                 .child(filter),
@@ -366,7 +366,7 @@ impl Colet {
                                 .gap(px(2.))
                                 .tip(format!("絞り込み：{narrow}"))
                                 .child(icon("funnel", 11., muted))
-                                .child(div().min_w_0().truncate().text_size(px(11.)).text_color(muted).child(narrow)),
+                                .child(div().min_w_0().truncate().text_size(px(metrics::TEXT_SMALL)).text_color(muted).child(narrow)),
                         )
                     }),
             )
@@ -377,7 +377,7 @@ impl Colet {
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis_start()
-                        .text_size(px(12.))
+                        .text_size(px(metrics::TEXT_BODY))
                         .text_color(muted)
                         .child(with_marks(&entry.parent, &entry.marks.parent)),
                 )
@@ -391,7 +391,15 @@ impl Colet {
         let size = if entry.directory { String::new() } else { time::size(entry.size) };
         let modified = entry.modified.and_then(time::date_minute).unwrap_or_else(|| "—".into());
         let cell = |width: f32, text: String| {
-            div().flex_none().w(px(width)).flex().whitespace_nowrap().text_size(px(12.)).text_color(muted).child(text).into_any_element()
+            div()
+                .flex_none()
+                .w(px(width))
+                .flex()
+                .whitespace_nowrap()
+                .text_size(px(metrics::TEXT_BODY))
+                .text_color(muted)
+                .child(text)
+                .into_any_element()
         };
         let chevron = if entry.directory {
             icon("chevron-right", 13., if lit { p.on_accent_muted } else { p.text_faint }).into_any_element()
@@ -464,7 +472,7 @@ impl Colet {
                     .pb(px(6.))
                     .flex()
                     .items_end()
-                    .text_size(px(12.))
+                    .text_size(px(metrics::TEXT_BODY))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(p.text_muted)
                     .child(title),

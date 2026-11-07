@@ -10,6 +10,7 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, NarrowField, RowScrolls},
     menus::Popup,
+    metrics,
     reveal::Sideways,
     settings::{KeptTab, Settings},
     state::{ColumnId, Kind, State, favorite_parts},
@@ -185,7 +186,7 @@ impl Render for DraggedTab {
             )
             .opacity(0.8)
             .font_family("Segoe UI")
-            .text_size(px(13.))
+            .text_size(px(metrics::TEXT_LARGE))
             .text_color(p.text)
     }
 }

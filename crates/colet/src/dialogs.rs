@@ -19,6 +19,7 @@ use gpui_kit::*;
 use crate::{
     app::Colet,
     menus::Popup,
+    metrics,
     ops::{ItemStatus, Menu, Status},
     places::Dialog,
     search_filters::FilterEdit,
@@ -75,7 +76,7 @@ fn field(
     // The ring, two pixels in the focus color a pixel off the field, as the old app's outline.
     crate::view::frame(p, focused).child(
         div()
-            .h(px(32.))
+            .h(px(metrics::CONTROL_HEIGHT))
             .px(px(10.))
             .flex()
             .items_center()
@@ -90,7 +91,7 @@ fn field(
 }
 
 fn label(p: Palette, text: &'static str) -> Div {
-    div().text_size(px(12.)).text_color(p.text_muted).child(text)
+    div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_muted).child(text)
 }
 
 /// A dialog's button: the primary one is what Enter does.
@@ -140,8 +141,8 @@ impl Colet {
             .child(label(p, "絞り込み"))
             .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
             .child(match problem {
-                Some(problem) => div().text_size(px(12.)).text_color(p.danger).child(problem),
-                None => div().text_size(px(12.)).text_color(p.text_faint).child("開いたとき、この文字で名前を絞り込みます"),
+                Some(problem) => div().text_size(px(metrics::TEXT_BODY)).text_color(p.danger).child(problem),
+                None => div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_faint).child("開いたとき、この文字で名前を絞り込みます"),
             })
     }
 
@@ -197,15 +198,16 @@ impl Colet {
                 "保存",
             ),
         };
-        let content = div().flex().flex_col().gap_3().child(div().text_size(px(12.)).text_color(p.text_faint).child(place)).child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(label(p, "名前"))
-                .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
-                .when_some(problem, |d, problem| d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))),
-        );
+        let content =
+            div().flex().flex_col().gap_3().child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_faint).child(place)).child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "名前"))
+                    .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
+                    .when_some(problem, |d, problem| d.child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.danger).child(problem))),
+            );
         let buttons = vec![
             push("cancel", "キャンセル", false, true)
                 .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
@@ -233,7 +235,7 @@ impl Colet {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_size(px(12.)).text_color(p.text_faint).child(format!("フォルダー：{}", shown(&original.path))))
+            .child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_faint).child(format!("フォルダー：{}", shown(&original.path))))
             .child(
                 div()
                     .flex()
@@ -241,7 +243,7 @@ impl Colet {
                     .gap_1()
                     .child(label(p, "名前"))
                     .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
-                    .child(div().text_size(px(12.)).text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
+                    .child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
             )
             .child(self.narrow_field(narrow, problem, window, cx));
         let buttons = vec![
@@ -282,7 +284,9 @@ impl Colet {
                     .gap_1()
                     .child(label(p, "名前"))
                     .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
-                    .child(div().text_size(px(12.)).text_color(p.text_faint).child("空欄なら検索文字列をそのまま表示します")),
+                    .child(
+                        div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_faint).child("空欄なら検索文字列をそのまま表示します"),
+                    ),
             )
             .child(
                 div()
@@ -292,7 +296,7 @@ impl Colet {
                     .child(label(p, "検索文字列"))
                     .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
                     .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                        d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
+                        d.child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
                     }),
             )
             .child(
@@ -341,7 +345,7 @@ impl Colet {
                         .child(label(p, "名前"))
                         .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
                         .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                            d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
+                            d.child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
                         }),
                 )
                 .child(
@@ -351,7 +355,7 @@ impl Colet {
                         .gap_1()
                         .child(label(p, "検索文字列"))
                         .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
-                        .child(div().text_size(px(12.)).text_color(p.text_faint).child(
+                        .child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_faint).child(
                             "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
                         )),
                 );
@@ -370,12 +374,14 @@ impl Colet {
     fn filter_delete_dialog(&self, name: &str, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
         let p = self.palette;
         let users = self.filter_users(name);
-        let content =
-            div().flex().flex_col().gap_2().text_size(px(13.)).child(format!("「{name}」を削除しますか？")).when(users > 0, |d| {
-                d.child(div().text_size(px(12.)).text_color(p.text_muted).child(format!(
+        let content = div().flex().flex_col().gap_2().text_size(px(metrics::TEXT_LARGE)).child(format!("「{name}」を削除しますか？")).when(
+            users > 0,
+            |d| {
+                d.child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_muted).child(format!(
                     "このフィルターを使う保存した検索が{users}件あります。削除すると、それらはフィルターなしで検索します。"
                 )))
-            });
+            },
+        );
         let buttons = vec![
             push("cancel", "キャンセル", false, true)
                 .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
@@ -406,9 +412,20 @@ impl Colet {
                     .border_b_1()
                     .border_color(p.border)
                     .child(
-                        div().flex_1().min_w_0().flex().flex_col().child(div().truncate().text_size(px(13.)).child(f.name.clone())).child(
-                            div().truncate().text_size(px(12.)).text_color(p.text_muted).font_family("Consolas").child(f.query.clone()),
-                        ),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(div().truncate().text_size(px(metrics::TEXT_LARGE)).child(f.name.clone()))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(metrics::TEXT_BODY))
+                                    .text_color(p.text_muted)
+                                    .font_family("Consolas")
+                                    .child(f.query.clone()),
+                            ),
                     )
                     .child(
                         tool(("filter-up", i).into(), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
@@ -435,12 +452,17 @@ impl Colet {
             .gap_2()
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(px(metrics::TEXT_BODY))
                     .text_color(p.text_muted)
                     .child("検索に加えるEverythingの検索式を登録し、検索欄の右のボタン（Ctrl+Shift+F）で1つ選んで使います。"),
             )
             .child(if rows.is_empty() {
-                div().py_2().text_size(px(12.)).text_color(p.text_faint).child("フィルターはまだありません").into_any_element()
+                div()
+                    .py_2()
+                    .text_size(px(metrics::TEXT_BODY))
+                    .text_color(p.text_faint)
+                    .child("フィルターはまだありません")
+                    .into_any_element()
             } else {
                 div().flex().flex_col().children(rows).into_any_element()
             });
@@ -500,7 +522,12 @@ impl Colet {
                                 colet.update(cx, |this, cx| this.toggle_protected(cx)).ok();
                             }),
                     )
-                    .child(div().text_size(px(12.)).text_color(p.text_muted).child("隠しファイルを表示しているときに効きます。"))
+                    .child(
+                        div()
+                            .text_size(px(metrics::TEXT_BODY))
+                            .text_color(p.text_muted)
+                            .child("隠しファイルを表示しているときに効きます。"),
+                    )
             })
             .child(
                 div().flex().flex_col().gap_1().child(label(p, "Everything")).child(
@@ -516,7 +543,7 @@ impl Colet {
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .text_ellipsis()
-                                .text_size(px(13.))
+                                .text_size(px(metrics::TEXT_LARGE))
                                 .text_color(p.text)
                                 .role(Role::Status)
                                 .aria_label(said.clone())
@@ -528,13 +555,13 @@ impl Colet {
             )
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(px(metrics::TEXT_BODY))
                     .text_color(p.text_muted)
                     .child("Everything 1.5.0.1424以降を起動してお使いください。つながらないときは「再接続」を押してください。"),
             )
-            .child(div().pt_1().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
+            .child(div().pt_1().text_size(px(metrics::TEXT_LARGE)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
             // One by one: an array of them all would lie whole on the stack, past what a debug build has.
-            .child(div().flex().flex_col().gap_1().text_size(px(12.)).children(SHORTCUTS.iter().map(|&(key, what)| {
+            .child(div().flex().flex_col().gap_1().text_size(px(metrics::TEXT_BODY)).children(SHORTCUTS.iter().map(|&(key, what)| {
                 div()
                     .flex()
                     .gap_3()
@@ -558,9 +585,9 @@ impl Colet {
             .flex()
             .flex_col()
             .gap_2()
-            .text_size(px(13.))
+            .text_size(px(metrics::TEXT_LARGE))
             .child(format!("{count} 項目を開きますか？"))
-            .child(div().text_size(px(12.)).text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"));
+            .child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"));
         let buttons = vec![
             push("cancel", "キャンセル", false, true)
                 .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
@@ -599,7 +626,7 @@ impl Colet {
                 cx.propagate();
                 false
             })
-            .title(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(title))
+            .title(div().text_size(px(metrics::TEXT_TITLE)).font_weight(FontWeight::SEMIBOLD).child(title))
             .child(
                 div()
                     .id("dialog-content")
@@ -727,7 +754,7 @@ impl Colet {
                         // White on the deep red: past 4.5:1 in either theme.
                         .bg(p.danger_fill)
                         .text_color(p.on_accent)
-                        .text_size(px(10.))
+                        .text_size(px(metrics::TEXT_TINY))
                         .font_weight(FontWeight::SEMIBOLD)
                         .flex()
                         .items_center()
@@ -786,7 +813,7 @@ impl Colet {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .text_size(px(12.))
+                        .text_size(px(metrics::TEXT_BODY))
                         .hover(|d| d.bg(p.raised_hover))
                         .child(
                             svg()
@@ -808,7 +835,7 @@ impl Colet {
                     )
                     .when(open, |d| {
                         d.when_some(entry.error.clone(), |d, error| {
-                            d.child(div().px_3().pb_1().text_size(px(12.)).text_color(p.danger).child(error))
+                            d.child(div().px_3().pb_1().text_size(px(metrics::TEXT_BODY)).text_color(p.danger).child(error))
                         })
                         .children(entry.items.iter().enumerate().map(|(k, item)| {
                             let path = item.path.clone();
@@ -824,7 +851,7 @@ impl Colet {
                                 .py(px(3.))
                                 .flex()
                                 .flex_col()
-                                .text_size(px(12.))
+                                .text_size(px(metrics::TEXT_BODY))
                                 .child(
                                     div()
                                         .flex()
@@ -867,7 +894,7 @@ impl Colet {
                                 div()
                                     .pl(px(32.))
                                     .py_1()
-                                    .text_size(px(12.))
+                                    .text_size(px(metrics::TEXT_BODY))
                                     .text_color(p.text_faint)
                                     .child(format!("ほか {} 項目", entry.more)),
                             )
@@ -916,7 +943,12 @@ impl Colet {
                             ),
                     )
                     .child(if entries.is_empty() {
-                        div().p_4().text_size(px(12.)).text_color(p.text_muted).child("まだファイル操作はありません").into_any_element()
+                        div()
+                            .p_4()
+                            .text_size(px(metrics::TEXT_BODY))
+                            .text_color(p.text_muted)
+                            .child("まだファイル操作はありません")
+                            .into_any_element()
                     } else {
                         div().id("history-list").flex_1().overflow_y_scroll().children(entries).into_any_element()
                     }),

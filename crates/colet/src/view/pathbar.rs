@@ -177,12 +177,12 @@ impl Colet {
             .flex_1()
             .min_w(px(ADDRESS_MIN))
             .m(px(-3.))
-            .text_size(px(12.))
+            .text_size(px(metrics::TEXT_BODY))
             .child(
                 div()
                     .id("address")
                     .w_full()
-                    .h(px(32.))
+                    .h(px(metrics::CONTROL_HEIGHT))
                     .pl(px(4.))
                     .pr(px(2.))
                     .flex()
@@ -246,7 +246,7 @@ impl Colet {
             .items_center()
             .gap(px(2.))
             // As large as the rows' names, though the bar's buttons stay smaller.
-            .text_size(px(13.))
+            .text_size(px(metrics::TEXT_LARGE))
             .when_some(max_width, |d, width| d.min_w_0().max_w(px(width)))
             .when(max_width.is_none(), |d| d.flex_none())
             .when(chevron, |d| d.child(icon("chevron-right", 13., p.text_faint)))

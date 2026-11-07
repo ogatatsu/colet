@@ -51,7 +51,7 @@ impl Colet {
             .child(
                 div()
                     .id("home-head")
-                    .h(px(34.))
+                    .h(px(metrics::HEADING_HEIGHT))
                     .flex_none()
                     .pl_3()
                     .pr_2()
@@ -65,7 +65,7 @@ impl Colet {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(12.))
+                            .text_size(px(metrics::TEXT_BODY))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
                             .child("ホーム"),

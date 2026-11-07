@@ -61,7 +61,7 @@ impl Colet {
             .child(
                 div()
                     .id("unfold-head")
-                    .h(px(34.))
+                    .h(px(metrics::HEADING_HEIGHT))
                     .w_full()
                     .flex_none()
                     .flex()
@@ -72,7 +72,15 @@ impl Colet {
                     .child(icon("chevrons-left", 14., p.text_muted))
                     .test_support(),
             )
-            .child(div().id("unfold-count").pt_2().text_size(px(12.)).text_color(p.text_muted).child(away.to_string()).test_support())
+            .child(
+                div()
+                    .id("unfold-count")
+                    .pt_2()
+                    .text_size(px(metrics::TEXT_BODY))
+                    .text_color(p.text_muted)
+                    .child(away.to_string())
+                    .test_support(),
+            )
             // The button laid over the whole strip: its ring's room would push the heading's line off the
             // columns'.
             .child(

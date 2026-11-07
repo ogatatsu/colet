@@ -19,6 +19,7 @@ use gpui_kit::*;
 use crate::{
     app::*,
     crumbs::Crumb,
+    metrics,
     places::{HomeDrag, movable},
     reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
     state::{Column, ColumnId, Kind},
@@ -153,7 +154,7 @@ impl Colet {
             .justify_center()
             .gap_3()
             .p_6()
-            .text_size(px(12.))
+            .text_size(px(metrics::TEXT_BODY))
             .text_color(p.text_muted)
             .child(icon("search", 28., p.text_faint))
             .child("名前やEverythingの検索式で探せます")
@@ -220,7 +221,7 @@ impl Render for Colet {
             .bg(p.bg)
             .text_color(p.text)
             .font_family("Segoe UI")
-            .text_size(px(13.))
+            .text_size(px(metrics::TEXT_LARGE))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.search.update(cx, |input, cx| {
                     input.focus(window, cx);
