@@ -132,7 +132,8 @@ fn asks_the_folder_about_a_new_name_off_the_ui_thread_and_lets_go_of_an_answer_o
 #[gpui_kit::test]
 fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the_last_pressed(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
-    let highlight = |cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns.last().unwrap().highlight.clone());
+    // In the folder already open, the item is picked where it lives.
+    let picked = |cx: &mut TestAppContext| ui.selected(cx, 2);
     ui.act(cx, |window, cx| {
         ui.view.update(cx, |v, cx| {
             v.show_history(true, None, window, cx);
@@ -144,7 +145,7 @@ fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the
     });
     settle(cx);
     assert!(ui.read(cx, |v| !v.history.open));
-    assert_eq!(highlight(cx).as_deref(), Some(Path::new(r"D:\work\c.txt")));
+    assert_eq!(picked(cx), [r"D:\work\c.txt"]);
     // Closed before the answer came, the history has moved on from it.
     ui.act(cx, |window, cx| {
         ui.view.update(cx, |v, cx| {
@@ -154,7 +155,7 @@ fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the
         });
     });
     settle(cx);
-    assert_eq!(highlight(cx).as_deref(), Some(Path::new(r"D:\work\c.txt")));
+    assert_eq!(picked(cx), [r"D:\work\c.txt"]);
     // Gone since, it says so and the history stays open.
     ui.act(cx, |window, cx| {
         ui.view.update(cx, |v, cx| {
@@ -282,7 +283,7 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     // Still there: its name opens it in the columns.
     ui.click(cx, ("history-item", entry.id << 16));
     assert!(ui.read(cx, |v| !v.history.open));
-    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().highlight.clone()).as_deref(), Some(Path::new(r"D:\work\a.txt")));
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
 }
 
 #[gpui_kit::test]

@@ -446,6 +446,20 @@ impl Showing {
     }
 }
 
+/// An item known only by its path and whether it is a folder, as one typed or kept in the history.
+fn bare_entry(path: &Path, directory: bool) -> Entry {
+    Entry {
+        path: path.into(),
+        name: shown(folder_name(path)),
+        parent: parent_folder(path).map(shown).unwrap_or_default(),
+        directory,
+        size: None,
+        modified: None,
+        hidden: Hiding::Shown,
+        marks: Marks::default(),
+    }
+}
+
 /// A folder column to open to the right of a selection.
 struct Spec {
     path: PathBuf,
@@ -628,12 +642,7 @@ impl State {
         let mut state = Self::new();
         state.reveal(path, directory);
         state.past.clear();
-        if state.columns.len() > 2 {
-            let last = state.columns.len() - 1;
-            state.fold = Some(Fold { anchor: state.columns[last].id, open: false });
-            state.active = last;
-            state.note_folder();
-        }
+        state.fold_to_last();
         state
     }
 
@@ -1126,16 +1135,7 @@ impl State {
     /// Shows an item where it lives, as from the history, leaving the search; the column pointing at
     /// it takes the keys.
     pub fn reveal(&mut self, path: &Path, directory: bool) {
-        let entry = Entry {
-            path: path.into(),
-            name: shown(folder_name(path)),
-            parent: parent_folder(path).map(shown).unwrap_or_default(),
-            directory,
-            size: None,
-            modified: None,
-            hidden: Hiding::Shown,
-            marks: Marks::default(),
-        };
+        let entry = bare_entry(path, directory);
         let here = self.snapshot();
         let mut home = self.columns.swap_remove(0);
         home.selected.clear();
@@ -1155,6 +1155,58 @@ impl State {
         self.search_filter = None;
         self.fold = None;
         self.remember(here);
+    }
+
+    /// Goes to a path typed in the address or opened from the history. A folder open in a column is gone
+    /// to as its crumb goes, the columns below kept; what lies under the deepest folder open is opened on
+    /// from it, all else open and the search kept; anything else is revealed afresh, the folders above it
+    /// folded away as a search result's are.
+    pub fn go_to_path(&mut self, path: &Path, directory: bool) {
+        let key = path_key(path);
+        let folders: Vec<(usize, OsString)> =
+            self.columns.iter().enumerate().filter(|(_, c)| c.kind == Kind::Folder).map(|(index, c)| (index, path_key(&c.path))).collect();
+        if directory && let Some(&(index, _)) = folders.iter().find(|(_, folder)| *folder == key) {
+            self.set_active(index);
+            return;
+        }
+        let deepest = folders.last().cloned();
+        let specs = reveal_chain(&bare_entry(path, directory));
+        let from = deepest.and_then(|(index, deepest)| Some((index, specs.iter().position(|s| path_key(&s.path) == deepest)?)));
+        let Some((index, at)) = from else {
+            self.reveal(path, directory);
+            self.fold_to_last();
+            return;
+        };
+        let here = self.snapshot();
+        let mut specs = specs.into_iter().skip(at);
+        // The deepest folder points on toward the path, then the folders below it open.
+        if let Some(spec) = specs.next() {
+            let c = &mut self.columns[index];
+            c.selected = spec.selected.unwrap_or_default();
+            c.focused = spec.highlight.clone().or_else(|| c.selected.last().cloned());
+            c.highlight = spec.highlight;
+        }
+        self.columns.truncate(index + 1);
+        for spec in specs {
+            let mut c = self.column(Kind::Folder, &spec.path, spec.highlight.clone());
+            c.selected = spec.selected.unwrap_or_default();
+            c.focused = spec.highlight.or_else(|| c.selected.last().cloned());
+            self.columns.push(c);
+        }
+        let at = self.columns.iter().position(|c| c.highlight.as_deref() == Some(path));
+        self.active = if directory { self.columns.len() - 1 } else { at.unwrap_or(self.columns.len() - 1) };
+        self.note_folder();
+        self.remember(here);
+    }
+
+    /// The last column stands alone, the folders above it folded away, the keys in it.
+    fn fold_to_last(&mut self) {
+        if self.columns.len() > 2 {
+            let last = self.columns.len() - 1;
+            self.fold = Some(Fold { anchor: self.columns[last].id, open: false });
+            self.active = last;
+            self.note_folder();
+        }
     }
 
     /// Ahead of the listing that shows it, the renamed item keeps its selection and an open folder its
@@ -2143,6 +2195,45 @@ mod tests {
         assert_eq!(s.active, 2);
         s.back();
         assert_eq!(s.query, "x");
+    }
+
+    #[test]
+    fn goes_to_a_folder_open_as_its_crumb_does_keeping_the_columns_below() {
+        let mut s = State::new();
+        s.reveal(Path::new(r"D:\a\b"), true);
+        let before = chain(&s);
+        s.go_to_path(Path::new(r"d:\A"), true);
+        assert_eq!(chain(&s), before);
+        assert_eq!(s.active, 2);
+        assert_eq!(s.fold, None);
+    }
+
+    #[test]
+    fn opens_on_from_the_deepest_folder_to_what_lies_under_it_all_else_open() {
+        let mut s = State::new();
+        s.reveal(Path::new(r"D:\a"), true);
+        s.go_to_path(Path::new(r"D:\a\b\c.txt"), false);
+        assert_eq!(chain(&s), [link(r"D:\", &[r"D:\a"], Some(Path::new(r"D:\a"))), link(r"D:\a", &[r"D:\a\b"], None), link(r"D:\a\b", &[], Some(Path::new(r"D:\a\b\c.txt")))]);
+        assert_eq!((s.active, s.folded_away()), (3, 0));
+        s.go_to_path(Path::new(r"D:\a\b\d"), true);
+        assert_eq!(chain(&s)[2..], [link(r"D:\a\b", &[r"D:\a\b\d"], Some(Path::new(r"D:\a\b\d"))), link(r"D:\a\b\d", &[], None)]);
+        assert_eq!((s.active, s.folded_away()), (4, 0));
+        s.back();
+        assert_eq!(s.columns.len(), 4);
+    }
+
+    #[test]
+    fn opens_anything_else_afresh_with_the_folders_above_folded_away() {
+        let mut s = State::new();
+        s.reveal(Path::new(r"D:\a\b"), true);
+        s.go_to_path(Path::new(r"D:\a\x\y.txt"), false);
+        assert_eq!(chain(&s).last(), Some(&link(r"D:\a\x", &[], Some(Path::new(r"D:\a\x\y.txt")))));
+        assert_eq!((s.active, s.folded_away()), (3, 2));
+        s.go_to_path(Path::new(r"E:\"), true);
+        assert_eq!(chain(&s), [link(r"E:\", &[], None)]);
+        assert_eq!((s.active, s.fold), (1, None));
+        s.back();
+        assert_eq!(s.folded_away(), 2);
     }
 
     fn names(s: &State, index: usize) -> Vec<&str> {

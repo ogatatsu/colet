@@ -964,7 +964,7 @@ impl Colet {
             PathKind::Gone => self.notify(format!("「{}」はもうありません", shown(folder_name(&path))), Tone::Info, cx),
             PathKind::Folder | PathKind::File => {
                 self.show_history(false, None, window, cx);
-                self.state.reveal(&path, kind == PathKind::Folder);
+                self.state.go_to_path(&path, kind == PathKind::Folder);
                 self.sync_search_field(window, cx);
                 self.focus_active(window, cx);
             }

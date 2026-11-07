@@ -118,11 +118,7 @@ impl Colet {
             self.open_path_in_tab(&path, directory, window, cx);
             return;
         }
-        self.state.reveal(&path, directory);
-        // A folder's own contents are worked in; a file's row has the keys where it lives.
-        if directory {
-            self.state.set_active(self.state.columns.len() - 1);
-        }
+        self.state.go_to_path(&path, directory);
         self.sync_search_field(window, cx);
         self.focus_active(window, cx);
     }
