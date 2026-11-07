@@ -2034,10 +2034,14 @@ impl Colet {
         };
         // What a filter hides is not counted, nor acted on.
         let shown_selected = active.shown_selected();
-        let picked: Vec<&Entry> = shown_selected.iter().filter_map(|path| active.entry(path)).collect();
-        let detail = match picked.as_slice() {
+        // Only one picked row is looked up: each is a search through the rows, done on every frame.
+        let picked = match shown_selected.as_ref() {
+            [path] => active.entry(path),
+            _ => None,
+        };
+        let detail = match picked {
             _ if shown_selected.len() > 1 => format!("{} 項目を選択", shown_selected.len()),
-            [entry] => {
+            Some(entry) => {
                 let what = if entry.directory { "フォルダー".into() } else { time::size(entry.size) };
                 match entry.modified.and_then(time::date_time) {
                     Some(when) => format!("{what} · {when}"),

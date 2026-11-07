@@ -224,7 +224,12 @@ impl Column {
 
     /// Every row it shows is picked, and it shows some.
     pub fn all_selected(&self) -> bool {
-        !self.entries.is_empty() && self.entries.iter().all(|e| self.selected.contains(&e.path))
+        if self.entries.is_empty() || self.selected.len() < self.entries.len() {
+            return false;
+        }
+        // Asked on every frame, so a set: a list searched per row is quadratic in a large folder.
+        let selected: HashSet<&Path> = self.selected.iter().map(PathBuf::as_path).collect();
+        self.entries.iter().all(|e| selected.contains(e.path.as_path()))
     }
 
     /// Loading with nothing listed yet: its total is not known, not 0.
