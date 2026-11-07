@@ -130,7 +130,7 @@ impl Theme {
 
     pub fn label(self) -> &'static str {
         match self {
-            Theme::System => "Windowsに合わせる",
+            Theme::System => "システム",
             Theme::Light => "ライト",
             Theme::Dark => "ダーク",
         }
