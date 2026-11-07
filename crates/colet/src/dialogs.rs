@@ -649,8 +649,8 @@ impl Colet {
         )
     }
 
-    /// The file actions beside the trail, and the room they take.
-    pub fn render_actions(&mut self, cx: &mut Context<Self>) -> (f32, AnyElement) {
+    /// The file actions under the toolbar.
+    pub fn render_actions(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let reasons = self.reasons();
         let action = |id: &'static str, glyph: &'static str, label: &'static str, key: &'static str, off: Option<&'static str>| {
@@ -680,7 +680,7 @@ impl Colet {
             .child(action("new-folder", "folder-plus", "新規フォルダー", "Ctrl+Shift+N", reasons.paste).on_click(cx.listener(|this, _, window, cx| this.ask_new_folder(window, cx))))
             // With Shift held it deletes outright, as Explorer's Delete does.
             .child(crate::view::keep_focus(action("recycle", "trash", "ごみ箱へ移動", "Delete／Shift+クリックで完全に削除", reasons.delete)).on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))));
-        (7. * 30. + 13. + 16., row.into_any_element())
+        row.into_any_element()
     }
 
     /// The history's button in the status bar: turning while an operation runs, with the count of those

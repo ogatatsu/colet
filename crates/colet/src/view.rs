@@ -1395,6 +1395,7 @@ impl Colet {
 
         let sort_keyed = keyed(&self.sort_focus, window);
         let filter_button = self.filter_button(window, cx);
+        let address = self.render_address(window, cx);
         div()
             .h(px(48.))
             .flex_none()
@@ -1420,10 +1421,11 @@ impl Colet {
                             .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
                     ),
             )
+            .child(filter_button)
             .child(
-                // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row. However
-                // narrow the window, it keeps room to type in.
-                frame(p, focused).flex_1().min_w(px(SEARCH_FIELD_MIN)).m(px(-3.)).child(
+                // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row. It keeps
+                // its width while the address beside it gives way, then narrows, keeping room to type in.
+                frame(p, focused).flex_none().w(px(SEARCH_FIELD_WIDTH)).flex_shrink(1.).min_w(px(SEARCH_FIELD_MIN)).m(px(-3.)).child(
                     div()
                         .id("search-box")
                         .w_full()
@@ -1469,9 +1471,12 @@ impl Colet {
                         .test_support(),
                 ),
             )
-            .child(filter_button)
+            // From what is searched to where it is.
+            .child(div().flex_none().child(icon("chevron-right", 14., p.text_faint)))
+            .child(address)
             .child(
                 div()
+                    .flex_none()
                     .relative()
                     .child(
                         frame(p, sort_keyed).m(px(-3.)).child(
@@ -1547,6 +1552,8 @@ impl Colet {
         // the tip still names it.
         div()
             .relative()
+            // Its name gives way before the search field narrows.
+            .flex_shrink(100.)
             // The funnel and the chevron with their padding, gaps and border: the button never goes under
             // the sort order's.
             .min_w(px(60.))
@@ -1589,34 +1596,27 @@ impl Colet {
                 ),
             )
             .when_some(self.menu_element("search-filter-menu", "検索フィルター", cx).filter(|_| self.filter_open()), |d, menu| {
-                d.child(deferred(div().absolute().top(px(36.)).right_0().min_w(px(200.)).max_w(px(320.)).child(menu)).with_priority(1))
+                d.child(deferred(div().absolute().top(px(36.)).left_0().min_w(px(200.)).max_w(px(320.)).child(menu)).with_priority(1))
             })
             .into_any_element()
     }
 
     /// The trail from the search or the drive down to the deepest folder; when it outgrows the bar, the
     /// crumbs furthest from the deepest fold into a menu so the nearest stay readable.
-    /// The crumbs of the trail: the results' own while they are pinned, then each folder column's.
+    /// The crumbs of the trail: each folder column's. The search results have none: the search field beside
+    /// it stands for them.
     fn trail(&self) -> Vec<Crumb> {
-        let mut crumbs = Vec::new();
-        if self.state.pinned() {
-            let searched = match (&self.state.search_filter, self.state.query.as_str()) {
-                (Some(filter), "") => format!("フィルター: {filter}"),
-                (Some(filter), query) => format!("{query}（フィルター: {filter}）"),
-                (None, query) => query.to_owned(),
-            };
-            crumbs.push(Crumb { column: 1, name: "検索結果".into(), path: searched });
-        }
-        for (index, c) in self.state.columns.iter().enumerate().filter(|(_, c)| c.kind == Kind::Folder) {
-            crumbs.push(Crumb { column: index, name: shown(folder_name(&c.path)), path: shown(&c.path) });
-        }
-        crumbs
+        self.state
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.kind == Kind::Folder)
+            .map(|(index, c)| Crumb { column: index, name: shown(folder_name(&c.path)), path: shown(&c.path) })
+            .collect()
     }
 
-    /// Each crumb's whole width as drawn: its 13px name, padding, the search icon on the results' own,
-    /// the chevron before it and the gap after.
+    /// Each crumb's whole width as drawn: its 13px name, padding, the chevron before it and the gap after.
     fn crumb_widths(&self, crumbs: &[Crumb], window: &Window) -> Vec<f32> {
-        let results = self.state.pinned();
         let font = font("Segoe UI");
         crumbs
             .iter()
@@ -1624,23 +1624,37 @@ impl Colet {
             .map(|(k, Crumb { name: label, .. })| {
                 let run = TextRun { len: label.len(), font: font.clone(), color: self.palette.text, background_color: None, underline: None, strikethrough: None };
                 let shaped = window.text_system().shape_line(label.clone().into(), px(13.), &[run], None);
-                let icon = if results && k == 0 { 13. + 4. } else { 0. };
                 // The first stands at the bar's start, with no chevron or gap before it.
                 let before = if k == 0 { 0. } else { crate::crumbs::SEPARATOR + crate::crumbs::GAP };
-                f32::from(shaped.width).ceil() + 12. + icon + before
+                f32::from(shaped.width).ceil() + 12. + before
             })
             .collect()
     }
 
-    fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let file_actions = self.render_actions(cx);
+    /// The row under the toolbar: the file actions.
+    fn render_pathbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        div()
+            .h(px(40.))
+            .flex_none()
+            .px_3()
+            .flex()
+            .items_center()
+            .border_b_1()
+            .border_color(p.border)
+            .child(self.render_actions(cx))
+            .into_any_element()
+    }
+
+    /// The address beside the search field: the trail of crumbs, or the field to type a path in.
+    fn render_address(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let crumbs = self.trail();
         let widths = self.crumb_widths(&crumbs, window);
-        // The room the bar was last drawn with; before the first frame, what the window leaves it.
+        // The room the bar was last drawn with; before the first frame, a guess at what the toolbar leaves it.
         let row_width = match self.crumbs.row.get() {
             Some(row) => f32::from(row.size.width),
-            None => f32::from(window.viewport_size().width) - 26. - 16. - 14. - file_actions.0,
+            None => (f32::from(window.viewport_size().width) - ADDRESS_GUESS).max(crate::crumbs::TYPING_ROOM),
         };
         self.crumbs.room.set(row_width);
         // The crumbs leave a strip to press to type a path, however long the trail.
@@ -1705,38 +1719,30 @@ impl Colet {
             .on_action(cx.listener(|this, _: &input::Escape, window, cx| this.leave_address(window, cx)))
             .on_action(cx.listener(|this, _: &GoToAddressInNewTab, window, cx| this.go_to_address(true, window, cx)))
             .child(Input::new(&self.address));
-        div()
-            .h(px(40.))
-            .flex_none()
-            .pl(px(10.))
-            .pr_3()
-            .flex()
-            .items_center()
-            .gap_4()
-            .border_b_1()
-            .border_color(p.border)
+        // Ringed as the search field is while it takes the keys; the ring lies over the gaps around. It gives
+        // way first in a narrow window, folding its crumbs.
+        frame(p, editing)
+            .flex_1()
+            .min_w(px(ADDRESS_MIN))
+            .m(px(-3.))
             .text_size(px(12.))
             .child(
-                // Ringed as the search field is while it takes the keys; the ring lies over the gaps around.
-                frame(p, editing).flex_1().min_w_0().m(px(-3.)).child(
-                    div()
-                        .id("address")
-                        .w_full()
-                        .h(px(30.))
-                        .pl(px(4.))
-                        .pr(px(2.))
-                        .flex()
-                        .items_center()
-                        .bg(p.surface)
-                        .border_1()
-                        .border_color(p.border_strong)
-                        .rounded(px(6.))
-                        .when(editing, |d| d.child(field))
-                        .when(!editing, |d| d.child(trail))
-                        .test_support(),
-                ),
+                div()
+                    .id("address")
+                    .w_full()
+                    .h(px(32.))
+                    .pl(px(4.))
+                    .pr(px(2.))
+                    .flex()
+                    .items_center()
+                    .bg(p.surface)
+                    .border_1()
+                    .border_color(p.border_strong)
+                    .rounded(px(6.))
+                    .when(editing, |d| d.child(field))
+                    .when(!editing, |d| d.child(trail))
+                    .test_support(),
             )
-            .child(file_actions.1)
             .into_any_element()
     }
 
@@ -1780,7 +1786,6 @@ impl Colet {
         let p = self.palette;
         let Crumb { column: index, name: label, path } = crumb;
         let current = index == self.state.active;
-        let query = self.state.pinned() && index == 1;
         let focus = self.stops.get(&format!("crumb:{index}")).cloned().unwrap_or_else(|| self.columns_focus.clone());
         div()
             .flex()
@@ -1814,7 +1819,6 @@ impl Colet {
                     .text_color(if current { p.text } else { p.text_muted })
                     .hover(|d| d.bg(p.hover))
                     .tip(path)
-                    .when(query, |d| d.child(icon("search", 13., p.text_faint)))
                     .child(div().truncate().child(label))
                     .on_click(cx.listener(move |this, _, window, cx| this.go_to(index, window, cx)))
                     .test_support(),
@@ -2203,7 +2207,7 @@ impl Render for Colet {
         let tabbar = self.render_tabbar(window, cx);
         let sidebar = self.render_sidebar(window, cx);
         let toolbar = self.render_toolbar(window, cx);
-        let pathbar = self.render_pathbar(window, cx);
+        let pathbar = self.render_pathbar(cx);
         let main = self.render_main(window, cx);
         div()
             .id("colet")

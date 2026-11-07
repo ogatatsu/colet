@@ -29,6 +29,22 @@ fn moves_from_the_search_field_into_the_results_with_down(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn the_trail_beside_the_search_starts_at_the_folder_the_results_lead_to(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\alpha.txt")]));
+    let ui = open(cx, fake);
+    ui.input(cx, "a");
+    // The results alone: the search field stands for them and the trail is empty.
+    assert!(ui.act(cx, |window, _| window.try_find(("crumb", 1usize)).is_none()));
+    ui.press(cx, "down");
+    // Their folder open: its crumb stands first, with none for the results before it.
+    let (field, address, crumb) = ui.act(cx, |window, _| {
+        assert!(window.try_find(("crumb", 1usize)).is_none());
+        (window.find("search-box").bounds(), window.find("address").bounds(), window.find(("crumb", 2usize)).bounds())
+    });
+    assert!(field.right() < address.left() && address.left() <= crumb.left(), "{field:?} {address:?} {crumb:?}");
+}
+
+#[gpui_kit::test]
 fn reports_a_failed_search_as_one_and_retries(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
     *fake.failing.lock().unwrap() = Some("Everything 1.5に接続できません。".into());

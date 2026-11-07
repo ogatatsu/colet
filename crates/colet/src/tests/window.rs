@@ -44,10 +44,13 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
     let ui = open(cx, Arc::new(fake));
     let (width, height) = crate::app::MIN_WINDOW;
     cx.simulate_window_resize(ui.window, size(px(width), px(height)));
-    let (sidebar, field, filter, last) = ui.act(cx, |window, _| {
+    let (sidebar, field, filter, address, last) = ui.act(cx, |window, _| {
         let find = |id: &str| window.find(SharedString::from(id.to_owned())).bounds();
-        (find("sidebar"), find("search-box"), find("search-filter"), find("preferences"))
+        (find("sidebar"), find("search-box"), find("search-filter"), find("address"), find("preferences"))
     });
+    // The filter, the search and the address in a row, the address keeping room to press to type.
+    assert!(filter.right() <= field.left() && field.right() < address.left(), "{filter:?} {field:?} {address:?}");
+    assert!(address.size.width >= px(crate::app::ADDRESS_MIN - 6.), "{address:?}");
     // Home's pane gave way to its usual width, keeping the width it was dragged to.
     assert_eq!(sidebar.size.width, px(width - crate::app::MAIN_MIN));
     assert_eq!(ui.read(cx, |v| v.widths.sidebar), 480.);

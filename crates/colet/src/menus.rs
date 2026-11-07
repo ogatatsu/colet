@@ -538,7 +538,6 @@ impl Colet {
     /// Opens the menu of the folders folded off the trail, as it was last drawn.
     pub fn open_crumb_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.popup = Some(Popup::Crumbs);
-        let results = self.state.pinned();
         let active = self.state.active;
         let colet = cx.weak_entity();
         let items = self
@@ -549,7 +548,7 @@ impl Colet {
                 let (index, label, path) = (crumb.column, crumb.name.clone(), crumb.path.clone());
                 let colet = colet.clone();
                 PopupMenuItem::element(move |_, _| div().id(("crumb-item", index)).test_support().tip(path.clone()).child(label.clone()))
-                    .icon(crate::view::glyph(if index == 1 && results { "search" } else { "folder" }))
+                    .icon(crate::view::glyph("folder"))
                     .checked(index == active)
                     .on_click(move |_, window, cx| {
                         colet

@@ -207,8 +207,14 @@ pub const FOLD_WIDTH: f32 = 28.;
 pub const MAIN_MIN: f32 = 480.;
 /// The smallest the window goes: home's pane at its usual width, and the rest.
 pub const MIN_WINDOW: (f32, f32) = (240. + MAIN_MIN, 480.);
-/// The least the search field narrows to, the search filter's name giving way first.
+/// The search field's width while the window has room, and the least it narrows to, the address beside it
+/// and the search filter's name giving way first.
+pub const SEARCH_FIELD_WIDTH: f32 = 260.;
 pub const SEARCH_FIELD_MIN: f32 = 160.;
+/// The least the address keeps: the "…" of its folded crumbs, the last clipped, and room to press to type.
+pub const ADDRESS_MIN: f32 = 120.;
+/// What the toolbar takes from the window but the address, guessed before it is first drawn.
+pub const ADDRESS_GUESS: f32 = 640.;
 
 /// Which width a drag on a column's edge changes.
 #[derive(Clone, Copy, PartialEq, Eq)]
