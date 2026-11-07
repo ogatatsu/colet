@@ -16,6 +16,47 @@ use crate::{
 /// What the empty address says before and while editing.
 pub(crate) const PLACEHOLDER: &str = "パスを入力（Ctrl+L）";
 
+/// The address bar's field, shown in place of the trail while open, and how many times anything has
+/// happened to it: a path typed, the field opened or closed. An answer about a path is taken only while
+/// nothing has happened since it was asked.
+pub struct Address {
+    pub field: Entity<InputState>,
+    open: bool,
+    asked: u64,
+}
+
+impl Address {
+    pub(crate) fn new(field: Entity<InputState>) -> Self {
+        Self { field, open: false, asked: 0 }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// Opens or closes the field; an answer still on its way is let go of.
+    fn set_open(&mut self, open: bool) {
+        self.open = open;
+        self.asked += 1;
+    }
+
+    /// What the field holds changed: an answer still on its way is no longer about it.
+    fn typed(&mut self) {
+        self.asked += 1;
+    }
+
+    /// Asks about what the field holds now: the number its answer is to come back with.
+    fn ask(&mut self) -> u64 {
+        self.asked += 1;
+        self.asked
+    }
+
+    /// Nothing has happened to the field since `asked`.
+    fn still_asked(&self, asked: u64) -> bool {
+        asked == self.asked
+    }
+}
+
 impl Colet {
     /// The field, and what it tells: Enter goes to what is typed.
     pub(crate) fn address_field(window: &mut Window, cx: &mut Context<Self>) -> (Entity<InputState>, Subscription) {
@@ -24,7 +65,7 @@ impl Colet {
             match event {
                 InputEvent::PressEnter { .. } => this.go_to_address(false, window, cx),
                 // What was asked for is no longer what the field holds.
-                InputEvent::Change => this.address_asked += 1,
+                InputEvent::Change => this.address.typed(),
                 _ => {}
             }
         });
@@ -43,9 +84,8 @@ impl Colet {
             return;
         }
         let text = self.deepest_folder().map(shown).unwrap_or_default();
-        self.address_open = true;
-        self.address_asked += 1;
-        self.address.update(cx, |input, cx| {
+        self.address.set_open(true);
+        self.address.field.update(cx, |input, cx| {
             input.set_value(text, window, cx);
             input.focus(window, cx);
             input.select_all(window, cx);
@@ -55,8 +95,7 @@ impl Colet {
 
     /// Lets go of what was typed; the trail shows again. Any answer still on its way is let go of too.
     pub fn close_address(&mut self, cx: &mut Context<Self>) {
-        self.address_open = false;
-        self.address_asked += 1;
+        self.address.set_open(false);
         cx.notify();
     }
 
@@ -69,9 +108,8 @@ impl Colet {
     /// While the field is open, the keys going anywhere else close it, and an answer still on its way is
     /// let go of; its own menu keeps it.
     pub(crate) fn follow_address(&mut self, window: &Window, cx: &App) {
-        if self.address_open && !self.has_keys(&self.address, window, cx) {
-            self.address_open = false;
-            self.address_asked += 1;
+        if self.address.is_open() && !self.has_keys(&self.address.field, window, cx) {
+            self.address.set_open(false);
         }
     }
 
@@ -79,7 +117,7 @@ impl Colet {
     /// how its names are written on disk, is asked off the UI thread, as a share can keep it waiting. What
     /// cannot be gone to is said, and the field stays as it is to be put right.
     pub fn go_to_address(&mut self, in_new_tab: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.address.read(cx).value().to_string();
+        let text = self.address.field.read(cx).value().to_string();
         if text.trim().is_empty() {
             return;
         }
@@ -91,8 +129,7 @@ impl Colet {
             );
             return;
         };
-        self.address_asked += 1;
-        let asked = self.address_asked;
+        let asked = self.address.ask();
         let backend = self.backend.clone();
         let found = {
             let path = path.clone();
@@ -115,7 +152,7 @@ impl Colet {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if asked != self.address_asked {
+        if !self.address.still_asked(asked) {
             return;
         }
         let Some((path, directory)) = found else {

@@ -3,7 +3,7 @@ use super::*;
 
 impl Ui {
     fn address(&self, cx: &mut TestAppContext) -> Option<String> {
-        let (open, field) = self.view.read_with(cx, |v, _| (v.address_open, v.address.clone()));
+        let (open, field) = self.view.read_with(cx, |v, _| (v.address.is_open(), v.address.field.clone()));
         open.then(|| field.read_with(cx, |input, _| input.value().to_string()))
     }
 

@@ -34,6 +34,7 @@ use gpui_kit::*;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use crate::{
+    address::Address,
     backend::{self, Search},
     clipboard::Clipboard,
     crumbs::Trail,
@@ -321,6 +322,40 @@ impl Listings {
     }
 }
 
+/// Reloads of the search for the changes Everything reports: one waiting at a time, and at most one every
+/// couple of seconds.
+#[derive(Default)]
+struct SearchRefresh {
+    /// A reload is waiting to go.
+    waiting: bool,
+    /// When the last one went.
+    last: Option<Instant>,
+}
+
+impl SearchRefresh {
+    const EVERY: Duration = Duration::from_secs(2);
+
+    /// A reload is to wait its turn: how long until it may go, or none when one is already waiting.
+    fn wait(&mut self) -> Option<Duration> {
+        if self.waiting {
+            return None;
+        }
+        self.waiting = true;
+        Some(self.last.map_or(Duration::ZERO, |at| Self::EVERY.saturating_sub(at.elapsed())))
+    }
+
+    /// The reload waiting went now.
+    fn went(&mut self) {
+        self.waiting = false;
+        self.last = Some(Instant::now());
+    }
+
+    /// The reload waiting is no longer to go.
+    fn cancel(&mut self) {
+        self.waiting = false;
+    }
+}
+
 /// A file kept between starts as it was `read`, or the defaults with what to say of it, and its saves
 /// through `write`: none while the file could not be read and is still there, so it is never written over.
 fn kept<T: Default + Clone + Send + 'static>(
@@ -398,12 +433,7 @@ pub struct Colet {
     pub search: Entity<InputState>,
     /// The search field has the keys: no column is marked as worked in.
     pub search_focused: bool,
-    /// The address bar's field, shown in place of the trail while `address_open`.
-    pub address: Entity<InputState>,
-    pub address_open: bool,
-    /// Counts the paths typed and the times the field opens or closes: an answer about a path is taken
-    /// only while nothing has happened since it was asked.
-    pub(crate) address_asked: u64,
+    pub address: Address,
     /// The field of each column, narrowing it to some names.
     pub filters: HashMap<ColumnId, FilterField>,
     pub home_focus: FocusHandle,
@@ -420,8 +450,7 @@ pub struct Colet {
     pub(crate) backend: backend::Shared,
     listings: Listings,
     pub(crate) watching: Watching,
-    searched_at: Option<Instant>,
-    search_refresh: bool,
+    search_refresh: SearchRefresh,
     pub settings: Settings,
     pub(crate) settings_saves: Saves<Settings>,
     /// The orders the columns are given apart from `settings.sort`, kept in a file of their own and
@@ -507,9 +536,7 @@ impl Colet {
             palette: Palette::for_window(window, settings.theme),
             search,
             search_focused: false,
-            address,
-            address_open: false,
-            address_asked: 0,
+            address: Address::new(address),
             filters: HashMap::new(),
             home_focus: cx.focus_handle().tab_stop(true),
             columns_focus: cx.focus_handle().tab_stop(true),
@@ -524,8 +551,7 @@ impl Colet {
             backend,
             listings: Listings::default(),
             watching: Watching::default(),
-            searched_at: None,
-            search_refresh: false,
+            search_refresh: SearchRefresh::default(),
             settings,
             settings_saves,
             sorts,
@@ -556,7 +582,7 @@ impl Colet {
             this.notify(problem, Tone::Error, cx);
         }
         this.palette.style_input(&this.search, cx);
-        this.palette.style_input(&this.address, cx);
+        this.palette.style_input(&this.address.field, cx);
         this.restore_tabs(window, cx);
         // The window's dialog follows `dialog` as each change to Colet settles.
         let colet = cx.entity();
@@ -618,7 +644,7 @@ impl Colet {
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
         self.palette = Palette::for_window(window, self.settings.theme);
         crate::theme::apply(window, self.settings.theme, cx);
-        let mut inputs = vec![self.search.clone(), self.address.clone()];
+        let mut inputs = vec![self.search.clone(), self.address.field.clone()];
         inputs.extend(self.filters.values().map(|field| field.input.clone()));
         inputs.extend(self.dialog.iter().flat_map(Dialog::fields));
         for input in &inputs {
@@ -865,7 +891,7 @@ impl Colet {
     /// never listed shows as loading. What the tab before it still had out is let go of.
     pub(crate) fn relist(&mut self, cx: &mut Context<Self>) {
         self.listings.keep(&HashSet::new());
-        self.search_refresh = false;
+        self.search_refresh.cancel();
         let columns: Vec<(ColumnId, bool)> = self.state.columns.iter().map(|c| (c.id, c.request != 0)).collect();
         for (id, listed) in columns {
             self.listings.first(id);
@@ -1105,25 +1131,22 @@ impl Colet {
     /// A busy disk reports changes each second: the first reloads at once, then at most one every couple
     /// of seconds. One met by a reload in flight waits for it, as it may have read the results before.
     fn search_changed(&mut self, cx: &mut Context<Self>) {
-        if self.search_refresh {
+        let Some(wait) = self.search_refresh.wait() else {
             return;
-        }
-        self.search_refresh = true;
-        let wait = self.searched_at.map_or(Duration::ZERO, |at| Duration::from_secs(2).saturating_sub(at.elapsed()));
+        };
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(wait).await;
             loop {
                 let busy = this
                     .update(cx, |this, cx| {
                         let Some(search) = this.state.columns.iter().find(|c| c.kind == Kind::Search).map(|c| c.id) else {
-                            this.search_refresh = false;
+                            this.search_refresh.cancel();
                             return false;
                         };
                         if this.listings.loading(search) {
                             return true;
                         }
-                        this.search_refresh = false;
-                        this.searched_at = Some(Instant::now());
+                        this.search_refresh.went();
                         this.load(search, 0, true, cx);
                         false
                     })
