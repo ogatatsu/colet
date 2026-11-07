@@ -184,13 +184,21 @@ impl Sink {
     }
     fn placed(&self, item: Ref<IShellItem>, result: HRESULT, made: Ref<IShellItem>) -> Result<()> {
         self.done(item, result)?;
-        if result.is_ok()
+        if finished(result)
             && let Some(made) = made.as_ref()
         {
             self.report(Item::Placed { path: path(Some(made)) });
         }
         Ok(())
     }
+}
+
+/// The item went as asked: a success, but not COPYENGINE_S_USER_IGNORED (skipped) nor
+/// COPYENGINE_S_PENDING (waiting on a question), which leave it where it was.
+fn finished(result: HRESULT) -> bool {
+    const USER_IGNORED: HRESULT = HRESULT(0x0027_0005);
+    const PENDING: HRESULT = HRESULT(0x0027_000B);
+    result.is_ok() && result != USER_IGNORED && result != PENDING
 }
 
 /// The item's path, or for one with none, as in a ZIP folder or on a phone, its name in the address bar.
@@ -253,8 +261,9 @@ impl IFileOperationProgressSink_Impl for Sink_Impl {
     fn PostDeleteItem(&self, _: u32, item: Ref<IShellItem>, result: HRESULT, recycled: Ref<IShellItem>) -> Result<()> {
         let gone = path(item.as_ref());
         self.done(item, result)?;
-        // Sent to the bin, the shell hands the item there; deleted outright, nothing.
-        if result.is_ok() && recycled.is_null() {
+        // Sent to the bin, the shell hands the item there; deleted outright, nothing. One skipped or still
+        // waiting on a question is a success code too, yet stays where it was.
+        if finished(result) && recycled.is_null() {
             self.report(Item::Destroyed { path: gone });
         }
         Ok(())
