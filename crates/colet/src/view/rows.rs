@@ -29,7 +29,8 @@ impl Render for HomeGhost {
             .border_1()
             .border_color(p.border_strong)
             .bg(p.raised)
-            .opacity(0.8)
+            // Faint enough that the landing line it passes over still shows through.
+            .opacity(0.5)
             .font_family("Segoe UI")
             .text_size(px(metrics::TEXT_LARGE))
             .text_color(p.text)
@@ -127,6 +128,8 @@ impl Colet {
             self.row_look(index, entry, marked);
         let c = &self.state.columns[index];
         let kind = c.kind;
+        // While a row in home is carried, only the line tells where it goes.
+        let dragging = kind == Kind::Home && self.home_drag.carried.is_some();
         let saved = saved_query(&entry.path);
         // A narrowed favorite's is its folder's: a drive's own, say.
         let image = match narrowed_folder(&entry.path) {
@@ -204,7 +207,7 @@ impl Colet {
             .when(selected, |r| r.bg(if marked && !aside { p.accent_fill } else { p.selected_inactive }))
             .when(lit, |r| r.text_color(p.on_accent))
             .when(barred, |r| r.bg(p.highlight))
-            .when(!selected && !highlighted, |r| r.hover(|r| r.bg(p.hover)))
+            .when(!selected && !highlighted && !dragging, |r| r.hover(|r| r.bg(p.hover)))
             .when(faded, |r| r.text_color(p.text_muted))
             // The selection in home while the columns are worked in: marked at its edge, as in a sidebar.
             .map(|r| {
