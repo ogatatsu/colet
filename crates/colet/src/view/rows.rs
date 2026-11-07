@@ -211,7 +211,7 @@ impl Colet {
                 let picture = div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture);
                 if kind == Kind::Home { r.child(picture) } else { r.child(self.check(index, entry, selected, lit, picture, cx)) }
             })
-            .child(self.row_name(entry, kind, barred && highlighted, lit, within, narrow))
+            .child(self.row_name(entry, kind, lit, within, narrow))
             // Out of the name, so the name stays the file's own: a fade alone would read as hidden.
             .when(held, |r| {
                 r.child(
@@ -314,7 +314,7 @@ impl Colet {
 
     /// The name, with the filter a saved search runs within and what a favorite or saved search opens
     /// narrowed to beside it, and a search result's folder under it.
-    fn row_name(&self, entry: &Entry, kind: Kind, accented: bool, lit: bool, within: Option<String>, narrow: Option<String>) -> Div {
+    fn row_name(&self, entry: &Entry, kind: Kind, lit: bool, within: Option<String>, narrow: Option<String>) -> Div {
         let p = self.palette;
         let ink = if lit { p.on_accent } else { p.text };
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
@@ -334,7 +334,6 @@ impl Colet {
                         div()
                             .min_w_0()
                             .truncate()
-                            .when(accented, |d| d.text_color(p.accent).font_weight(FontWeight::SEMIBOLD))
                             .child(with_marks(&entry.name, &entry.marks.name)),
                     )
                     // A badge, tinted with the row's own ink so it shows on any of its fills.
