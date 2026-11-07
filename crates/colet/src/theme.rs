@@ -176,7 +176,11 @@ impl Palette {
         ] {
             *role = Some(hex(color).into());
         }
-        ThemeConfig { name: name.into(), mode, colors, ..Default::default() }
+        let mut config = ThemeConfig::default();
+        config.name = name.into();
+        config.mode = mode;
+        config.colors = colors;
+        config
     }
 }
 
@@ -284,7 +288,8 @@ mod tests {
     fn input_ink_and_caret_keep_the_chosen_theme_against_either_base_theme() {
         for palette in [Palette::light(), Palette::dark()] {
             for colors in [ColorTokens::light(), ColorTokens::dark()] {
-                let tokens = SemanticThemeTokens { colors, ..Default::default() };
+                let mut tokens = SemanticThemeTokens::default();
+                tokens.colors = colors;
                 let style = palette.input_style().resolved(&tokens);
                 assert_eq!(style.foreground, palette.text);
                 assert_eq!(style.muted_foreground, palette.text_muted);
