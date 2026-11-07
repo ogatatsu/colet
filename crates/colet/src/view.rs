@@ -209,6 +209,10 @@ impl Render for Colet {
         if self.home_drag.carried.is_some() && !cx.has_active_drag() {
             self.end_home_drag();
         }
+        // And a tab's let go of off the tab bar.
+        if self.tabs.drag.carried.is_some() && !cx.has_active_drag() {
+            self.end_tab_drag();
+        }
         self.follow_focus(window, cx);
         self.scroll_rows();
         self.reveal(window);

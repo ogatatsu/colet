@@ -84,6 +84,15 @@ pub struct Tabs {
     pub scroll: ScrollHandle,
     /// The tab in front is to be brought in sight on the strip.
     reveal: bool,
+    pub drag: TabDrag,
+}
+
+/// A tab carried along the strip, and the gap between tabs it would land in.
+#[derive(Default)]
+pub struct TabDrag {
+    pub carried: Option<TabId>,
+    /// 0 before the first tab, up to the count after the last; none while the pointer is off the strip.
+    pub gap: Option<usize>,
 }
 
 impl Tabs {
@@ -161,30 +170,29 @@ pub struct DraggedTab {
     id: TabId,
     name: String,
     glyph: &'static str,
+    /// The tab's width on the strip, curves aside.
+    width: f32,
     palette: crate::theme::Palette,
 }
 
 impl Render for DraggedTab {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
+        // As wide as the tab and held where it was picked up; the curves reach out beside it. Faint
+        // enough that the landing line it passes over still shows through.
         div()
-            .w(px(TAB_MIN + 60. + TAB_CURVE * 2.))
+            .relative()
+            .w(px(self.width))
             .h(px(TAB_HEIGHT))
-            .px_2()
-            .child(
-                div()
-                    .relative()
-                    .size_full()
-                    .pl(px(10.))
-                    .pr(px(4.))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(tab_shape(p.bg, Some(p.border)))
-                    .child(svg().path(format!("icons/{}.svg", self.glyph)).size(px(14.)).flex_none().text_color(p.text))
-                    .child(div().min_w_0().truncate().child(self.name.clone())),
-            )
-            .opacity(0.8)
+            .pl(px(10.))
+            .pr(px(4.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .child(tab_shape(p.bg, Some(p.border)))
+            .child(svg().path(format!("icons/{}.svg", self.glyph)).size(px(14.)).flex_none().text_color(p.text))
+            .child(div().min_w_0().truncate().child(self.name.clone()))
+            .opacity(0.5)
             .font_family("Segoe UI")
             .text_size(px(metrics::TEXT_LARGE))
             .text_color(p.text)
@@ -534,9 +542,11 @@ impl Colet {
         self.switch_tab(index + 1, window, cx);
     }
 
-    /// The tab `id` dropped where the tab at `to` stands.
-    fn move_tab(&mut self, id: TabId, to: usize, cx: &mut Context<Self>) {
+    /// The tab `id` dropped in the gap `gap`: 0 before the first tab, up to the count after the last.
+    fn move_tab(&mut self, id: TabId, gap: usize, cx: &mut Context<Self>) {
         let Some(from) = self.tabs.position(id) else { return };
+        // Taken out first, the tabs past it close up by one.
+        let to = if gap > from { gap - 1 } else { gap };
         if from == to {
             return;
         }
@@ -546,6 +556,42 @@ impl Colet {
         self.tabs.current = self.tabs.position(front).unwrap_or_default();
         self.keep_tabs(cx);
         cx.notify();
+    }
+
+    /// A tab is picked up: it fades where it was.
+    fn start_tab_drag(&mut self, id: TabId, cx: &mut Context<Self>) {
+        self.tabs.drag = TabDrag { carried: Some(id), gap: None };
+        cx.notify();
+    }
+
+    /// The pointer moved in a tab's drag, with the tab bar drawn at `bar` and its tabs `width` wide.
+    fn aim_tab_drag(&mut self, at: Point<Pixels>, bar: Bounds<Pixels>, width: f32, cx: &mut Context<Self>) {
+        if self.tabs.drag.carried.is_none() {
+            return;
+        }
+        let gap = bar.contains(&at).then(|| {
+            let strip = self.tabs.scroll.bounds();
+            let along = f32::from(at.x - strip.left() - self.tabs.scroll.offset().x) - TAB_CURVE;
+            // Over a tab's left half it goes before it, over its right half after; past the last, last.
+            ((along / width).round().max(0.) as usize).min(self.tabs.list.len())
+        });
+        if self.tabs.drag.gap != gap {
+            self.tabs.drag.gap = gap;
+            cx.notify();
+        }
+    }
+
+    fn land_tab(&mut self, dragged: &DraggedTab, cx: &mut Context<Self>) {
+        let gap = self.tabs.drag.gap;
+        self.end_tab_drag();
+        if let Some(gap) = gap {
+            self.move_tab(dragged.id, gap, cx);
+        }
+        cx.notify();
+    }
+
+    pub fn end_tab_drag(&mut self) {
+        self.tabs.drag = TabDrag::default();
     }
 
     /// The search filter `from` is named `to` now, or is gone: every tab follows it, closed ones too.
@@ -593,6 +639,7 @@ impl Colet {
         }
         let current = self.tabs.current;
         let count = self.tabs.list.len();
+        let dragging = self.tabs.drag.carried.is_some();
         let mut tabs = Vec::with_capacity(count * 2);
         for index in 0..count {
             // Keep one cell per tab, in order, so scroll_to_item includes both curves. The selected
@@ -621,8 +668,8 @@ impl Colet {
                     .top(px(TAB_TOP))
                     .w(px(width * 2.))
                     .h(px(TAB_HEIGHT))
-                    .hover(|s| s.opacity(0.))
-                    .drag_over::<DraggedTab>(|s, _, _, _| s.opacity(0.))
+                    // While a tab is carried, only the line tells where it goes.
+                    .when(!dragging, |d| d.hover(|s| s.opacity(0.)))
                     .child(div().absolute().left(px(width - 1.)).top(px(8.)).w(px(1.)).h(px(16.)).bg(p.border))
                     .into_any_element(),
             );
@@ -635,8 +682,28 @@ impl Colet {
                 .test_support()
                 .into_any_element(),
         );
+        if let Some(gap) = self.tabs.drag.gap.filter(|_| dragging) {
+            // Over every tab, at the edge between the bodies the carried one would land between.
+            tabs.push(
+                div()
+                    .id("tab-landing")
+                    .absolute()
+                    .left(px(TAB_CURVE + gap as f32 * width - 1.))
+                    .top(px(TAB_TOP))
+                    .w(px(2.))
+                    .h(px(TAB_HEIGHT))
+                    .rounded(px(1.))
+                    .bg(p.accent)
+                    .test_support()
+                    .into_any_element(),
+            );
+        }
         div()
             .id("tabbar")
+            .on_drag_move(cx.listener(move |this, event: &DragMoveEvent<DraggedTab>, _, cx| {
+                this.aim_tab_drag(event.event.position, event.bounds, width, cx)
+            }))
+            .on_drop(cx.listener(|this, dragged: &DraggedTab, _, cx| this.land_tab(dragged, cx)))
             .h(px(TAB_HEIGHT + TAB_TOP))
             .flex_none()
             .w_full()
@@ -702,7 +769,10 @@ impl Colet {
         let current = index == self.tabs.current;
         let group = SharedString::from(format!("tab-{id}"));
         let Title { glyph, name, tip } = title(tab.parked.as_ref().map_or(&self.state, |parked| &parked.state), &self.settings);
-        let dragged = DraggedTab { id, name: name.clone(), glyph, palette: p };
+        let dragged = DraggedTab { id, name: name.clone(), glyph, width, palette: p };
+        let dragging = self.tabs.drag.carried.is_some();
+        let carried = self.tabs.drag.carried == Some(id);
+        let view = cx.entity().downgrade();
         div()
             .id(("tab", id as usize))
             .group(group.clone())
@@ -722,7 +792,7 @@ impl Colet {
             .aria_size_of_set(self.tabs.list.len())
             .text_color(if current { p.text } else { p.text_muted })
             .when(current, |d| d.child(tab_shape(p.bg, Some(p.border))))
-            .when(!current, |d| {
+            .when(!current && !dragging, |d| {
                 d.child(
                     div()
                         .absolute()
@@ -731,11 +801,11 @@ impl Colet {
                         .left_0()
                         .right_0()
                         .invisible()
-                        .group_hover(group.clone(), |s| s.visible())
-                        .group_drag_over::<DraggedTab>(group, |s| s.visible())
+                        .group_hover(group, |s| s.visible())
                         .child(tab_shape(p.hover, None)),
                 )
             })
+            .when(carried, |d| d.opacity(0.4))
             .tip(tip)
             .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if current {
                 p.text
@@ -786,11 +856,9 @@ impl Colet {
                     this.open_tab_menu(id, event.position, window, cx);
                 }),
             )
-            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .on_drop(cx.listener(move |this, dragged: &DraggedTab, _, cx| {
-                if let Some(to) = this.tabs.position(id) {
-                    this.move_tab(dragged.id, to, cx);
-                }
-            }))
+            .on_drag(dragged, move |dragged, _, _, cx| {
+                view.update(cx, |this, cx| this.start_tab_drag(dragged.id, cx)).ok();
+                cx.new(|_| dragged.clone())
+            })
     }
 }

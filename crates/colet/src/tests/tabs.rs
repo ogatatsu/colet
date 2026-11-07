@@ -307,3 +307,86 @@ fn names_a_tab_for_the_place_picked_in_home_while_home_is_worked_in(cx: &mut Tes
     ui.press(cx, "ctrl-t");
     assert_eq!(ui.title(cx), ("house", "ホーム".into(), "ホーム".into()));
 }
+
+impl Ui {
+    fn tab_ids(&self, cx: &mut TestAppContext) -> Vec<crate::tabs::TabId> {
+        self.read(cx, |v| v.tabs.list.iter().map(|tab| tab.id).collect())
+    }
+
+    fn tab_bounds(&self, cx: &mut TestAppContext, id: crate::tabs::TabId) -> Bounds<gpui_kit::Pixels> {
+        self.act(cx, |window, _| window.find(("tab", id as usize)).bounds())
+    }
+
+    fn tab_drag(&self, cx: &mut TestAppContext) -> (Option<crate::tabs::TabId>, Option<usize>) {
+        self.read(cx, |v| (v.tabs.drag.carried, v.tabs.drag.gap))
+    }
+}
+
+fn four_tabs(cx: &mut TestAppContext) -> Ui {
+    let fake = Arc::new(Fake::default());
+    {
+        let mut settings = fake.settings.lock().unwrap();
+        settings.tabs = vec![crate::settings::KeptTab::default(); 4];
+        settings.tab = 1;
+    }
+    open(cx, fake)
+}
+
+/// A tab's left or right quarter.
+fn left_of(b: Bounds<gpui_kit::Pixels>) -> gpui_kit::Point<gpui_kit::Pixels> {
+    point(b.left() + b.size.width / 4., b.center().y)
+}
+
+fn right_of(b: Bounds<gpui_kit::Pixels>) -> gpui_kit::Point<gpui_kit::Pixels> {
+    point(b.right() - b.size.width / 4., b.center().y)
+}
+
+#[gpui_kit::test]
+fn drags_a_tab_into_the_gap_its_line_shows(cx: &mut TestAppContext) {
+    let ui = four_tabs(cx);
+    let ids = ui.tab_ids(cx);
+    let (from, to) = (ui.tab_bounds(cx, ids[0]), ui.tab_bounds(cx, ids[2]));
+    // Over the right half of a tab, the line goes after it; the tab carried fades where it was.
+    ui.hold_drag(cx, from.center(), right_of(to));
+    assert_eq!(ui.tab_drag(cx), (Some(ids[0]), Some(3)));
+    ui.act(cx, |window, _| assert!(window.find("tab-landing").bounds().size.width > px(0.)));
+    ui.let_go(cx, right_of(to));
+    assert_eq!(ui.tab_ids(cx), [ids[1], ids[2], ids[0], ids[3]]);
+    // The tab in front stays in front, wherever it now stands.
+    assert_eq!(ui.read(cx, |v| v.current_tab()), ids[1]);
+    assert_eq!(ui.tab_drag(cx), (None, None));
+
+    // Over the left half, before it.
+    let ids = ui.tab_ids(cx);
+    let (from, to) = (ui.tab_bounds(cx, ids[3]), ui.tab_bounds(cx, ids[1]));
+    ui.hold_drag(cx, from.center(), left_of(to));
+    assert_eq!(ui.tab_drag(cx), (Some(ids[3]), Some(1)));
+    ui.let_go(cx, left_of(to));
+    assert_eq!(ui.tab_ids(cx), [ids[0], ids[3], ids[1], ids[2]]);
+}
+
+#[gpui_kit::test]
+fn drags_a_tab_past_the_last_onto_the_room_beside_them(cx: &mut TestAppContext) {
+    let ui = four_tabs(cx);
+    let ids = ui.tab_ids(cx);
+    let from = ui.tab_bounds(cx, ids[0]);
+    let room = ui.act(cx, |window, _| window.find("new-tab").bounds().center());
+    ui.hold_drag(cx, from.center(), room);
+    assert_eq!(ui.tab_drag(cx), (Some(ids[0]), Some(4)));
+    ui.let_go(cx, room);
+    assert_eq!(ui.tab_ids(cx), [ids[1], ids[2], ids[3], ids[0]]);
+}
+
+#[gpui_kit::test]
+fn leaves_the_tabs_as_they_were_let_go_of_off_the_bar(cx: &mut TestAppContext) {
+    let ui = four_tabs(cx);
+    let ids = ui.tab_ids(cx);
+    let from = ui.tab_bounds(cx, ids[0]);
+    let below = point(from.center().x, from.bottom() + px(200.));
+    ui.hold_drag(cx, from.center(), below);
+    // Off the bar, no line.
+    assert_eq!(ui.tab_drag(cx), (Some(ids[0]), None));
+    ui.let_go(cx, below);
+    assert_eq!(ui.tab_ids(cx), ids);
+    assert_eq!(ui.tab_drag(cx), (None, None));
+}
