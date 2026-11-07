@@ -2,7 +2,10 @@
 //! folder of thousands costs a handful of shell calls.
 use std::{collections::HashMap, sync::Arc};
 
-use colet_core::{entry::Entry, shell::{self, IconSource}};
+use colet_core::{
+    entry::Entry,
+    shell::{self, IconSource},
+};
 use gpui_kit::{Context, RenderImage};
 
 use crate::app::Colet;

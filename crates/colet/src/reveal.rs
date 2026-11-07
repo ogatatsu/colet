@@ -129,11 +129,7 @@ pub fn refit(from: f32, was: f32, was_end: f32, view: f32, cells: &[Cell], activ
     let end = cells[last].start + cells[last].width;
     let flush = (end - view).max(0.);
     // A pixel either way, for widths rounded under display scaling.
-    if from + was >= was_end - 1. {
-        active.map_or(flush, |active| flush.min(cells[active.min(last)].start))
-    } else {
-        from.min(flush)
-    }
+    if from + was >= was_end - 1. { active.map_or(flush, |active| flush.min(cells[active.min(last)].start)) } else { from.min(flush) }
 }
 
 /// What is on screen, in columns: 1.5 is halfway across the second. Above 0, some are hidden on the

@@ -218,7 +218,8 @@ fn never_writes_over_column_orders_it_could_not_read(cx: &mut TestAppContext) {
             roots: vec![Entry::folder(r"D:\", "D:")],
             ..Fake::default().with_folders(&[(r"D:\", vec![file(r"D:\a.txt")])])
         });
-        *fake.unreadable_sorts.lock().unwrap() = Some(LoadError { message: "カラムの並び順を読み込めません".into(), kept: true });
+        *fake.unreadable_sorts.lock().unwrap() =
+            Some(LoadError { message: "カラムの並び順を読み込めません".into(), kept: true });
         let ui = open(cx, fake.clone());
         (fake, ui)
     };

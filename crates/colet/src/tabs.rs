@@ -418,7 +418,8 @@ impl Colet {
             (state, true)
         } else {
             let Some(entry) = c.entry(path) else { return };
-            let state = if c.kind == Kind::Home { State::opening_home(c, &entry.path) } else { State::opening(&entry.path, entry.directory) };
+            let state =
+                if c.kind == Kind::Home { State::opening_home(c, &entry.path) } else { State::opening(&entry.path, entry.directory) };
             (state, entry.directory)
         };
         let filter = if state.pinned() { state.search_filter.clone() } else { None };
@@ -735,7 +736,11 @@ impl Colet {
                 )
             })
             .tip(tip)
-            .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if current { p.text } else { p.text_muted }))
+            .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if current {
+                p.text
+            } else {
+                p.text_muted
+            }))
             .child(div().flex_1().min_w_0().truncate().child(name))
             .child(
                 div()

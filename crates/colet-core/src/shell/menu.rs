@@ -2,24 +2,26 @@
 //! when there are none. Built and shown on one thread for the life of the process: a dialog a command
 //! opens, such as Properties, closes when the thread that invoked it ends, and the submenus (Send to, New)
 //! draw themselves through messages to the window that owns the menu.
-use std::{cell::{Cell, RefCell}, sync::mpsc, thread};
+use std::{
+    cell::{Cell, RefCell},
+    sync::mpsc,
+    thread,
+};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN, CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN,
-    CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX, GCS_VERBW, IContextMenu,
-    IContextMenu2, IContextMenu3, ILClone, ILFindLastID, ILIsParent, ILRemoveLastID,
+    CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN, CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFO,
+    CMINVOKECOMMANDINFOEX, GCS_VERBW, IContextMenu, IContextMenu2, IContextMenu3, ILClone, ILFindLastID, ILIsParent, ILRemoveLastID,
     IShellFolder, SHBindToObject, SHBindToParent,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DeleteMenu, DestroyMenu, DispatchMessageW,
-    GetMenuItemCount, GetMenuItemID, GetMessageW, HMENU, MF_BYPOSITION, MSG, PostMessageW,
-    RegisterClassW, SW_SHOWNORMAL, SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    TrackPopupMenuEx, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_DRAWITEM, WM_INITMENUPOPUP,
-    WM_MEASUREITEM, WM_MENUCHAR, WM_NULL, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DeleteMenu, DestroyMenu, DispatchMessageW, GetMenuItemCount, GetMenuItemID,
+    GetMessageW, HMENU, MF_BYPOSITION, MSG, PostMessageW, RegisterClassW, SW_SHOWNORMAL, SetForegroundWindow, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, TrackPopupMenuEx, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_DRAWITEM, WM_INITMENUPOPUP, WM_MEASUREITEM,
+    WM_MENUCHAR, WM_NULL, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Error, HRESULT, Interface, PCSTR, PCWSTR, PSTR, Result, w};
 
@@ -51,10 +53,7 @@ pub struct MenuThread(isize);
 impl MenuThread {
     pub fn spawn() -> Result<Self> {
         let (ready, window) = mpsc::channel();
-        thread::Builder::new()
-            .name("shell-menu".into())
-            .spawn(move || run(ready))
-            .map_err(|_| Error::from_thread())?;
+        thread::Builder::new().name("shell-menu".into()).spawn(move || run(ready)).map_err(|_| Error::from_thread())?;
         window.recv().map_err(|_| Error::empty())?.map(Self)
     }
 
@@ -107,12 +106,8 @@ fn run(ready: mpsc::Sender<Result<isize>>) {
 
 fn create_window() -> Result<HWND> {
     let instance = unsafe { GetModuleHandleW(None)? };
-    let class = WNDCLASSW {
-        lpfnWndProc: Some(procedure),
-        hInstance: instance.into(),
-        lpszClassName: w!("ColetShellMenu"),
-        ..Default::default()
-    };
+    let class =
+        WNDCLASSW { lpfnWndProc: Some(procedure), hInstance: instance.into(), lpszClassName: w!("ColetShellMenu"), ..Default::default() };
     if unsafe { RegisterClassW(&class) } == 0 {
         return Err(Error::from_thread());
     }
@@ -238,11 +233,9 @@ fn context_menu(owner: HWND, paths: &[PathBuf], background: &Path) -> Result<ICo
         return Err(Error::from_hresult(windows::Win32::Foundation::E_INVALIDARG));
     }
     let folder: IShellFolder = unsafe { SHBindToParent(items.0[0], None)? };
-    let children: Vec<*const ITEMIDLIST> =
-        items.0.iter().map(|item| unsafe { ILFindLastID(*item) } as *const _).collect();
+    let children: Vec<*const ITEMIDLIST> = items.0.iter().map(|item| unsafe { ILFindLastID(*item) } as *const _).collect();
 
     unsafe { folder.GetUIObjectOf(owner, &children, None) }
-
 }
 
 /// Fills `popup` with everything Explorer shows with Shift held, less Rename, which only Explorer's own
@@ -263,8 +256,7 @@ fn verb(menu: &IContextMenu, popup: HMENU, position: i32) -> Option<String> {
         return None;
     }
     let mut verb = [0u16; 64];
-    unsafe { menu.GetCommandString(id as usize - 1, GCS_VERBW, None, PSTR(verb.as_mut_ptr().cast()), verb.len() as u32) }
-        .ok()?;
+    unsafe { menu.GetCommandString(id as usize - 1, GCS_VERBW, None, PSTR(verb.as_mut_ptr().cast()), verb.len() as u32) }.ok()?;
     let len = verb.iter().position(|&c| c == 0).unwrap_or(verb.len());
     (len > 0).then(|| String::from_utf16_lossy(&verb[..len]))
 }
@@ -279,9 +271,8 @@ mod tests {
         apartment.result()?;
         let menu = context_menu(HWND::default(), paths, background)?;
         let popup = unsafe { CreatePopupMenu()? };
-        let result = fill(&menu, popup).map(|()| {
-            (0..unsafe { GetMenuItemCount(Some(popup)) }).filter_map(|i| verb(&menu, popup, i)).collect()
-        });
+        let result =
+            fill(&menu, popup).map(|()| (0..unsafe { GetMenuItemCount(Some(popup)) }).filter_map(|i| verb(&menu, popup, i)).collect());
         unsafe {
             let _ = DestroyMenu(popup);
         }

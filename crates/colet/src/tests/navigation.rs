@@ -20,11 +20,11 @@ fn moves_from_the_empty_search_field_into_home_with_down_picking_its_row(cx: &mu
 #[gpui_kit::test]
 fn opens_a_deep_search_file_on_its_own_folder_and_right_jumps_to_it(cx: &mut TestAppContext) {
     let deep = file(r"D:\a\b\zeta.txt");
-    let fake = Arc::new(
-        Fake::default()
-            .with_results(vec![deep.clone()])
-            .with_folders(&[(r"D:\", vec![folder(r"D:\a")]), (r"D:\a", vec![folder(r"D:\a\b")]), (r"D:\a\b", vec![deep.clone()])]),
-    );
+    let fake = Arc::new(Fake::default().with_results(vec![deep.clone()]).with_folders(&[
+        (r"D:\", vec![folder(r"D:\a")]),
+        (r"D:\a", vec![folder(r"D:\a\b")]),
+        (r"D:\a\b", vec![deep.clone()]),
+    ]));
     let ui = open(cx, fake);
     ui.input(cx, "zeta");
     ui.click(cx, row(&deep.path));
@@ -434,11 +434,11 @@ fn picks_one_row_at_a_time_in_home(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn marks_under_the_crumbs_what_is_on_screen_while_some_are_folded(cx: &mut TestAppContext) {
     let deep = file(r"D:\a\b\zeta.txt");
-    let fake = Arc::new(
-        Fake::default()
-            .with_results(vec![deep.clone()])
-            .with_folders(&[(r"D:\", vec![folder(r"D:\a")]), (r"D:\a", vec![folder(r"D:\a\b")]), (r"D:\a\b", vec![deep.clone()])]),
-    );
+    let fake = Arc::new(Fake::default().with_results(vec![deep.clone()]).with_folders(&[
+        (r"D:\", vec![folder(r"D:\a")]),
+        (r"D:\a", vec![folder(r"D:\a\b")]),
+        (r"D:\a\b", vec![deep.clone()]),
+    ]));
     let ui = open(cx, fake);
     ui.input(cx, "zeta");
     assert!(ui.act(cx, |window, _| window.try_find("crumb-bar").is_none()));

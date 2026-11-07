@@ -372,9 +372,7 @@ impl Colet {
             // With nothing picked, the folder column's own folder.
             copy_path: if none { here } else { None },
             // From several folders too, as a drag from them.
-            send_to: item
-                .or(drive.then_some("ドライブは送れません"))
-                .or(self.send_targets.is_empty().then_some(NO_SEND_TARGETS)),
+            send_to: item.or(drive.then_some("ドライブは送れません")).or(self.send_targets.is_empty().then_some(NO_SEND_TARGETS)),
         }
     }
 
@@ -402,12 +400,7 @@ impl Colet {
 
     /// Puts something on the clipboard off the UI thread; a paste asked for meanwhile waits for it, so it
     /// never pastes what was there before.
-    fn write_clipboard(
-        &mut self,
-        work: impl FnOnce() -> Result<(), String> + Send + 'static,
-        done: String,
-        cx: &mut Context<Self>,
-    ) {
+    fn write_clipboard(&mut self, work: impl FnOnce() -> Result<(), String> + Send + 'static, done: String, cx: &mut Context<Self>) {
         let result = self.clipboard.write(work);
         // A lane that stopped, as after a write panicked, never says.
         let task = cx
@@ -670,8 +663,10 @@ impl Colet {
         let (backend, owner) = (self.backend.clone(), self.owner);
         self.in_background(
             move || {
-                let failed: Vec<(String, String)> =
-                    paths.iter().filter_map(|path| backend.open(path, owner).err().map(|error| (shown(folder_name(path)), error))).collect();
+                let failed: Vec<(String, String)> = paths
+                    .iter()
+                    .filter_map(|path| backend.open(path, owner).err().map(|error| (shown(folder_name(path)), error)))
+                    .collect();
                 match failed.as_slice() {
                     [] => Ok(()),
                     [(name, error)] => Err(format!("「{name}」を開けません: {error}")),
@@ -885,8 +880,12 @@ impl Colet {
             };
             let pinned: Vec<PathBuf> = self.settings.pinned.iter().map(moved_key).collect();
             let pinned = (pinned != self.settings.pinned).then_some(pinned);
-            let favorites: Vec<Favorite> =
-                self.settings.favorites.iter().map(|f| Favorite { path: moved_path(&f.path).unwrap_or_else(|| f.path.clone()), ..f.clone() }).collect();
+            let favorites: Vec<Favorite> = self
+                .settings
+                .favorites
+                .iter()
+                .map(|f| Favorite { path: moved_path(&f.path).unwrap_or_else(|| f.path.clone()), ..f.clone() })
+                .collect();
             let favorites = (favorites != self.settings.favorites).then_some(favorites);
             if favorites.is_some() || pinned.is_some() {
                 self.update_settings(
@@ -942,7 +941,8 @@ impl Colet {
             self.notify_entry(format!("「{}」: {problem}", kind.title()), id, cx);
         }
         // Like Explorer, what was pasted is picked once listed, under the names it got.
-        if kind == Kind::Paste && !pasted.is_empty()
+        if kind == Kind::Paste
+            && !pasted.is_empty()
             && let Some(state) = self.state_in(tab)
         {
             state.pasted(&destination, &pasted);

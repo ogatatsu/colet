@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use windows::Win32::Foundation::{E_INVALIDARG, HWND};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    ILClone, ILCreateFromPathW, ILFindLastID, ILFree, ILRemoveLastID, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC,
-    SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems, ShellExecuteExW,
+    ILClone, ILCreateFromPathW, ILFindLastID, ILFree, ILRemoveLastID, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
+    SHOpenFolderAndSelectItems, ShellExecuteExW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{Error, Result, w};

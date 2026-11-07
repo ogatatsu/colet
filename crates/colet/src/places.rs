@@ -173,7 +173,8 @@ impl HomeDragging {
                 (Some(first), Some(last)) if list.contains(&at) && at.y >= first.1.top() && at.y < last.1.bottom() => {
                     let over = own.iter().position(|(_, bounds)| at.y < bounds.bottom()).unwrap_or(own.len() - 1);
                     let (path, bounds) = own[over];
-                    let before = if at.y < bounds.center().y { Some(path.clone()) } else { own.get(over + 1).map(|(path, _)| path.clone()) };
+                    let before =
+                        if at.y < bounds.center().y { Some(path.clone()) } else { own.get(over + 1).map(|(path, _)| path.clone()) };
                     Some(Landing { before })
                 }
                 _ => None,
@@ -246,15 +247,12 @@ pub fn restore_bounds(
 ) -> (Option<DisplayId>, Bounds<Pixels>) {
     let saved = Bounds::new(point(px(placement.x), px(placement.y)), size(px(placement.width), px(placement.height)));
     let held = displays.iter().find(|(_, d)| d.contains(&saved.center()));
-    let Some(&(id, display)) = held.or_else(|| displays.iter().find(|(id, _)| Some(*id) == primary)).or(displays.first())
-    else {
+    let Some(&(id, display)) = held.or_else(|| displays.iter().find(|(id, _)| Some(*id) == primary)).or(displays.first()) else {
         return (None, saved);
     };
     let (min_width, min_height) = crate::app::MIN_WINDOW;
-    let size = size(
-        saved.size.width.max(px(min_width)).min(display.size.width),
-        saved.size.height.max(px(min_height)).min(display.size.height),
-    );
+    let size =
+        size(saved.size.width.max(px(min_width)).min(display.size.width), saved.size.height.max(px(min_height)).min(display.size.height));
     let origin = if held.is_some() {
         point(
             saved.origin.x.clamp(display.left(), display.right() - size.width),
@@ -582,7 +580,9 @@ impl Colet {
         let edited = self.edited_search(cx)?;
         if edited.query.trim().is_empty() {
             Some("")
-        } else if edited.key() != original.key() && self.settings.saved(&edited.query, edited.filter.as_deref(), edited.narrow.as_deref()).is_some() {
+        } else if edited.key() != original.key()
+            && self.settings.saved(&edited.query, edited.filter.as_deref(), edited.narrow.as_deref()).is_some()
+        {
             Some("この検索は既に保存しています")
         } else {
             None
@@ -743,9 +743,11 @@ impl Colet {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Placement, SavedSearch, Settings, Shelf, home_entries, home_groups, move_before, movable, places, restore_bounds, shown};
-    use std::path::Path;
+    use super::{
+        Entry, Placement, SavedSearch, Settings, Shelf, home_entries, home_groups, movable, move_before, places, restore_bounds, shown,
+    };
     use gpui_kit::{Bounds, DisplayId, point, px, size};
+    use std::path::Path;
 
     #[test]
     fn reopens_on_the_display_it_was_left_on_or_centered_on_the_primary_one() {
@@ -799,18 +801,21 @@ mod tests {
         let at = |path: &str, name: &str| (path.to_string(), name.to_string());
         assert_eq!(
             rows,
-            [at(r"C:\", "OS (C:)"), at(r"D:\", "データ (D:)"), at(r"\\nas\Share", r"\\nas\Share"), at(r"d:\Projects", r"d:\Projects"), at(r"E:\", r"E:\")]
+            [
+                at(r"C:\", "OS (C:)"),
+                at(r"D:\", "データ (D:)"),
+                at(r"\\nas\Share", r"\\nas\Share"),
+                at(r"d:\Projects", r"d:\Projects"),
+                at(r"E:\", r"E:\")
+            ]
         );
     }
 
     #[test]
     fn takes_a_place_in_another_case_as_the_same_but_not_a_query() {
         let search = |query: &str| SavedSearch { name: String::new(), query: query.into(), filter: None, narrow: None };
-        let settings = Settings {
-            favorites: vec![r"c:\".into()],
-            saved_searches: vec![search("ext:PDF"), search("ext:pdf")],
-            ..Settings::default()
-        };
+        let settings =
+            Settings { favorites: vec![r"c:\".into()], saved_searches: vec![search("ext:PDF"), search("ext:pdf")], ..Settings::default() };
         assert!(settings.is_favorite(Path::new(r"C:\")) && settings.is_favorite(Path::new("C:")));
         let entries = home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)")]);
         let paths: Vec<&str> = entries.iter().map(|e| e.path.to_str().unwrap()).collect();
@@ -833,7 +838,10 @@ mod tests {
             .into_iter()
             .map(|(title, rows)| (title, rows.into_iter().map(|e| e.path.to_str().unwrap()).collect()))
             .collect();
-        assert_eq!(groups, [("ピン留め", vec!["search:ext:pdf", r"C:\", r"D:\Music"]), ("お気に入り", vec![r"D:\Work"]), ("場所", vec![r"D:\"])]);
+        assert_eq!(
+            groups,
+            [("ピン留め", vec!["search:ext:pdf", r"C:\", r"D:\Music"]), ("お気に入り", vec![r"D:\Work"]), ("場所", vec![r"D:\"])]
+        );
         assert_eq!(movable(&settings, Path::new(r"C:\")), Some(Shelf::Pinned));
         assert_eq!(movable(&settings, Path::new(r"D:\Work")), Some(Shelf::Favorite));
         assert_eq!(movable(&settings, Path::new(r"D:\")), None);

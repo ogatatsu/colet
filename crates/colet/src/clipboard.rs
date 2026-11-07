@@ -4,8 +4,9 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     sync::{
-        Arc, mpsc,
+        Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc,
     },
 };
 

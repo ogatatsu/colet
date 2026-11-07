@@ -106,18 +106,11 @@ impl Entry {
     pub fn from_metadata(path: &Path, metadata: &std::fs::Metadata) -> Self {
         Self {
             path: path.to_owned(),
-            name: path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| shown(path)),
+            name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| shown(path)),
             parent: path.parent().map(shown).unwrap_or_default(),
             directory: metadata.is_dir(),
             size: (!metadata.is_dir()).then_some(metadata.len()),
-            modified: metadata
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as u64),
+            modified: metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64),
             hidden: hiding(path, metadata.file_attributes()),
             marks: Marks::default(),
         }
@@ -216,11 +209,7 @@ impl Ord for Key {
         if self.order.descending {
             by = by.reverse();
         }
-        self.file
-            .cmp(&other.file)
-            .then(by)
-            .then_with(|| self.name.cmp(&other.name))
-            .then_with(|| self.path.cmp(&other.path))
+        self.file.cmp(&other.file).then(by).then_with(|| self.name.cmp(&other.name)).then_with(|| self.path.cmp(&other.path))
     }
 }
 
@@ -281,10 +270,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a"), "data").unwrap();
         std::fs::create_dir(dir.path().join("z")).unwrap();
-        let mut entries: Vec<_> = std::fs::read_dir(dir.path())
-            .unwrap()
-            .map(|e| Entry::from_path(&e.unwrap().path()).unwrap())
-            .collect();
+        let mut entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| Entry::from_path(&e.unwrap().path()).unwrap()).collect();
         for by in Sort::ALL {
             sort_entries(&mut entries, Order { by, descending: false });
             assert!(entries[0].directory);

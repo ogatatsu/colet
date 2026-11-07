@@ -6,9 +6,7 @@ use std::{
     thread,
 };
 
-use windows::Win32::Foundation::{
-    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree,
-};
+use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
 use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_NONE, OPEN_EXISTING, WriteFile};
@@ -113,9 +111,8 @@ fn pipe_name() -> windows::core::Result<String> {
 
 fn send(pipe: &str, message: Message, path: &Path) -> Result<(), Error> {
     let name = Wide::new(pipe);
-    let connect = || unsafe {
-        CreateFileW(name.get(), GENERIC_WRITE.0, FILE_SHARE_NONE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None)
-    };
+    let connect =
+        || unsafe { CreateFileW(name.get(), GENERIC_WRITE.0, FILE_SHARE_NONE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None) };
     let handle = match connect() {
         Err(error) if error.code() == ERROR_PIPE_BUSY.to_hresult() => {
             // Still reading the line before: tried again once it takes the next.

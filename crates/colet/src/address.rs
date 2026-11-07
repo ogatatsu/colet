@@ -84,7 +84,11 @@ impl Colet {
             return;
         }
         let Some(path) = address(&text, |name| std::env::var(name).ok()) else {
-            self.notify(format!("「{}」は開けません。ドライブ（C:\\…）かサーバー（\\\\server）から始まるパスを入力してください", text.trim()), Tone::Error, cx);
+            self.notify(
+                format!("「{}」は開けません。ドライブ（C:\\…）かサーバー（\\\\server）から始まるパスを入力してください", text.trim()),
+                Tone::Error,
+                cx,
+            );
             return;
         };
         self.address_asked += 1;

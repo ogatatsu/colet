@@ -157,12 +157,9 @@ fn items(paths: &[PathBuf]) -> Result<IDataObject> {
     let folder = Pidls(vec![unsafe { ILClone(pidls.0[0]) }]);
     unsafe {
         let _ = ILRemoveLastID(Some(folder.0[0]));
-        while !pidls.0.iter().all(|pidl| ILIsParent(folder.0[0], *pidl, false).as_bool())
-            && ILRemoveLastID(Some(folder.0[0])).as_bool()
-        {}
+        while !pidls.0.iter().all(|pidl| ILIsParent(folder.0[0], *pidl, false).as_bool()) && ILRemoveLastID(Some(folder.0[0])).as_bool() {}
     }
-    let children: Vec<*const ITEMIDLIST> =
-        pidls.0.iter().map(|pidl| unsafe { ILFindChild(folder.0[0], *pidl) } as *const _).collect();
+    let children: Vec<*const ITEMIDLIST> = pidls.0.iter().map(|pidl| unsafe { ILFindChild(folder.0[0], *pidl) } as *const _).collect();
     let data: IDataObject = unsafe { SHCreateDataObject(Some(folder.0[0]), Some(&children), None)? };
     let format = FORMATETC {
         cfFormat: CF_HDROP.0,
@@ -239,8 +236,8 @@ pub(crate) mod fixtures {
 
     use windows::Win32::Foundation::{DV_E_FORMATETC, DV_E_TYMED, E_NOTIMPL, OLE_E_ADVISENOTSUPPORTED, S_OK};
     use windows::Win32::System::Com::{
-        DATADIR_GET, DVASPECT_CONTENT, FORMATETC, IAdviseSink, IDataObject, IDataObject_Impl, IEnumFORMATETC,
-        IEnumSTATDATA, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
+        DATADIR_GET, DVASPECT_CONTENT, FORMATETC, IAdviseSink, IDataObject, IDataObject_Impl, IEnumFORMATETC, IEnumSTATDATA, STGMEDIUM,
+        STGMEDIUM_0, TYMED_HGLOBAL,
     };
     use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
     use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
@@ -293,13 +290,7 @@ pub(crate) mod fixtures {
     }
 
     fn format(format: u16) -> FORMATETC {
-        FORMATETC {
-            cfFormat: format,
-            ptd: ptr::null_mut(),
-            dwAspect: DVASPECT_CONTENT.0,
-            lindex: -1,
-            tymed: TYMED_HGLOBAL.0 as u32,
-        }
+        FORMATETC { cfFormat: format, ptd: ptr::null_mut(), dwAspect: DVASPECT_CONTENT.0, lindex: -1, tymed: TYMED_HGLOBAL.0 as u32 }
     }
 
     fn held(format: &FORMATETC) -> Result<()> {
@@ -317,11 +308,7 @@ pub(crate) mod fixtures {
             let handle = GlobalAlloc(GMEM_MOVEABLE, bytes.len().max(1))?;
             ptr::copy_nonoverlapping(bytes.as_ptr(), GlobalLock(handle).cast::<u8>(), bytes.len());
             let _ = GlobalUnlock(handle);
-            Ok(STGMEDIUM {
-                tymed: TYMED_HGLOBAL.0 as u32,
-                u: STGMEDIUM_0 { hGlobal: handle },
-                pUnkForRelease: ManuallyDrop::new(None),
-            })
+            Ok(STGMEDIUM { tymed: TYMED_HGLOBAL.0 as u32, u: STGMEDIUM_0 { hGlobal: handle }, pUnkForRelease: ManuallyDrop::new(None) })
         }
     }
 

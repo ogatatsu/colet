@@ -36,7 +36,14 @@ pub fn locate(path: &Path) -> Option<(PathBuf, bool)> {
         let mut data = WIN32_FIND_DATAW::default();
         let name = Wide::new(part);
         let handle = unsafe {
-            FindFirstFileExW(name.get(), FindExInfoBasic, &mut data as *mut _ as *mut _, FindExSearchNameMatch, None, FIND_FIRST_EX_FLAGS(0))
+            FindFirstFileExW(
+                name.get(),
+                FindExInfoBasic,
+                &mut data as *mut _ as *mut _,
+                FindExSearchNameMatch,
+                None,
+                FIND_FIRST_EX_FLAGS(0),
+            )
         }
         .ok()?;
         unsafe { FindClose(handle) }.ok()?;
@@ -108,9 +115,7 @@ pub fn list(path: &Path, order: Order, cancelled: &AtomicBool, owner: Owner) -> 
                 size: None,
                 modified: None,
                 // The listing's own record, which needs no access to the item.
-                hidden: listed
-                    .as_ref()
-                    .map_or(Hiding::Shown, |m| hiding(&p, std::os::windows::fs::MetadataExt::file_attributes(m))),
+                hidden: listed.as_ref().map_or(Hiding::Shown, |m| hiding(&p, std::os::windows::fs::MetadataExt::file_attributes(m))),
                 marks: Marks::default(),
             }))
         }),
@@ -244,7 +249,10 @@ mod tests {
         assert_eq!(locate(&dir.path().join(r"gone\Inner.TXT")), None);
         assert_eq!(locate(Path::new(r"C:\")), Some((PathBuf::from(r"C:\"), true)));
         let link = dir.path().join("link");
-        let made = std::process::Command::new("cmd").args(["/C".as_ref(), "mklink".as_ref(), "/J".as_ref(), link.as_os_str(), dir.path().join("Mixed").as_os_str()]).output().unwrap();
+        let made = std::process::Command::new("cmd")
+            .args(["/C".as_ref(), "mklink".as_ref(), "/J".as_ref(), link.as_os_str(), dir.path().join("Mixed").as_os_str()])
+            .output()
+            .unwrap();
         assert!(made.status.success());
         let (found, directory) = locate(&dir.path().join(r"LINK\inner.txt")).unwrap();
         assert!(found.to_string_lossy().ends_with(r"\link\Inner.TXT"), "{found:?}");

@@ -19,7 +19,11 @@ fn inside(path: &OsString, folder: &OsString) -> bool {
 
 fn relevant(path: &OsString, folder: &OsString) -> bool {
     inside(folder, path)
-        || path.as_encoded_bytes().iter().rposition(|&b| b == b'\\').is_some_and(|at| &path.as_encoded_bytes()[..at] == folder.as_encoded_bytes())
+        || path
+            .as_encoded_bytes()
+            .iter()
+            .rposition(|&b| b == b'\\')
+            .is_some_and(|at| &path.as_encoded_bytes()[..at] == folder.as_encoded_bytes())
 }
 
 /// Both arguments already hold path keys. Children change a listing, but only a watched folder or
@@ -99,10 +103,7 @@ impl FolderWatcher {
     /// Watches nothing until [`set`](Self::set), adding what changes to `changes`. `unwatched` hears of
     /// the folders it could list but not watch, as for a share that sends no change notifications; one it
     /// cannot read is left out, as its column says so. It is called on the watcher's thread.
-    pub fn new(
-        changes: Arc<Mutex<Changes>>,
-        unwatched: impl Fn(Vec<PathBuf>) + Send + 'static,
-    ) -> Result<Self, String> {
+    pub fn new(changes: Arc<Mutex<Changes>>, unwatched: impl Fn(Vec<PathBuf>) + Send + 'static) -> Result<Self, String> {
         let desired = Arc::new(Mutex::new(Vec::<OsString>::new()));
         let requested = desired.clone();
         let (wanted, sets) = mpsc::channel::<WatchCommand>();
@@ -114,9 +115,13 @@ impl FolderWatcher {
                     if matches!(event.kind, notify::EventKind::Access(_)) {
                         return;
                     }
-                    let reset = matches!(event.kind,
-                        notify::EventKind::Any | notify::EventKind::Create(_) | notify::EventKind::Remove(_)
-                        | notify::EventKind::Modify(notify::event::ModifyKind::Name(_)));
+                    let reset = matches!(
+                        event.kind,
+                        notify::EventKind::Any
+                            | notify::EventKind::Create(_)
+                            | notify::EventKind::Remove(_)
+                            | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
+                    );
                     (event.paths, reset, false)
                 }
                 Err(error) => (error.paths, true, true),
@@ -210,10 +215,13 @@ impl FolderWatcher {
                     }
                     // A Set and Repair can try the same folder twice. Report its final state once,
                     // and do not report an initial failure that the repair recovered from.
-                    let failed: Vec<PathBuf> = checked.into_iter().filter_map(|key| {
-                        let (path, watched) = asked.get(&key)?;
-                        (!watched && wanted.contains_key(&key) && std::fs::read_dir(path).is_ok()).then(|| path.clone())
-                    }).collect();
+                    let failed: Vec<PathBuf> = checked
+                        .into_iter()
+                        .filter_map(|key| {
+                            let (path, watched) = asked.get(&key)?;
+                            (!watched && wanted.contains_key(&key) && std::fs::read_dir(path).is_ok()).then(|| path.clone())
+                        })
+                        .collect();
                     if !refreshed.is_empty() {
                         // List again after the new handle is installed, covering the gap before it.
                         repaired.lock().unwrap().add(refreshed);
@@ -259,7 +267,9 @@ mod tests {
     fn only_changes_to_watched_folders_and_their_ancestors_repair_handles() {
         let folders = vec![path_key(Path::new(r"D:\Work\Nested")), path_key(Path::new(r"\\server\share\folder"))];
         let paths: Vec<OsString> = [r"D:\", r"d:\WORK", r"D:\Work\Nested", r"D:\Work\other", r"\\SERVER\share"]
-            .into_iter().map(|p| path_key(Path::new(p))).collect();
+            .into_iter()
+            .map(|p| path_key(Path::new(p)))
+            .collect();
         assert_eq!(repair_paths(&paths, &folders), [paths[0].clone(), paths[1].clone(), paths[2].clone(), paths[4].clone()]);
         assert!(paths.iter().take(3).all(|p| relevant(p, &folders[0])));
     }

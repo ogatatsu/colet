@@ -47,7 +47,8 @@ fn types_from_the_rows_into_their_field_each_time_as_another_word(cx: &mut TestA
     ui.press(cx, "right");
     let id = ui.read(cx, |v| v.state.columns[1].id);
     let typed = |ui: &Ui, cx: &mut TestAppContext| ui.view.read_with(cx, |v, cx| v.filters[&id].input.read(cx).value().to_string());
-    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
+    let shown =
+        |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     // A key in the rows goes on in the field, which takes the keys.
     ui.input(cx, "ap");
     assert_eq!(typed(&ui, cx), "ap");
@@ -151,10 +152,8 @@ fn moves_a_filter_up_from_the_keys(cx: &mut TestAppContext) {
 fn narrows_a_folder_by_name_typed_in_its_rows_and_lists_all_again_on_escape(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "D:")],
-        ..Fake::default().with_folders(&[
-            (r"D:\", vec![folder(r"D:\alpha"), file(r"D:\beta.txt"), folder(r"D:\gamma")]),
-            (r"D:\alpha", vec![]),
-        ])
+        ..Fake::default()
+            .with_folders(&[(r"D:\", vec![folder(r"D:\alpha"), file(r"D:\beta.txt"), folder(r"D:\gamma")]), (r"D:\alpha", vec![])])
     });
     let ui = open(cx, fake);
     ui.click(cx, row(r"D:\"));
@@ -168,7 +167,8 @@ fn narrows_a_folder_by_name_typed_in_its_rows_and_lists_all_again_on_escape(cx: 
     // What is typed narrows the rows rather than jumping through them; the folder it hides stays picked,
     // and open, as home's place does.
     ui.input(cx, "TA");
-    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
+    let shown =
+        |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     assert_eq!(shown(&ui, cx), [r"D:\beta.txt"]);
     assert_eq!(ui.selected(cx, 1), [r"D:\alpha"]);
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
@@ -237,7 +237,8 @@ fn narrows_home_from_its_field_keeping_the_place_open(cx: &mut TestAppContext) {
     // / in home goes to its field; what is typed narrows its rows, and the place hidden stays open.
     assert!(ui.toasts(cx).is_empty());
     ui.input(cx, "os");
-    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
+    let shown =
+        |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     assert_eq!(shown(&ui, cx), [r"C:\"]);
     assert_eq!(ui.selected(cx, 0), [r"D:\"]);
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
@@ -275,10 +276,7 @@ fn narrows_home_from_its_field_keeping_the_place_open(cx: &mut TestAppContext) {
 fn keeps_the_arrows_and_enter_in_a_filter_field_to_itself(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "D:")],
-        ..Fake::default().with_folders(&[
-            (r"D:\", vec![folder(r"D:\alpha"), file(r"D:\beta.txt")]),
-            (r"D:\alpha", vec![]),
-        ])
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\alpha"), file(r"D:\beta.txt")]), (r"D:\alpha", vec![])])
     });
     let ui = open(cx, fake.clone());
     ui.click(cx, row(r"D:\"));

@@ -3,17 +3,16 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::{E_ABORT, E_INVALIDARG};
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, IDataObject};
 use windows::Win32::UI::Shell::{
-    FileOperation, FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_RENAMEONCOLLISION, FOF_WANTNUKEWARNING,
-    FOFX_ADDUNDORECORD, FOFX_RECYCLEONDELETE, IFileOperation, IFileOperationProgressSink,
-    IFileOperationProgressSink_Impl, IShellItem, IShellItemArray, SHCreateItemFromParsingName,
-    SHCreateShellItemArrayFromDataObject, SHELLFLAGSTATE, SHGetSettings, SIGDN_DESKTOPABSOLUTEEDITING,
+    FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_RENAMEONCOLLISION, FOF_WANTNUKEWARNING, FOFX_ADDUNDORECORD, FOFX_RECYCLEONDELETE,
+    FileOperation, IFileOperation, IFileOperationProgressSink, IFileOperationProgressSink_Impl, IShellItem, IShellItemArray,
+    SHCreateItemFromParsingName, SHCreateShellItemArrayFromDataObject, SHELLFLAGSTATE, SHGetSettings, SIGDN_DESKTOPABSOLUTEEDITING,
     SIGDN_FILESYSPATH, SSF_NOCONFIRMRECYCLE,
 };
-use windows::Win32::Foundation::HWND;
 use windows::core::{AsImpl, Error, HRESULT, PCWSTR, Ref, Result, implement};
 
 use super::{Apartment, Ole, Owner, Wide};
@@ -21,15 +20,24 @@ use crate::paths::from_wide;
 
 #[derive(Clone, Debug)]
 pub enum Operation {
-    Copy { destination: PathBuf },
-    Move { destination: PathBuf },
+    Copy {
+        destination: PathBuf,
+    },
+    Move {
+        destination: PathBuf,
+    },
     /// To the Recycle Bin, as Explorer's Delete: asked first only as its setting says, and an item the
     /// bin cannot take is deleted outright once the shell has asked.
     Recycle,
     /// Deleted outright, as Explorer's Shift+Delete, once the shell has asked.
     Delete,
-    Rename { name: String },
-    NewFolder { parent: PathBuf, name: String },
+    Rename {
+        name: String,
+    },
+    NewFolder {
+        parent: PathBuf,
+        name: String,
+    },
 }
 
 /// What happened to one item.
@@ -46,13 +54,7 @@ pub enum Item {
 /// Carries out `operation` on `paths`, telling `report` how each item ends. `rename`: a copy into its own
 /// folder, which gets " - コピー" names rather than a clash. `Err(E_ABORT)` when the user cancelled.
 /// Blocks until the shell is done, so never call it from the thread that owns `owner`.
-pub fn operate(
-    operation: &Operation,
-    paths: &[PathBuf],
-    rename: bool,
-    owner: Owner,
-    report: impl FnMut(Item) + 'static,
-) -> Result<()> {
+pub fn operate(operation: &Operation, paths: &[PathBuf], rename: bool, owner: Owner, report: impl FnMut(Item) + 'static) -> Result<()> {
     perform(operation, rename, owner, report, |op, sink| queue(op, operation, paths, sink))
 }
 
@@ -60,12 +62,7 @@ pub fn operate(
 /// as from a ZIP folder or a phone, which the shell reads from the clipboard's data object itself. Items
 /// with no path are told by the name the address bar shows; only while the clipboard still holds what was
 /// read as `sequence`. Blocks as [`operate`] does.
-pub fn operate_clipboard(
-    operation: &Operation,
-    sequence: u32,
-    owner: Owner,
-    report: impl FnMut(Item) + 'static,
-) -> Result<()> {
+pub fn operate_clipboard(operation: &Operation, sequence: u32, owner: Owner, report: impl FnMut(Item) + 'static) -> Result<()> {
     operate_data(operation, owner, report, || super::clipboard::data(sequence))
 }
 
@@ -361,7 +358,7 @@ pub(crate) mod fixtures {
 
 #[cfg(test)]
 mod tests {
-    use std::{rc::Rc, cell::RefCell};
+    use std::{cell::RefCell, rc::Rc};
 
     use super::*;
     use windows::Win32::Foundation::{E_ACCESSDENIED, S_OK};
@@ -401,8 +398,7 @@ mod tests {
         let a = item(&file).unwrap();
         let reports = Rc::new(RefCell::new(Vec::new()));
         let seen = reports.clone();
-        let sink: IFileOperationProgressSink =
-            Sink(RefCell::new(Box::new(move |item| seen.borrow_mut().push(item)))).into();
+        let sink: IFileOperationProgressSink = Sink(RefCell::new(Box::new(move |item| seen.borrow_mut().push(item)))).into();
         unsafe {
             sink.PostDeleteItem(0, &a, S_OK, &a).unwrap();
             sink.PostDeleteItem(0, &a, S_OK, None).unwrap();
@@ -420,13 +416,9 @@ mod tests {
         std::fs::write(&file, "a").unwrap();
         let reports = Rc::new(RefCell::new(Vec::new()));
         let seen = reports.clone();
-        operate(
-            &Operation::Copy { destination: dir.path().to_owned() },
-            std::slice::from_ref(&file),
-            true,
-            0,
-            move |item| seen.borrow_mut().push(item),
-        )
+        operate(&Operation::Copy { destination: dir.path().to_owned() }, std::slice::from_ref(&file), true, 0, move |item| {
+            seen.borrow_mut().push(item)
+        })
         .unwrap();
         let reports = reports.borrow();
         assert!(matches!(&reports[0], Item::Done { result, .. } if result.is_ok()), "{reports:?}");

@@ -115,7 +115,8 @@ pub fn signing_in<T>(path: &Path, owner: Owner, attempt: impl Fn() -> io::Result
     }
     let remote = Wide::new(remote);
     let resource = NETRESOURCEW { dwType: RESOURCETYPE_ANY, lpRemoteName: PWSTR(remote.get().0 as *mut _), ..Default::default() };
-    let status = unsafe { WNetAddConnection3W(Some(HWND(owner as *mut _)), &resource, PCWSTR::null(), PCWSTR::null(), CONNECT_INTERACTIVE) };
+    let status =
+        unsafe { WNetAddConnection3W(Some(HWND(owner as *mut _)), &resource, PCWSTR::null(), PCWSTR::null(), CONNECT_INTERACTIVE) };
     ASKED.fetch_add(1, Ordering::SeqCst);
     if status.0 != 0 {
         return Err(error);

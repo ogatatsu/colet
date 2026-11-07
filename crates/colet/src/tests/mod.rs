@@ -4,8 +4,9 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, mpsc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc,
     },
     time::Duration,
 };
@@ -21,8 +22,8 @@ use colet_core::{
 };
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, EntityInputHandler as _, SharedString, Entity, Focusable, Modifiers, ScrollDelta, ScrollStrategy, TestAppContext, Window,
-    WindowBounds, WindowOptions, point, px, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, ElementId, Entity, EntityInputHandler as _, Focusable, Modifiers, ScrollDelta,
+    ScrollStrategy, SharedString, TestAppContext, Window, WindowBounds, WindowOptions, point, px, size,
 };
 
 use crate::{
@@ -32,25 +33,25 @@ use crate::{
     places::Dialog,
     settings::{LoadError, SavedSearch, SearchFilter, Settings, Theme},
     sorts::Sorts,
-    theme::Palette,
     state::{ColumnId, Kind, search_key},
+    theme::Palette,
 };
 
-mod search;
-mod navigation;
-mod column_filter;
-mod watch;
-mod sorting;
-mod scrolling;
-mod window;
-mod home;
-mod settings;
-mod file_ops;
-mod menus;
-mod quick_look;
-mod tabs;
-mod hidden;
 mod address;
+mod column_filter;
+mod file_ops;
+mod hidden;
+mod home;
+mod menus;
+mod navigation;
+mod quick_look;
+mod scrolling;
+mod search;
+mod settings;
+mod sorting;
+mod tabs;
+mod watch;
+mod window;
 
 #[derive(Default)]
 struct Fake {
@@ -413,10 +414,7 @@ fn open(cx: &mut TestAppContext, fake: Arc<Fake>) -> Ui {
         .update(|cx| {
             gpui_kit::open_window(
                 WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-                        Default::default(),
-                        size(px(1200.), px(800.)),
-                    ))),
+                    window_bounds: Some(WindowBounds::Windowed(Bounds::new(Default::default(), size(px(1200.), px(800.))))),
                     ..Default::default()
                 },
                 cx,
@@ -637,7 +635,8 @@ fn ordered_home(cx: &mut TestAppContext) -> (Arc<Fake>, Ui) {
     {
         let mut settings = fake.settings.lock().unwrap();
         settings.favorites = vec![r"D:\a".into(), r"D:\b".into(), r"D:\c".into()];
-        settings.saved_searches = ["one", "two"].map(|q| SavedSearch { name: String::new(), query: q.into(), filter: None, narrow: None }).to_vec();
+        settings.saved_searches =
+            ["one", "two"].map(|q| SavedSearch { name: String::new(), query: q.into(), filter: None, narrow: None }).to_vec();
     }
     let ui = open(cx, fake.clone());
     (fake, ui)
@@ -660,7 +659,10 @@ impl Ui {
             window.render_frame(cx);
             for step in 1..=4 {
                 let position = point(from.x + (to.x - from.x) * (step as f32 / 4.), from.y + (to.y - from.y) * (step as f32 / 4.));
-                window.dispatch_event(MouseMoveEvent { position, pressed_button: Some(MouseButton::Left), modifiers }.to_platform_input(), cx);
+                window.dispatch_event(
+                    MouseMoveEvent { position, pressed_button: Some(MouseButton::Left), modifiers }.to_platform_input(),
+                    cx,
+                );
                 window.render_frame(cx);
             }
         });
@@ -670,7 +672,10 @@ impl Ui {
         use gpui_kit::{InputEvent as _, MouseButton, MouseUpEvent};
         self.act(cx, |window, cx| {
             let modifiers = window.modifiers();
-            window.dispatch_event(MouseUpEvent { button: MouseButton::Left, position: at, modifiers, click_count: 1 }.to_platform_input(), cx);
+            window.dispatch_event(
+                MouseUpEvent { button: MouseButton::Left, position: at, modifiers, click_count: 1 }.to_platform_input(),
+                cx,
+            );
             window.render_frame(cx);
         });
         settle(cx);

@@ -37,7 +37,9 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
     {
         let mut settings = fake.settings.lock().unwrap();
         settings.filters = vec![SearchFilter { name: "去年の夏に撮ったとても大きな写真".into(), query: "ext:jpg".into() }];
-        settings.tabs = vec![crate::settings::KeptTab { filter: Some("去年の夏に撮ったとても大きな写真".into()), ..Default::default() }];
+        settings.tabs = vec![crate::settings::KeptTab {
+            filter: Some("去年の夏に撮ったとても大きな写真".into()), ..Default::default()
+        }];
         // Home's pane dragged as wide as it goes.
         settings.sidebar_width = 480.;
     }
@@ -56,7 +58,10 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
         let find = |id: &str| window.find(SharedString::from(id.to_owned())).bounds();
         (find("recycle"), find("sort"), find("show-hidden"))
     });
-    assert!(sort.top() > field.bottom() && recycle.right() < sort.left() && sort.right() <= hidden.left(), "{recycle:?} {sort:?} {hidden:?}");
+    assert!(
+        sort.top() > field.bottom() && recycle.right() < sort.left() && sort.right() <= hidden.left(),
+        "{recycle:?} {sort:?} {hidden:?}"
+    );
     assert!(hidden.right() <= px(width), "{hidden:?}");
     // Home's pane gave way to its usual width, keeping the width it was dragged to.
     assert_eq!(sidebar.size.width, px(width - crate::app::MAIN_MIN));

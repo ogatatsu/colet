@@ -80,8 +80,8 @@ pub fn path_key(path: &Path) -> OsString {
 
 /// `units` in upper case by the file system's rules, which map each UTF-16 unit to one unit.
 fn upper(units: Vec<u16>) -> Vec<u16> {
-    use windows::Win32::Globalization::{LCMAP_UPPERCASE, LCMapStringEx, LOCALE_NAME_INVARIANT};
     use windows::Win32::Foundation::LPARAM;
+    use windows::Win32::Globalization::{LCMAP_UPPERCASE, LCMapStringEx, LOCALE_NAME_INVARIANT};
     if units.is_empty() {
         return units;
     }
@@ -248,7 +248,21 @@ pub(crate) mod tests {
 
     #[test]
     fn an_address_never_names_a_relative_or_impossible_path() {
-        for text in ["", "work", r"..\work", r"\work", "D:work", r"\\", r"\\\share", r"\\a:b", r"\\?\D:\work", r"\\.\pipe\x", r"D:\a*b", r"D:\a?", r"1:\x"] {
+        for text in [
+            "",
+            "work",
+            r"..\work",
+            r"\work",
+            "D:work",
+            r"\\",
+            r"\\\share",
+            r"\\a:b",
+            r"\\?\D:\work",
+            r"\\.\pipe\x",
+            r"D:\a*b",
+            r"D:\a?",
+            r"1:\x",
+        ] {
             assert_eq!(typed(text), None, "{text}");
         }
     }
@@ -278,8 +292,19 @@ pub(crate) mod tests {
     #[test]
     fn finds_the_parent_where_ancestors_would_without_making_them() {
         let paths = [
-            r"D:\", "D:", r"D:\a", r"D:\a\", r"D:\a\b", r"\\server\share", r"\\server\share\", r"\\server",
-            r"\\server\share\a", r"\\server\share\a\b", "", "search:ext:pdf", r"search:a\b",
+            r"D:\",
+            "D:",
+            r"D:\a",
+            r"D:\a\",
+            r"D:\a\b",
+            r"\\server\share",
+            r"\\server\share\",
+            r"\\server",
+            r"\\server\share\a",
+            r"\\server\share\a\b",
+            "",
+            "search:ext:pdf",
+            r"search:a\b",
         ];
         for path in paths {
             let made = ancestors(p(path));

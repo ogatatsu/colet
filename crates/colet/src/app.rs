@@ -9,8 +9,9 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::{
-        Arc, mpsc,
+        Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc,
     },
     time::{Duration, Instant},
 };
@@ -502,11 +503,7 @@ impl Colet {
             state: State::new(),
             chosen_filter: None,
             tabs: Tabs::default(),
-            widths: Widths {
-                sidebar: settings.sidebar_width,
-                search: settings.search_width,
-                column: settings.column_width,
-            },
+            widths: Widths { sidebar: settings.sidebar_width, search: settings.search_width, column: settings.column_width },
             palette: Palette::for_window(window, settings.theme),
             search,
             search_focused: false,
@@ -678,7 +675,8 @@ impl Colet {
                             let keys = this.menu_has_keys(window, cx);
                             this.close_menus(keys, window, cx);
                         }
-                    }).ok();
+                    })
+                    .ok();
                 });
             });
         }
@@ -779,7 +777,6 @@ impl Colet {
         .detach();
     }
 
-
     // ---- Listings ----
 
     /// Lists the column `id` from `offset` on; `quiet` keeps what it shows meanwhile.
@@ -796,9 +793,8 @@ impl Colet {
         let task: Task<Listing> = match c.kind {
             Kind::Home => {
                 let settings = self.settings.clone();
-                cx.background_executor().spawn(async move {
-                    Ok(Listed::all(home_entries(&settings, places(backend.roots(), backend.indexed_roots()))))
-                })
+                cx.background_executor()
+                    .spawn(async move { Ok(Listed::all(home_entries(&settings, places(backend.roots(), backend.indexed_roots())))) })
             }
             Kind::Search => {
                 let filter = self.state.search_filter.as_deref().and_then(|name| self.settings.filter_query(name));
@@ -823,9 +819,7 @@ impl Colet {
             Kind::Folder => {
                 let path = c.path.clone();
                 let (cancelled, owner) = (self.listings.cancel_before(id), self.owner);
-                cx.background_executor().spawn(async move {
-                    Ok(Listed::all(backend.list(&path, sort, &cancelled, owner)?))
-                })
+                cx.background_executor().spawn(async move { Ok(Listed::all(backend.list(&path, sort, &cancelled, owner)?)) })
             }
         };
         let kind = c.kind;
@@ -850,8 +844,7 @@ impl Colet {
                     self.engine = Engine::Connected(name);
                     // Home, listed while Everything could not be asked, gains the folders its index starts from.
                     if reached {
-                        let homes: Vec<ColumnId> =
-                            self.state.columns.iter().filter(|c| c.kind == Kind::Home).map(|c| c.id).collect();
+                        let homes: Vec<ColumnId> = self.state.columns.iter().filter(|c| c.kind == Kind::Home).map(|c| c.id).collect();
                         for home in homes {
                             self.load(home, 0, true, cx);
                         }
@@ -1102,13 +1095,8 @@ impl Colet {
             }
         };
         let folders: HashSet<OsString> = paths.iter().map(|path| path_key(path)).collect();
-        let ids: Vec<ColumnId> = self
-            .state
-            .columns
-            .iter()
-            .filter(|c| c.kind == Kind::Folder && folders.contains(&path_key(&c.path)))
-            .map(|c| c.id)
-            .collect();
+        let ids: Vec<ColumnId> =
+            self.state.columns.iter().filter(|c| c.kind == Kind::Folder && folders.contains(&path_key(&c.path))).map(|c| c.id).collect();
         for id in ids {
             self.load(id, 0, true, cx);
         }
@@ -1549,7 +1537,13 @@ impl EntityInputHandler for Colet {
 
     // Where the IME shows what it composes: at the end of the field it goes on in, the column's own, not
     // the one it was last shown at.
-    fn bounds_for_range(&mut self, _: Range<usize>, _: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> Option<Bounds<Pixels>> {
+    fn bounds_for_range(
+        &mut self,
+        _: Range<usize>,
+        _: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
         let id = self.state.columns[self.state.active].id;
         let input = self.filters.get(&id)?.input.clone();
         input.update(cx, |input, cx| {

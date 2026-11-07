@@ -96,7 +96,10 @@ fn copies_the_path_of_a_folder_column_and_opens_it_in_a_tab_from_its_empty_space
     settle(cx);
     let last = ui.read(cx, |v| v.state.columns.last().map(|c| (text(&c.path), c.filter.as_ref().map(|f| f.text.clone()))));
     assert_eq!(last, Some((r"D:\work".to_owned(), Some("b".to_owned()))));
-    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>()), [r"D:\work\b.txt"]);
+    assert_eq!(
+        ui.read(cx, |v| v.state.columns.last().unwrap().entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>()),
+        [r"D:\work\b.txt"]
+    );
 }
 
 #[gpui_kit::test]
@@ -143,7 +146,9 @@ fn walks_the_file_menu_by_keys_and_closes_it_on_escape(cx: &mut TestAppContext) 
 
 fn send_targets(fake: &Fake) {
     *fake.send_targets.lock().unwrap() = vec![
-        SendTarget { name: "圧縮 (zip 形式) フォルダー".into(), path: r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget".into() },
+        SendTarget {
+            name: "圧縮 (zip 形式) フォルダー".into(), path: r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget".into()
+        },
         SendTarget { name: "USB".into(), path: r"C:\SendTo\USB.lnk".into() },
     ];
 }
@@ -291,14 +296,14 @@ fn dismisses_a_removed_columns_menu_before_another_frame(cx: &mut TestAppContext
 fn dismissing_a_removed_columns_menu_keeps_focus_given_to_a_field(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "shift-f10");
-    ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| {
-        v.state.select(1, vec![r"D:\other".into()]);
-        v.changed(cx);
-        v.search.update(cx, |input, cx| input.focus(window, cx));
-    }));
-    assert!(cx.update_window(ui.window, |_, window, cx| {
-        ui.view.read(cx).search.read(cx).focus_handle(cx).is_focused(window)
-    }).unwrap());
+    ui.act(cx, |window, cx| {
+        ui.view.update(cx, |v, cx| {
+            v.state.select(1, vec![r"D:\other".into()]);
+            v.changed(cx);
+            v.search.update(cx, |input, cx| input.focus(window, cx));
+        })
+    });
+    assert!(cx.update_window(ui.window, |_, window, cx| { ui.view.read(cx).search.read(cx).focus_handle(cx).is_focused(window) }).unwrap());
     assert!(ui.read(cx, |v| v.menu().is_none()));
 }
 
@@ -306,12 +311,14 @@ fn dismissing_a_removed_columns_menu_keeps_focus_given_to_a_field(cx: &mut TestA
 fn refuses_a_stale_menu_even_when_another_column_takes_its_index(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "shift-f10");
-    ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| {
-        let column = v.menu().unwrap().column;
-        v.state.select(1, vec![r"D:\other".into()]);
-        assert_ne!(v.state.columns[2].id, column);
-        v.show_shell_menu(window, cx);
-    }));
+    ui.act(cx, |window, cx| {
+        ui.view.update(cx, |v, cx| {
+            let column = v.menu().unwrap().column;
+            v.state.select(1, vec![r"D:\other".into()]);
+            assert_ne!(v.state.columns[2].id, column);
+            v.show_shell_menu(window, cx);
+        })
+    });
     assert!(fake.menus.lock().unwrap().is_empty());
     assert!(ui.read(cx, |v| v.menu().is_none() && v.menu_view.is_none()));
     assert!(ui.columns_focused(cx));

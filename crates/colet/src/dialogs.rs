@@ -6,7 +6,13 @@ use colet_core::{
 use std::path::PathBuf;
 
 use gpui_kit::base::input::{Input, InputState};
-use gpui_kit::component::{button::{Button, ButtonVariants}, checkbox::Checkbox, dialog::Dialog as DialogFrame, spinner::Spinner, Disableable, Sizable};
+use gpui_kit::component::{
+    Disableable, Sizable,
+    button::{Button, ButtonVariants},
+    checkbox::Checkbox,
+    dialog::Dialog as DialogFrame,
+    spinner::Spinner,
+};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -58,7 +64,6 @@ const SHORTCUTS: [(&str, &str); 28] = [
 fn clock(unix_ms: u64) -> String {
     colet_core::time::local(unix_ms).map_or_else(String::new, |t| format!("{:02}:{:02}", t.wHour, t.wMinute))
 }
-
 
 /// A field, ringed while it has the keys (`focused`), or its menu has them for it; `menu` opens that.
 fn field(
@@ -115,13 +120,7 @@ fn button(p: Palette, id: impl Into<ElementId>, text: impl Into<SharedString>, p
 
 /// A small button with a glyph, for each filter in the list.
 fn tool(id: ElementId, glyph: &'static str, label: String, enabled: bool) -> Button {
-    Button::new(id)
-        .ghost()
-        .small()
-        .icon(crate::view::glyph(glyph))
-        .accessibility_label(label.clone())
-        .tooltip(label)
-        .disabled(!enabled)
+    Button::new(id).ghost().small().icon(crate::view::glyph(glyph)).accessibility_label(label.clone()).tooltip(label).disabled(!enabled)
 }
 
 /// A choice among the filters, checked as a radio button is.
@@ -178,7 +177,14 @@ impl Colet {
     }
 
     /// A new folder's name, or a rename's.
-    fn name_dialog(&self, request: &Request, input: &Entity<InputState>, checking: bool, window: &Window, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+    fn name_dialog(
+        &self,
+        request: &Request,
+        input: &Entity<InputState>,
+        checking: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> (Div, Vec<AnyElement>) {
         let p = self.palette;
         let Request { kind, paths, destination, .. } = request;
         let problem = self.name_problem(cx);
@@ -186,22 +192,20 @@ impl Colet {
         // Where the name goes: a rename may come from the results, far from its folder.
         let (place, submit) = match kind {
             Operation::NewFolder => (format!("作成先：{}", shown(destination)), "作成"),
-            _ => (format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).map(shown).unwrap_or_default()), "保存"),
+            _ => (
+                format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).map(shown).unwrap_or_default()),
+                "保存",
+            ),
         };
-        let content = div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(div().text_size(px(12.)).text_color(p.text_faint).child(place))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(label(p, "名前"))
-                    .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
-                    .when_some(problem, |d, problem| d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))),
-            );
+        let content = div().flex().flex_col().gap_3().child(div().text_size(px(12.)).text_color(p.text_faint).child(place)).child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(label(p, "名前"))
+                .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
+                .when_some(problem, |d, problem| d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))),
+        );
         let buttons = vec![
             push("cancel", "キャンセル", false, true)
                 .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx)))
@@ -215,7 +219,14 @@ impl Colet {
     }
 
     /// A favorite's name and narrowing.
-    fn favorite_dialog(&self, original: &Favorite, name: &Entity<InputState>, narrow: &Entity<InputState>, window: &Window, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+    fn favorite_dialog(
+        &self,
+        original: &Favorite,
+        name: &Entity<InputState>,
+        narrow: &Entity<InputState>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> (Div, Vec<AnyElement>) {
         let p = self.palette;
         let problem = self.favorite_edit_problem(cx);
         let content = div()
@@ -245,7 +256,15 @@ impl Colet {
     }
 
     /// A saved search's name, query, filter and narrowing.
-    fn search_dialog(&self, name: &Entity<InputState>, query: &Entity<InputState>, filter: &Option<String>, narrow: &Entity<InputState>, window: &Window, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
+    fn search_dialog(
+        &self,
+        name: &Entity<InputState>,
+        query: &Entity<InputState>,
+        filter: &Option<String>,
+        narrow: &Entity<InputState>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> (Div, Vec<AnyElement>) {
         let p = self.palette;
         // The saved search's choice of filter, none first.
         let choices: Vec<Option<String>> =
@@ -309,32 +328,33 @@ impl Colet {
         let p = self.palette;
         let FilterEdit { name, query, .. } = edit;
         let problem = self.filter_problem(cx);
-        let content = div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(label(p, "名前"))
-                    .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
-                    .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                        d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
-                    }),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(label(p, "検索文字列"))
-                    .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
-                    .child(div().text_size(px(12.)).text_color(p.text_faint).child(
-                        "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
-                    )),
-            );
+        let content =
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(label(p, "名前"))
+                        .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                        .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
+                            d.child(div().text_size(px(12.)).text_color(p.danger).child(problem))
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(label(p, "検索文字列"))
+                        .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
+                        .child(div().text_size(px(12.)).text_color(p.text_faint).child(
+                            "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
+                        )),
+                );
         let buttons = vec![
             push("cancel", "キャンセル", false, true)
                 .on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx)))
@@ -350,13 +370,8 @@ impl Colet {
     fn filter_delete_dialog(&self, name: &str, cx: &mut Context<Self>) -> (Div, Vec<AnyElement>) {
         let p = self.palette;
         let users = self.filter_users(name);
-        let content = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .text_size(px(13.))
-            .child(format!("「{name}」を削除しますか？"))
-            .when(users > 0, |d| {
+        let content =
+            div().flex().flex_col().gap_2().text_size(px(13.)).child(format!("「{name}」を削除しますか？")).when(users > 0, |d| {
                 d.child(div().text_size(px(12.)).text_color(p.text_muted).child(format!(
                     "このフィルターを使う保存した検索が{users}件あります。削除すると、それらはフィルターなしで検索します。"
                 )))
@@ -391,13 +406,9 @@ impl Colet {
                     .border_b_1()
                     .border_color(p.border)
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(div().truncate().text_size(px(13.)).child(f.name.clone()))
-                            .child(div().truncate().text_size(px(12.)).text_color(p.text_muted).font_family("Consolas").child(f.query.clone())),
+                        div().flex_1().min_w_0().flex().flex_col().child(div().truncate().text_size(px(13.)).child(f.name.clone())).child(
+                            div().truncate().text_size(px(12.)).text_color(p.text_muted).font_family("Consolas").child(f.query.clone()),
+                        ),
                     )
                     .child(
                         tool(("filter-up", i).into(), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
@@ -422,9 +433,12 @@ impl Colet {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().text_size(px(12.)).text_color(p.text_muted).child(
-                "検索に加えるEverythingの検索式を登録し、検索欄の右のボタン（Ctrl+Shift+F）で1つ選んで使います。",
-            ))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(p.text_muted)
+                    .child("検索に加えるEverythingの検索式を登録し、検索欄の右のボタン（Ctrl+Shift+F）で1つ選んで使います。"),
+            )
             .child(if rows.is_empty() {
                 div().py_2().text_size(px(12.)).text_color(p.text_faint).child("フィルターはまだありません").into_any_element()
             } else {
@@ -453,25 +467,23 @@ impl Colet {
             .flex_col()
             .gap_3()
             // Taken at once as one is picked, and kept.
-            .child(
-                div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(
-                    // Ringed as the fields are; the rings' room makes up most of the gaps.
-                    div().id("themes").flex().gap(px(2.)).role(Role::RadioGroup).aria_label("テーマ").children(themes.into_iter().map(
-                        |(theme, focus)| {
-                            let chosen = self.settings.theme == theme;
-                            crate::view::frame(p, crate::view::keyed(&focus, window)).child(
-                                button(p, ("theme", theme as usize), theme.label(), chosen, true)
-                                    .track_focus(&focus)
-                                    .role(Role::RadioButton)
-                                    .aria_label(theme.label())
-                                    .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
-                                    .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
-                                    .test_support(),
-                            )
-                        },
-                    )),
-                ),
-            )
+            .child(div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(
+                // Ringed as the fields are; the rings' room makes up most of the gaps.
+                div().id("themes").flex().gap(px(2.)).role(Role::RadioGroup).aria_label("テーマ").children(themes.into_iter().map(
+                    |(theme, focus)| {
+                        let chosen = self.settings.theme == theme;
+                        crate::view::frame(p, crate::view::keyed(&focus, window)).child(
+                            button(p, ("theme", theme as usize), theme.label(), chosen, true)
+                                .track_focus(&focus)
+                                .role(Role::RadioButton)
+                                .aria_label(theme.label())
+                                .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
+                                .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
+                                .test_support(),
+                        )
+                    },
+                )),
+            ))
             // Taken at once, as the theme is. It counts only while the hidden items show, but is set at any time.
             .child({
                 let colet = cx.entity().downgrade();
@@ -488,9 +500,7 @@ impl Colet {
                                 colet.update(cx, |this, cx| this.toggle_protected(cx)).ok();
                             }),
                     )
-                    .child(
-                        div().text_size(px(12.)).text_color(p.text_muted).child("隠しファイルを表示しているときに効きます。"),
-                    )
+                    .child(div().text_size(px(12.)).text_color(p.text_muted).child("隠しファイルを表示しているときに効きます。"))
             })
             .child(
                 div().flex().flex_col().gap_1().child(label(p, "Everything")).child(
@@ -513,15 +523,15 @@ impl Colet {
                                 .tip(said)
                                 .child(format!("接続先：{engine}")),
                         )
-                        .child(
-                            push("reconnect", "再接続", false, true)
-                                .on_click(cx.listener(|this, _, _, cx| this.reconnect(cx))),
-                        ),
+                        .child(push("reconnect", "再接続", false, true).on_click(cx.listener(|this, _, _, cx| this.reconnect(cx)))),
                 ),
             )
-            .child(div().text_size(px(12.)).text_color(p.text_muted).child(
-                "Everything 1.5.0.1424以降を起動してお使いください。つながらないときは「再接続」を押してください。",
-            ))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(p.text_muted)
+                    .child("Everything 1.5.0.1424以降を起動してお使いください。つながらないときは「再接続」を押してください。"),
+            )
             .child(div().pt_1().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
             // One by one: an array of them all would lie whole on the stack, past what a debug build has.
             .child(div().flex().flex_col().gap_1().text_size(px(12.)).children(SHORTCUTS.iter().map(|&(key, what)| {
@@ -620,13 +630,9 @@ impl Colet {
         self.state.set_active(index);
         self.column_focus(index).focus(window, cx);
         let scale = window.scale_factor();
-        let mut point = windows::Win32::Foundation::POINT {
-            x: (f32::from(at.x) * scale) as i32,
-            y: (f32::from(at.y) * scale) as i32,
-        };
-        let _ = unsafe {
-            windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point)
-        };
+        let mut point = windows::Win32::Foundation::POINT { x: (f32::from(at.x) * scale) as i32, y: (f32::from(at.y) * scale) as i32 };
+        let _ =
+            unsafe { windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point) };
         self.popup = Some(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
         self.show_menu(window, cx);
         // Read afresh for each menu, so one added since is there.
@@ -658,12 +664,7 @@ impl Colet {
                 Some(why) => format!("{label}（{why}）"),
                 None => format!("{label}（{key}）"),
             };
-            Button::new(id)
-                .ghost()
-                .icon(crate::view::glyph(glyph))
-                .accessibility_label(label)
-                .tooltip(tip)
-                .disabled(off.is_some())
+            Button::new(id).ghost().icon(crate::view::glyph(glyph)).accessibility_label(label).tooltip(tip).disabled(off.is_some())
         };
         let row = div()
             .flex()
@@ -671,15 +672,36 @@ impl Colet {
             .items_center()
             .gap(px(2.))
             // Those done on the spot leave the keys where they were; the ones asking in a dialog take them.
-            .child(crate::view::keep_focus(action("copy", "copy", "コピー", "Ctrl+C", reasons.copy)).on_click(cx.listener(|this, _, _, cx| this.copy(false, cx))))
-            .child(crate::view::keep_focus(action("cut", "scissors", "切り取り", "Ctrl+X", reasons.cut)).on_click(cx.listener(|this, _, _, cx| this.copy(true, cx))))
-            .child(crate::view::keep_focus(action("paste", "clipboard-paste", "貼り付け", "Ctrl+V", reasons.paste)).on_click(cx.listener(|this, _, _, cx| this.paste(cx))))
-            .child(crate::view::keep_focus(action("copy-path", "link", "パスをコピー", "Ctrl+Shift+C", reasons.copy_path)).on_click(cx.listener(|this, _, _, cx| this.copy_paths(cx))))
+            .child(
+                crate::view::keep_focus(action("copy", "copy", "コピー", "Ctrl+C", reasons.copy))
+                    .on_click(cx.listener(|this, _, _, cx| this.copy(false, cx))),
+            )
+            .child(
+                crate::view::keep_focus(action("cut", "scissors", "切り取り", "Ctrl+X", reasons.cut))
+                    .on_click(cx.listener(|this, _, _, cx| this.copy(true, cx))),
+            )
+            .child(
+                crate::view::keep_focus(action("paste", "clipboard-paste", "貼り付け", "Ctrl+V", reasons.paste))
+                    .on_click(cx.listener(|this, _, _, cx| this.paste(cx))),
+            )
+            .child(
+                crate::view::keep_focus(action("copy-path", "link", "パスをコピー", "Ctrl+Shift+C", reasons.copy_path))
+                    .on_click(cx.listener(|this, _, _, cx| this.copy_paths(cx))),
+            )
             .child(div().mx(px(6.)).w(px(1.)).h(px(16.)).bg(p.border))
-            .child(action("rename", "pencil-line", "名前を変更", "F2", reasons.rename).on_click(cx.listener(|this, _, window, cx| this.ask_rename(window, cx))))
-            .child(action("new-folder", "folder-plus", "新規フォルダー", "Ctrl+Shift+N", reasons.paste).on_click(cx.listener(|this, _, window, cx| this.ask_new_folder(window, cx))))
+            .child(
+                action("rename", "pencil-line", "名前を変更", "F2", reasons.rename)
+                    .on_click(cx.listener(|this, _, window, cx| this.ask_rename(window, cx))),
+            )
+            .child(
+                action("new-folder", "folder-plus", "新規フォルダー", "Ctrl+Shift+N", reasons.paste)
+                    .on_click(cx.listener(|this, _, window, cx| this.ask_new_folder(window, cx))),
+            )
             // With Shift held it deletes outright, as Explorer's Delete does.
-            .child(crate::view::keep_focus(action("recycle", "trash", "ごみ箱へ移動", "Delete／Shift+クリックで完全に削除", reasons.delete)).on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))));
+            .child(
+                crate::view::keep_focus(action("recycle", "trash", "ごみ箱へ移動", "Delete／Shift+クリックで完全に削除", reasons.delete))
+                    .on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))),
+            );
         row.into_any_element()
     }
 
@@ -732,7 +754,9 @@ impl Colet {
         for entry in &self.history.entries {
             keys.push(format!("history-entry:{}", entry.id));
             if self.history.expanded.contains(&entry.id) {
-                keys.extend(entry.items.iter().enumerate().filter(|(_, item)| !item.gone).map(|(k, _)| format!("history-item:{}:{k}", entry.id)));
+                keys.extend(
+                    entry.items.iter().enumerate().filter(|(_, item)| !item.gone).map(|(k, _)| format!("history-item:{}:{k}", entry.id)),
+                );
             }
         }
         let stops: std::collections::HashMap<String, FocusHandle> = keys.into_iter().map(|key| (key.clone(), self.stop(key, cx))).collect();
@@ -750,81 +774,104 @@ impl Colet {
                     .border_b_1()
                     .border_color(p.border)
                     .child(
-                        crate::view::keep_focus(crate::view::ring(div().id(("history-entry", id)).track_focus(&stops[&format!("history-entry:{id}")]), p))
-                            .role(Role::Button)
-                            .aria_label(format!("{} {}", entry.request.kind.title(), entry.target()))
-                            .aria_expanded(open)
-                            .px_3()
-                            .py_2()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .text_size(px(12.))
-                            .hover(|d| d.bg(p.raised_hover))
-                            .child(svg().path(if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" }).size(px(12.)).text_color(p.text_faint))
-                            .child(div().text_color(p.text_faint).child(clock(entry.started)))
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child(entry.request.kind.title()))
-                            .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(entry.target()))
-                            .child(div().text_color(if problems { p.danger } else { p.text_muted }).child(entry.outcome()))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if !this.history.expanded.remove(&id) {
-                                    this.history.expanded.insert(id);
-                                }
-                                cx.notify();
-                            }))
-                            .test_support(),
+                        crate::view::keep_focus(crate::view::ring(
+                            div().id(("history-entry", id)).track_focus(&stops[&format!("history-entry:{id}")]),
+                            p,
+                        ))
+                        .role(Role::Button)
+                        .aria_label(format!("{} {}", entry.request.kind.title(), entry.target()))
+                        .aria_expanded(open)
+                        .px_3()
+                        .py_2()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .text_size(px(12.))
+                        .hover(|d| d.bg(p.raised_hover))
+                        .child(
+                            svg()
+                                .path(if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" })
+                                .size(px(12.))
+                                .text_color(p.text_faint),
+                        )
+                        .child(div().text_color(p.text_faint).child(clock(entry.started)))
+                        .child(div().font_weight(FontWeight::SEMIBOLD).child(entry.request.kind.title()))
+                        .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(entry.target()))
+                        .child(div().text_color(if problems { p.danger } else { p.text_muted }).child(entry.outcome()))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if !this.history.expanded.remove(&id) {
+                                this.history.expanded.insert(id);
+                            }
+                            cx.notify();
+                        }))
+                        .test_support(),
                     )
                     .when(open, |d| {
-                        d.when_some(entry.error.clone(), |d, error| d.child(div().px_3().pb_1().text_size(px(12.)).text_color(p.danger).child(error)))
-                            .children(entry.items.iter().enumerate().map(|(k, item)| {
-                                let path = item.path.clone();
-                                let name = shown(folder_name(&item.path));
-                                let color = match item.status {
-                                    ItemStatus::Done | ItemStatus::Destroyed | ItemStatus::Handed => p.text_muted,
-                                    ItemStatus::Failed => p.danger,
-                                    _ => p.text_faint,
-                                };
+                        d.when_some(entry.error.clone(), |d, error| {
+                            d.child(div().px_3().pb_1().text_size(px(12.)).text_color(p.danger).child(error))
+                        })
+                        .children(entry.items.iter().enumerate().map(|(k, item)| {
+                            let path = item.path.clone();
+                            let name = shown(folder_name(&item.path));
+                            let color = match item.status {
+                                ItemStatus::Done | ItemStatus::Destroyed | ItemStatus::Handed => p.text_muted,
+                                ItemStatus::Failed => p.danger,
+                                _ => p.text_faint,
+                            };
+                            div()
+                                .px_3()
+                                .pl(px(32.))
+                                .py(px(3.))
+                                .flex()
+                                .flex_col()
+                                .text_size(px(12.))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(if item.gone {
+                                            // Deleted, it has no place to open.
+                                            div().child(name).into_any_element()
+                                        } else {
+                                            crate::view::keep_focus(crate::view::ring(
+                                                div()
+                                                    .id(("history-item", (id << 16) | k as u64))
+                                                    .track_focus(&stops[&format!("history-item:{id}:{k}")]),
+                                                p,
+                                            ))
+                                            // Opened in Colet, not in a browser: a button, its name in the accent color.
+                                            .role(Role::Button)
+                                            .aria_label(name.clone())
+                                            .rounded(px(4.))
+                                            .text_color(p.accent)
+                                            .hover(|d| d.bg(p.raised_hover))
+                                            .child(name)
+                                            .on_click(
+                                                cx.listener(move |this, _, window, cx| this.reveal_from_history(path.clone(), window, cx)),
+                                            )
+                                            .test_support()
+                                            .into_any_element()
+                                        })
+                                        .child(div().text_color(color).child(item.status.label())),
+                                )
+                                .child(div().truncate().text_color(p.text_faint).child(match &item.from {
+                                    Some(from) => format!("← {}", shown(from)),
+                                    None => shown(&item.path),
+                                }))
+                                .when_some(item.error.clone(), |d, error| d.child(div().text_color(p.danger).child(error)))
+                                .into_any_element()
+                        }))
+                        .when(entry.more > 0, |d| {
+                            d.child(
                                 div()
-                                    .px_3()
                                     .pl(px(32.))
-                                    .py(px(3.))
-                                    .flex()
-                                    .flex_col()
+                                    .py_1()
                                     .text_size(px(12.))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(if item.gone {
-                                                // Deleted, it has no place to open.
-                                                div().child(name).into_any_element()
-                                            } else {
-                                                crate::view::keep_focus(crate::view::ring(
-                                                    div().id(("history-item", (id << 16) | k as u64)).track_focus(&stops[&format!("history-item:{id}:{k}")]),
-                                                    p,
-                                                ))
-                                                    // Opened in Colet, not in a browser: a button, its name in the accent color.
-                                                    .role(Role::Button)
-                                                    .aria_label(name.clone())
-                                                    .rounded(px(4.))
-                                                    .text_color(p.accent)
-                                                    .hover(|d| d.bg(p.raised_hover))
-                                                    .child(name)
-                                                    .on_click(cx.listener(move |this, _, window, cx| this.reveal_from_history(path.clone(), window, cx)))
-                                                    .test_support()
-                                                    .into_any_element()
-                                            })
-                                            .child(div().text_color(color).child(item.status.label())),
-                                    )
-                                    .child(div().truncate().text_color(p.text_faint).child(match &item.from {
-                                        Some(from) => format!("← {}", shown(from)),
-                                        None => shown(&item.path),
-                                    }))
-                                    .when_some(item.error.clone(), |d, error| d.child(div().text_color(p.danger).child(error)))
-                                    .into_any_element()
-                            }))
-                            .when(entry.more > 0, |d| d.child(div().pl(px(32.)).py_1().text_size(px(12.)).text_color(p.text_faint).child(format!("ほか {} 項目", entry.more))))
+                                    .text_color(p.text_faint)
+                                    .child(format!("ほか {} 項目", entry.more)),
+                            )
+                        })
                     })
                     .into_any_element()
             })
@@ -879,4 +926,3 @@ impl Colet {
         )
     }
 }
-

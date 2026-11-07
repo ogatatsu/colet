@@ -24,9 +24,8 @@ fn widens_a_column_by_an_edge_astride_its_border_even_past_it(cx: &mut TestAppCo
     let drive = ui.read(cx, |v| v.state.columns[1].id);
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3, "a column past the drive's");
     let before = ui.read(cx, |v| v.widths.column);
-    let (column, edge) = ui.act(cx, |window, _| {
-        (window.find(("column", drive)).bounds(), window.within(("column", drive)).find("column-resizer").bounds())
-    });
+    let (column, edge) =
+        ui.act(cx, |window, _| (window.find(("column", drive)).bounds(), window.within(("column", drive)).find("column-resizer").bounds()));
     // Half in the column, clear of its scrollbar; half over the next, which it is drawn above.
     assert!(edge.left() < column.right() && column.right() < edge.right(), "{edge:?} {column:?}");
     // Above the columns' scrollbar along the bottom, which keeps its presses.

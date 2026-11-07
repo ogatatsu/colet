@@ -14,17 +14,16 @@ use std::{
 use windows::Win32::Foundation::{E_CHANGED_STATE, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::IDataObject;
 use windows::Win32::System::DataExchange::{
-    AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-    IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+    AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, IsClipboardFormatAvailable,
+    OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::Ole::{CF_HDROP, CF_UNICODETEXT, DROPEFFECT_COPY, DROPEFFECT_MOVE, OleGetClipboard};
 use windows::Win32::UI::Shell::{DROPFILES, DragQueryFileW, FILEDESCRIPTORW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, HWND_MESSAGE,
-    MSG, RegisterClassW, SetWindowLongPtrW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLIPBOARDUPDATE,
-    WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, HWND_MESSAGE, MSG, RegisterClassW,
+    SetWindowLongPtrW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLIPBOARDUPDATE, WNDCLASSW,
 };
 use windows::core::{Error, HRESULT, PCWSTR, Result, w};
 
@@ -97,9 +96,7 @@ pub(super) fn drop_files(paths: &[PathBuf]) -> Vec<u8> {
     list.push(0);
     let header = DROPFILES { pFiles: mem::size_of::<DROPFILES>() as u32, fWide: true.into(), ..Default::default() };
     let mut bytes = Vec::with_capacity(mem::size_of::<DROPFILES>() + list.len() * 2);
-    bytes.extend_from_slice(unsafe {
-        std::slice::from_raw_parts((&header as *const DROPFILES).cast::<u8>(), mem::size_of::<DROPFILES>())
-    });
+    bytes.extend_from_slice(unsafe { std::slice::from_raw_parts((&header as *const DROPFILES).cast::<u8>(), mem::size_of::<DROPFILES>()) });
     bytes.extend(list.iter().flat_map(|c| c.to_le_bytes()));
     bytes
 }

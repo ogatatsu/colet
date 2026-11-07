@@ -69,7 +69,9 @@ fn refreshes_every_loaded_search_page_after_a_change_overtaken_by_pagination(cx:
     fake.results.lock().unwrap().remove(0);
     fake.changed.store(true, Ordering::Relaxed);
     ui.view.update(cx, |v, cx| v.more(id, cx));
-    for _ in 0..4 { settle(cx); }
+    for _ in 0..4 {
+        settle(cx);
+    }
     let paths = ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     assert_eq!(paths.len(), 510);
     assert!(!paths.contains(&r"D:\0000.txt".into()));

@@ -490,11 +490,7 @@ fn reveal_chain(entry: &Entry) -> Vec<Spec> {
                     highlight: (entry.directory && k + 2 == chain.len()).then(|| entry.path.clone()),
                 }
             } else {
-                Spec {
-                    path: path.clone(),
-                    selected: Some(Vec::new()),
-                    highlight: (!entry.directory).then(|| entry.path.clone()),
-                }
+                Spec { path: path.clone(), selected: Some(Vec::new()), highlight: (!entry.directory).then(|| entry.path.clone()) }
             }
         })
         .collect()
@@ -656,7 +652,8 @@ impl State {
     pub fn opening_home(home: &Column, key: &Path) -> Self {
         let mut state = Self::new();
         let id = state.columns[0].id;
-        state.columns[0] = Column { id, selected: Vec::new(), focused: None, hid: None, anchor: None, base: None, pick: None, ..home.clone() };
+        state.columns[0] =
+            Column { id, selected: Vec::new(), focused: None, hid: None, anchor: None, base: None, pick: None, ..home.clone() };
         state.select(0, vec![key.to_owned()]);
         state.past.clear();
         state
@@ -811,11 +808,7 @@ impl State {
         {
             let path = path.clone();
             self.run_saved_search(index, path, here);
-        } else if c.kind == Kind::Home
-            && self.pinned()
-            && paths.len() == 1
-            && c.entries.iter().any(|e| e.path == paths[0])
-        {
+        } else if c.kind == Kind::Home && self.pinned() && paths.len() == 1 && c.entries.iter().any(|e| e.path == paths[0]) {
             self.leave_search_for(paths, here);
         } else {
             self.pick_rows(index, paths, here);
@@ -1431,15 +1424,7 @@ impl State {
     /// A listing arrived: `entries` from `offset` on, of `total`. A page after the first adds to what is
     /// listed; the first replaces it. `departed` holds the path keys of what Colet's own operations sent
     /// away, which is expected to go.
-    pub fn page(
-        &mut self,
-        id: ColumnId,
-        request: u64,
-        entries: Vec<Entry>,
-        total: usize,
-        offset: usize,
-        departed: &HashSet<OsString>,
-    ) {
+    pub fn page(&mut self, id: ColumnId, request: u64, entries: Vec<Entry>, total: usize, offset: usize, departed: &HashSet<OsString>) {
         let Some(index) = self.index_of(id) else { return };
         let c = &mut self.columns[index];
         if c.request != request {
@@ -1449,9 +1434,7 @@ impl State {
         // in the other columns, told by its name.
         if c.kind == Kind::Search {
             let hidden: Vec<PathBuf> = match &c.filter {
-                Some(filter) => {
-                    c.selected.iter().filter(|p| holds(&shown(folder_name(p)), &filter.text).is_none()).cloned().collect()
-                }
+                Some(filter) => c.selected.iter().filter(|p| holds(&shown(folder_name(p)), &filter.text).is_none()).cloned().collect(),
                 None => Vec::new(),
             };
             let keys = c.focused.clone().or_else(|| c.hid.take());
@@ -1547,9 +1530,10 @@ impl State {
         // The folder it had open beside it is gone: close it and what it opened. Said only of a folder
         // gone some other way: one Colet sent away is expected to go.
         let vanished = kind == Kind::Folder
-            && self.columns.get(index + 1).is_some_and(|child| {
-                !self.columns[index].entries.iter().any(|e| e.path == child.path && e.directory)
-            });
+            && self
+                .columns
+                .get(index + 1)
+                .is_some_and(|child| !self.columns[index].entries.iter().any(|e| e.path == child.path && e.directory));
         if vanished {
             let child = self.columns[index + 1].path.clone();
             self.columns.truncate(index + 1);
@@ -2218,7 +2202,14 @@ mod tests {
         let mut s = State::new();
         s.reveal(Path::new(r"D:\a"), true);
         s.go_to_path(Path::new(r"D:\a\b\c.txt"), false);
-        assert_eq!(chain(&s), [link(r"D:\", &[r"D:\a"], Some(Path::new(r"D:\a"))), link(r"D:\a", &[r"D:\a\b"], None), link(r"D:\a\b", &[], Some(Path::new(r"D:\a\b\c.txt")))]);
+        assert_eq!(
+            chain(&s),
+            [
+                link(r"D:\", &[r"D:\a"], Some(Path::new(r"D:\a"))),
+                link(r"D:\a", &[r"D:\a\b"], None),
+                link(r"D:\a\b", &[], Some(Path::new(r"D:\a\b\c.txt")))
+            ]
+        );
         assert_eq!((s.active, s.folded_away()), (3, 0));
         s.go_to_path(Path::new(r"D:\a\b\d"), true);
         assert_eq!(chain(&s)[2..], [link(r"D:\a\b", &[r"D:\a\b\d"], Some(Path::new(r"D:\a\b\d"))), link(r"D:\a\b\d", &[], None)]);

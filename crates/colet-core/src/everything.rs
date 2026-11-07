@@ -3,7 +3,10 @@ use std::{
     ffi::c_void,
     path::PathBuf,
     ptr,
-    sync::{Arc, atomic::{AtomicBool, AtomicU32, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -220,11 +223,15 @@ impl Watch {
 impl Drop for Watch {
     fn drop(&mut self) {
         self.news.stopping.store(true, Ordering::Relaxed);
-        unsafe { Everything3_ShutdownClient(self.client); }
+        unsafe {
+            Everything3_ShutdownClient(self.client);
+        }
         if let Some(thread) = self.thread.take() {
             thread.join().ok();
         }
-        unsafe { Everything3_DestroyClient(self.client); }
+        unsafe {
+            Everything3_DestroyClient(self.client);
+        }
     }
 }
 
@@ -250,8 +257,13 @@ unsafe impl Send for SearchSession {}
 impl Default for SearchSession {
     fn default() -> Self {
         Self {
-            client: ptr::null_mut(), watch: None, state: ptr::null_mut(), key: None,
-            version: String::new(), watch_retry_at: None, connection: String::new(),
+            client: ptr::null_mut(),
+            watch: None,
+            state: ptr::null_mut(),
+            key: None,
+            version: String::new(),
+            watch_retry_at: None,
+            connection: String::new(),
             #[cfg(test)]
             watch_instance: None,
         }
@@ -324,11 +336,8 @@ impl SearchSession {
             // These setters update the state but return FALSE in the pinned upstream version.
             Everything3_SetSearchViewportOffset(self.state, offset);
             Everything3_SetSearchViewportCount(self.state, count);
-            let result = if new_search {
-                Everything3_Search(self.client, self.state)
-            } else {
-                Everything3_GetResults(self.client, self.state)
-            };
+            let result =
+                if new_search { Everything3_Search(self.client, self.state) } else { Everything3_GetResults(self.client, self.state) };
             if result.is_null() {
                 let error = Everything3_GetLastError();
                 self.disconnect();
@@ -357,7 +366,9 @@ impl SearchSession {
         };
         let dotted = |v: [u32; 4]| v.map(|n| n.to_string()).join(".");
         if version < OLDEST {
-            unsafe { Everything3_DestroyClient(client); }
+            unsafe {
+                Everything3_DestroyClient(client);
+            }
             return Err(format!(
                 "Everything {}以降が必要です（接続先: {}）。更新してから再試行してください。",
                 dotted(OLDEST),
@@ -479,9 +490,7 @@ unsafe fn read(result: Handle, offset: usize) -> Page {
                 directory,
                 size: (!directory && size != u64::MAX).then_some(size),
                 // FILETIME to Unix milliseconds.
-                modified: (modified != u64::MAX)
-                    .then(|| modified.checked_sub(116_444_736_000_000_000).map(|v| v / 10_000))
-                    .flatten(),
+                modified: (modified != u64::MAX).then(|| modified.checked_sub(116_444_736_000_000_000).map(|v| v / 10_000)).flatten(),
                 hidden: Hiding::Shown,
                 marks,
                 path,
@@ -557,7 +566,9 @@ mod tests {
         let mut session = SearchSession::default();
         session.search(query, Order::default(), 0, PAGE, true).unwrap();
         let client = session.client;
-        unsafe { assert_ne!(Everything3_ShutdownClient(session.watch.as_ref().unwrap().client), 0); }
+        unsafe {
+            assert_ne!(Everything3_ShutdownClient(session.watch.as_ref().unwrap().client), 0);
+        }
         let error = failure(&mut session);
         assert!(error.contains("自動更新を停止しました"));
         assert_eq!(session.client, client);
@@ -579,14 +590,18 @@ mod tests {
         }
         let query = format!("parent:\"{}\"", fixture.path().display());
         let mut session = SearchSession::default();
-        unsafe { session.connect().unwrap(); }
+        unsafe {
+            session.connect().unwrap();
+        }
         let client = session.client;
         // Keep the real paging connection, but make only the watch's connection attempt fail.
         session.watch_instance = Some("colet-nonexistent-watch-test-instance".into());
         let deadline = Instant::now() + Duration::from_secs(15);
         let first = loop {
             let page = session.search(&query, Order::default(), 0, PAGE, true).unwrap();
-            if page.total == 511 { break page; }
+            if page.total == 511 {
+                break page;
+            }
             assert!(Instant::now() < deadline, "Everything did not index the fixture: {}", page.total);
             std::thread::sleep(Duration::from_millis(100));
         };
@@ -633,7 +648,9 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(15);
         let first = loop {
             let page = session.search(&query, Order::default(), 0, PAGE, true).unwrap();
-            if page.total == 511 { break page; }
+            if page.total == 511 {
+                break page;
+            }
             assert!(Instant::now() < deadline, "Everything did not index the fixture: {}", page.total);
             std::thread::sleep(Duration::from_millis(100));
         };
@@ -674,7 +691,9 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(15);
         let entry = loop {
             let page = session.search(&format!("parent:\"{folder}\" 本"), Order::default(), 0, PAGE, true).unwrap();
-            if let Some(entry) = page.entries.into_iter().next() { break entry; }
+            if let Some(entry) = page.entries.into_iter().next() {
+                break entry;
+            }
             assert!(Instant::now() < deadline, "Everything did not index the fixture");
             std::thread::sleep(Duration::from_millis(100));
         };
@@ -704,7 +723,9 @@ mod tests {
         for by in Sort::ALL {
             let entries = loop {
                 let page = session.search(&query, Order { by, descending: true }, 0, PAGE, true).unwrap();
-                if page.entries.len() == 2 { break page.entries; }
+                if page.entries.len() == 2 {
+                    break page.entries;
+                }
                 assert!(Instant::now() < deadline, "Everything did not index the fixture");
                 std::thread::sleep(Duration::from_millis(100));
             };

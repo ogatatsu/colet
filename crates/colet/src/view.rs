@@ -2,9 +2,17 @@
 //! and the status bar beside it.
 use std::{ops::Range, rc::Rc, time::Instant};
 
-use colet_core::{entry::{Entry, Sort, direction_label}, paths::{folder_name, id_text, shown}, time};
+use colet_core::{
+    entry::{Entry, Sort, direction_label},
+    paths::{folder_name, id_text, shown},
+    time,
+};
 use gpui_kit::base::input::{self, Input, InputState};
-use gpui_kit::component::{button::{Button, ButtonVariants}, status_bar::StatusBar, Disableable, Selectable, Sizable};
+use gpui_kit::component::{
+    Disableable, Selectable, Sizable,
+    button::{Button, ButtonVariants},
+    status_bar::StatusBar,
+};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -12,9 +20,9 @@ use crate::{
     app::*,
     crumbs::Crumb,
     places::{HomeDrag, movable},
-    state::{favorite_key, narrowed_folder, saved_query},
     reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
     state::{Column, ColumnId, Kind},
+    state::{favorite_key, narrowed_folder, saved_query},
 };
 
 /// What follows the pointer as a row is dragged in home: its row, faint.
@@ -73,11 +81,9 @@ pub fn glyph(name: &str) -> gpui_kit::component::Icon {
 
 /// The loading icon, turning once a second.
 pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> AnimationElement<Svg> {
-    icon("loader-circle", size, color).with_animation(
-        id,
-        Animation::new(std::time::Duration::from_secs(1)).repeat(),
-        |svg, delta| svg.with_transformation(Transformation::rotate(percentage(delta))),
-    )
+    icon("loader-circle", size, color).with_animation(id, Animation::new(std::time::Duration::from_secs(1)).repeat(), |svg, delta| {
+        svg.with_transformation(Transformation::rotate(percentage(delta)))
+    })
 }
 
 /// A thin scrollbar laid over a list, as the old app's; its thumb is Colet's color.
@@ -116,17 +122,41 @@ impl Element for OnTop {
         None
     }
 
-    fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
         (self.0.as_mut().unwrap().request_layout(window, cx), ())
     }
 
-    fn prepaint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), window: &mut Window, _: &mut App) {
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        _: &mut App,
+    ) {
         let (offset, mask) = (window.element_offset(), window.content_mask());
         self.1.set(Some(mask));
         window.defer_draw(self.0.take().unwrap(), offset, 0, Some(mask));
     }
 
-    fn paint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), _: &mut (), _: &mut Window, _: &mut App) {}
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        _: &mut Window,
+        _: &mut App,
+    ) {
+    }
 }
 
 impl IntoElement for OnTop {
@@ -155,15 +185,38 @@ impl Element for Clipped {
         None
     }
 
-    fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
         (self.child.request_layout(window, cx), ())
     }
 
-    fn prepaint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), window: &mut Window, cx: &mut App) {
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         window.with_content_mask(self.clip.get(), |window| self.child.prepaint(window, cx));
     }
 
-    fn paint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), _: &mut (), window: &mut Window, cx: &mut App) {
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         window.with_content_mask(self.clip.get(), |window| self.child.paint(window, cx));
     }
 }
@@ -449,7 +502,10 @@ impl Colet {
         // Home lights the saved search that is running, narrowed as it was kept.
         let highlighted = c.highlight.as_ref() == Some(&entry.path)
             || saved.is_some_and(|(q, f, n)| {
-                self.state.pinned() && q == self.state.query && f == self.state.search_filter.as_deref() && n == self.state.search_narrowing().as_deref()
+                self.state.pinned()
+                    && q == self.state.query
+                    && f == self.state.search_filter.as_deref()
+                    && n == self.state.search_narrowing().as_deref()
             });
         // On the clipboard, cut or copied, whoever put it there.
         let held = self.clipboard.holds(&entry.path);
@@ -499,10 +555,9 @@ impl Colet {
         let path = entry.path.clone();
         // A pinned row, favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
         // Narrowed, home hides some of its kind, and where among them it would land is not to be seen.
-        let drag = (kind == Kind::Home && c.filter.is_none())
-            .then(|| movable(&self.settings, &entry.path))
-            .flatten()
-            .map(|shelf| (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_drag.rows.clone(), cx.entity().downgrade()));
+        let drag = (kind == Kind::Home && c.filter.is_none()).then(|| movable(&self.settings, &entry.path)).flatten().map(|shelf| {
+            (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_drag.rows.clone(), cx.entity().downgrade())
+        });
         let name = entry.name.clone();
         let picture = match (saved, image) {
             (Some(_), _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
@@ -563,9 +618,7 @@ impl Colet {
             .border_color(transparent_black())
             .when(focused, |r| r.border_color(if lit { p.focus_on_fill } else { p.focus }))
             .when(target, |r| r.border_color(p.accent).bg(p.highlight))
-            .when(barred, |r| {
-                r.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).rounded_l(px(4.)).bg(p.accent))
-            })
+            .when(barred, |r| r.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).rounded_l(px(4.)).bg(p.accent)))
             .when(selected, |r| r.bg(if marked && !aside { p.accent_fill } else { p.selected_inactive }))
             .when(lit, |r| r.text_color(p.on_accent))
             .when(barred, |r| r.bg(p.highlight))
@@ -574,11 +627,7 @@ impl Colet {
             // The selection in home while the columns are worked in: marked at its edge, as in a sidebar.
             .map(|r| {
                 let picture = div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture);
-                if kind == Kind::Home {
-                    r.child(picture)
-                } else {
-                    r.child(self.check(index, entry, selected, lit, picture, cx))
-                }
+                if kind == Kind::Home { r.child(picture) } else { r.child(self.check(index, entry, selected, lit, picture, cx)) }
             })
             .child(self.row_name(entry, kind, barred && highlighted, lit, within, narrow))
             // Out of the name, so the name stays the file's own: a fade alone would read as hidden.
@@ -587,7 +636,17 @@ impl Colet {
                     div()
                         .id(SharedString::from(format!("held:{}", id_text(&entry.path))))
                         .tip(if cut { "切り取り中" } else { "コピー中" })
-                        .child(icon(if cut { "scissors" } else { "copy" }, 12., if lit { p.on_accent_muted } else if cut { p.text_faint } else { p.accent }))
+                        .child(icon(
+                            if cut { "scissors" } else { "copy" },
+                            12.,
+                            if lit {
+                                p.on_accent_muted
+                            } else if cut {
+                                p.text_faint
+                            } else {
+                                p.accent
+                            },
+                        ))
                         .test_support(),
                 )
             })
@@ -600,7 +659,15 @@ impl Colet {
     /// The icon, which turns to a checkbox while its row is one of several selected or the pointer is on it,
     /// as Explorer's item check boxes do: one alone is the row gone into, not a set being gathered. It takes
     /// the row's edge and the gap after it, to be easy to hit.
-    fn check(&self, index: usize, entry: &Entry, selected: bool, lit: bool, picture: Div, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn check(
+        &self,
+        index: usize,
+        entry: &Entry,
+        selected: bool,
+        lit: bool,
+        picture: Div,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let p = self.palette;
         let path = entry.path.clone();
         let boxed = selected && self.state.columns[index].selected.len() > 1;
@@ -722,7 +789,16 @@ impl Colet {
                     }),
             )
             .when(kind == Kind::Search, |d| {
-                d.child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis_start().text_size(px(12.)).text_color(muted).child(with_marks(&entry.parent, &entry.marks.parent)))
+                d.child(
+                    div()
+                        .w_full()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis_start()
+                        .text_size(px(12.))
+                        .text_color(muted)
+                        .child(with_marks(&entry.parent, &entry.marks.parent)),
+                )
             })
     }
 
@@ -745,7 +821,15 @@ impl Colet {
 
     /// A click on the row of `path` in the column at `index`: a double one opens it; home picks one row at
     /// a time, whatever is held; elsewhere Ctrl and Shift pick as they do in Explorer.
-    fn click_row(&mut self, index: usize, kind: Kind, path: &std::path::Path, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn click_row(
+        &mut self,
+        index: usize,
+        kind: Kind,
+        path: &std::path::Path,
+        event: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let modifiers = event.modifiers();
         if event.click_count() >= 2 {
             self.open(index, path, window, cx);
@@ -828,17 +912,15 @@ impl Colet {
     /// the preferences too, where Everything is reconnected.
     fn column_error(&self, id: ColumnId, kind: Kind, error: String, cx: &mut Context<Self>) -> AnyElement {
         self.message("circle-alert", error)
-            .child(
-                keep_focus(Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label("再試行")).on_click(cx.listener(
-                    move |this, event: &ClickEvent, window, cx| {
-                        // The button goes as the column loads: the keys go back to the columns.
-                        if event.is_keyboard() {
-                            this.focus_active(window, cx);
-                        }
-                        this.load(id, 0, false, cx);
-                    },
-                )),
-            )
+            .child(keep_focus(Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label("再試行")).on_click(cx.listener(
+                move |this, event: &ClickEvent, window, cx| {
+                    // The button goes as the column loads: the keys go back to the columns.
+                    if event.is_keyboard() {
+                        this.focus_active(window, cx);
+                    }
+                    this.load(id, 0, false, cx);
+                },
+            )))
             .when(kind == Kind::Search, |d| {
                 d.child(
                     Button::new("search-settings")
@@ -868,7 +950,9 @@ impl Colet {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.home_scroll)
-            .on_drag_move(cx.listener(|this, event: &DragMoveEvent<HomeDrag>, _, cx| this.drag_home(event.event.position, event.bounds, cx)))
+            .on_drag_move(
+                cx.listener(|this, event: &DragMoveEvent<HomeDrag>, _, cx| this.drag_home(event.event.position, event.bounds, cx)),
+            )
             .on_drop(cx.listener(|this, drag: &HomeDrag, _, cx| this.drop_home(drag, cx)))
             .test_support();
         for (k, (title, items)) in groups.into_iter().enumerate() {
@@ -954,7 +1038,15 @@ impl Colet {
             .relative()
             .child(list)
             // Clear of the half of the edge that falls inside.
-            .child(div().absolute().top_0().bottom_0().left_0().right(px(RESIZER_WIDTH / 2.)).child(scrollbar(gpui_kit::base::Scrollbar::vertical(&handle), p)))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left_0()
+                    .right(px(RESIZER_WIDTH / 2.))
+                    .child(scrollbar(gpui_kit::base::Scrollbar::vertical(&handle), p)),
+            )
             .into_any_element()
     }
 
@@ -1081,10 +1173,9 @@ impl Colet {
                     .child({
                         // What it is narrowed to now is part of what is kept.
                         let kept = match kind {
-                            Kind::Search => self
-                                .settings
-                                .saved(&self.state.query, self.state.search_filter.as_deref(), narrowing.as_deref())
-                                .is_some(),
+                            Kind::Search => {
+                                self.settings.saved(&self.state.query, self.state.search_filter.as_deref(), narrowing.as_deref()).is_some()
+                            }
                             _ => self.settings.is_favorite(&star_key),
                         };
                         let label = match (kind, kept) {
@@ -1111,7 +1202,15 @@ impl Colet {
                     .test_support(),
             )
             .when_some(field, |d, input| {
-                d.child(div().flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(self.filter_field(id, filtering, &input, window, cx)))
+                d.child(
+                    div()
+                        .flex_none()
+                        .px_2()
+                        .py(px(6.))
+                        .border_b_1()
+                        .border_color(p.border)
+                        .child(self.filter_field(id, filtering, &input, window, cx)),
+                )
             })
             .child(headings)
             .child(body)
@@ -1179,7 +1278,11 @@ impl Colet {
         let check_all = (c.kind != Kind::Home).then(|| self.check_all(index, cx));
         let heading = |by: Sort, name: &'static str| {
             let chosen = order.by == by;
-            let label = if chosen { format!("{}で並べ替え（{}）", by.label(), direction_label(order.descending)) } else { format!("{}で並べ替え", by.label()) };
+            let label = if chosen {
+                format!("{}で並べ替え（{}）", by.label(), direction_label(order.descending))
+            } else {
+                format!("{}で並べ替え", by.label())
+            };
             div()
                 .id((name, id))
                 .role(Role::Button)
@@ -1222,13 +1325,9 @@ impl Colet {
         let p = self.palette;
         let c = &self.state.columns[index];
         let (id, empty, all) = (c.id, c.entries.is_empty(), c.all_selected());
-        let check = div()
-            .size(px(14.))
-            .rounded(px(3.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .map(|b| if all { b.bg(p.accent_fill).child(icon("check", 11., p.on_accent)) } else { b.border_1().border_color(p.text_muted) });
+        let check = div().size(px(14.)).rounded(px(3.)).flex().items_center().justify_center().map(|b| {
+            if all { b.bg(p.accent_fill).child(icon("check", 11., p.on_accent)) } else { b.border_1().border_color(p.text_muted) }
+        });
         div()
             .id(("check-all", id))
             .flex_none()
@@ -1325,7 +1424,16 @@ impl Colet {
         let marked = self.state.active == 0 && !self.search_focused;
         let body = self.column_body(0, marked, cx);
         let width = self.sidebar_width(window);
-        let keys = div().id("home").track_focus(&self.home_focus).flex_1().min_h_0().relative().flex().flex_col().child(self.takes_text(&self.home_focus, cx)).child(body);
+        let keys = div()
+            .id("home")
+            .track_focus(&self.home_focus)
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .flex()
+            .flex_col()
+            .child(self.takes_text(&self.home_focus, cx))
+            .child(body);
         let keys = self.column_keys(keys, cx);
         div()
             .id("sidebar")
@@ -1378,7 +1486,17 @@ impl Colet {
                     ),
             )
             .when_some(field, |d, input| {
-                d.child(div().id("home-filter").flex_none().px_2().py(px(6.)).border_b_1().border_color(p.border).child(self.filter_field(id, filtering, &input, window, cx)).test_support())
+                d.child(
+                    div()
+                        .id("home-filter")
+                        .flex_none()
+                        .px_2()
+                        .py(px(6.))
+                        .border_b_1()
+                        .border_color(p.border)
+                        .child(self.filter_field(id, filtering, &input, window, cx))
+                        .test_support(),
+                )
             })
             .child(keys)
             .child(self.resizer("sidebar-resizer", WidthOf::Sidebar, width, cx))
@@ -1438,7 +1556,13 @@ impl Colet {
                         .border_color(p.border_strong)
                         .rounded(px(6.))
                         .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
-                        .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(&self.search, cx)).child(Input::new(&self.search)))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .capture_any_mouse_down(Self::right_press_menu(&self.search, cx))
+                                .child(Input::new(&self.search)),
+                        )
                         // ↓ goes into the results, as from a search field in Explorer; Esc clears the search.
                         .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {
                             cx.stop_propagation();
@@ -1536,9 +1660,15 @@ impl Colet {
             )
             .child(
                 keep_focus(
-                    Self::icon_button("show-hidden", if show { "eye" } else { "eye-off" }, "隠しファイルを表示", "隠しファイルを表示（Ctrl+H）", true)
-                        .selected(show)
-                        .toggled(show),
+                    Self::icon_button(
+                        "show-hidden",
+                        if show { "eye" } else { "eye-off" },
+                        "隠しファイルを表示",
+                        "隠しファイルを表示（Ctrl+H）",
+                        true,
+                    )
+                    .selected(show)
+                    .toggled(show),
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx))),
             )
@@ -1626,7 +1756,14 @@ impl Colet {
             .iter()
             .enumerate()
             .map(|(k, Crumb { name: label, .. })| {
-                let run = TextRun { len: label.len(), font: font.clone(), color: self.palette.text, background_color: None, underline: None, strikethrough: None };
+                let run = TextRun {
+                    len: label.len(),
+                    font: font.clone(),
+                    color: self.palette.text,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
                 let shaped = window.text_system().shape_line(label.clone().into(), px(13.), &[run], None);
                 // The first stands at the bar's start, with no chevron or gap before it.
                 let before = if k == 0 { 0. } else { crate::crumbs::SEPARATOR + crate::crumbs::GAP };
@@ -1688,25 +1825,25 @@ impl Colet {
             .min_w_0()
             .overflow_hidden()
             .child({
-                        let (row, room) = (self.crumbs.row.clone(), self.crumbs.room.clone());
-                        canvas(
-                            move |bounds, window, _| {
-                                row.set(Some(bounds));
-                                if (f32::from(bounds.size.width) - room.get()).abs() > 0.5 {
-                                    window.request_animation_frame();
-                                }
-                            },
-                            |_, _, _, _| {},
-                        )
-                        .absolute()
-                        .size_full()
-                    })
-                    .children(self.crumb_bar())
-                    .children(fold)
-                    .children(shown.into_iter().enumerate().map(|(k, crumb)| {
-                        let max_width = (folded + k == last).then_some(room / 2.);
-                        self.crumb(crumb, k > 0 || folded > 0, max_width, cx)
-                    }))
+                let (row, room) = (self.crumbs.row.clone(), self.crumbs.room.clone());
+                canvas(
+                    move |bounds, window, _| {
+                        row.set(Some(bounds));
+                        if (f32::from(bounds.size.width) - room.get()).abs() > 0.5 {
+                            window.request_animation_frame();
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full()
+            })
+            .children(self.crumb_bar())
+            .children(fold)
+            .children(shown.into_iter().enumerate().map(|(k, crumb)| {
+                let max_width = (folded + k == last).then_some(room / 2.);
+                self.crumb(crumb, k > 0 || folded > 0, max_width, cx)
+            }))
             // The room past the crumbs: a press there turns the trail into the field.
             .child(
                 div()
@@ -1716,9 +1853,10 @@ impl Colet {
                     .h_full()
                     .cursor_text()
                     .when(crumbs.is_empty(), |d| {
-                        d.flex().items_center().px(px(6.)).child(
-                            div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(crate::address::PLACEHOLDER),
-                        )
+                        d.flex()
+                            .items_center()
+                            .px(px(6.))
+                            .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(crate::address::PLACEHOLDER))
                     })
                     .on_click(cx.listener(|this, _, window, cx| this.open_address(window, cx)))
                     .test_support(),
@@ -1789,7 +1927,9 @@ impl Colet {
                         }
                     })),
             )
-            .when_some(menu, |d, menu| d.child(deferred(div().absolute().top(px(28.)).left_0().min_w(px(160.)).child(menu)).with_priority(1)))
+            .when_some(menu, |d, menu| {
+                d.child(deferred(div().absolute().top(px(28.)).left_0().min_w(px(160.)).child(menu)).with_priority(1))
+            })
             .into_any_element()
     }
 
@@ -1816,9 +1956,12 @@ impl Colet {
                     .relative()
                     .child({
                         let crumbs = self.crumbs.bounds.clone();
-                        canvas(move |bounds, _, _| {
-                            crumbs.borrow_mut().insert(index, bounds);
-                        }, |_, _, _, _| {})
+                        canvas(
+                            move |bounds, _, _| {
+                                crumbs.borrow_mut().insert(index, bounds);
+                            },
+                            |_, _, _, _| {},
+                        )
                         .absolute()
                         .size_full()
                     })
@@ -2062,7 +2205,18 @@ impl Colet {
             .px_3()
             .gap_4()
             .text_size(px(12.))
-            .child(div().id("place").role(Role::Status).aria_label(place.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis_start().child(place))
+            .child(
+                div()
+                    .id("place")
+                    .role(Role::Status)
+                    .aria_label(place.clone())
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
+                    .child(place),
+            )
             .right(div().flex_none().child(detail))
             .right(
                 div()
@@ -2130,8 +2284,7 @@ impl Colet {
             }
             let (cells, active) = self.scrolling();
             let start = self.sideways.slide.as_ref().map_or(from, |s| s.target);
-            let shown: Vec<ColumnId> =
-                self.state.columns[self.state.columns.len() - cells.len()..].iter().map(|c| c.id).collect();
+            let shown: Vec<ColumnId> = self.state.columns[self.state.columns.len() - cells.len()..].iter().map(|c| c.id).collect();
             let target = match keep {
                 Some(keep) => uncover_target(view, &cells, keep),
                 // Home or the pinned results taken up again beside the same columns, as ← brings the keys
@@ -2290,14 +2443,8 @@ impl Render for Colet {
                 }
             }))
             // The mouse's back and forward buttons, as Alt+← and Alt+→.
-            .on_mouse_down(
-                MouseButton::Navigate(NavigationDirection::Back),
-                cx.listener(|this, _, window, cx| this.back(window, cx)),
-            )
-            .on_mouse_down(
-                MouseButton::Navigate(NavigationDirection::Forward),
-                cx.listener(|this, _, window, cx| this.forward(window, cx)),
-            )
+            .on_mouse_down(MouseButton::Navigate(NavigationDirection::Back), cx.listener(|this, _, window, cx| this.back(window, cx)))
+            .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, _, window, cx| this.forward(window, cx)))
             .when(self.resizing.is_some(), |d| {
                 d.cursor_col_resize()
                     .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
@@ -2324,21 +2471,16 @@ impl Render for Colet {
             .child(toolbar)
             .child(pathbar)
             .child(
-                div().flex_1().min_h_0().w_full().flex().child(sidebar).child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .flex()
-                        .flex_col()
-                        .child(main)
-                        .child(self.render_statusbar(cx)),
-                ),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .flex()
+                    .child(sidebar)
+                    .child(div().flex_1().min_w_0().h_full().flex().flex_col().child(main).child(self.render_statusbar(cx))),
             )
             // Over a dialog, a field's menu is drawn with it.
             .children(if self.dialog.is_none() { self.render_menu(cx) } else { None })
             .children(self.render_history(cx))
-
     }
 }
-

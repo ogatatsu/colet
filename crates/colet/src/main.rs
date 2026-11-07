@@ -28,7 +28,9 @@ use std::borrow::Cow;
 use gpui_kit::*;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-gpui_kit::assets::icon_assets!(ExtraIcons, [
+gpui_kit::assets::icon_assets!(
+    ExtraIcons,
+    [
         X,
         ChevronsLeft,
         Check,
@@ -49,7 +51,8 @@ gpui_kit::assets::icon_assets!(ExtraIcons, [
         AppWindow,
         RotateCcw,
         Send
-    ]);
+    ]
+);
 
 /// GPUI Kit's icons, and the few more Colet draws.
 struct AppAssets;

@@ -3,8 +3,9 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc, Mutex, OnceLock, mpsc,
+    Arc, Mutex, OnceLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
+    mpsc,
 };
 
 use crate::{
@@ -17,7 +18,10 @@ use colet_core::{
     folders,
     operations::{self, Event, Request},
     quick_look,
-    shell::{self, Dropped, MenuThread, Owner, SendTarget, ShowMenu, clipboard::{self, ClipboardFiles}},
+    shell::{
+        self, Dropped, MenuThread, Owner, SendTarget, ShowMenu,
+        clipboard::{self, ClipboardFiles},
+    },
 };
 
 /// What a path names on disk.
@@ -122,8 +126,7 @@ impl Backend for Live {
         if self.latest.load(Ordering::Relaxed) != search.request {
             return Err("古い検索要求です".into());
         }
-        let page =
-            session.search(&search.query, search.sort, search.offset, search.count, search.refresh)?;
+        let page = session.search(&search.query, search.sort, search.offset, search.count, search.refresh)?;
         Ok((page, session.connection.clone()))
     }
 
@@ -225,9 +228,7 @@ impl Backend for Live {
                 Err("同じフォルダーの項目を選んだときに使えます".into())
             }
             // A command from the menu before is still running, as a dialog it opened.
-            Err(error) if error.code() == shell::MENU_BUSY => {
-                Err("その他のオプションで開いた操作が終わってから使えます".into())
-            }
+            Err(error) if error.code() == shell::MENU_BUSY => Err("その他のオプションで開いた操作が終わってから使えます".into()),
             Err(error) => Err(said(error)),
         }
     }
@@ -290,12 +291,7 @@ mod tests {
         let (folder, file, junction) = (dir.path().join("folder"), dir.path().join("a.txt"), dir.path().join("link"));
         std::fs::create_dir(&folder).unwrap();
         std::fs::write(&file, "a").unwrap();
-        let made = std::process::Command::new("cmd")
-            .args(["/C", "mklink", "/J"])
-            .arg(&junction)
-            .arg(&folder)
-            .output()
-            .unwrap();
+        let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&junction).arg(&folder).output().unwrap();
         assert!(made.status.success(), "{made:?}");
         std::fs::remove_dir(&folder).unwrap();
         let live = Live::default();

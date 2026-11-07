@@ -161,7 +161,10 @@ fn keeps_the_tabs_in_the_settings(cx: &mut TestAppContext) {
     let folders: Vec<String> = tabs[0].place.folders.iter().map(|(path, _)| text(path)).collect();
     assert_eq!(folders, [r"D:\", r"D:\work"]);
     // Only what leads on is kept: the file picked last is not.
-    assert_eq!(tabs[0].place.picks.iter().map(|p| p.as_deref().map(text)).collect::<Vec<_>>(), [Some(r"D:\".into()), Some(r"D:\work".into()), None]);
+    assert_eq!(
+        tabs[0].place.picks.iter().map(|p| p.as_deref().map(text)).collect::<Vec<_>>(),
+        [Some(r"D:\".into()), Some(r"D:\work".into()), None]
+    );
     assert_eq!(tabs[1].place.query, "cat");
     // Started again from them, the folders open as they were.
     let state = crate::state::State::from_kept(tabs[0].place.clone());
@@ -219,10 +222,8 @@ fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mu
     use crate::state::favorite_key;
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],
-        ..Fake::default().with_folders(&[
-            (r"D:\", vec![folder(r"D:\work")]),
-            (r"D:\work", vec![file(r"D:\work\a.pdf"), file(r"D:\work\b.txt")]),
-        ])
+        ..Fake::default()
+            .with_folders(&[(r"D:\", vec![folder(r"D:\work")]), (r"D:\work", vec![file(r"D:\work\a.pdf"), file(r"D:\work\b.txt")])])
     });
     fake.settings.lock().unwrap().favorites = vec![Favorite { narrow: Some("pdf".into()), ..Favorite::new(r"D:\work") }];
     let ui = open(cx, fake);
@@ -260,7 +261,8 @@ fn names_a_tab_for_the_favorite_it_opened_however_deep_it_goes(cx: &mut TestAppC
         roots: vec![Entry::folder(r"D:\", "D:")],
         ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\work")]), (r"D:\work", vec![file(r"D:\work\a.txt")])])
     });
-    fake.settings.lock().unwrap().favorites = vec![crate::settings::Favorite { name: "データ".into(), ..crate::settings::Favorite::new(r"D:\") }];
+    fake.settings.lock().unwrap().favorites =
+        vec![crate::settings::Favorite { name: "データ".into(), ..crate::settings::Favorite::new(r"D:\") }];
     let ui = open(cx, fake);
     ui.click(cx, row(r"D:\"));
     // Picked in home, it is named so already.

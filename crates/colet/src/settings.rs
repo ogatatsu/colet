@@ -743,7 +743,8 @@ mod tests {
     #[test]
     fn keeps_one_favorite_and_saved_search_of_each_narrowing_as_it_would_be_typed_again() {
         let favorite = |path: &str, narrow: Option<&str>| Favorite { narrow: narrow.map(Into::into), ..Favorite::new(path) };
-        let search = |narrow: Option<&str>| SavedSearch { name: String::new(), query: "cat".into(), filter: None, narrow: narrow.map(Into::into) };
+        let search =
+            |narrow: Option<&str>| SavedSearch { name: String::new(), query: "cat".into(), filter: None, narrow: narrow.map(Into::into) };
         let mut settings = Settings {
             favorites: vec![
                 favorite(r"D:\Work", None),
@@ -839,7 +840,12 @@ mod tests {
 
     #[test]
     fn keeps_one_pin_of_each_row_and_none_for_a_search_not_saved() {
-        let search = |query: &str, filter: Option<&str>| SavedSearch { name: String::new(), query: query.into(), filter: filter.map(Into::into), narrow: None };
+        let search = |query: &str, filter: Option<&str>| SavedSearch {
+            name: String::new(),
+            query: query.into(),
+            filter: filter.map(Into::into),
+            narrow: None,
+        };
         let mut settings = Settings {
             filters: vec![SearchFilter { name: "画像".into(), query: "ext:jpg".into() }],
             saved_searches: vec![search("cat", None), search("dog", Some("動画")), search("cow", Some("画像"))],
@@ -859,7 +865,12 @@ mod tests {
         settings.normalize();
         assert_eq!(
             settings.pinned,
-            [PathBuf::from(r"D:\Work"), search_key("cat", None, None), search_key("dog", None, None), search_key("cow", Some("画像"), None)]
+            [
+                PathBuf::from(r"D:\Work"),
+                search_key("cat", None, None),
+                search_key("dog", None, None),
+                search_key("cow", Some("画像"), None)
+            ]
         );
         assert!(settings.is_pinned(Path::new(r"d:\WORK")) && !settings.is_pinned(&search_key("Cat", None, None)));
         let written = serde_json::to_string(&settings).unwrap();
@@ -869,11 +880,21 @@ mod tests {
     #[test]
     fn keeps_one_filter_of_each_name_and_lets_go_of_the_names_of_those_gone() {
         let filter = |name: &str, query: &str| SearchFilter { name: name.into(), query: query.into() };
-        let search = |query: &str, filter: Option<&str>| SavedSearch { name: String::new(), query: query.into(), filter: filter.map(Into::into), narrow: None };
+        let search = |query: &str, filter: Option<&str>| SavedSearch {
+            name: String::new(),
+            query: query.into(),
+            filter: filter.map(Into::into),
+            narrow: None,
+        };
         let mut settings = Settings {
             filters: vec![filter("画像", "ext:jpg;png"), filter("", "ext:mp3"), filter("動画", " "), filter("画像", "ext:gif")],
             tabs: vec![KeptTab { filter: Some("動画".into()), ..KeptTab::default() }],
-            saved_searches: vec![search("cat", Some("画像")), search("cat", None), search("cat", Some("動画")), search("cat", Some("画像"))],
+            saved_searches: vec![
+                search("cat", Some("画像")),
+                search("cat", None),
+                search("cat", Some("動画")),
+                search("cat", Some("画像")),
+            ],
             ..Settings::default()
         };
         settings.normalize();
@@ -948,10 +969,8 @@ mod tests {
 
     #[test]
     fn forgets_a_window_too_small_to_use() {
-        let mut settings = Settings {
-            window: Some(Placement { x: 0., y: 0., width: 10., height: 10., maximized: false }),
-            ..Settings::default()
-        };
+        let mut settings =
+            Settings { window: Some(Placement { x: 0., y: 0., width: 10., height: 10., maximized: false }), ..Settings::default() };
         settings.normalize();
         assert_eq!(settings.window, None);
     }

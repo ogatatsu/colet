@@ -54,22 +54,39 @@ pub struct Request {
 /// How one item ended, or where a copy or move put it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Done { path: PathBuf },
-    Failed { path: PathBuf, error: String },
+    Done {
+        path: PathBuf,
+    },
+    Failed {
+        path: PathBuf,
+        error: String,
+    },
     /// Passed over at the user's word, as from a name clash.
-    Skipped { path: PathBuf },
+    Skipped {
+        path: PathBuf,
+    },
     /// Stopped at the user's word.
-    Cancelled { path: PathBuf },
+    Cancelled {
+        path: PathBuf,
+    },
     /// Where the last item went, which a name clash may have renamed.
-    Placed { path: PathBuf },
+    Placed {
+        path: PathBuf,
+    },
     /// The last item done was deleted outright, not sent to the Recycle Bin.
-    Destroyed { path: PathBuf },
+    Destroyed {
+        path: PathBuf,
+    },
     /// The last item done is no longer where it was: moved, renamed or deleted. A copy's
     /// source stays, and a new folder was nowhere before.
-    Left { path: PathBuf },
+    Left {
+        path: PathBuf,
+    },
     /// Handed to the shell, which writes it out on its own and tells nothing back: where it goes by the
     /// name it was given, which a name clash may change.
-    Handed { path: PathBuf },
+    Handed {
+        path: PathBuf,
+    },
 }
 
 /// What an operation the user stopped fails with.
@@ -141,7 +158,8 @@ fn collapse(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
         .iter()
         .map(|p| {
             let path = std::path::absolute(absolute(p)?).map_err(|e| e.to_string())?;
-            let separated: Vec<u16> = path.as_os_str().encode_wide().map(|c| if c == u16::from(b'/') { u16::from(b'\\') } else { c }).collect();
+            let separated: Vec<u16> =
+                path.as_os_str().encode_wide().map(|c| if c == u16::from(b'/') { u16::from(b'\\') } else { c }).collect();
             Ok(path_key(Path::new(&OsString::from_wide(&separated))))
         })
         .collect::<Result<Vec<OsString>, String>>()?;
@@ -270,8 +288,7 @@ pub fn run(request: Request, owner: Owner, report: impl FnMut(Event) + Send + 's
     }
     let tally = Arc::new(Tally::default());
     let leaves = matches!(prepared.operation, Operation::Move { .. } | Operation::Recycle | Operation::Delete | Operation::Rename { .. });
-    let result =
-        shell::operate(&prepared.operation, &prepared.paths, prepared.rename, owner, reporter(leaves, tally.clone(), report));
+    let result = shell::operate(&prepared.operation, &prepared.paths, prepared.rename, owner, reporter(leaves, tally.clone(), report));
     let failed = tally.failed.load(Ordering::Relaxed);
     // Never empty a replaced clipboard, or one whose cut did not all go.
     if let Some(sequence) = prepared.cut
@@ -339,9 +356,7 @@ struct Tally {
 fn reporter(leaves: bool, tally: Arc<Tally>, mut report: impl FnMut(Event) + Send + 'static) -> impl FnMut(Item) + 'static {
     move |item| {
         let left = match &item {
-            Item::Done { path, result } if leaves && result.is_ok() && *result != PENDING && *result != USER_IGNORED => {
-                Some(path.clone())
-            }
+            Item::Done { path, result } if leaves && result.is_ok() && *result != PENDING && *result != USER_IGNORED => Some(path.clone()),
             _ => None,
         };
         let event = match item {
@@ -432,9 +447,8 @@ mod tests {
         std::fs::write(&x, "").unwrap();
         std::fs::write(&y, "").unwrap();
         let p = |p: &Path| p.to_owned();
-        let paste = |paths: Vec<PathBuf>, cut: bool, folder: &Path| {
-            prepare(request(Kind::Paste, vec![], folder, ""), files(paths, cut)).unwrap()
-        };
+        let paste =
+            |paths: Vec<PathBuf>, cut: bool, folder: &Path| prepare(request(Kind::Paste, vec![], folder, ""), files(paths, cut)).unwrap();
         assert!(paste(vec![p(&x)], false, &a).rename);
         // A copy from elsewhere among them still asks at a clash.
         assert!(!paste(vec![p(&x), p(&y)], false, &a).rename);
@@ -477,7 +491,20 @@ mod tests {
             // Not yet a problem while it is typed: "CON" passes through on the way to "CONTRACT".
             assert_eq!(name_problem(name, false), None, "{name}");
         }
-        for name in ["con.txt", "nul.txt", "NUL.tar.gz", "COM1.txt", "COM¹.txt", "LPT³.txt", "CONIN$.txt", "CON .txt", "COM0", "LPT0", "COM10", "CLOCK$"] {
+        for name in [
+            "con.txt",
+            "nul.txt",
+            "NUL.tar.gz",
+            "COM1.txt",
+            "COM¹.txt",
+            "LPT³.txt",
+            "CONIN$.txt",
+            "CON .txt",
+            "COM0",
+            "LPT0",
+            "COM10",
+            "CLOCK$",
+        ] {
             assert_eq!(name_problem(name, true), None, "{name}");
         }
         // Ending in a dot or a space, the shell would trim it to the device's name: refused as such.

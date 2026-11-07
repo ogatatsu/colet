@@ -11,7 +11,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::settings::{self, File, LoadError, order, paths};
 
-pub const SORTS: File = File { stem: "sort", what: "カラムの並び順", file: "カラムの並び順のファイル", fallback: "既定の並び順" };
+pub const SORTS: File =
+    File { stem: "sort", what: "カラムの並び順", file: "カラムの並び順のファイル", fallback: "既定の並び順" };
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Sorts {

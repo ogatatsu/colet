@@ -2,9 +2,15 @@
 //! mouse and the keys pick alike: ↑↓ move, Enter picks, Esc closes, and the keys go back to where they were.
 use std::path::PathBuf;
 
-use colet_core::{entry::{Sort, direction_label}, shell::IconSource};
+use colet_core::{
+    entry::{Sort, direction_label},
+    shell::IconSource,
+};
 use gpui_kit::base::input::{self, InputState};
-use gpui_kit::component::{ActiveTheme, menu::{PopupMenu, PopupMenuItem}};
+use gpui_kit::component::{
+    ActiveTheme,
+    menu::{PopupMenu, PopupMenuItem},
+};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -36,7 +42,10 @@ pub enum Command {
     Favorite(std::path::PathBuf),
     /// What is picked, sent to the item of Windows' Send To at `target`: moved when `shift` is held as it
     /// is picked.
-    SendTo { target: std::path::PathBuf, shift: bool },
+    SendTo {
+        target: std::path::PathBuf,
+        shift: bool,
+    },
     /// A row of home, pinned or put back.
     Pin(std::path::PathBuf),
     Windows,
@@ -116,13 +125,31 @@ pub struct Line {
     pub sub: Option<Vec<Line>>,
 }
 
-fn line(id: &'static str, glyph: &'static str, text: &'static str, hint: Option<&'static str>, off: Option<&'static str>, command: Command) -> Line {
+fn line(
+    id: &'static str,
+    glyph: &'static str,
+    text: &'static str,
+    hint: Option<&'static str>,
+    off: Option<&'static str>,
+    command: Command,
+) -> Line {
     Line { id: id.into(), glyph: Some(glyph), picture: None, text: text.into(), hint, off, command, group: false, chosen: false, sub: None }
 }
 
 /// A line with no glyph, off without a word unless `on`.
 fn plain(id: &'static str, text: &'static str, hint: &'static str, on: bool, command: Command) -> Line {
-    Line { id: id.into(), glyph: None, picture: None, text: text.into(), hint: Some(hint), off: (!on).then_some(""), command, group: false, chosen: false, sub: None }
+    Line {
+        id: id.into(),
+        glyph: None,
+        picture: None,
+        text: text.into(),
+        hint: Some(hint),
+        off: (!on).then_some(""),
+        command,
+        group: false,
+        chosen: false,
+        sub: None,
+    }
 }
 
 /// A line to choose, checked when it is the one in use.
@@ -285,8 +312,7 @@ impl Colet {
         if self.sort_open() || column.is_some() {
             let target = column.map(|c| c.id);
             let sort = column.map_or(self.settings.sort, |c| self.order_of(c));
-            let mut lines: Vec<Line> =
-                Sort::ALL.map(|by| choice(by.label(), by.label(), Command::Sort(target, by), by == sort.by)).into();
+            let mut lines: Vec<Line> = Sort::ALL.map(|by| choice(by.label(), by.label(), Command::Sort(target, by), by == sort.by)).into();
             lines.extend([false, true].map(|descending| {
                 let label = direction_label(descending);
                 choice(label, label, Command::Direction(target, descending), descending == sort.descending)
@@ -317,7 +343,10 @@ impl Colet {
                 plain("tab-close-others", "他のタブを閉じる", "", count > 1, Command::CloseOtherTabs(tab)),
                 plain("tab-close-right", "右のタブを閉じる", "", at + 1 < count, Command::CloseTabsRight(tab)),
                 line("tab-duplicate", "copy", "複製", None, None, Command::DuplicateTab(tab)).grouped(),
-                Line { off: (!reopen).then_some(""), ..line("tab-reopen", "rotate-ccw", "閉じたタブを開き直す", Some("Ctrl+Shift+T"), None, Command::ReopenTab) },
+                Line {
+                    off: (!reopen).then_some(""),
+                    ..line("tab-reopen", "rotate-ccw", "閉じたタブを開き直す", Some("Ctrl+Shift+T"), None, Command::ReopenTab)
+                },
             ];
         }
         if self.menu().is_none() {
@@ -341,11 +370,22 @@ impl Colet {
         };
         // From empty space, the folder column's own folder, narrowed as it is.
         let in_tab = match (entries.as_slice(), self.folder_here().filter(|_| !some)) {
-            ([entry], _) => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(entry.path.clone())),
-            (_, Some(folder)) => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(folder)),
+            ([entry], _) => {
+                line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(entry.path.clone()))
+            }
+            (_, Some(folder)) => {
+                line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(folder))
+            }
             _ => {
                 let off = if some { ONE_ITEM } else { NEEDS_FOLDER };
-                line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), Some(off), Command::OpenInTab(Default::default()))
+                line(
+                    "menu-open-tab",
+                    "app-window",
+                    "新しいタブで開く",
+                    Some("Ctrl+Enter"),
+                    Some(off),
+                    Command::OpenInTab(Default::default()),
+                )
             }
         };
         // Each item of Windows' Send To, by the shell's icon for it.
@@ -446,7 +486,9 @@ impl Colet {
         }
         // A tab's: the menu goes first, as it holds the tabs where they are.
         if let Some(tab) = match &command {
-            Command::CloseTab(tab) | Command::CloseOtherTabs(tab) | Command::CloseTabsRight(tab) | Command::DuplicateTab(tab) => Some(Some(*tab)),
+            Command::CloseTab(tab) | Command::CloseOtherTabs(tab) | Command::CloseTabsRight(tab) | Command::DuplicateTab(tab) => {
+                Some(Some(*tab))
+            }
             Command::ReopenTab => Some(None),
             _ => None,
         } {
@@ -505,7 +547,11 @@ impl Colet {
             Command::SearchFilter(name) => self.choose_filter(name, cx),
             Command::EditFilters => self.open_filters(window, cx),
             Command::Edit(_) => unreachable!("a field's edit is done above"),
-            Command::CloseTab(_) | Command::CloseOtherTabs(_) | Command::CloseTabsRight(_) | Command::DuplicateTab(_) | Command::ReopenTab => {
+            Command::CloseTab(_)
+            | Command::CloseOtherTabs(_)
+            | Command::CloseTabsRight(_)
+            | Command::DuplicateTab(_)
+            | Command::ReopenTab => {
                 unreachable!("a tab's is done above")
             }
         }
@@ -642,7 +688,9 @@ impl Colet {
                     .gap_4()
                     .child(div().flex_1().flex().items_center().gap_2().children(picture).child(text.clone()))
                     .when_some(hint, |d, key| d.child(div().text_xs().text_color(cx.theme().muted_foreground).child(key)))
-                    .when(chevron, |d| d.child(svg().path("icons/chevron-right.svg").size(px(12.)).flex_none().text_color(cx.theme().muted_foreground)))
+                    .when(chevron, |d| {
+                        d.child(svg().path("icons/chevron-right.svg").size(px(12.)).flex_none().text_color(cx.theme().muted_foreground))
+                    })
             })
             .when_some(glyph, |item, glyph| item.icon(crate::view::glyph(glyph)))
             .disabled(off.is_some())

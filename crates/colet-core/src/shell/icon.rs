@@ -1,13 +1,10 @@
 use std::{ffi::c_void, mem, path::PathBuf};
 
 use windows::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits,
-    GetObjectW, HGDIOBJ, ReleaseDC,
+    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits, GetObjectW, HGDIOBJ, ReleaseDC,
 };
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
-use windows::Win32::UI::Shell::{
-    SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGetFileInfoW,
-};
+use windows::Win32::UI::Shell::{SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGetFileInfoW};
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
 
 use super::{Apartment, Wide};
@@ -45,9 +42,7 @@ pub fn icon(source: &IconSource) -> Option<Icon> {
         flags |= SHGFI_USEFILEATTRIBUTES;
     }
     let attributes = if directory { FILE_ATTRIBUTE_DIRECTORY } else { FILE_ATTRIBUTE_NORMAL };
-    let found = unsafe {
-        SHGetFileInfoW(path.get(), attributes, Some(&mut info), mem::size_of::<SHFILEINFOW>() as u32, flags)
-    };
+    let found = unsafe { SHGetFileInfoW(path.get(), attributes, Some(&mut info), mem::size_of::<SHFILEINFOW>() as u32, flags) };
     if found == 0 || info.hIcon.is_invalid() {
         return None;
     }
@@ -96,15 +91,12 @@ unsafe fn read(icon: &ICONINFO) -> Option<Icon> {
     };
     let mut bgra = vec![0u8; count * 4];
     let dc = unsafe { GetDC(None) };
-    let read = unsafe {
-        GetDIBits(dc, icon.hbmColor, 0, height as u32, Some(bgra.as_mut_ptr().cast()), &mut header, DIB_RGB_COLORS)
-    };
+    let read = unsafe { GetDIBits(dc, icon.hbmColor, 0, height as u32, Some(bgra.as_mut_ptr().cast()), &mut header, DIB_RGB_COLORS) };
     if read != 0 && bgra.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0) {
         // Legacy icons carry their transparency in the AND mask instead.
         let mut mask = vec![0u8; count * 4];
-        let masked = unsafe {
-            GetDIBits(dc, icon.hbmMask, 0, height as u32, Some(mask.as_mut_ptr().cast()), &mut header, DIB_RGB_COLORS)
-        } != 0;
+        let masked =
+            unsafe { GetDIBits(dc, icon.hbmMask, 0, height as u32, Some(mask.as_mut_ptr().cast()), &mut header, DIB_RGB_COLORS) } != 0;
         for (pixel, mask) in bgra.as_chunks_mut::<4>().0.iter_mut().zip(mask.as_chunks::<4>().0) {
             pixel[3] = if masked && mask[0] != 0 { 0 } else { 255 };
         }
@@ -119,11 +111,7 @@ mod tests {
 
     #[test]
     fn renders_shell_icons() {
-        for source in [
-            IconSource::Extension(".txt".into()),
-            IconSource::Folder,
-            IconSource::Item("C:\\".into()),
-        ] {
+        for source in [IconSource::Extension(".txt".into()), IconSource::Folder, IconSource::Item("C:\\".into())] {
             let icon = icon(&source).unwrap_or_else(|| panic!("{source:?}"));
             assert!(icon.width > 0 && icon.height > 0, "{source:?}");
             assert_eq!(icon.bgra.len(), (icon.width * icon.height * 4) as usize);

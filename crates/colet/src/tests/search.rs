@@ -112,7 +112,8 @@ fn narrows_the_results_by_name_through_everything_keeping_the_one_picked(cx: &mu
     settle(cx);
     let narrowed: Vec<String> = fake.queries().into_iter().filter(|q| q.contains("nopath:")).collect();
     assert_eq!(narrowed, ["<a> nopath:nowildcards:\"bet\""]);
-    let shown = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
+    let shown =
+        |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
     assert_eq!(shown(&ui, cx), [r"D:\beta.txt", r"D:\alphabet.txt"]);
     // Counted against all the search finds; the one picked, hidden, stays picked with its folder open.
     let header = ui.read(cx, |v| (v.state.columns[1].total, v.state.columns[1].filter.as_ref().map(|f| f.whole)));
@@ -190,7 +191,8 @@ fn chooses_a_filter_from_the_keys_and_hands_them_back_to_the_field(cx: &mut Test
 fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\cat.jpg")]));
     let ui = open(cx, fake.clone());
-    let listing = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| matches!(v.dialog, Some(Dialog::Filters { edit: None, deleting: None })));
+    let listing =
+        |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| matches!(v.dialog, Some(Dialog::Filters { edit: None, deleting: None })));
     ui.click(cx, "search-filter");
     ui.click(cx, "edit-filters");
     assert!(listing(&ui, cx));
