@@ -80,7 +80,12 @@ pub fn places(drives: Vec<Entry>, indexed: Vec<PathBuf>) -> Vec<Entry> {
         })
         .filter(|path| seen.insert(path_key(path)))
         .collect();
-    others.sort_by_cached_key(|path| path_key(path));
+    // In lower case, which puts a server (`\\`) before a drive's letters.
+    others.sort_by_cached_key(|path| {
+        let mut key = path_key(path);
+        key.make_ascii_lowercase();
+        key
+    });
     drives.into_iter().chain(others.into_iter().map(|path| Entry::folder(&path, &shown(&path)))).collect()
 }
 

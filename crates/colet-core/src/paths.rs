@@ -70,24 +70,25 @@ pub fn parent_folder(path: &Path) -> Option<&Path> {
     trimmed.iter().rposition(|&b| b == b'\\').map(|at| path_of(&trimmed[..at]))
 }
 
-/// A path compared without case or the drive root's trailing backslash. Letters are lowered as text;
-/// what is not text is kept as it is, so two paths that differ there never share a key.
+/// A path compared without case or the drive root's trailing backslash, as Windows compares names: each
+/// unit raised by the system's own uppercase table, one for one, so `K` and the Kelvin sign `K`, which
+/// Windows keeps apart, stay apart here. A unit with no case, an unpaired surrogate among them, is kept.
 pub fn path_key(path: &Path) -> OsString {
-    let trimmed = path_of(trim_backslashes(bytes(path)));
-    let mut key = Vec::new();
-    let mut text = String::new();
-    for unit in char::decode_utf16(trimmed.as_os_str().encode_wide()) {
-        match unit {
-            Ok(c) => text.push(c),
-            Err(unpaired) => {
-                key.extend(text.to_lowercase().encode_utf16());
-                text.clear();
-                key.push(unpaired.unpaired_surrogate());
-            }
-        }
+    let units: Vec<u16> = path_of(trim_backslashes(bytes(path))).as_os_str().encode_wide().collect();
+    OsString::from_wide(&upper(units))
+}
+
+/// `units` in upper case by the file system's rules, which map each UTF-16 unit to one unit.
+fn upper(units: Vec<u16>) -> Vec<u16> {
+    use windows::Win32::Globalization::{LCMAP_UPPERCASE, LCMapStringEx, LOCALE_NAME_INVARIANT};
+    use windows::Win32::Foundation::LPARAM;
+    if units.is_empty() {
+        return units;
     }
-    key.extend(text.to_lowercase().encode_utf16());
-    OsString::from_wide(&key)
+    let mut raised = vec![0u16; units.len()];
+    // Without LCMAP_LINGUISTIC_CASING the file system's casing is used, which keeps the length.
+    let written = unsafe { LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE, &units, Some(&mut raised), None, None, LPARAM(0)) };
+    if written as usize == units.len() { raised } else { units }
 }
 
 /// `name` inside `parent`; a drive root already ends in a backslash.
@@ -298,6 +299,9 @@ pub(crate) mod tests {
     #[test]
     fn compares_without_case_or_trailing_backslash() {
         assert_eq!(path_key(p(r"D:\Work\")), path_key(p(r"d:\work")));
+        assert_eq!(path_key(p(r"D:\Ä\ω")), path_key(p(r"d:\ä\Ω")));
+        // Windows keeps the Kelvin sign apart from K, though Unicode lowers both to k.
+        assert_ne!(path_key(p("D:\\K.txt")), path_key(p("D:\\\u{212A}.txt")));
         assert_eq!(child(p(r"D:\"), "a"), p(r"D:\a"));
         assert_eq!(child(p(r"D:\a"), "b"), p(r"D:\a\b"));
         assert_eq!(folder_name(p(r"D:\a\b")), "b");
@@ -324,7 +328,7 @@ pub(crate) mod tests {
         assert_eq!(shown(&odd), shown(&real));
         assert_ne!(odd, real);
         assert_ne!(path_key(&odd), path_key(&real));
-        // Still lowered around it.
+        // Still raised around it.
         assert_eq!(path_key(&odd), path_key(&unpaired(p(r"d:\"), "aB")));
         let inner = child(&odd, "c");
         assert_eq!(parent_folder(&inner), Some(odd.as_path()));
