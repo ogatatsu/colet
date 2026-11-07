@@ -1,16 +1,43 @@
 //! What a folder holds, and the drives home lists.
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW};
+use windows::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_DIRECTORY, FIND_FIRST_EX_FLAGS, FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, GetDriveTypeW,
+    GetLogicalDrives, GetVolumeInformationW, WIN32_FIND_DATAW,
+};
 
 use crate::{
     entry::{Entry, Hiding, Marks, Order, hiding, sort_entries},
-    paths::shown,
+    paths::{ancestors, child, from_wide, shown},
     wide::Wide,
 };
+
+/// `path` as it is named on disk, each name in its own case, and whether it is a folder: a junction or
+/// link to one is, as listed, and is not followed. `None` when any part of the way is not there or cannot
+/// be reached. It touches the disk, once for each folder on the way.
+pub fn locate(path: &Path) -> Option<(PathBuf, bool)> {
+    let chain = ancestors(path);
+    let mut found = chain.first()?.clone();
+    if !std::fs::metadata(&found).ok()?.is_dir() {
+        return None;
+    }
+    let mut directory = true;
+    for part in &chain[1..] {
+        let mut data = WIN32_FIND_DATAW::default();
+        let name = Wide::new(part);
+        let handle = unsafe {
+            FindFirstFileExW(name.get(), FindExInfoBasic, &mut data as *mut _ as *mut _, FindExSearchNameMatch, None, FIND_FIRST_EX_FLAGS(0))
+        }
+        .ok()?;
+        unsafe { FindClose(handle) }.ok()?;
+        found = child(&found, from_wide(&data.cFileName));
+        directory = data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0;
+    }
+    Some((found, directory))
+}
 
 /// What a listing that a newer one, or its column's removal, made unnecessary fails with.
 pub const STALE: &str = "古いフォルダー要求です";
@@ -184,6 +211,28 @@ mod tests {
         let mut read: Vec<String> = entries.iter().map(|e| std::fs::read_to_string(&e.path).unwrap()).collect();
         read.sort();
         assert_eq!(read, ["odd", "real"]);
+    }
+
+    #[test]
+    fn locates_a_path_in_the_case_it_is_named_on_disk_without_following_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("Mixed")).unwrap();
+        std::fs::write(dir.path().join(r"Mixed\Inner.TXT"), "").unwrap();
+        let (found, directory) = locate(&dir.path().join(r"mixed\inner.txt")).unwrap();
+        assert!(found.to_string_lossy().ends_with(r"\Mixed\Inner.TXT"), "{found:?}");
+        assert!(!directory);
+        assert_eq!(crate::paths::path_key(&found), crate::paths::path_key(&dir.path().join(r"Mixed\Inner.TXT")));
+        let (found, directory) = locate(&dir.path().join("MIXED")).unwrap();
+        assert!(found.ends_with("Mixed") && directory);
+        assert_eq!(locate(&dir.path().join(r"Mixed\gone")), None);
+        assert_eq!(locate(&dir.path().join(r"gone\Inner.TXT")), None);
+        assert_eq!(locate(Path::new(r"C:\")), Some((PathBuf::from(r"C:\"), true)));
+        let link = dir.path().join("link");
+        let made = std::process::Command::new("cmd").args(["/C".as_ref(), "mklink".as_ref(), "/J".as_ref(), link.as_os_str(), dir.path().join("Mixed").as_os_str()]).output().unwrap();
+        assert!(made.status.success());
+        let (found, directory) = locate(&dir.path().join(r"LINK\inner.txt")).unwrap();
+        assert!(found.to_string_lossy().ends_with(r"\link\Inner.TXT"), "{found:?}");
+        assert!(!directory);
     }
 
     #[test]

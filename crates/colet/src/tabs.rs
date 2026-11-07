@@ -433,6 +433,21 @@ impl Colet {
         cx.notify();
     }
 
+    /// Opens `path` in a tab of its own right of this one, in front: a folder with its contents worked in,
+    /// a file where it lives, its row with the keys. The folders above fold away, as a search result opens.
+    pub fn open_path_in_tab(&mut self, path: &Path, directory: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tabs_held() {
+            return;
+        }
+        let mut state = State::opening(path, directory);
+        if directory {
+            state.set_active(state.columns.len() - 1);
+        }
+        let tab = self.tabs.tab(Some(Parked::new(state, None, Keys::Column)));
+        self.tabs.list.insert(self.tabs.current + 1, tab);
+        self.switch_tab(self.tabs.current + 1, window, cx);
+    }
+
     /// Closes the tab at `index`; the one right of it comes to the front in its place, or the one left of
     /// it at the end. The last one closes the window.
     pub fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {

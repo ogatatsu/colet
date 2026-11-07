@@ -14,7 +14,7 @@ use colet_core::{
     entry::{Entry, Hiding, Marks, Order, Sort},
     everything::Page,
     operations::{CANCELLED, Event, Kind as Operation, Request},
-    paths::{ancestors, child, folder_name, id_text, parent_folder},
+    paths::{ancestors, child, folder_name, id_text, parent_folder, path_key},
     quick_look::{Error as QuickLookError, Message as QuickLookMessage},
     shell::{Dropped, Owner, SendTarget, clipboard::ClipboardFiles},
     watch::Changes,
@@ -50,6 +50,7 @@ mod menus;
 mod quick_look;
 mod tabs;
 mod hidden;
+mod address;
 
 #[derive(Default)]
 struct Fake {
@@ -304,6 +305,16 @@ impl Backend for Fake {
             Some(_) => PathKind::File,
             None => PathKind::Gone,
         }
+    }
+
+    /// Without case, as the disk finds it: a drive or a folder listed, or an item in one.
+    fn locate(&self, path: &Path) -> Option<(PathBuf, bool)> {
+        let key = path_key(path);
+        let folders = self.folders.lock().unwrap();
+        if let Some(folder) = folders.keys().find(|p| path_key(Path::new(p)) == key) {
+            return Some((PathBuf::from(folder), true));
+        }
+        folders.values().flatten().find(|e| path_key(&e.path) == key).map(|e| (e.path.clone(), e.directory))
     }
 
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, _: (i32, i32), _: Owner) -> Result<(), String> {

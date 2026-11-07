@@ -1638,11 +1638,13 @@ impl Colet {
         let crumbs = self.trail();
         let widths = self.crumb_widths(&crumbs, window);
         // The room the bar was last drawn with; before the first frame, what the window leaves it.
-        let room = match self.crumbs.row.get() {
+        let row_width = match self.crumbs.row.get() {
             Some(row) => f32::from(row.size.width),
-            None => f32::from(window.viewport_size().width) - 26. - 16. - file_actions.0,
+            None => f32::from(window.viewport_size().width) - 26. - 16. - 14. - file_actions.0,
         };
-        self.crumbs.room.set(room);
+        self.crumbs.room.set(row_width);
+        // The crumbs leave a strip to press to type a path, however long the trail.
+        let room = row_width - crate::crumbs::TYPING_ROOM;
         let folded = crate::crumbs::folded(&widths, room);
         let last = crumbs.len().saturating_sub(1);
         self.crumbs.bounds.borrow_mut().retain(|index, _| crumbs[folded..].iter().any(|c| c.column == *index));
@@ -1653,28 +1655,17 @@ impl Colet {
         let menu_current = crumbs[..folded].iter().any(|c| c.column == self.state.active);
         self.crumbs.folded = crumbs[..folded].to_vec();
         let fold = (folded > 0).then(|| self.crumb_fold(menu_current, cx));
-        div()
-            .h(px(36.))
-            .flex_none()
-            .pl(px(14.))
-            .pr_3()
+        let editing = self.address_open;
+        let trail = div()
             .flex()
+            .flex_1()
+            .h_full()
+            .relative()
             .items_center()
-            .gap_4()
-            .border_b_1()
-            .border_color(p.border)
-            .text_size(px(12.))
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .h_full()
-                    .relative()
-                    .items_center()
-                    .gap(px(2.))
-                    .min_w_0()
-                    .overflow_hidden()
-                    .child({
+            .gap(px(2.))
+            .min_w_0()
+            .overflow_hidden()
+            .child({
                         let (row, room) = (self.crumbs.row.clone(), self.crumbs.room.clone());
                         canvas(
                             move |bounds, window, _| {
@@ -1693,7 +1684,57 @@ impl Colet {
                     .children(shown.into_iter().enumerate().map(|(k, crumb)| {
                         let max_width = (folded + k == last).then_some(room / 2.);
                         self.crumb(crumb, k > 0 || folded > 0, max_width, cx)
-                    })),
+                    }))
+            // The room past the crumbs: a press there turns the trail into the field.
+            .child(
+                div()
+                    .id("address-room")
+                    .flex_1()
+                    .min_w(px(crate::crumbs::TYPING_ROOM))
+                    .h_full()
+                    .cursor_text()
+                    .on_click(cx.listener(|this, _, window, cx| this.open_address(window, cx)))
+                    .test_support(),
+            );
+        let field = div()
+            .flex_1()
+            .min_w_0()
+            .px(px(6.))
+            .key_context(ADDRESS)
+            .capture_any_mouse_down(Self::right_press_menu(&self.address, cx))
+            .on_action(cx.listener(|this, _: &input::Escape, window, cx| this.leave_address(window, cx)))
+            .on_action(cx.listener(|this, _: &GoToAddressInNewTab, window, cx| this.go_to_address(true, window, cx)))
+            .child(Input::new(&self.address));
+        div()
+            .h(px(40.))
+            .flex_none()
+            .pl(px(10.))
+            .pr_3()
+            .flex()
+            .items_center()
+            .gap_4()
+            .border_b_1()
+            .border_color(p.border)
+            .text_size(px(12.))
+            .child(
+                // Ringed as the search field is while it takes the keys; the ring lies over the gaps around.
+                frame(p, editing).flex_1().min_w_0().m(px(-3.)).child(
+                    div()
+                        .id("address")
+                        .w_full()
+                        .h(px(30.))
+                        .pl(px(4.))
+                        .pr(px(2.))
+                        .flex()
+                        .items_center()
+                        .bg(p.surface)
+                        .border_1()
+                        .border_color(p.border_strong)
+                        .rounded(px(6.))
+                        .when(editing, |d| d.child(field))
+                        .when(!editing, |d| d.child(trail))
+                        .test_support(),
+                ),
             )
             .child(file_actions.1)
             .into_any_element()
@@ -2150,6 +2191,7 @@ impl Colet {
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.search_focused = self.has_keys(&self.search, window, cx);
+        self.follow_address(window, cx);
         // A drag in home let go of anywhere but its list.
         if self.home_drag.carried.is_some() && !cx.has_active_drag() {
             self.end_home_drag();
@@ -2179,6 +2221,7 @@ impl Render for Colet {
                     input.select_all(window, cx);
                 });
             }))
+            .on_action(cx.listener(|this, _: &FocusAddress, window, cx| this.open_address(window, cx)))
             .on_action(cx.listener(|this, _: &OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| {
                 if this.dialog.is_none() {

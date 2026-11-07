@@ -71,6 +71,9 @@ pub trait Backend: Send + Sync + 'static {
     /// Whether `path` is a folder, a file, or gone. It touches the disk, which a share can keep waiting for
     /// seconds: never ask it on the UI thread.
     fn path_kind(&self, path: &Path) -> PathKind;
+    /// `path` as it is named on disk, and whether it is a folder; `None` when it cannot be reached. It
+    /// touches the disk: never ask it on the UI thread.
+    fn locate(&self, path: &Path) -> Option<(PathBuf, bool)>;
     /// The Windows context menu at screen point `at`, for `paths` or the folder `background`.
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String>;
     /// What Windows' Send To offers, from its folder; none while it cannot be read. It touches the disk.
@@ -200,6 +203,10 @@ impl Backend for Live {
             Ok(_) => PathKind::File,
             Err(_) => PathKind::Gone,
         }
+    }
+
+    fn locate(&self, path: &Path) -> Option<(PathBuf, bool)> {
+        folders::locate(path)
     }
 
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String> {

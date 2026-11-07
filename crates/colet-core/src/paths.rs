@@ -113,6 +113,71 @@ pub fn moved(path: &Path, from: &Path, to: &Path) -> Option<PathBuf> {
     Some(moved.into())
 }
 
+/// What a path typed or pasted in the address bar names: an absolute path, on a drive (`D:\work`, or
+/// `D:` alone for its root) or a share (`\\server\share\dir`). The quotes Explorer's "Copy as path" puts
+/// round it and the spaces about it go, `/` stands for `\`, and each `%NAME%` that `var` knows is put
+/// in; `.` and `..` are walked. `None` for anything else, a relative path among them, or a name Windows
+/// never allows.
+pub fn address(text: &str, var: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let mut text = text.trim();
+    if let Some(inner) = text.strip_prefix('"').and_then(|t| t.strip_suffix('"')) {
+        text = inner.trim();
+    }
+    let text = expand(text, var).replace('/', "\\");
+    let (root, rest) = if let Some(unc) = text.strip_prefix(r"\\") {
+        let mut parts = unc.splitn(3, '\\');
+        let (server, share) = (parts.next()?, parts.next()?);
+        if server.is_empty() || share.is_empty() || matches!(server, "?" | ".") {
+            return None;
+        }
+        (format!(r"\\{server}\{share}"), parts.next().unwrap_or(""))
+    } else {
+        let mut chars = text.chars();
+        let (letter, colon) = (chars.next()?, chars.next()?);
+        let rest = chars.as_str();
+        if !letter.is_ascii_alphabetic() || colon != ':' || !(rest.is_empty() || rest.starts_with('\\')) {
+            return None;
+        }
+        (format!("{}:\\", letter.to_ascii_uppercase()), rest)
+    };
+    let mut names: Vec<&str> = Vec::new();
+    for name in rest.split('\\') {
+        match name {
+            "" | "." => {}
+            ".." => {
+                names.pop();
+            }
+            name if name.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') || c < ' ') => return None,
+            name => names.push(name),
+        }
+    }
+    Some(names.into_iter().fold(PathBuf::from(root), |path, name| child(&path, name)))
+}
+
+/// `text` with each `%NAME%` that `var` knows put in; the rest stays as typed.
+fn expand(text: &str, var: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('%') else { break };
+        out.push_str(&rest[..start]);
+        match var(&after[..end]).filter(|_| end > 0) {
+            Some(value) => {
+                out.push_str(&value);
+                rest = &after[end + 1..];
+            }
+            // Its closing % may open the next one.
+            None => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// What is shown of a path or a name: a part that is not text shows as U+FFFD. Never to be read back as
 /// the path: two items can show alike.
 pub fn shown(text: impl AsRef<OsStr>) -> String {
@@ -137,6 +202,39 @@ pub fn from_wide(wide: &[u16]) -> PathBuf {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    fn typed(text: &str) -> Option<String> {
+        let var = |name: &str| (name == "USERPROFILE").then(|| r"C:\Users\me".to_owned());
+        address(text, var).map(|p| p.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn an_address_names_a_drive_or_a_share_however_it_is_written() {
+        assert_eq!(typed(r"D:\work\a.txt").as_deref(), Some(r"D:\work\a.txt"));
+        assert_eq!(typed("d:").as_deref(), Some(r"D:\"));
+        assert_eq!(typed(r"d:\").as_deref(), Some(r"D:\"));
+        assert_eq!(typed("  \"D:/work/sub/\"  ").as_deref(), Some(r"D:\work\sub"));
+        assert_eq!(typed(r"D:\\work\.\old\..\new\").as_deref(), Some(r"D:\work\new"));
+        assert_eq!(typed(r"D:\..\work").as_deref(), Some(r"D:\work"));
+        assert_eq!(typed(r"\\server\share").as_deref(), Some(r"\\server\share"));
+        assert_eq!(typed("//server/share/dir/").as_deref(), Some(r"\\server\share\dir"));
+    }
+
+    #[test]
+    fn an_address_takes_in_the_variables_it_knows() {
+        assert_eq!(typed(r"%USERPROFILE%\Downloads").as_deref(), Some(r"C:\Users\me\Downloads"));
+        assert_eq!(typed(r"%NOWHERE%\Downloads"), None);
+        assert_eq!(typed(r"D:\a%b\c").as_deref(), Some(r"D:\a%b\c"));
+        assert_eq!(typed(r"D:\%%\c").as_deref(), Some(r"D:\%%\c"));
+        assert_eq!(typed(r"D:\50%\%USERPROFILE%x").as_deref(), None);
+    }
+
+    #[test]
+    fn an_address_never_names_a_relative_or_impossible_path() {
+        for text in ["", "work", r"..\work", r"\work", "D:work", r"\\server", r"\\?\D:\work", r"\\.\pipe\x", r"D:\a*b", r"D:\a?", r"1:\x"] {
+            assert_eq!(typed(text), None, "{text}");
+        }
+    }
 
     fn p(text: &str) -> &Path {
         Path::new(text)

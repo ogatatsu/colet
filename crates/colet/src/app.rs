@@ -103,6 +103,8 @@ actions!(
         PreviousTab,
         ReopenTab,
         OpenInNewTab,
+        FocusAddress,
+        GoToAddressInNewTab,
     ]
 );
 
@@ -113,6 +115,9 @@ pub const SORT: &str = "Sort";
 
 /// Where a text field takes the keys: GPUI Base's own context for its fields.
 pub const TEXT: &str = "Input";
+
+/// The address bar's field, where Alt+Enter goes to the path typed in a new tab.
+pub const ADDRESS: &str = "Address";
 
 /// Where the column keys apply: home and the columns beside it.
 pub const COLUMNS: &str = "Columns";
@@ -131,7 +136,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-left", GoBack, Some(COLUMNS)),
         KeyBinding::new("alt-right", GoForward, Some(COLUMNS)),
         KeyBinding::new("ctrl-f", FocusSearch, None),
-        KeyBinding::new("ctrl-l", FocusSearch, None),
+        KeyBinding::new("ctrl-l", FocusAddress, None),
+        KeyBinding::new("alt-enter", GoToAddressInNewTab, Some(ADDRESS)),
         KeyBinding::new("ctrl-shift-f", OpenSearchFilters, None),
         KeyBinding::new("ctrl-u", Unfold, None),
         KeyBinding::new("ctrl-0", FocusHome, None),
@@ -385,6 +391,12 @@ pub struct Colet {
     pub search: Entity<InputState>,
     /// The search field has the keys: no column is marked as worked in.
     pub search_focused: bool,
+    /// The address bar's field, shown in place of the trail while `address_open`.
+    pub address: Entity<InputState>,
+    pub address_open: bool,
+    /// Counts the paths typed and the times the field opens or closes: an answer about a path is taken
+    /// only while nothing has happened since it was asked.
+    pub(crate) address_asked: u64,
     /// The field of each column, narrowing it to some names.
     pub filters: HashMap<ColumnId, FilterField>,
     pub home_focus: FocusHandle,
@@ -458,8 +470,10 @@ impl Colet {
         cx: &mut Context<Self>,
     ) -> Self {
         let (search, typed) = Self::search_field(window, cx);
+        let (address, address_typed) = Self::address_field(window, cx);
         let subscriptions = vec![
             typed,
+            address_typed,
             // Followed only while the theme follows Windows.
             cx.observe_window_appearance(window, |this, window, cx| this.apply_theme(window, cx)),
             cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
@@ -490,6 +504,9 @@ impl Colet {
             palette: Palette::for_window(window, settings.theme),
             search,
             search_focused: false,
+            address,
+            address_open: false,
+            address_asked: 0,
             filters: HashMap::new(),
             home_focus: cx.focus_handle().tab_stop(true),
             columns_focus: cx.focus_handle().tab_stop(true),
@@ -536,6 +553,7 @@ impl Colet {
             this.notify(problem, Tone::Error, cx);
         }
         this.palette.style_input(&this.search, cx);
+        this.palette.style_input(&this.address, cx);
         this.restore_tabs(window, cx);
         // The window's dialog follows `dialog` as each change to Colet settles.
         let colet = cx.entity();
@@ -597,7 +615,7 @@ impl Colet {
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
         self.palette = Palette::for_window(window, self.settings.theme);
         crate::theme::apply(window, self.settings.theme, cx);
-        let mut inputs = vec![self.search.clone()];
+        let mut inputs = vec![self.search.clone(), self.address.clone()];
         inputs.extend(self.filters.values().map(|field| field.input.clone()));
         inputs.extend(self.dialog.iter().flat_map(Dialog::fields));
         for input in &inputs {

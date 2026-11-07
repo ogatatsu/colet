@@ -36,6 +36,8 @@ pub const GAP: f32 = 2.;
 pub const SEPARATOR: f32 = 13. + GAP;
 /// The "…" button.
 pub const MORE: f32 = 24.;
+/// The room the crumbs always leave past them, to press to type a path.
+pub const TYPING_ROOM: f32 = 32.;
 
 /// The leading crumbs to fold, given each crumb's whole width (its separator and gap counted) and the
 /// bar's `room`.
