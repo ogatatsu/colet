@@ -450,6 +450,7 @@ impl Colet {
         let groups = crate::places::home_groups(&self.settings, &entries);
         // Drawn afresh below, for a drag to find its place.
         self.home_drag.rows.borrow_mut().clear();
+        self.home_drag.headings.borrow_mut().clear();
         // The line where a drag would land: above the row it goes before, or below its kind's last.
         let landing = self.home_drag.carried.as_ref().zip(self.home_drag.landing.as_ref()).map(|(d, l)| (d.shelf, l.before.clone()));
         let mut rows = div()
@@ -465,10 +466,13 @@ impl Colet {
             .on_drop(cx.listener(|this, drag: &HomeDrag, _, cx| this.drop_home(drag, cx)))
             .test_support();
         for (k, (title, items)) in groups.into_iter().enumerate() {
+            let headings = self.home_drag.headings.clone();
             rows = rows.child(
                 div()
                     // Set off from the kind above, so the kinds read apart.
                     .when(k > 0, |d| d.mt(px(8.)))
+                    .relative()
+                    .child(canvas(move |bounds, _, _| headings.borrow_mut().push(bounds), |_, _, _, _| {}).absolute().inset_0())
                     .h(px(28.))
                     .px_3()
                     .pb(px(6.))

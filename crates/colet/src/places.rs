@@ -159,18 +159,28 @@ pub struct HomeDragging {
     scrolling: bool,
     /// Where each of home's favorites and saved searches was drawn, for a drag to find its place among them.
     pub rows: HomeRows,
+    /// Where each of home's headings was drawn, top to bottom: a kind reaches from its own to the next.
+    pub headings: Rc<RefCell<Vec<Bounds<Pixels>>>>,
 }
 
 impl HomeDragging {
-    /// Where the drag would land: between two rows of its own kind, by the half of the row it is over;
-    /// nowhere outside them. True when that moved.
+    /// Where the drag would land: between two rows of its own kind, by the half of the row it is over.
+    /// Its kind reaches from its heading to the next kind's, or the list's end: over its heading it goes
+    /// first, below its last row last. Nowhere outside that. True when that moved.
     fn aim(&mut self, settings: &Settings) -> bool {
         let (Some(drag), Some((at, list))) = (&self.carried, self.pointer) else { return false };
         let landing = {
             let rows = self.rows.borrow();
+            let headings = self.headings.borrow();
             let own: Vec<_> = rows.iter().filter(|(path, _)| movable(settings, path) == Some(drag.shelf)).collect();
-            match (own.first(), own.last()) {
-                (Some(first), Some(last)) if list.contains(&at) && at.y >= first.1.top() && at.y < last.1.bottom() => {
+            let reach = own.first().zip(own.last()).map(|(first, last)| {
+                let top = headings.iter().rev().map(|h| h.top()).find(|&top| top <= first.1.top()).unwrap_or(first.1.top());
+                let bottom = headings.iter().map(|h| h.top()).find(|&top| top >= last.1.bottom()).unwrap_or(list.bottom());
+                (top, bottom)
+            });
+            match reach {
+                // Above its first row it lands before it; below its last, after it.
+                Some((top, bottom)) if list.contains(&at) && at.y >= top && at.y < bottom => {
                     let over = own.iter().position(|(_, bounds)| at.y < bounds.bottom()).unwrap_or(own.len() - 1);
                     let (path, bounds) = own[over];
                     let before =

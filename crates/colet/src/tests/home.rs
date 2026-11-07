@@ -259,6 +259,25 @@ fn drags_a_favorite_to_a_new_place_among_the_favorites(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
+fn drags_a_favorite_first_over_its_heading_and_last_below_its_rows(cx: &mut TestAppContext) {
+    let (fake, ui) = ordered_home(cx);
+    // Over the heading above the first favorite, it goes first.
+    let (a, c) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, r"D:\c"));
+    let heading = point(a.center().x, a.top() - px(10.));
+    ui.hold_drag(cx, c.center(), heading);
+    assert_eq!(ui.read(cx, |v| v.home_drag.landing.clone().and_then(|l| l.before)).as_deref(), Some(Path::new(r"D:\a")));
+    ui.let_go(cx, heading);
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\c", r"D:\a", r"D:\b"]);
+    // In the gap below the last, before the saved searches' heading, it goes last.
+    let (c, b) = (ui.home_row(cx, r"D:\c"), ui.home_row(cx, r"D:\b"));
+    let gap = point(b.center().x, b.bottom() + px(4.));
+    ui.hold_drag(cx, c.center(), gap);
+    assert_eq!(ui.read(cx, |v| v.home_drag.landing.clone()), Some(crate::places::Landing { before: None }));
+    ui.let_go(cx, gap);
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
+}
+
+#[gpui_kit::test]
 fn drags_a_saved_search_below_the_last_without_running_it(cx: &mut TestAppContext) {
     let (fake, ui) = ordered_home(cx);
     let (one, two) = (ui.home_row(cx, "search:one"), ui.home_row(cx, "search:two"));
