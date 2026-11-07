@@ -242,6 +242,7 @@ pub struct Reasons {
     pub shell: Option<&'static str>,
     pub copy_path: Option<&'static str>,
     pub send_to: Option<&'static str>,
+    pub properties: Option<&'static str>,
 }
 
 const NEEDS_SELECTION: &str = "項目を選択すると使えます";
@@ -346,6 +347,13 @@ impl Colet {
             copy_path: if none { place } else { None },
             // From several folders too, as a drag from them.
             send_to: item.or(drive.then_some(NO_SEND_DRIVE)).or(self.send_targets.is_empty().then_some(NO_SEND_TARGETS)),
+            // Only looked at: in home and while an operation runs too, and from several folders. With
+            // nothing picked, the folder column's own folder, a server's not.
+            properties: if none {
+                at_server.then_some(NOT_AT_SERVER).or(self.folder_here().is_none().then_some(NEEDS_FOLDER))
+            } else {
+                search.then_some(NOT_FOR_SAVED)
+            },
         }
     }
 
@@ -675,6 +683,24 @@ impl Colet {
             }
             _ => {}
         }
+    }
+
+    /// Windows' properties of what is picked, several together in one dialog; with nothing picked, of the
+    /// folder column's own folder.
+    pub fn show_properties(&mut self, cx: &mut Context<Self>) {
+        // What the menu was opened on, read before it closes: after, the selection would stand in.
+        let (mut picked, refused) = (self.picked(), self.reasons().properties);
+        self.take_menu();
+        if let Some(reason) = refused {
+            self.refuse("プロパティ", reason, cx);
+            return;
+        }
+        if picked.is_empty() {
+            picked.extend(self.folder_here());
+        }
+        let paths: Vec<PathBuf> = picked.iter().map(|p| home_path(p).into_owned()).collect();
+        let (backend, owner) = (self.backend.clone(), self.owner);
+        self.in_background(move || backend.properties(&paths, owner), None, cx);
     }
 
     /// The Windows (Explorer) menu, where this one was opened. Dismisses Colet's menu and returns its

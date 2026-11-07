@@ -30,7 +30,7 @@ use crate::{
 };
 
 /// The keys the preferences list, as the old app's did.
-const SHORTCUTS: [(&str, &str); 28] = [
+const SHORTCUTS: [(&str, &str); 29] = [
     ("↑ ↓", "項目を選択（Shift で範囲選択）"),
     ("← →", "カラムを移動"),
     ("Enter", "開く"),
@@ -57,6 +57,7 @@ const SHORTCUTS: [(&str, &str); 28] = [
     ("F2", "名前を変更（保存した検索は編集）"),
     ("Delete", "ごみ箱へ移動"),
     ("Shift+Delete", "完全に削除"),
+    ("Alt+Enter", "プロパティ"),
     ("F5", "更新"),
     ("文字キー", "カラムを名前で絞り込む（Backspace で 1 文字消す、Esc で解除）"),
 ];
@@ -728,6 +729,11 @@ impl Colet {
             .child(
                 crate::view::keep_focus(action("recycle", "trash", "ごみ箱へ移動", "Delete／Shift+クリックで完全に削除", reasons.delete))
                     .on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))),
+            )
+            .child(div().mx(px(6.)).w(px(1.)).h(px(16.)).bg(p.border))
+            .child(
+                crate::view::keep_focus(action("properties", "info", "プロパティ", "Alt+Enter", reasons.properties))
+                    .on_click(cx.listener(|this, _, _, cx| this.show_properties(cx))),
             );
         row.into_any_element()
     }

@@ -44,6 +44,7 @@ mod hidden;
 mod home;
 mod menus;
 mod navigation;
+mod properties;
 mod quick_look;
 mod scrolling;
 mod search;
@@ -95,6 +96,8 @@ struct Fake {
     unopenable: Mutex<Vec<String>>,
     /// What each Explorer window was asked to show selected.
     revealed: Mutex<Vec<Vec<String>>>,
+    /// What each properties dialog was asked to show.
+    properties: Mutex<Vec<Vec<String>>>,
     menus: Mutex<Vec<(Vec<String>, String)>>,
     /// What Send To offers, and each send: where to, what, and with Shift held or not.
     send_targets: Mutex<Vec<SendTarget>>,
@@ -296,6 +299,11 @@ impl Backend for Fake {
 
     fn reveal(&self, paths: &[PathBuf]) -> Result<(), String> {
         self.revealed.lock().unwrap().push(paths.iter().map(|p| text(p)).collect());
+        Ok(())
+    }
+
+    fn properties(&self, paths: &[PathBuf], _: Owner) -> Result<(), String> {
+        self.properties.lock().unwrap().push(paths.iter().map(|p| text(p)).collect());
         Ok(())
     }
 

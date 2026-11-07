@@ -1,7 +1,7 @@
 //! The Windows (Explorer) context menu for items that share a parent folder, or for a folder's background
-//! when there are none. Built and shown on one thread for the life of the process: a dialog a command
-//! opens, such as Properties, closes when the thread that invoked it ends, and the submenus (Send to, New)
-//! draw themselves through messages to the window that owns the menu.
+//! when there are none, and the properties dialog. Built and shown on one thread for the life of the
+//! process: a dialog a command opens, such as Properties, closes when the thread that invoked it ends, and
+//! the submenus (Send to, New) draw themselves through messages to the window that owns the menu.
 use std::{
     cell::{Cell, RefCell},
     sync::mpsc,
@@ -41,8 +41,18 @@ pub struct ShowMenu {
     pub at: (i32, i32),
 }
 
+/// What the thread is asked to do.
+enum Job {
+    Menu(ShowMenu),
+    /// Windows' properties of the paths, which close as the thread that opened them ends.
+    Properties {
+        paths: Vec<PathBuf>,
+        owner: Owner,
+    },
+}
+
 struct Request {
-    menu: ShowMenu,
+    job: Job,
     done: mpsc::Sender<Result<bool>>,
 }
 
@@ -60,8 +70,17 @@ impl MenuThread {
     /// Shows the menu and carries out what is picked; `Ok(false)` when nothing is.
     /// Blocks until the menu closes, so never call it from the thread that owns `menu.owner`.
     pub fn show(&self, menu: ShowMenu) -> Result<bool> {
+        self.ask(Job::Menu(menu))
+    }
+
+    /// Opens Windows' properties of `paths` from this thread, which outlives them; returns as they open.
+    pub fn properties(&self, paths: Vec<PathBuf>, owner: Owner) -> Result<()> {
+        self.ask(Job::Properties { paths, owner }).map(|_| ())
+    }
+
+    fn ask(&self, job: Job) -> Result<bool> {
         let (done, result) = mpsc::channel();
-        let request = Box::into_raw(Box::new(Request { menu, done }));
+        let request = Box::into_raw(Box::new(Request { job, done }));
         let window = HWND(self.0 as *mut _);
         if let Err(error) = unsafe { PostMessageW(Some(window), WM_APP, WPARAM(0), LPARAM(request as isize)) } {
             drop(unsafe { Box::from_raw(request) });
@@ -133,11 +152,20 @@ fn create_window() -> Result<HWND> {
 unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     if message == WM_APP {
         let request = unsafe { Box::from_raw(l.0 as *mut Request) };
+        let menu = match &request.job {
+            // Opened at once, the dialog on a thread of its own: no menu up, or a dialog from one, stands
+            // in its way.
+            Job::Properties { paths, owner } => {
+                let _ = request.done.send(super::properties::properties(paths, *owner).map(|()| true));
+                return LRESULT(0);
+            }
+            Job::Menu(menu) => menu,
+        };
         if BUSY.replace(true) {
             let _ = request.done.send(Err(Error::from_hresult(BUSY_ERROR)));
             return LRESULT(0);
         }
-        let result = show(window, &request.menu);
+        let result = show(window, menu);
         BUSY.set(false);
         let _ = request.done.send(result);
         return LRESULT(0);

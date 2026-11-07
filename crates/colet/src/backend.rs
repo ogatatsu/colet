@@ -73,6 +73,8 @@ pub trait Backend: Send + Sync + 'static {
     fn open(&self, path: &Path, owner: Owner) -> Result<(), String>;
     /// Shows them, all in one folder, selected together in an Explorer window.
     fn reveal(&self, paths: &[PathBuf]) -> Result<(), String>;
+    /// Opens Windows' properties of `paths`, several together in one dialog, from any folders.
+    fn properties(&self, paths: &[PathBuf], owner: Owner) -> Result<(), String>;
     /// Whether `path` is a folder, a file, or gone. It touches the disk, which a share can keep waiting for
     /// seconds: never ask it on the UI thread.
     fn path_kind(&self, path: &Path) -> PathKind;
@@ -99,10 +101,21 @@ fn said(error: windows_core::Error) -> String {
 pub struct Live {
     session: Mutex<SearchSession>,
     latest: AtomicU64,
-    /// Started at the first menu, and kept for the life of the app.
+    /// Started at the first menu or properties, and kept for the life of the app.
     menu: Mutex<Option<MenuThread>>,
     /// Started at the first preview, and kept for the life of the app.
     quick_look: OnceLock<quick_look::Sender>,
+}
+
+impl Live {
+    /// The thread the shell's menus and properties are shown on, started the first time it is wanted.
+    fn menu_thread(&self) -> Result<MenuThread, String> {
+        let mut menu = self.menu.lock().map_err(|e| e.to_string())?;
+        if menu.is_none() {
+            *menu = Some(MenuThread::spawn().map_err(said)?);
+        }
+        Ok(menu.clone().unwrap())
+    }
 }
 
 impl Backend for Live {
@@ -197,6 +210,10 @@ impl Backend for Live {
         shell::reveal(paths).map_err(said)
     }
 
+    fn properties(&self, paths: &[PathBuf], owner: Owner) -> Result<(), String> {
+        self.menu_thread()?.properties(paths.to_vec(), owner).map_err(said)
+    }
+
     fn path_kind(&self, path: &Path) -> PathKind {
         use std::os::windows::fs::MetadataExt;
         const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
@@ -214,14 +231,7 @@ impl Backend for Live {
     }
 
     fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String> {
-        let menu = {
-            let mut menu = self.menu.lock().map_err(|e| e.to_string())?;
-            if menu.is_none() {
-                *menu = Some(MenuThread::spawn().map_err(said)?);
-            }
-            menu.clone().unwrap()
-        };
-        match menu.show(ShowMenu { owner, paths, background, at }) {
+        match self.menu_thread()?.show(ShowMenu { owner, paths, background, at }) {
             Ok(_) => Ok(()),
             // The items are not all in one folder.
             Err(error) if error.code() == windows::Win32::Foundation::E_INVALIDARG => {

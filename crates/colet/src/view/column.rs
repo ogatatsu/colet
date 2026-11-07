@@ -43,6 +43,7 @@ impl Colet {
             .on_action(cx.listener(|this, _: &CutItems, _, cx| this.copy(true, cx)))
             .on_action(cx.listener(|this, _: &PasteItems, _, cx| this.paste(cx)))
             .on_action(cx.listener(|this, _: &CopyPaths, _, cx| this.copy_paths(cx)))
+            .on_action(cx.listener(|this, _: &ShowProperties, _, cx| this.show_properties(cx)))
             .on_action(cx.listener(|this, _: &NewFolder, window, cx| this.ask_new_folder(window, cx)))
             .on_action(cx.listener(|this, _: &RecycleItems, _, cx| this.delete_picked(false, cx)))
             .on_action(cx.listener(|this, _: &RecycleItemsForGood, _, cx| this.delete_picked(true, cx)))

@@ -34,6 +34,7 @@ pub enum Command {
     Cut,
     Paste,
     CopyPath,
+    Properties,
     Rename,
     NewFolder,
     Recycle,
@@ -426,7 +427,10 @@ impl Colet {
                 .grouped(),
             );
         }
-        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows).grouped());
+        lines.push(
+            line("menu-properties", "info", "プロパティ", Some("Alt+Enter"), quiet(reasons.properties), Command::Properties).grouped(),
+        );
+        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows));
         lines
     }
 
@@ -473,7 +477,8 @@ impl Colet {
             Command::Favorite(path),
         ));
         lines[4].group = true;
-        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows).grouped());
+        lines.push(line("menu-properties", "info", "プロパティ", Some("Alt+Enter"), reasons.properties, Command::Properties).grouped());
+        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows));
         lines
     }
 
@@ -522,6 +527,7 @@ impl Colet {
             Command::Cut => self.copy(true, cx),
             Command::Paste => self.paste(cx),
             Command::CopyPath => self.copy_paths(cx),
+            Command::Properties => self.show_properties(cx),
             Command::Rename => self.ask_rename(window, cx),
             Command::NewFolder => self.ask_new_folder(window, cx),
             Command::Recycle => self.delete_picked(false, cx),

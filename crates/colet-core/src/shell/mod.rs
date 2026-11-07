@@ -1,10 +1,12 @@
-//! The Windows shell: icons, the Explorer context menu, Send To, and file operations with the shell's own dialogs.
+//! The Windows shell: icons, the Explorer context menu, Send To, the properties dialog, and file operations with the
+//! shell's own dialogs.
 pub mod clipboard;
 mod drop;
 mod icon;
 mod menu;
 mod open;
 mod operation;
+mod properties;
 mod send_to;
 
 pub use drop::{Dropped, drop_clipboard, send_to};
