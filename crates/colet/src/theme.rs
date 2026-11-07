@@ -47,6 +47,8 @@ pub struct Palette {
     pub on_accent: Hsla,
     /// Secondary text on the accent fill.
     pub on_accent_muted: Hsla,
+    /// What a search matched, on the accent fill: set off from `on_accent` around it.
+    pub on_accent_match: Hsla,
     /// Behind the edge columns are hidden past.
     pub shade: Hsla,
 }
@@ -77,6 +79,7 @@ impl Palette {
             selection: hsl(184., 42., 28.),
             on_accent: hsl(0., 0., 100.),
             on_accent_muted: hsla(0., 0., 1., 0.85),
+            on_accent_match: hsl(45., 95., 75.),
             shade: hsla(210. / 360., 0.3, 0.03, 0.55),
         }
     }
@@ -106,6 +109,7 @@ impl Palette {
             selection: hsl(184., 50., 80.),
             on_accent: hsl(0., 0., 100.),
             on_accent_muted: hsla(0., 0., 1., 0.85),
+            on_accent_match: hsl(45., 95., 78.),
             shade: hsla(210. / 360., 0.3, 0.2, 0.18),
         }
     }

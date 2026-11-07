@@ -108,10 +108,9 @@ fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
 }
 
-/// `text` with what a search matched in it underlined, in the ink of the text around it.
-fn with_marks(text: &str, marks: &[Range<usize>]) -> StyledText {
-    let underline = UnderlineStyle { thickness: px(1.), ..Default::default() };
-    let style = HighlightStyle { underline: Some(underline), ..Default::default() };
+/// `text` with what a search matched in it in `color`.
+fn with_marks(text: &str, marks: &[Range<usize>], color: Hsla) -> StyledText {
+    let style = HighlightStyle { color: Some(color), ..Default::default() };
     StyledText::new(text.to_owned()).with_highlights(marks.iter().map(|range| (range.clone(), style)))
 }
 

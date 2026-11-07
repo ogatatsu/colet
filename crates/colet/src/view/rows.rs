@@ -321,6 +321,7 @@ impl Colet {
         let p = self.palette;
         let ink = if lit { p.on_accent } else { p.text };
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
+        let mark = if lit { p.on_accent_match } else { p.accent };
         div()
             .flex_1()
             .min_w_0()
@@ -337,7 +338,7 @@ impl Colet {
                         div()
                             .min_w_0()
                             .truncate()
-                            .child(with_marks(&entry.name, &entry.marks.name)),
+                            .child(with_marks(&entry.name, &entry.marks.name, mark)),
                     )
                     // A badge, tinted with the row's own ink so it shows on any of its fills.
                     .when_some(within, |d, filter| {
@@ -381,7 +382,7 @@ impl Colet {
                         .text_ellipsis_start()
                         .text_size(px(metrics::TEXT_BODY))
                         .text_color(muted)
-                        .child(with_marks(&entry.parent, &entry.marks.parent)),
+                        .child(with_marks(&entry.parent, &entry.marks.parent, mark)),
                 )
             })
     }
