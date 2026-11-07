@@ -1,0 +1,573 @@
+//! A column: its heading, filter field, headings, rows and the edge that widens it.
+use super::*;
+
+impl Colet {
+    /// Shift+↑↓, with Ctrl adding: picks rows on the way, or in home, which picks one at a time, moves as
+    /// the arrows do.
+    pub(super) fn extend_step(&mut self, by: isize, add: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.in_home() {
+            self.step(by, window, cx);
+            return;
+        }
+        self.state.extend_step(by, add);
+        self.changed(cx);
+    }
+
+    /// The keys that move through a column and between them, for home's pane and the columns alike.
+    pub(super) fn column_keys(&self, el: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+        el.key_context(COLUMNS)
+            .on_action(cx.listener(|this, _: &SelectPrevious, window, cx| this.step(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectNext, window, cx| this.step(1, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectPageUp, window, cx| this.step(-10, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectPageDown, window, cx| this.step(10, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectFirst, window, cx| this.step(-isize::MAX / 2, window, cx)))
+            .on_action(cx.listener(|this, _: &SelectLast, window, cx| this.step(isize::MAX / 2, window, cx)))
+            .on_action(cx.listener(|this, _: &ColumnLeft, window, cx| this.move_column(false, window, cx)))
+            .on_action(cx.listener(|this, _: &ColumnRight, window, cx| this.move_column(true, window, cx)))
+            .on_action(cx.listener(|this, _: &GoBack, window, cx| this.back(window, cx)))
+            .on_action(cx.listener(|this, _: &GoForward, window, cx| this.forward(window, cx)))
+            .on_action(cx.listener(|this, _: &RenameItem, window, cx| this.ask_rename(window, cx)))
+            .on_action(cx.listener(|this, _: &CopyItems, _, cx| this.copy(false, cx)))
+            .on_action(cx.listener(|this, _: &CutItems, _, cx| this.copy(true, cx)))
+            .on_action(cx.listener(|this, _: &PasteItems, _, cx| this.paste(cx)))
+            .on_action(cx.listener(|this, _: &CopyPaths, _, cx| this.copy_paths(cx)))
+            .on_action(cx.listener(|this, _: &NewFolder, window, cx| this.ask_new_folder(window, cx)))
+            .on_action(cx.listener(|this, _: &RecycleItems, _, cx| this.delete_picked(false, cx)))
+            .on_action(cx.listener(|this, _: &RecycleItemsForGood, _, cx| this.delete_picked(true, cx)))
+            // Home picks one row at a time: Ctrl+A picks nothing there, and Shift moves as the arrows do.
+            .on_action(cx.listener(|this, _: &SelectAll, _, cx| {
+                if !this.in_home() {
+                    this.state.select_all(this.state.active);
+                    this.changed(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ExtendUp, window, cx| this.extend_step(-1, false, window, cx)))
+            .on_action(cx.listener(|this, _: &ExtendDown, window, cx| this.extend_step(1, false, window, cx)))
+            .on_action(cx.listener(|this, _: &AddUp, window, cx| this.extend_step(-1, true, window, cx)))
+            .on_action(cx.listener(|this, _: &AddDown, window, cx| this.extend_step(1, true, window, cx)))
+            .on_action(cx.listener(|this, _: &FocusPrevious, _, cx| this.focus_step(-1, cx)))
+            .on_action(cx.listener(|this, _: &FocusNext, _, cx| this.focus_step(1, cx)))
+            .on_action(cx.listener(|this, _: &FocusPageUp, _, cx| this.focus_step(-10, cx)))
+            .on_action(cx.listener(|this, _: &FocusPageDown, _, cx| this.focus_step(10, cx)))
+            .on_action(cx.listener(|this, _: &FocusFirst, _, cx| this.focus_step(-isize::MAX / 2, cx)))
+            .on_action(cx.listener(|this, _: &FocusLast, _, cx| this.focus_step(isize::MAX / 2, cx)))
+            .on_action(cx.listener(|this, _: &TogglePicked, window, cx| {
+                this.state.toggle_focused();
+                // A saved search picked alone in home runs, which the field shows.
+                this.sync_search_field(window, cx);
+                this.changed(cx);
+            }))
+            .on_action(cx.listener(|this, _: &QuickLook, window, cx| {
+                if this.home_focus.is_focused(window) || this.columns_focus.is_focused(window) {
+                    this.quick_look(cx);
+                } else {
+                    // A field types it, a button is pressed by it.
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenMenu, window, cx| {
+                // Under the focused row, as from the keyboard; or the column's top.
+                let at = match this.focused_row.get() {
+                    Some(row) => point(row.left() + px(16.), row.bottom()),
+                    None => point(px(this.sidebar_width(window)) + px(24.), px(140.)),
+                };
+                this.open_menu(this.state.active, None, at, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenItem, window, cx| {
+                let index = this.state.active;
+                // Several picked open together, as the menu's 開く does.
+                if this.state.columns[index].shown_selected().len() > 1 {
+                    this.open_picked(window, cx);
+                } else if let Some(path) = this.state.columns[index].focused.clone() {
+                    this.open(index, &path, window, cx);
+                }
+            }))
+            // The row the keys are on opens in a tab of its own, behind this one; with none, the folder
+            // column's own folder.
+            .on_action(cx.listener(|this, _: &OpenInNewTab, _, cx| {
+                let index = this.state.active;
+                let c = &this.state.columns[index];
+                let own = (c.kind == Kind::Folder).then(|| c.path.clone());
+                if let Some(path) = c.focused.clone().or_else(|| c.highlight.clone()).or(own) {
+                    this.open_in_tab(index, &path, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &TrimFilter, window, cx| {
+                if !this.trim_filter(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ClearFilter, window, cx| {
+                let c = &this.state.columns[this.state.active];
+                if c.filtering() {
+                    this.close_filter(c.id, window, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+    }
+
+    /// While `focus`, the rows', has the keys, what is typed there goes to their column's field.
+    pub(super) fn takes_text(&self, focus: &FocusHandle, cx: &mut Context<Self>) -> impl IntoElement {
+        let (focus, view) = (focus.clone(), cx.entity());
+        canvas(|_, _, _| {}, move |bounds, _, window, cx| window.handle_input(&focus, ElementInputHandler::new(bounds, view), cx))
+            .absolute()
+            .size_full()
+    }
+
+    pub(super) fn message(&self, icon_name: &'static str, text: String) -> Div {
+        let p = self.palette;
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .px_4()
+            .py_8()
+            .text_size(px(12.))
+            .text_color(p.text_muted)
+            .child(icon(icon_name, 28., p.text_faint))
+            .child(div().text_center().child(text))
+    }
+
+    pub(super) fn loading(&self) -> Div {
+        let p = self.palette;
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_4()
+            .py_3()
+            .text_size(px(12.))
+            .text_color(p.text_muted)
+            .child(spinner("loading", 15., p.text_muted))
+            .child("読み込み中…")
+    }
+
+    /// What a column lists, or why it lists nothing.
+    /// The column at `index` under its headings: its rows, or why it has none.
+    pub(super) fn column_body(&mut self, index: usize, marked: bool, cx: &mut Context<Self>) -> AnyElement {
+        let c = &self.state.columns[index];
+        let (id, kind) = (c.id, c.kind);
+        if let Some(error) = c.error.clone() {
+            return self.column_error(id, kind, error, cx);
+        }
+        if c.unread() {
+            return self.loading().into_any_element();
+        }
+        if c.entries.is_empty() {
+            let (name, text) = match kind {
+                Kind::Search if c.filter.is_some() => ("funnel", "一致する項目はありません"),
+                Kind::Search => ("search", "一致する項目はありません"),
+                Kind::Home if c.filter.is_some() => ("funnel", "一致する項目はありません"),
+                Kind::Home => ("hard-drive", "場所もお気に入りもありません"),
+                Kind::Folder if c.shown_total() > 0 && c.filtering() => ("funnel", "一致する項目はありません"),
+                Kind::Folder if c.total > 0 => ("eye-off", "隠しファイルのみがあります"),
+                Kind::Folder => ("folder", "このフォルダーは空です"),
+            };
+            return self.message(name, text.into()).into_any_element();
+        }
+        if kind == Kind::Home {
+            return self.home_rows(marked, cx);
+        }
+        self.column_rows(index, marked, cx)
+    }
+
+    /// Why the column `id` could not be listed, with a button to try again; the search's, with one to
+    /// the preferences too, where Everything is reconnected.
+    fn column_error(&self, id: ColumnId, kind: Kind, error: String, cx: &mut Context<Self>) -> AnyElement {
+        self.message("circle-alert", error)
+            .child(keep_focus(Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label("再試行")).on_click(cx.listener(
+                move |this, event: &ClickEvent, window, cx| {
+                    // The button goes as the column loads: the keys go back to the columns.
+                    if event.is_keyboard() {
+                        this.focus_active(window, cx);
+                    }
+                    this.load(id, 0, false, cx);
+                },
+            )))
+            .when(kind == Kind::Search, |d| {
+                d.child(
+                    Button::new("search-settings")
+                        .outline()
+                        .icon(glyph("sliders-horizontal"))
+                        .label("設定")
+                        .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// The edge a drag widens a column from: astride its border, so its scrollbar stays clear of it.
+    pub(super) fn resizer(&self, id: &'static str, of: WidthOf, width: f32, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        // Over what lies past the border, drawn after it; none over a dialog, which covers it.
+        if self.dialog.is_some() {
+            return div().into_any_element();
+        }
+        let handle = div()
+            .id(id)
+            .group(id)
+            .absolute()
+            .top_0()
+            // Off the columns' scrollbar along the bottom, which it would take the presses of.
+            .bottom(px(SCROLLBAR_WIDTH))
+            .right(px(-RESIZER_WIDTH / 2.))
+            .w(px(RESIZER_WIDTH))
+            .flex()
+            .justify_center()
+            .cursor_col_resize()
+            // A line on the border, not a band over the rows.
+            .child(div().w(px(2.)).h_full().group_hover(id, |d| d.bg(p.accent)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.resizing = Some(Resize { of, start_x: event.position.x, start_width: width });
+                    cx.stop_propagation();
+                }),
+            )
+            .test_support();
+        on_top(handle).into_any_element()
+    }
+
+    pub(super) fn render_column(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let marked = index == self.state.active && !self.search_focused;
+        let c: &Column = &self.state.columns[index];
+        let (id, kind) = (c.id, c.kind);
+        let (width, of) = match kind {
+            Kind::Search => (self.widths.search, WidthOf::Search),
+            _ => (self.widths.column, WidthOf::Column),
+        };
+        let title = c.title().into_owned();
+        let header_title = title.clone();
+        let count = match &c.filter {
+            _ if c.error.is_some() || c.unread() => String::new(),
+            // Everything narrows the results: how many it lets through, of how many the search finds.
+            Some(f) if kind == Kind::Search => format!("{} / {}", time::count(c.total as u64), time::count(f.whole as u64)),
+            Some(f) if !f.text.is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.shown_total() as u64)),
+            _ => time::count(c.shown_total() as u64),
+        };
+        let filtering = c.filtering();
+        let field = self.filters.get(&id).map(|field| field.input.clone());
+        let path = shown(&c.path);
+        let (star_key, narrowing) = (favorite_key(&c.path, c.narrowing().as_deref()), c.narrowing());
+        let body = self.column_body(index, marked, cx);
+        let sort_button = self.sort_button(index, window, cx);
+        let headings = self.headings(index, cx);
+        div()
+            .id(("column", id))
+            .role(Role::Group)
+            .aria_label(format!("{title} カラム"))
+            // A press anywhere in it takes the keys there, before the columns' focus would send them to
+            // the first one beside home.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    if let Some(index) = this.state.index_of(id) {
+                        this.state.set_active(index);
+                        cx.notify();
+                    }
+                }),
+            )
+            // Let go, it slides on screen as a crumb brings it, even when it was already active: sliding
+            // under the press would carry a button in it away from the pointer.
+            .on_click(cx.listener(|this, _, _, cx| this.changed(cx)))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    if let Some(index) = this.state.index_of(id) {
+                        this.open_menu(index, Some(Vec::new()), event.position, window, cx);
+                    }
+                }),
+            )
+            .w(px(width))
+            .flex_none()
+            .h_full()
+            .relative()
+            .flex()
+            .flex_col()
+            .bg(p.surface)
+            .border_r_1()
+            .border_color(p.border)
+            .child(
+                div()
+                    .id(("head", id))
+                    .h(px(34.))
+                    .flex_none()
+                    .pl_3()
+                    .pr_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(p.border)
+                    .when(marked, |d| d.border_b_2().border_color(p.accent))
+                    .child(
+                        div()
+                            .id(("title", id))
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(if marked { p.text } else { p.text_muted })
+                            .when(!path.is_empty(), |d| d.tip(path))
+                            .child(header_title),
+                    )
+                    .child(div().text_size(px(12.)).text_color(p.text_faint).child(count))
+                    .child(sort_button)
+                    .child({
+                        // What it is narrowed to now is part of what is kept.
+                        let kept = match kind {
+                            Kind::Search => {
+                                self.settings.saved(&self.state.query, self.state.search_filter.as_deref(), narrowing.as_deref()).is_some()
+                            }
+                            _ => self.settings.is_favorite(&star_key),
+                        };
+                        let label = match (kind, kept) {
+                            (Kind::Search, true) => "保存した検索を解除（Ctrl+D）",
+                            (Kind::Search, false) => "検索を保存（Ctrl+D）",
+                            (_, true) => "お気に入りを解除（Ctrl+D）",
+                            (_, false) => "お気に入りに追加（Ctrl+D）",
+                        };
+                        Button::new(("star", id))
+                            .ghost()
+                            .xsmall()
+                            .icon(if kept { glyph("star-fill").text_color(p.accent) } else { glyph("star") })
+                            .accessibility_label(label)
+                            .tooltip(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if kind == Kind::Search {
+                                    this.toggle_saved_current(cx);
+                                } else if let Some(index) = this.state.index_of(id) {
+                                    let key = this.favorite_key_of(index);
+                                    this.toggle_favorite(&key, cx);
+                                }
+                            }))
+                    })
+                    .test_support(),
+            )
+            .when_some(field, |d, input| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .px_2()
+                        .py(px(6.))
+                        .border_b_1()
+                        .border_color(p.border)
+                        .child(self.filter_field(id, filtering, &input, window, cx)),
+                )
+            })
+            .child(headings)
+            .child(body)
+            .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
+            .test_support()
+            .into_any_element()
+    }
+
+    /// The button of the column's own order, beside its star: accented while it is given one apart from
+    /// the default, and its menu under it.
+    fn sort_button(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let c = &self.state.columns[index];
+        let id = c.id;
+        let (order, own) = (self.order_of(c), self.own_order(c).is_some());
+        let open = self.column_sort_open() == Some(id);
+        let label = format!("並び順: {}{}", order.label(), if own { "" } else { "（既定）" });
+        let focus = self.stop(format!("column-sort:{id}"), cx);
+        let keyed = keyed(&focus, window);
+        div()
+            .relative()
+            .flex_none()
+            .child(
+                div()
+                    .id(("column-sort", id))
+                    .test_support()
+                    .track_focus(&focus)
+                    .key_context(SORT)
+                    .on_action(cx.listener(move |this, _: &OpenSort, window, cx| this.open_column_sort(id, window, cx)))
+                    .role(Role::Button)
+                    .aria_label(label.clone())
+                    .aria_expanded(open)
+                    .tip(label)
+                    .size(px(24.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(4.))
+                    .border_2()
+                    .border_color(if keyed { p.focus } else { transparent_black() })
+                    .hover(|d| d.bg(p.hover))
+                    .when(open, |d| d.bg(p.hover))
+                    .child(icon("arrow-up-down", 14., if own { p.accent } else { p.text_muted }))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if this.column_sort_open() == Some(id) {
+                            this.close_menus(true, window, cx);
+                        } else {
+                            this.open_column_sort(id, window, cx);
+                        }
+                    })),
+            )
+            .when_some(self.menu_element("column-sort-menu", "並び順", cx).filter(|_| open), |d, menu| {
+                d.child(deferred(div().absolute().top(px(28.)).right_0().w(px(160.)).child(menu)).with_priority(1))
+            })
+            .into_any_element()
+    }
+
+    /// The headings over the column's rows, each sorting it by what it heads; the one it goes by shows
+    /// the way it runs. Laid out as a row is, so each stands over its cells.
+    pub(super) fn headings(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let c = &self.state.columns[index];
+        let id = c.id;
+        let order = self.order_of(c);
+        let check_all = (c.kind != Kind::Home).then(|| self.check_all(index, cx));
+        let heading = |by: Sort, name: &'static str| {
+            let chosen = order.by == by;
+            let label = if chosen {
+                format!("{}で並べ替え（{}）", by.label(), direction_label(order.descending))
+            } else {
+                format!("{}で並べ替え", by.label())
+            };
+            div()
+                .id((name, id))
+                .role(Role::Button)
+                .aria_label(label)
+                .h_full()
+                .px(px(4.))
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .rounded(px(4.))
+                .hover(|d| d.bg(p.hover))
+                .text_color(if chosen { p.text } else { p.text_muted })
+                .child(by.label())
+                .when(chosen, |d| d.child(icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted)))
+                .on_click(cx.listener(move |this, _, _, cx| this.sort_by_heading(id, by, cx)))
+                .test_support()
+        };
+        // The row's room: the list's 4px, then the row's 8px and its 2px ring; inside, the gap between cells.
+        // Each heading reaches 4px past its cells, over the gap, so its text stands where theirs does.
+        div()
+            .flex_none()
+            .h(px(24.))
+            .px(px(10.))
+            .flex()
+            .items_center()
+            .border_b_1()
+            .border_color(p.border)
+            .text_size(px(11.))
+            .children(check_all)
+            .child(heading(Sort::Name, "sort-by-name").flex_1().min_w_0())
+            .child(heading(Sort::Size, "sort-by-size").w(px(SIZE_WIDTH + 8.)).flex_none())
+            .child(heading(Sort::Modified, "sort-by-modified").w(px(MODIFIED_WIDTH + 8.)).flex_none())
+            .child(div().w(px(13. + 8.)).flex_none())
+            .into_any_element()
+    }
+
+    /// The checkbox heading the rows' own, over them: checked while every row shown is picked, a click
+    /// then picks none, and otherwise all. Faded, and pressed in vain, while there are no rows.
+    fn check_all(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let p = self.palette;
+        let c = &self.state.columns[index];
+        let (id, empty, all) = (c.id, c.entries.is_empty(), c.all_selected());
+        let check = div().size(px(14.)).rounded(px(3.)).flex().items_center().justify_center().map(|b| {
+            if all { b.bg(p.accent_fill).child(icon("check", 11., p.on_accent)) } else { b.border_1().border_color(p.text_muted) }
+        });
+        div()
+            .id(("check-all", id))
+            .flex_none()
+            .h_full()
+            // Where the rows' checkboxes stand, then the gap to their names less the heading's own 4px.
+            .ml(px(4.))
+            .mr(px(4.))
+            .w(px(16.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .role(Role::CheckBox)
+            .aria_label("すべて選択")
+            .aria_toggled(if all { Toggled::True } else { Toggled::False })
+            .when(empty, |d| d.opacity(0.4))
+            .child(check)
+            .when(!empty, |d| {
+                d.on_click(cx.listener(move |this, _, _, cx| {
+                    let Some(index) = this.state.index_of(id) else { return };
+                    this.state.toggle_all(index);
+                    this.state.set_active(index);
+                    this.changed(cx);
+                }))
+            })
+            .test_support()
+    }
+
+    /// The field narrowing the column `id` to the names holding what is typed there.
+    pub(super) fn filter_field(
+        &self,
+        id: ColumnId,
+        filtering: bool,
+        input: &Entity<InputState>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let p = self.palette;
+        let focused = self.has_keys(input, window, cx);
+        let has_text = !input.read(cx).value().is_empty();
+        // Ringed as the search field is; the ring lies over the gaps around.
+        frame(p, focused).m(px(-3.)).child(
+            div()
+                .id(("filter", id))
+                .w_full()
+                .h(px(28.))
+                .pl(px(8.))
+                .pr(px(2.))
+                .flex()
+                .items_center()
+                .gap_2()
+                .bg(p.surface)
+                .border_1()
+                .border_color(p.border_strong)
+                .rounded(px(6.))
+                // Accented while it has the keys, or narrows the rows from out of them.
+                .child(icon("funnel", 13., if focused || filtering { p.accent } else { p.text_muted }))
+                .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(input, cx)).child(Input::new(input)))
+                // ↓ picks a row it lets through, as a click does, going there; Esc clears it, then goes there too.
+                .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
+                    cx.stop_propagation();
+                    this.open_from_filter(id, window, cx);
+                }))
+                .on_action(cx.listener(move |this, _: &input::Escape, window, cx| {
+                    cx.stop_propagation();
+                    this.escape_filter(id, window, cx);
+                }))
+                // ← and → past the text's ends stay here, not going on to the next column; Enter does
+                // as ↓ does.
+                .on_action(|_: &input::MoveLeft, _, cx| cx.stop_propagation())
+                .on_action(|_: &input::MoveRight, _, cx| cx.stop_propagation())
+                .on_action(|_: &input::Enter, _, cx| cx.stop_propagation())
+                .when(has_text, |b| {
+                    b.child(
+                        Button::new(("clear-filter", id))
+                            .ghost()
+                            .xsmall()
+                            .icon(glyph("x"))
+                            .accessibility_label("フィルタをクリア")
+                            .tooltip("フィルタをクリア（Esc）")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if let Some(field) = this.filters.get(&id) {
+                                    let input = field.input.clone();
+                                    input.update(cx, |input, cx| {
+                                        input.set_value("", window, cx);
+                                        input.focus(window, cx);
+                                    });
+                                    this.filter(id, "", cx);
+                                }
+                            })),
+                    )
+                })
+                .test_support(),
+        )
+    }
+}
