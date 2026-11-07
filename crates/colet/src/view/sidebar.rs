@@ -59,7 +59,6 @@ impl Colet {
                     .items_center()
                     .border_b_1()
                     .border_color(p.border)
-                    .when(marked, |d| d.border_b_2().border_color(p.accent))
                     .child(
                         div()
                             .flex_1()
@@ -86,6 +85,8 @@ impl Colet {
             })
             .child(keys)
             .child(self.resizer("sidebar-resizer", WidthOf::Sidebar, width, cx))
+            // Its left and bottom are the window's edges: drawn inside them.
+            .when(marked, |d| d.child(on_top(active_frame(p).left_0().bottom_0())))
             .test_support()
             .into_any_element()
     }

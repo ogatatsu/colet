@@ -149,7 +149,40 @@ impl Colet {
             .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::horizontal(&self.sideways.scroll), p)))
             .when(screen.hidden_left(), |d| d.child(div().absolute().top_0().bottom_0().left_0().w(px(28.)).bg(shade(90.))))
             .when(screen.hidden_right(), |d| d.child(div().absolute().top_0().bottom_0().right_0().w(px(28.)).bg(shade(270.))))
+            .child(self.scrolling_frame())
             .into_any_element()
+    }
+
+    /// The frame round the active one of the scrolling columns, drawn over them from outside their scroll
+    /// so it lies on the lines round the column: the one before it (or what stands left of the scroll),
+    /// the path bar's above, its own, and the status bar's below. Where the column is cut, it runs along
+    /// the edge of the view. Read at paint, it stays on the column as it scrolls.
+    fn scrolling_frame(&self) -> impl IntoElement {
+        let active = if self.search_focused { None } else { self.scrolling().1 };
+        let (scroll, width, color) = (self.sideways.scroll.clone(), self.widths.column, self.palette.accent);
+        // A pixel past the view on every side but the right, where the window ends; drawn last, or the
+        // status bar drawn after the columns would cover its bottom.
+        on_top(
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    let Some(active) = active else { return };
+                    let view = f32::from(bounds.size.width) - 1.;
+                    let start = active as f32 * width + f32::from(scroll.offset().x);
+                    let (left, right) = ((start - 1.).max(-1.), (start + width).min(view));
+                    if right - left <= 2. {
+                        return;
+                    }
+                    let origin = point(bounds.origin.x + px(1. + left), bounds.origin.y);
+                    window.paint_quad(outline(Bounds::new(origin, size(px(right - left), bounds.size.height)), color, BorderStyle::Solid));
+                },
+            )
+            .absolute()
+            .top(px(-1.))
+            .bottom(px(-1.))
+            .left(px(-1.))
+            .right_0(),
+        )
     }
 
     /// Slides the columns toward where they should rest, a frame at a time.

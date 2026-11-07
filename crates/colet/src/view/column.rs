@@ -309,7 +309,6 @@ impl Colet {
                     .gap_2()
                     .border_b_1()
                     .border_color(p.border)
-                    .when(marked, |d| d.border_b_2().border_color(p.accent))
                     .child(
                         div()
                             .id(("title", id))
@@ -341,6 +340,8 @@ impl Colet {
             .child(headings)
             .child(body)
             .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
+            // The scrolling columns' frame is drawn over their scroll, which would cut this one's edges.
+            .when(marked && kind == Kind::Search, |d| d.child(on_top(active_frame(p).left(px(-1.)).bottom(px(-1.)))))
             .test_support()
             .into_any_element()
     }

@@ -88,6 +88,12 @@ pub fn frame(p: crate::theme::Palette, shown: bool) -> Div {
     div().p(px(1.)).rounded(px(8.)).border_2().border_color(if shown { p.focus } else { transparent_black() })
 }
 
+/// The frame round the column worked in, laid over it on the lines round it: from the path bar's line
+/// above to its own on the right; the caller sets its left and bottom.
+fn active_frame(p: crate::theme::Palette) -> Div {
+    div().absolute().top(px(-1.)).right_0().border_1().border_color(p.accent)
+}
+
 /// Tab, not the mouse, brought the keys to `focus`: when [`ring`] shows.
 pub fn keyed(focus: &FocusHandle, window: &Window) -> bool {
     focus.is_focused(window) && window.last_input_was_keyboard()
