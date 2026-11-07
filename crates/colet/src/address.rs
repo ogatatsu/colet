@@ -21,8 +21,11 @@ impl Colet {
     pub(crate) fn address_field(window: &mut Window, cx: &mut Context<Self>) -> (Entity<InputState>, Subscription) {
         let field = cx.new(|cx| InputState::new(window, cx).placeholder(PLACEHOLDER));
         let typed = cx.subscribe_in(&field, window, |this: &mut Self, _, event, window, cx| {
-            if let InputEvent::PressEnter { .. } = event {
-                this.go_to_address(false, window, cx);
+            match event {
+                InputEvent::PressEnter { .. } => this.go_to_address(false, window, cx),
+                // What was asked for is no longer what the field holds.
+                InputEvent::Change => this.address_asked += 1,
+                _ => {}
             }
         });
         (field, typed)
@@ -63,10 +66,12 @@ impl Colet {
         self.focus_active(window, cx);
     }
 
-    /// While the field is open, the keys going anywhere else close it; its own menu keeps it.
+    /// While the field is open, the keys going anywhere else close it, and an answer still on its way is
+    /// let go of; its own menu keeps it.
     pub(crate) fn follow_address(&mut self, window: &Window, cx: &App) {
         if self.address_open && !self.has_keys(&self.address, window, cx) {
             self.address_open = false;
+            self.address_asked += 1;
         }
     }
 
