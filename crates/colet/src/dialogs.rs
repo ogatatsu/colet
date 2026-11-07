@@ -614,7 +614,7 @@ impl Colet {
         let Some((title, content, buttons)) = self.dialog_parts(window, cx) else { return dialog };
         let colet = cx.weak_entity();
         dialog
-            .w(px(560.))
+            .w(px(640.))
             .close_button(false)
             .overlay_closable(false)
             .on_cancel(move |_, window, cx| {
