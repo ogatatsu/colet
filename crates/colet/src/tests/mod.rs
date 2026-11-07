@@ -128,7 +128,7 @@ impl Backend for Fake {
         if self.failing.lock().unwrap().is_some() { Vec::new() } else { self.indexed.lock().unwrap().iter().map(PathBuf::from).collect() }
     }
 
-    fn list(&self, path: &Path, sort: Order, _: &AtomicBool) -> Result<Vec<Entry>, String> {
+    fn list(&self, path: &Path, sort: Order, _: &AtomicBool, _: colet_core::shell::Owner) -> Result<Vec<Entry>, String> {
         self.lists.lock().unwrap().push(text(path));
         self.orders.lock().unwrap().push(sort);
         self.listed.lock().unwrap().push((text(path), sort));

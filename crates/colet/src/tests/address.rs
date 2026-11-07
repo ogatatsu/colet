@@ -112,3 +112,80 @@ fn with_no_folder_open_the_field_starts_empty(cx: &mut TestAppContext) {
     assert_eq!(ui.active(cx), 1);
     assert!(ui.selected(cx, 1).is_empty());
 }
+
+/// A server with a share and a hidden one, and a folder in the share.
+fn on_a_server(cx: &mut TestAppContext) -> (Arc<Fake>, Ui) {
+    let hide = |entry: Entry| Entry { hidden: Hiding::Hidden, ..entry };
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![]),
+            (r"\\nas", vec![hide(folder(r"\\nas\C$")), folder(r"\\nas\share")]),
+            (r"\\nas\share", vec![folder(r"\\nas\share\a")]),
+            (r"\\nas\share\a", vec![file(r"\\nas\share\a\x.txt")]),
+        ])
+    });
+    let ui = open(cx, fake.clone());
+    (fake, ui)
+}
+
+impl Ui {
+    fn folders(&self, cx: &mut TestAppContext) -> Vec<String> {
+        self.read(cx, |v| v.state.columns.iter().skip(1).map(|c| text(&c.path)).collect())
+    }
+
+    fn names(&self, cx: &mut TestAppContext, index: usize) -> Vec<String> {
+        self.read(cx, |v| v.state.columns[index].entries.iter().map(|e| e.name.clone()).collect())
+    }
+}
+
+#[gpui_kit::test]
+fn a_shared_folder_opens_below_its_server_which_lists_its_shares(cx: &mut TestAppContext) {
+    let (_, ui) = on_a_server(cx);
+    ui.press(cx, "ctrl-l");
+    ui.input(cx, r"\\nas\share\a");
+    ui.press(cx, "enter");
+    assert_eq!(ui.folders(cx), [r"\\nas", r"\\nas\share", r"\\nas\share\a"]);
+    assert_eq!(ui.selected(cx, 1), [r"\\nas\share"]);
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].title().into_owned()), "nas");
+    // The hidden share stays out while the hidden items do.
+    assert_eq!(ui.names(cx, 1), ["share"]);
+    ui.press(cx, "ctrl-h");
+    assert_eq!(ui.names(cx, 1), ["C$", "share"]);
+}
+
+#[gpui_kit::test]
+fn a_server_typed_alone_opens_on_its_shares(cx: &mut TestAppContext) {
+    let (_, ui) = on_a_server(cx);
+    ui.press(cx, "ctrl-l");
+    ui.input(cx, r"\\NAS\");
+    ui.press(cx, "enter");
+    assert_eq!(ui.address(cx), None);
+    assert_eq!(ui.folders(cx), [r"\\nas"]);
+    assert_eq!(ui.names(cx, 1), ["share"]);
+}
+
+#[gpui_kit::test]
+fn a_servers_shares_are_only_looked_at(cx: &mut TestAppContext) {
+    let (fake, ui) = on_a_server(cx);
+    ui.press(cx, "ctrl-l");
+    ui.input(cx, r"\\nas");
+    ui.press(cx, "enter");
+    assert_eq!(ui.active(cx), 1);
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 1), [r"\\nas\share"]);
+    let reasons = ui.read(cx, |v| {
+        let r = v.reasons();
+        [r.copy, r.cut, r.paste, r.rename, r.delete, r.shell, r.send_to]
+    });
+    assert_eq!(reasons, [Some(crate::ops::NOT_AT_SERVER); 7]);
+    let reasons = ui.read(cx, |v| [v.reasons().copy_path, v.reasons().explorer]);
+    assert_eq!(reasons, [None, None]);
+    // Nor is anything made or deleted there by its keys.
+    ui.press(cx, "delete");
+    ui.press(cx, "ctrl-shift-n");
+    assert!(fake.operations.lock().unwrap().is_empty());
+    // A share's own folder takes a new folder as any does.
+    ui.press(cx, "right");
+    assert_eq!(ui.read(cx, |v| v.reasons().paste), None);
+}

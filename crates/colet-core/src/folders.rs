@@ -11,7 +11,9 @@ use windows::Win32::Storage::FileSystem::{
 
 use crate::{
     entry::{Entry, Hiding, Marks, Order, hiding, sort_entries},
-    paths::{ancestors, child, from_wide, shown},
+    network,
+    paths::{ancestors, child, from_wide, is_server, shown},
+    shell::Owner,
     wide::Wide,
 };
 
@@ -20,12 +22,17 @@ use crate::{
 /// be reached. It touches the disk, once for each folder on the way.
 pub fn locate(path: &Path) -> Option<(PathBuf, bool)> {
     let chain = ancestors(path);
-    let mut found = chain.first()?.clone();
+    // A server is no folder to look at: its shares are, below it, named as typed.
+    let top = usize::from(is_server(chain.first()?));
+    let Some(root) = chain.get(top) else {
+        return network::answers(&chain[0]).then(|| (chain[0].clone(), true));
+    };
+    let mut found = root.clone();
     if !std::fs::metadata(&found).ok()?.is_dir() {
         return None;
     }
     let mut directory = true;
-    for part in &chain[1..] {
+    for part in &chain[top + 1..] {
         let mut data = WIN32_FIND_DATAW::default();
         let name = Wide::new(part);
         let handle = unsafe {
@@ -58,13 +65,22 @@ fn collect<T>(mut items: impl Iterator<Item = T>, cancelled: &AtomicBool) -> Res
     }
 }
 
-/// The items directly in `path`, sorted; stops early, failing with [`STALE`], once `cancelled` is set.
-pub fn list(path: &Path, order: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
+/// The items directly in `path`, sorted, or a server's shares; stops early, failing with [`STALE`], once
+/// `cancelled` is set. A server that will not let the user in as they are asks them to sign in, in a
+/// dialog of Windows' own over `owner`.
+pub fn list(path: &Path, order: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String> {
     check(cancelled)?;
-    if path.as_os_str().as_encoded_bytes().contains(&0) || !path.is_absolute() {
+    if path.as_os_str().as_encoded_bytes().contains(&0) || !path.is_absolute() && !is_server(path) {
         return Err("絶対パスを指定してください".into());
     }
-    let items = std::fs::read_dir(path).map_err(|e| format!("フォルダーを開けません: {e}"))?;
+    if is_server(path) {
+        let mut shares =
+            network::signing_in(path, owner, || network::shares(path)).map_err(|e| format!("共有フォルダーを一覧できません: {e}"))?;
+        check(cancelled)?;
+        sort_entries(&mut shares, order);
+        return Ok(shares);
+    }
+    let items = network::signing_in(path, owner, || std::fs::read_dir(path)).map_err(|e| format!("フォルダーを開けません: {e}"))?;
     let entries = collect(
         items.map(|entry| {
             // Not one item unreadable, whose name it would still give, but the listing broken off: a part
@@ -146,7 +162,7 @@ mod tests {
 
     #[test]
     fn a_cancelled_listing_never_opens_the_folder() {
-        assert_eq!(list(Path::new("invalid path"), Order::default(), &AtomicBool::new(true)).unwrap_err(), STALE);
+        assert_eq!(list(Path::new("invalid path"), Order::default(), &AtomicBool::new(true), 0).unwrap_err(), STALE);
     }
 
     #[test]
@@ -168,7 +184,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "data").unwrap();
         std::fs::create_dir(dir.path().join("z")).unwrap();
-        let entries = list(dir.path(), Order::default(), &AtomicBool::new(false)).unwrap();
+        let entries = list(dir.path(), Order::default(), &AtomicBool::new(false), 0).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "z");
         assert!(entries[0].directory);
@@ -189,7 +205,7 @@ mod tests {
         }
         // On the link itself, not what it points to.
         run("attrib", &["+h".as_ref(), "+s".as_ref(), "/L".as_ref(), hidden.as_os_str()]);
-        let entries = list(dir.path(), Order::default(), &AtomicBool::new(false)).unwrap();
+        let entries = list(dir.path(), Order::default(), &AtomicBool::new(false), 0).unwrap();
         let hides = |name: &str| entries.iter().find(|e| e.name == name).unwrap().hidden.is_hidden();
         assert!(hides("hidden link"));
         assert!(!hides("shown link"));
@@ -204,7 +220,7 @@ mod tests {
         let real = dir.path().join("a\u{FFFD}X");
         std::fs::write(&odd, "odd").unwrap();
         std::fs::write(&real, "real").unwrap();
-        let entries = list(dir.path(), Order::default(), &AtomicBool::new(false)).unwrap();
+        let entries = list(dir.path(), Order::default(), &AtomicBool::new(false), 0).unwrap();
         // Both show alike, yet each path still opens its own item.
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, entries[1].name);

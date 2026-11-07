@@ -340,7 +340,7 @@ impl Colet {
             _ => entries.iter().all(|e| e.directory).then_some(NEEDS_FILE),
         };
         // From empty space, the folder column's own folder, narrowed as it is.
-        let in_tab = match (entries.as_slice(), self.destination().filter(|_| !some)) {
+        let in_tab = match (entries.as_slice(), self.folder_here().filter(|_| !some)) {
             ([entry], _) => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(entry.path.clone())),
             (_, Some(folder)) => line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(folder)),
             _ => {

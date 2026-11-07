@@ -26,8 +26,17 @@ fn is_unc(path: &Path) -> bool {
     bytes(path).starts_with(br"\\")
 }
 
+/// A UNC path's parts before its first folder: the two empty ones its `\\` makes, and the server's name.
+const UNC_ROOT: usize = 3;
+
+/// Whether `path` names a server alone (`\\server`), whose column lists its shares.
+pub fn is_server(path: &Path) -> bool {
+    let trimmed = trim_backslashes(bytes(path));
+    is_unc(path) && trimmed.len() > 2 && !trimmed[2..].contains(&b'\\')
+}
+
 /// Every folder from the root down to `path`: a drive root keeps its trailing backslash (`D:\`), a UNC
-/// path starts at its share (`\\server\share`).
+/// path starts at its server (`\\server`), which holds its shares.
 pub fn ancestors(path: &Path) -> Vec<PathBuf> {
     if path.as_os_str().is_empty() {
         return Vec::new();
@@ -36,13 +45,13 @@ pub fn ancestors(path: &Path) -> Vec<PathBuf> {
     let unc = is_unc(path);
     let root = if unc {
         // The first parts as they stand in the path, joined by the backslashes between them.
-        let length = parts[..parts.len().min(4)].iter().map(|part| part.len() + 1).sum::<usize>() - 1;
+        let length = parts[..parts.len().min(UNC_ROOT)].iter().map(|part| part.len() + 1).sum::<usize>() - 1;
         path_of(&bytes(path)[..length]).to_owned()
     } else {
         child(path_of(parts[0]), "")
     };
     let mut paths = vec![root];
-    for part in &parts[if unc { 4.min(parts.len()) } else { 1 }..] {
+    for part in &parts[if unc { UNC_ROOT.min(parts.len()) } else { 1 }..] {
         let next = child(paths.last().unwrap(), path_of(part));
         paths.push(next);
     }
@@ -50,11 +59,11 @@ pub fn ancestors(path: &Path) -> Vec<PathBuf> {
 }
 
 /// The folder holding `path`, as [`ancestors`] names it but read from the path itself, with nothing made:
-/// `None` for a root (`D:\`, `\\server\share`) or nothing. A drive's own folders name it `D:` here, where
+/// `None` for a root (`D:\`, `\\server`) or nothing. A drive's own folders name it `D:` here, where
 /// `ancestors` gives `D:\`; one or the other alike stands for it.
 pub fn parent_folder(path: &Path) -> Option<&Path> {
     let trimmed = trim_backslashes(bytes(path));
-    let root = if is_unc(path) { 4 } else { 1 };
+    let root = if is_unc(path) { UNC_ROOT } else { 1 };
     if path.as_os_str().is_empty() || trimmed.split(|&b| b == b'\\').nth(root).is_none() {
         return None;
     }
@@ -114,7 +123,7 @@ pub fn moved(path: &Path, from: &Path, to: &Path) -> Option<PathBuf> {
 }
 
 /// What a path typed or pasted in the address bar names: an absolute path, on a drive (`D:\work`, or
-/// `D:` alone for its root) or a share (`\\server\share\dir`). The quotes Explorer's "Copy as path" puts
+/// `D:` alone for its root) or a server (`\\server\share\dir`, or `\\server` alone for its shares). The quotes Explorer's "Copy as path" puts
 /// round it and the spaces about it go, `/` stands for `\`, and each `%NAME%` that `var` knows is put
 /// in; `.` and `..` are walked. `None` for anything else, a relative path among them, or a name Windows
 /// never allows.
@@ -125,12 +134,11 @@ pub fn address(text: &str, var: impl Fn(&str) -> Option<String>) -> Option<PathB
     }
     let text = expand(text, var).replace('/', "\\");
     let (root, rest) = if let Some(unc) = text.strip_prefix(r"\\") {
-        let mut parts = unc.splitn(3, '\\');
-        let (server, share) = (parts.next()?, parts.next()?);
-        if server.is_empty() || share.is_empty() || matches!(server, "?" | ".") {
+        let (server, rest) = unc.split_once('\\').unwrap_or((unc, ""));
+        if server.is_empty() || matches!(server, "?" | ".") || server.contains(not_in_names) {
             return None;
         }
-        (format!(r"\\{server}\{share}"), parts.next().unwrap_or(""))
+        (format!(r"\\{server}"), rest)
     } else {
         let mut chars = text.chars();
         let (letter, colon) = (chars.next()?, chars.next()?);
@@ -147,11 +155,16 @@ pub fn address(text: &str, var: impl Fn(&str) -> Option<String>) -> Option<PathB
             ".." => {
                 names.pop();
             }
-            name if name.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') || c < ' ') => return None,
+            name if name.contains(not_in_names) => return None,
             name => names.push(name),
         }
     }
     Some(names.into_iter().fold(PathBuf::from(root), |path, name| child(&path, name)))
+}
+
+/// What Windows never allows in a name.
+fn not_in_names(c: char) -> bool {
+    matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') || c < ' '
 }
 
 /// `text` with each `%NAME%` that `var` knows put in; the rest stays as typed.
@@ -218,6 +231,9 @@ pub(crate) mod tests {
         assert_eq!(typed(r"D:\..\work").as_deref(), Some(r"D:\work"));
         assert_eq!(typed(r"\\server\share").as_deref(), Some(r"\\server\share"));
         assert_eq!(typed("//server/share/dir/").as_deref(), Some(r"\\server\share\dir"));
+        assert_eq!(typed(r"\\192.168.1.2").as_deref(), Some(r"\\192.168.1.2"));
+        assert_eq!(typed(r"\\192.168.1.2\").as_deref(), Some(r"\\192.168.1.2"));
+        assert_eq!(typed(r"\\server\share\..").as_deref(), Some(r"\\server"));
     }
 
     #[test]
@@ -231,7 +247,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_address_never_names_a_relative_or_impossible_path() {
-        for text in ["", "work", r"..\work", r"\work", "D:work", r"\\server", r"\\?\D:\work", r"\\.\pipe\x", r"D:\a*b", r"D:\a?", r"1:\x"] {
+        for text in ["", "work", r"..\work", r"\work", "D:work", r"\\", r"\\\share", r"\\a:b", r"\\?\D:\work", r"\\.\pipe\x", r"D:\a*b", r"D:\a?", r"1:\x"] {
             assert_eq!(typed(text), None, "{text}");
         }
     }
@@ -253,7 +269,8 @@ pub(crate) mod tests {
     fn lists_every_folder_from_the_root() {
         assert_eq!(ancestors(p(r"D:\a\b")), [p(r"D:\"), p(r"D:\a"), p(r"D:\a\b")]);
         assert_eq!(ancestors(p(r"D:\")), [p(r"D:\")]);
-        assert_eq!(ancestors(p(r"\\server\share\a")), [p(r"\\server\share"), p(r"\\server\share\a")]);
+        assert_eq!(ancestors(p(r"\\server\share\a")), [p(r"\\server"), p(r"\\server\share"), p(r"\\server\share\a")]);
+        assert_eq!(ancestors(p(r"\\server\")), [p(r"\\server")]);
         assert!(ancestors(p("")).is_empty());
     }
 
@@ -274,6 +291,8 @@ pub(crate) mod tests {
         assert_eq!(parent_folder(p(r"D:\a\b")), Some(p(r"D:\a")));
         assert_eq!(parent_folder(p(r"D:\a")), Some(p("D:")));
         assert_eq!(parent_folder(p(r"\\server\share\a")), Some(p(r"\\server\share")));
+        assert_eq!(parent_folder(p(r"\\server\share")), Some(p(r"\\server")));
+        assert_eq!(parent_folder(p(r"\\server")), None);
     }
 
     #[test]
@@ -283,6 +302,18 @@ pub(crate) mod tests {
         assert_eq!(child(p(r"D:\a"), "b"), p(r"D:\a\b"));
         assert_eq!(folder_name(p(r"D:\a\b")), "b");
         assert_eq!(folder_name(p(r"D:\")), "D:");
+        assert_eq!(folder_name(p(r"\\192.168.1.2")), "192.168.1.2");
+        assert_eq!(folder_name(p(r"\\server\share")), "share");
+    }
+
+    #[test]
+    fn tells_a_server_from_its_shares_and_drives() {
+        for path in [r"\\server", r"\\192.168.1.2\"] {
+            assert!(is_server(p(path)), "{path}");
+        }
+        for path in [r"\\server\share", r"\\server\share\a", r"D:\", r"\\", ""] {
+            assert!(!is_server(p(path)), "{path}");
+        }
     }
 
     #[test]

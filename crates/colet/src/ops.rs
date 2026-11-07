@@ -12,7 +12,7 @@ use std::{
 use colet_core::{
     entry::Entry,
     operations::{CANCELLED, Event, Kind, Request},
-    paths::{child, folder_name, parent_folder, path_key, shown},
+    paths::{child, folder_name, is_server, parent_folder, path_key, shown},
     shell::Dropped,
 };
 use gpui_kit::base::input::{InputEvent, InputState};
@@ -248,6 +248,7 @@ const NEEDS_SELECTION: &str = "項目を選択すると使えます";
 pub const NEEDS_FOLDER: &str = "フォルダーのカラムで使えます";
 const BUSY: &str = "ファイル操作の完了後に使えます";
 const NOT_AT_HOME: &str = "ホームでは使えません";
+pub const NOT_AT_SERVER: &str = "サーバーの共有一覧では使えません";
 pub const ONE_ITEM: &str = "1項目を選択したときに使えます";
 pub const NEEDS_FILE: &str = "ファイルを選択したときに使えます";
 pub const SAME_FOLDER: &str = "同じフォルダーの項目を選んだときに使えます";
@@ -290,10 +291,21 @@ impl Colet {
         c.entries.iter().filter(|e| picked.contains(&e.path)).cloned().collect()
     }
 
-    /// Where a paste or a new folder goes: the folder column worked in.
-    pub fn destination(&self) -> Option<PathBuf> {
+    /// The folder column worked in's own folder, or server.
+    pub fn folder_here(&self) -> Option<PathBuf> {
         let c = self.action_column()?;
         (c.kind == ColumnKind::Folder).then(|| c.path.clone())
+    }
+
+    /// Where a paste or a new folder goes: the folder column worked in, unless it lists a server's shares,
+    /// which are only looked at.
+    pub fn destination(&self) -> Option<PathBuf> {
+        self.folder_here().filter(|path| !is_server(path))
+    }
+
+    /// The column worked in lists a server's shares.
+    fn at_server(&self) -> bool {
+        self.action_column().is_some_and(|c| c.kind == ColumnKind::Folder && is_server(&c.path))
     }
 
     /// Asked as the buttons are drawn, each frame: it walks the selection, which may be thousands, without
@@ -301,11 +313,21 @@ impl Colet {
     pub fn reasons(&self) -> Reasons {
         let picked = self.picked_paths();
         let at_home = self.action_column().is_none_or(|c| c.kind == ColumnKind::Home);
+        let at_server = self.at_server();
         let search = picked.iter().any(|p| saved_query(p).is_some());
         let none = picked.is_empty();
-        let item = if none { Some(NEEDS_SELECTION) } else if at_home { Some(NOT_AT_HOME) } else { None };
+        let item = if none {
+            Some(NEEDS_SELECTION)
+        } else if at_home {
+            Some(NOT_AT_HOME)
+        } else if at_server {
+            Some(NOT_AT_SERVER)
+        } else {
+            None
+        };
         let busy = self.running.is_some().then_some(BUSY);
-        let folder = busy.or(self.destination().is_none().then_some(NEEDS_FOLDER));
+        let folder = busy.or(if at_server { Some(NOT_AT_SERVER) } else { self.destination().is_none().then_some(NEEDS_FOLDER) });
+        let here = self.folder_here().is_none().then_some(NEEDS_FOLDER);
         let saved_pick = picked.len() == 1 && search;
         let drive = picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(&home_path(p)).is_none());
         let first = picked.first().map(|p| parent_folder(p).unwrap_or(Path::new("")));
@@ -315,6 +337,8 @@ impl Colet {
                 Some(NEEDS_SELECTION)
             } else if at_home {
                 Some(NOT_AT_HOME)
+            } else if at_server {
+                Some(NOT_AT_SERVER)
             } else if search {
                 Some("保存した検索はコピーできません")
             } else if drive {
@@ -328,7 +352,7 @@ impl Colet {
             delete: busy.or(item),
             // With nothing picked, the folder column's own folder.
             explorer: if none {
-                self.destination().is_none().then_some(NEEDS_FOLDER)
+                here
             } else if apart {
                 Some(SAME_FOLDER)
             } else {
@@ -336,15 +360,17 @@ impl Colet {
             },
             shell: if search {
                 Some("保存した検索には使えません")
+            } else if at_server {
+                Some(NOT_AT_SERVER)
             } else if none {
-                self.destination().is_none().then_some(NEEDS_FOLDER)
+                here
             } else if apart {
                 Some(SAME_FOLDER)
             } else {
                 None
             },
             // With nothing picked, the folder column's own folder.
-            copy_path: if none { self.destination().is_none().then_some(NEEDS_FOLDER) } else { None },
+            copy_path: if none { here } else { None },
             // From several folders too, as a drag from them.
             send_to: item
                 .or(drive.then_some("ドライブは送れません"))
@@ -409,7 +435,7 @@ impl Colet {
     pub fn copy_paths(&mut self, cx: &mut Context<Self>) {
         let mut picked = self.picked();
         if picked.is_empty() {
-            picked.extend(self.destination());
+            picked.extend(self.folder_here());
         }
         self.take_menu();
         if picked.is_empty() {
@@ -664,7 +690,7 @@ impl Colet {
     /// Shows the picked items, all in one folder, selected together in it; with nothing picked, the folder
     /// column's own folder, open on what it holds.
     pub fn reveal_in_explorer(&mut self, cx: &mut Context<Self>) {
-        let (picked, folder, refused) = (self.picked_entries(), self.destination(), self.reasons().explorer);
+        let (picked, folder, refused) = (self.picked_entries(), self.folder_here(), self.reasons().explorer);
         self.take_menu();
         if refused.is_some() {
             return;

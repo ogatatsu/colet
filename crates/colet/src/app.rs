@@ -822,9 +822,9 @@ impl Colet {
             }
             Kind::Folder => {
                 let path = c.path.clone();
-                let cancelled = self.listings.cancel_before(id);
+                let (cancelled, owner) = (self.listings.cancel_before(id), self.owner);
                 cx.background_executor().spawn(async move {
-                    Ok(Listed::all(backend.list(&path, sort, &cancelled)?))
+                    Ok(Listed::all(backend.list(&path, sort, &cancelled, owner)?))
                 })
             }
         };
@@ -1006,13 +1006,14 @@ impl Colet {
 
     // ---- Watching ----
 
-    /// Watches the folders the columns could read, one level deep, as [`Watching::set`] does.
+    /// Watches the folders the columns could read, one level deep, as [`Watching::set`] does; a server's
+    /// shares, which no change tells of, are read again with F5 only.
     pub(crate) fn watch(&mut self, cx: &mut Context<Self>) -> Option<mpsc::Receiver<()>> {
         let paths: Vec<PathBuf> = self
             .state
             .columns
             .iter()
-            .filter(|c| c.kind == Kind::Folder && c.error.is_none())
+            .filter(|c| c.kind == Kind::Folder && c.error.is_none() && !colet_core::paths::is_server(&c.path))
             .map(|c| c.path.clone())
             .collect();
         self.watching.set(paths).unwrap_or_else(|error| {

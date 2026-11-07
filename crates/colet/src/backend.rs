@@ -43,7 +43,8 @@ pub trait Backend: Send + Sync + 'static {
     fn roots(&self) -> Vec<Entry>;
     /// The folders Everything's index starts from; none while it cannot be asked.
     fn indexed_roots(&self) -> Vec<PathBuf>;
-    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String>;
+    /// A server that will not let the user in as they are asks them to sign in, in a dialog over `owner`.
+    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String>;
     /// The results and the name of what they came from.
     fn search(&self, search: Search) -> Result<(Page, String), String>;
     /// How many results `query` finds, leaving the last search and its watch be.
@@ -111,8 +112,8 @@ impl Backend for Live {
         everything::roots().unwrap_or_default()
     }
 
-    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool) -> Result<Vec<Entry>, String> {
-        folders::list(path, sort, cancelled)
+    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String> {
+        folders::list(path, sort, cancelled, owner)
     }
 
     fn search(&self, search: Search) -> Result<(Page, String), String> {
