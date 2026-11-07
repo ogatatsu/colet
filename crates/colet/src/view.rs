@@ -1715,6 +1715,11 @@ impl Colet {
                     .min_w(px(crate::crumbs::TYPING_ROOM))
                     .h_full()
                     .cursor_text()
+                    .when(crumbs.is_empty(), |d| {
+                        d.flex().items_center().px(px(6.)).child(
+                            div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(crate::address::PLACEHOLDER),
+                        )
+                    })
                     .on_click(cx.listener(|this, _, window, cx| this.open_address(window, cx)))
                     .test_support(),
             );

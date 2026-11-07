@@ -13,8 +13,8 @@ use crate::{
     state::Kind,
 };
 
-/// What the field says while empty.
-const PLACEHOLDER: &str = "パスを入力（Ctrl+L）";
+/// What the empty address says before and while editing.
+pub(crate) const PLACEHOLDER: &str = "パスを入力（Ctrl+L）";
 
 impl Colet {
     /// The field, and what it tells: Enter goes to what is typed.
