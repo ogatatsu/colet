@@ -453,7 +453,7 @@ fn takes_the_keys_into_a_field_right_clicked_from_elsewhere_with_what_it_had_pic
 fn keeps_the_keys_in_the_menu_from_a_row_or_the_folder_s_empty_space(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     let work = ui.read(cx, |v| v.state.columns[2].id);
-    for target in [ElementId::from(row(r"D:\work\c.txt")), ElementId::from(("column", work))] {
+    for target in [row(r"D:\work\c.txt"), ElementId::from(("column", work))] {
         ui.act(cx, |window, cx| window.right_click(target.clone(), cx));
         settle(cx);
         let view = ui.view.clone();
