@@ -774,9 +774,11 @@ impl Colet {
         let paths: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
         let (backend, owner) = (self.backend.clone(), self.owner);
         let task = cx.background_executor().spawn(async move { backend.send_to(&target, &paths, shift, owner) });
+        self.sending += 1;
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
+                this.sending -= 1;
                 match result {
                     Ok(Dropped::Refused) => this.notify(format!("「{name}」は受け付けませんでした"), Tone::Info, cx),
                     Ok(_) => {}

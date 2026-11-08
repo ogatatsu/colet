@@ -500,6 +500,9 @@ pub struct Colet {
     pub focused_row: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The file operation under way; they go one at a time.
     pub running: Option<Running>,
+    /// The sends to Windows' Send To under way: their drops run in this process, so the window stays
+    /// until each returns.
+    pub sending: usize,
     /// The settings could not be written as the window closed: the next close goes without them.
     pub(crate) unsaved_close: bool,
     pub history: History,
@@ -595,6 +598,7 @@ impl Colet {
             pressed_open: false,
             focused_row: Default::default(),
             running: None,
+            sending: 0,
             unsaved_close: false,
             history: History::default(),
             clipboard: Clipboard::default(),
@@ -644,11 +648,15 @@ impl Colet {
         (search, typed)
     }
 
-    /// Whether the window may close: not while a file operation runs. The settings are written at once,
+    /// Whether the window may close: not while a file operation or a send runs. The settings are written at once,
     /// rather than a moment after the last change; when that fails, the next close goes without them.
     pub(crate) fn may_close(&mut self, cx: &mut Context<Self>) -> bool {
         if self.running.is_some() {
             self.notify("ファイル操作中です。完了を待つか、進捗ダイアログでキャンセルしてから閉じてください。", Tone::Info, cx);
+            return false;
+        }
+        if self.sending > 0 {
+            self.notify("「送る」の処理中です。完了を待ってから閉じてください。", Tone::Info, cx);
             return false;
         }
         if self.unsaved_close {

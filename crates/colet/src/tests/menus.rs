@@ -221,6 +221,23 @@ fn sends_by_keys_from_the_file_menu(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn keeps_the_window_while_a_send_runs(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    send_targets(&fake);
+    let close = |cx: &mut TestAppContext| ui.view.update(cx, |v, cx| v.may_close(cx));
+    ui.view.update(cx, |v, cx| {
+        v.send_targets = fake.send_targets();
+        v.send_to(r"C:\SendTo\USB.lnk".into(), false, cx);
+    });
+    // Its drop runs in this process: closing now would cut it off.
+    assert!(!close(cx));
+    settle(cx);
+    assert!(ui.toasts(cx).iter().any(|t| t.contains("「送る」の処理中です")));
+    assert_eq!(fake.sent.lock().unwrap().len(), 1);
+    assert!(close(cx));
+}
+
+#[gpui_kit::test]
 fn sends_results_from_several_folders_moved_with_shift(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a\x.txt"), file(r"D:\b\y.txt")]));
     send_targets(&fake);
