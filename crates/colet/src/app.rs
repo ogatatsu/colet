@@ -43,7 +43,7 @@ use crate::{
     ops::{History, Running},
     places::{Dialog, HomeDragging, home_entries, home_groups, places},
     reveal::Sideways,
-    settings::{LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
+    settings::{self, File, LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
     tabs::Tabs,
@@ -366,13 +366,14 @@ impl SearchRefresh {
 /// through `write`: none while the file could not be read and is still there, so it is never written over.
 fn kept<T: Default + Clone + Send + 'static>(
     read: Result<T, LoadError>,
+    file: &File,
     write: impl Fn(&T) -> Result<(), String> + Send + Sync + 'static,
 ) -> (T, Saves<T>, Option<String>) {
     let (value, problem, still_there) = match read {
         Ok(value) => (value, None, false),
         Err(error) => (T::default(), Some(error.message), error.kept),
     };
-    (value, Saves::new((!still_there).then(|| Saver::new(write))), problem)
+    (value, Saves::new((!still_there).then(|| Saver::new(file, write))), problem)
 }
 
 /// The rows of each column, scrolled up and down apart from the others.
@@ -533,11 +534,11 @@ impl Colet {
         window.on_window_should_close(cx, move |_, cx| view.upgrade().is_none_or(|view| view.update(cx, |this, cx| this.may_close(cx))));
         let (settings, settings_saves, problem) = {
             let backend = backend.clone();
-            kept(settings, move |settings| backend.save_settings(settings))
+            kept(settings, &settings::SETTINGS, move |settings| backend.save_settings(settings))
         };
         let (sorts, sorts_saves, sorts_problem) = {
             let backend = backend.clone();
-            kept(sorts, move |sorts| backend.save_sorts(sorts))
+            kept(sorts, &crate::sorts::SORTS, move |sorts| backend.save_sorts(sorts))
         };
         let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
             Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),

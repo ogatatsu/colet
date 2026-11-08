@@ -127,7 +127,7 @@ impl FolderWatcher {
                 Err(error) => (error.paths, true, true),
             };
             let keys: Vec<OsString> = paths.iter().map(|p| path_key(p)).collect();
-            let requested = requested.lock().unwrap();
+            let requested = requested.lock().unwrap_or_else(|e| e.into_inner());
             if !keys.is_empty() && !keys.iter().any(|p| requested.iter().any(|f| relevant(p, f))) {
                 return;
             }
@@ -136,7 +136,7 @@ impl FolderWatcher {
             if reset && (paths.is_empty() || !repairs.is_empty()) {
                 let _ = repair.send(WatchCommand::Repair(repairs));
             }
-            changes.lock().unwrap().add(if error { Vec::new() } else { listings(paths, reset) });
+            changes.lock().unwrap_or_else(|e| e.into_inner()).add(if error { Vec::new() } else { listings(paths, reset) });
         })
         .map_err(|e| e.to_string())?;
         // Dropping the handle sends Stop: the callback also has a sender, so disconnection alone
@@ -173,7 +173,7 @@ impl FolderWatcher {
                     let mut checked = HashSet::new();
                     if let Some(paths) = next {
                         wanted = paths.into_iter().map(|p| (path_key(&p), p)).collect();
-                        *desired.lock().unwrap() = wanted.keys().cloned().collect();
+                        *desired.lock().unwrap_or_else(|e| e.into_inner()) = wanted.keys().cloned().collect();
                         let mut needed = wanted.clone();
                         for path in wanted.values() {
                             if let Some(parent) = path.parent() {
@@ -224,7 +224,7 @@ impl FolderWatcher {
                         .collect();
                     if !refreshed.is_empty() {
                         // List again after the new handle is installed, covering the gap before it.
-                        repaired.lock().unwrap().add(refreshed);
+                        repaired.lock().unwrap_or_else(|e| e.into_inner()).add(refreshed);
                     }
                     if !failed.is_empty() {
                         unwatched(failed);

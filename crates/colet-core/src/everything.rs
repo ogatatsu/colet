@@ -67,6 +67,9 @@ pub const PAGE: usize = 500;
 
 const WATCH_RETRY: Duration = Duration::from_secs(5);
 
+/// How long a watch woken with neither a change nor an error waits before it waits again.
+const WAKE_PAUSE: Duration = Duration::from_millis(100);
+
 /// The oldest Everything it asks, 1.5.0.1424b: the one that names its pipes by session.
 const OLDEST: [u32; 4] = [1, 5, 0, 1424];
 
@@ -208,6 +211,8 @@ impl Watch {
                 }
                 let error = unsafe { Everything3_GetLastError() };
                 if error == 0 {
+                    // Woken for nothing: wait a moment before waiting again, so it never spins.
+                    std::thread::sleep(WAKE_PAUSE);
                     continue;
                 }
                 if !heard.stopping.load(Ordering::Relaxed) {
@@ -330,7 +335,13 @@ impl SearchSession {
             let key = (query.to_owned(), order);
             let new_search = self.key.as_ref() != Some(&key) || refresh || self.state.is_null();
             if new_search {
-                self.prepare(query, order)?;
+                if let Err(error) = self.prepare(query, order) {
+                    // The watch and the key are the last search's: let them go with it, so no change
+                    // to it is told as one to this.
+                    self.watch = None;
+                    self.key = None;
+                    return Err(error);
+                }
                 self.start_watching();
             }
             // These setters update the state but return FALSE in the pinned upstream version.

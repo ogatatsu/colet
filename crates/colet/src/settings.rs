@@ -2,6 +2,7 @@
 //! the search filters, the tabs with what each searched and the folders open, the sort order, the theme, whether
 //! the hidden items show, and where the window was. The way back and forth and what is picked besides are not kept.
 use std::{
+    io::Write as _,
     path::{Path, PathBuf},
     sync::{Arc, mpsc},
     time::{SystemTime, UNIX_EPOCH},
@@ -420,19 +421,39 @@ pub const SETTINGS: File = File { stem: "settings", what: "設定", file: "設�
 pub struct Saver<T> {
     lane: Lane,
     write: Arc<Write<T>>,
+    /// What the file holds, for saying it could not be saved: "設定".
+    what: &'static str,
 }
 
 type Write<T> = dyn Fn(&T) -> Result<(), String> + Send + Sync;
 
 impl<T: Send + 'static> Saver<T> {
-    pub fn new(write: impl Fn(&T) -> Result<(), String> + Send + Sync + 'static) -> Self {
-        Self { lane: Lane::default(), write: Arc::new(write) }
+    pub fn new(file: &File, write: impl Fn(&T) -> Result<(), String> + Send + Sync + 'static) -> Self {
+        Self { lane: Lane::default(), write: Arc::new(write), what: file.what }
     }
 
-    /// Queues `kept` behind the saves before it; the receiver hears how its write went.
-    pub fn save(&self, kept: T) -> mpsc::Receiver<Result<(), String>> {
+    /// Queues `kept` behind the saves before it; [`Queued::written`] says how its write went.
+    pub fn save(&self, kept: T) -> Queued {
         let write = self.write.clone();
-        self.lane.run(move || write(&kept))
+        Queued { result: self.lane.run(move || write(&kept)), what: self.what }
+    }
+}
+
+/// A save on its way.
+pub struct Queued {
+    result: mpsc::Receiver<Result<(), String>>,
+    what: &'static str,
+}
+
+impl Queued {
+    /// How the save went, once it is written; a write that broke off never says, and is taken as failed.
+    pub fn written(self) -> Result<(), String> {
+        self.result.recv().unwrap_or_else(|_| Err(format!("{}を保存できません", self.what)))
+    }
+
+    #[cfg(test)]
+    fn pending(&self) -> bool {
+        matches!(self.result.try_recv(), Err(mpsc::TryRecvError::Empty))
     }
 }
 
@@ -457,21 +478,16 @@ impl<T: Clone + Send + 'static> Saves<T> {
     }
 
     /// Queues `kept` unless a change came after `change`, which has its own save coming.
-    pub fn save_if_last(&self, change: u64, kept: &T) -> Option<mpsc::Receiver<Result<(), String>>> {
+    pub fn save_if_last(&self, change: u64, kept: &T) -> Option<Queued> {
         let saver = self.saver.as_ref().filter(|_| self.changes == change)?;
         Some(saver.save(kept.clone()))
     }
 
     /// Queues `kept` now, dropping the saves still waiting out a burst.
-    pub fn save_now(&mut self, kept: &T) -> Option<mpsc::Receiver<Result<(), String>>> {
+    pub fn save_now(&mut self, kept: &T) -> Option<Queued> {
         self.changes += 1;
         self.saver.as_ref().map(|saver| saver.save(kept.clone()))
     }
-}
-
-/// How a save went, once it is written; a saver that stopped never says.
-pub fn written(result: mpsc::Receiver<Result<(), String>>) -> Result<(), String> {
-    result.recv().unwrap_or_else(|_| Err("設定を保存できません".into()))
 }
 
 /// `%APPDATA%\Colet\settings.json`.
@@ -541,7 +557,11 @@ pub fn write<T: Serialize>(kept: &T, path: &Path, file: &File) -> Result<(), Str
     std::fs::create_dir_all(path.parent().unwrap()).map_err(fail)?;
     let temporary = path.with_extension("json.tmp");
     let json = serde_json::to_vec_pretty(kept).map_err(|e| e.to_string())?;
-    std::fs::write(&temporary, json).map_err(fail)?;
+    // Flushed to the disk before it takes the old one's place, so a power cut leaves one of them whole.
+    let mut written = std::fs::File::create(&temporary).map_err(fail)?;
+    written.write_all(&json).map_err(fail)?;
+    written.sync_all().map_err(fail)?;
+    drop(written);
     std::fs::rename(&temporary, path).map_err(fail)
 }
 
@@ -562,7 +582,7 @@ mod tests {
         let (release, released) = mpsc::channel::<()>();
         let gate = Mutex::new((started, released));
         let target = path.clone();
-        let saver = Saver::new(move |settings: &Settings| {
+        let saver = Saver::new(&SETTINGS, move |settings: &Settings| {
             if settings.favorites == [Favorite::new("older")] {
                 let gate = gate.lock().unwrap();
                 gate.0.send(()).unwrap();
@@ -574,10 +594,10 @@ mod tests {
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
         // The older save is in the middle of its write; the final one waits behind it.
         let latest = saver.save(Settings { favorites: vec!["latest".into()], ..Settings::default() });
-        assert!(latest.try_recv().is_err());
+        assert!(latest.pending());
         release.send(()).unwrap();
-        written(older).unwrap();
-        written(latest).unwrap();
+        older.written().unwrap();
+        latest.written().unwrap();
         assert_eq!(load_from(&path).unwrap().favorites, [Favorite::new("latest")]);
     }
 

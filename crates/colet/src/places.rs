@@ -5,7 +5,6 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::mpsc::Receiver,
     time::Duration,
 };
 
@@ -20,7 +19,7 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, Engine, Tone, WidthOf},
     search_filters::FilterEdit,
-    settings::{Favorite, Placement, SavedSearch, Settings, Theme, written},
+    settings::{Favorite, Placement, Queued, SavedSearch, Settings, Theme},
     sorts::Sorts,
     state::{HomeKey, Kind, narrowing},
 };
@@ -305,11 +304,11 @@ impl Colet {
 
     /// Sends the save `queue` makes a moment later, once a burst of changes (a drag) is over, and says
     /// if it fails; `queue` sends none when a later change has its own coming.
-    fn save_later(cx: &mut Context<Self>, queue: impl FnOnce(&Self) -> Option<Receiver<Result<(), String>>> + 'static) {
+    fn save_later(cx: &mut Context<Self>, queue: impl FnOnce(&Self) -> Option<Queued> + 'static) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(250)).await;
             let Some(queued) = this.update(cx, |this, _| queue(this)).ok().flatten() else { return };
-            let saved = cx.background_executor().spawn(async move { written(queued) }).await;
+            let saved = cx.background_executor().spawn(async move { queued.written() }).await;
             if let Err(error) = saved {
                 this.update(cx, |this, cx| this.notify(error, Tone::Error, cx)).ok();
             }
@@ -322,8 +321,8 @@ impl Colet {
     pub fn flush_settings(&mut self) -> Result<(), String> {
         let settings = self.settings_saves.save_now(&self.settings);
         let sorts = self.sorts_saves.save_now(&self.sorts);
-        let settings = settings.map_or(Ok(()), written);
-        let sorts = sorts.map_or(Ok(()), written);
+        let settings = settings.map_or(Ok(()), Queued::written);
+        let sorts = sorts.map_or(Ok(()), Queued::written);
         settings.and(sorts)
     }
 
