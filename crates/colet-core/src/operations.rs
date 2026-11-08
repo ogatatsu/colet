@@ -69,7 +69,8 @@ pub enum Event {
     Cancelled {
         path: PathBuf,
     },
-    /// Where the last item went, which a name clash may have renamed.
+    /// Where the last item went: copied, moved or renamed, under the name it got, which may not be the
+    /// one asked.
     Placed {
         path: PathBuf,
     },
@@ -578,7 +579,8 @@ mod tests {
         let events = events.lock().unwrap();
         let done = events.iter().filter(|e| matches!(e, Event::Done { .. })).count();
         let left: Vec<_> = events.iter().filter_map(|e| if let Event::Left { path } = e { Some(path) } else { None }).collect();
-        assert_eq!((done, events.len()), (3, 5), "{events:?}");
+        assert_eq!((done, events.len()), (3, 6), "{events:?}");
+        assert!(events.contains(&Event::Placed { path: renamed.clone() }), "{events:?}");
         // The new folder was nowhere before; the renamed one and the one sent to the bin left.
         assert_eq!(left, [&child, &renamed]);
     }

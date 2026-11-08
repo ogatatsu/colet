@@ -45,7 +45,7 @@ pub enum Operation {
 pub enum Item {
     /// How the item ended.
     Done { path: PathBuf, result: HRESULT },
-    /// Where a copy or move put it, which a name clash may have renamed.
+    /// Where a copy, move or rename put it, under the name it got, which may not be the one asked.
     Placed { path: PathBuf },
     /// The item just deleted went for good, not to the Recycle Bin.
     Destroyed { path: PathBuf },
@@ -221,8 +221,9 @@ impl IFileOperationProgressSink_Impl for Sink_Impl {
     fn PreRenameItem(&self, _: u32, _: Ref<IShellItem>, _: &PCWSTR) -> Result<()> {
         Ok(())
     }
-    fn PostRenameItem(&self, _: u32, item: Ref<IShellItem>, _: &PCWSTR, result: HRESULT, _: Ref<IShellItem>) -> Result<()> {
-        self.done(item, result)
+    fn PostRenameItem(&self, _: u32, item: Ref<IShellItem>, _: &PCWSTR, result: HRESULT, renamed: Ref<IShellItem>) -> Result<()> {
+        // Under the name it got, which may not be the one asked.
+        self.placed(item, result, renamed)
     }
     fn PreMoveItem(&self, _: u32, _: Ref<IShellItem>, _: Ref<IShellItem>, _: &PCWSTR) -> Result<()> {
         Ok(())
@@ -407,6 +408,42 @@ mod tests {
         let reports = reports.borrow();
         assert_eq!(reports.iter().filter(|i| matches!(i, Item::Destroyed { .. })).count(), 1, "{reports:?}");
         assert_eq!(reports[2], Item::Destroyed { path: file.clone() });
+    }
+
+    #[test]
+    fn says_what_a_rename_named_it_whatever_was_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (file, got) = (dir.path().join("a.txt"), dir.path().join("b (2).txt"));
+        std::fs::write(&file, "a").unwrap();
+        std::fs::write(&got, "b").unwrap();
+        let (a, b) = (item(&file).unwrap(), item(&got).unwrap());
+        let asked = Wide::new(Path::new("b.txt"));
+        let reports = Rc::new(RefCell::new(Vec::new()));
+        let seen = reports.clone();
+        let sink: IFileOperationProgressSink = Sink(RefCell::new(Box::new(move |item| seen.borrow_mut().push(item)))).into();
+        unsafe {
+            sink.PostRenameItem(0, &a, asked.get(), S_OK, &b).unwrap();
+            sink.PostRenameItem(0, &a, asked.get(), E_ACCESSDENIED, None).unwrap();
+        }
+        let reports = reports.borrow();
+        assert_eq!(reports[1], Item::Placed { path: got });
+        assert_eq!(reports.len(), 3, "{reports:?}");
+    }
+
+    #[test]
+    fn renames_and_says_where_it_went() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, "a").unwrap();
+        let reports = Rc::new(RefCell::new(Vec::new()));
+        let seen = reports.clone();
+        operate(&Operation::Rename { name: "b.txt".into() }, std::slice::from_ref(&file), false, 0, move |item| {
+            seen.borrow_mut().push(item)
+        })
+        .unwrap();
+        let reports = reports.borrow();
+        assert!(matches!(&reports[0], Item::Done { result, .. } if result.is_ok()), "{reports:?}");
+        assert_eq!(reports[1], Item::Placed { path: dir.path().join("b.txt") });
     }
 
     #[test]

@@ -15,7 +15,7 @@ use colet_core::{
     entry::{Entry, Hiding, Marks, Order, Sort},
     everything::Page,
     operations::{CANCELLED, Event, Kind as Operation, Request},
-    paths::{ancestors, child, folder_name, id_text, parent_folder, path_key},
+    paths::{ancestors, child, folder_name, id_text, path_key},
     quick_look::{Error as QuickLookError, Message as QuickLookMessage},
     shell::{Dropped, Owner, SendTarget, clipboard::ClipboardFiles},
     watch::Changes,
@@ -88,6 +88,8 @@ struct Fake {
     /// What each operation was asked, and the paths that refuse to go.
     operations: Mutex<Vec<Request>>,
     stuck: Mutex<Vec<String>>,
+    /// The name the next rename gets in place of the one asked, as the shell may give.
+    renamed_as: Mutex<Option<String>>,
     /// Paths the Recycle Bin cannot take, deleted outright.
     unbinnable: Mutex<Vec<String>>,
     /// The shell's question on deleting is turned down.
@@ -235,13 +237,22 @@ impl Backend for Fake {
             Operation::Rename => {
                 let from = &request.paths[0];
                 let mut entry = self.remove(from).unwrap();
-                let parent = parent_folder(from).unwrap().to_owned();
-                entry.path = child(&parent, &request.name);
-                entry.name = request.name.clone();
-
+                // As `remove` finds it: a drive's root keeps its backslash.
+                let parent = ancestors(from).into_iter().rev().nth(1).unwrap();
+                let name = self.renamed_as.lock().unwrap().take().unwrap_or_else(|| request.name.clone());
+                entry.path = child(&parent, &name);
+                entry.name = name;
+                let to = entry.path.clone();
                 self.add(&parent, entry);
+                // A folder's listing goes with it.
+                let mut folders = self.folders.lock().unwrap();
+                if let Some(list) = folders.remove(&text(from)) {
+                    folders.insert(text(&to), list);
+                }
+                drop(folders);
                 report(Event::Done { path: from.clone() });
                 report(Event::Left { path: from.clone() });
+                report(Event::Placed { path: to });
             }
             Operation::NewFolder => {
                 let path = child(&request.destination, &request.name);

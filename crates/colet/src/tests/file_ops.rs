@@ -1,5 +1,6 @@
 //! File operations, the clipboard, Explorer and the history.
 use super::*;
+use crate::settings::Favorite;
 
 #[gpui_kit::test]
 fn copies_and_pastes_picking_what_was_pasted(cx: &mut TestAppContext) {
@@ -66,6 +67,22 @@ fn lets_go_of_what_a_paste_moves_as_the_clipboard_holds_it_not_as_last_seen(cx: 
     assert_eq!(released, HashSet::from([colet_core::paths::path_key(Path::new(r"D:\other"))]));
     settle(cx);
     assert!(ui.read(cx, |v| v.running.is_none() && v.watching.released.is_empty()));
+}
+
+#[gpui_kit::test]
+fn follows_a_rename_to_the_name_the_shell_gave_not_the_one_asked(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.view.update(cx, |v, cx| v.update_settings(|s| s.favorites = vec![Favorite::new(r"D:\work")], cx));
+    *fake.renamed_as.lock().unwrap() = Some("job (2)".into());
+    let request = Request { kind: Operation::Rename, paths: vec![r"D:\work".into()], destination: r"D:\".into(), name: "job".into() };
+    ui.view.update(cx, |v, cx| v.run(request, cx));
+    settle(cx);
+    assert_eq!(ui.read(cx, |v| v.settings.favorites.clone()), [Favorite::new(r"D:\job (2)")]);
+    // It stays picked, and its column open, under that name.
+    assert_eq!(ui.selected(cx, 1), [r"D:\job (2)"]);
+    assert_eq!(ui.read(cx, |v| text(&v.state.columns[2].path)), r"D:\job (2)");
+    let item = ui.read(cx, |v| v.history.entries[0].items[0].clone());
+    assert_eq!((text(&item.path), item.from.as_deref().map(text)), (r"D:\job (2)".into(), Some(r"D:\work".into())));
 }
 
 #[gpui_kit::test]

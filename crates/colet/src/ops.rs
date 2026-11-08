@@ -883,8 +883,16 @@ impl Colet {
             Err(error) if error == CANCELLED => (true, None),
             Err(error) => (false, Some(error.clone())),
         };
+        // Where the shell says it put it, under the name it got, which may not be the one asked; one that
+        // says nothing of it is taken at the name asked, once its item is done.
+        let told = kind == Kind::Rename && !pasted.is_empty();
         let renamed = (kind == Kind::Rename && result.is_ok())
-            .then(|| paths.first().map(|p| child(parent_folder(p).unwrap_or(Path::new("")), &name)))
+            .then(|| {
+                pasted
+                    .first()
+                    .cloned()
+                    .or_else(|| made.as_ref().and(paths.first()).map(|p| child(parent_folder(p).unwrap_or(Path::new("")), &name)))
+            })
             .flatten();
         if let Some(to) = &renamed {
             // Carry the selection over to the new name before the listing drops the old one, in the tab it
@@ -945,7 +953,8 @@ impl Colet {
         if moved_nothing || declined {
             self.history.entries.remove(index);
         } else {
-            if let Some(to) = renamed
+            // Told where it went, the item already says so.
+            if let Some(to) = renamed.filter(|_| !told)
                 && let Some(item) = entry.items.first_mut().filter(|i| i.status == ItemStatus::Done)
             {
                 item.from = Some(std::mem::replace(&mut item.path, to));
