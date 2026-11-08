@@ -363,7 +363,7 @@ impl From<TabFile> for KeptTab {
         let place = Kept {
             query: file.query,
             search_filter: file.search_filter,
-            fold: file.fold.filter(|fold| fold.anchor < folders.len()).map(|fold| (fold.anchor, fold.open)),
+            fold: file.fold.filter(|fold| fold.anchor < folders.len()),
             folders,
             picks: file.picks,
             active: file.active,
@@ -382,7 +382,7 @@ impl From<KeptTab> for TabFile {
             folders: place.folders.into_iter().map(|(path, highlight)| FolderFile { path, highlight }).collect(),
             picks: place.picks,
             active: place.active,
-            fold: place.fold.map(|(anchor, open)| Fold { anchor, open }),
+            fold: place.fold,
         }
     }
 }
@@ -636,7 +636,7 @@ mod tests {
                 folders: vec![(r"D:\a".into(), Some(r"D:\a\b".into())), (r"D:\a\b".into(), None)],
                 picks: vec![None, Some(r"D:\a".into())],
                 active: 2,
-                fold: Some((0, true)),
+                fold: Some(Fold { anchor: 0, open: true }),
             },
             filter: Some("画像".into()),
         };

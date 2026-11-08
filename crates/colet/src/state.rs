@@ -307,7 +307,7 @@ pub struct Kept {
     pub picks: Vec<Option<PathBuf>>,
     pub active: usize,
     /// The anchor counted among the folders, and whether the folders above it are out.
-    pub fold: Option<(usize, bool)>,
+    pub fold: Option<Fold<usize>>,
 }
 
 impl Kept {
@@ -636,7 +636,7 @@ impl State {
 
     /// What a tab keeps between starts: each column's pick only where it leads on to the next.
     pub fn kept(&self) -> Kept {
-        let folders: Vec<&Column> = self.columns.iter().filter(|c| c.kind == Kind::Folder).collect();
+        let Location { query, search_filter, folders, active, fold, .. } = self.snapshot();
         let last = self.columns.len() - 1;
         let picks = self
             .columns
@@ -647,14 +647,7 @@ impl State {
                 _ => None,
             })
             .collect();
-        Kept {
-            query: self.query.clone(),
-            search_filter: self.search_filter.clone(),
-            folders: folders.iter().map(|c| (c.path.clone(), c.highlight.clone())).collect(),
-            picks,
-            active: self.active,
-            fold: self.fold.and_then(|fold| Some((folders.iter().position(|c| c.id == fold.anchor)?, fold.open))),
-        }
+        Kept { query, search_filter, folders, picks, active, fold }
     }
 
     /// A tab as it was kept, its columns yet to be listed.
@@ -662,7 +655,6 @@ impl State {
         let mut state = Self::new();
         let Kept { query, search_filter, folders, picks, active, fold } = kept;
         let selections = picks.into_iter().map(|pick| pick.into_iter().collect()).collect();
-        let fold = fold.map(|(anchor, open)| Fold { anchor, open });
         state.restore(Location { query, search_filter, folders, selections, active, fold });
         state.note_folder();
         state
