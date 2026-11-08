@@ -9,7 +9,7 @@ use colet_core::{
 };
 use gpui_kit::base::input::{self, Input, InputState};
 use gpui_kit::component::{
-    Disableable, Selectable, Sizable,
+    Disableable, FocusableExt, Selectable, Sizable,
     button::{Button, ButtonVariants},
     status_bar::StatusBar,
 };
@@ -184,28 +184,20 @@ impl Colet {
                     |(query, label)| {
                         let focus = self.stop(format!("hint:{query}"), cx);
                         frame(p, keyed(&focus, window)).child(
-                            div()
-                                .id(query)
+                            Button::new(query)
+                                .outline()
                                 .track_focus(&focus)
-                                .role(Role::Button)
-                                .aria_label(format!("{query} {label}"))
+                                .focus_ring(false)
+                                .accessibility_label(format!("{query} {label}"))
                                 .h(px(28.))
                                 .px(px(10.))
-                                .flex()
-                                .items_center()
                                 .gap(px(6.))
-                                .bg(p.surface)
-                                .border_1()
-                                .border_color(p.border)
-                                .rounded(px(6.))
-                                .hover(|d| d.bg(p.hover))
                                 .child(div().text_color(p.accent).font_family("Consolas").child(query))
                                 .child(label)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     let filter = this.chosen_filter.clone();
                                     this.search_for(query, filter, window, cx)
-                                }))
-                                .test_support(),
+                                })),
                         )
                     },
                 ),

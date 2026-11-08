@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use gpui_kit::base::input::{Input, InputState};
 use gpui_kit::component::{
-    Disableable, Sizable,
+    Disableable, FocusableExt, Sizable,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     dialog::Dialog as DialogFrame,
@@ -100,24 +100,10 @@ fn push(id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, 
     Button::new(id).label(text).when(primary, |b| b.primary()).disabled(!enabled)
 }
 
-/// A button drawn as [`push`]'s, for one the keys are sent to, which a [`Button`] keeps to itself.
-fn button(p: Palette, id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, enabled: bool) -> Stateful<Div> {
-    let text = text.into();
-    div()
-        .id(id)
-        .h(px(30.))
-        .px_3()
-        .flex()
-        .items_center()
-        .rounded(px(6.))
-        .border_1()
-        .when(primary, |b| b.bg(p.accent_fill).border_color(p.accent_fill).text_color(p.on_accent))
-        .when(!primary, |b| b.bg(p.raised).border_color(p.border_strong))
-        // A plain one lies on the dialog's own color, which a fade would leave as it was.
-        .when(enabled && primary, |b| b.hover(|b| b.opacity(0.9)))
-        .when(enabled && !primary, |b| b.hover(|b| b.bg(p.raised_hover)))
-        .when(!enabled, |b| b.opacity(0.35))
-        .child(text)
+/// [`push`]'s button with the keys sent to it through `focus`. Its ring is the app's, laid round it by
+/// [`crate::view::frame`] only while Tab brought the keys there.
+fn keyed_push(id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, focus: &FocusHandle) -> Button {
+    push(id, text, primary, true).track_focus(focus).focus_ring(false)
 }
 
 /// A small button with a glyph, for each filter in the list.
@@ -496,13 +482,14 @@ impl Colet {
                     |(theme, focus)| {
                         let chosen = self.settings.theme == theme;
                         crate::view::frame(p, crate::view::keyed(&focus, window)).child(
-                            button(p, ("theme", theme as usize), theme.label(), chosen, true)
-                                .track_focus(&focus)
+                            keyed_push(("theme", theme as usize), theme.label(), chosen, &focus)
                                 .role(Role::RadioButton)
-                                .aria_label(theme.label())
-                                .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
-                                .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
-                                .test_support(),
+                                .toggled(chosen)
+                                // Picked, it takes the keys, as a radio group's checked one does.
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    focus.focus(window, cx);
+                                    this.set_theme(theme, window, cx)
+                                })),
                         )
                     },
                 )),
@@ -596,12 +583,8 @@ impl Colet {
             // It takes the keys as the dialog opens, so Enter goes on as it was pressed to open them.
             crate::view::frame(p, crate::view::keyed(&confirm_open, window))
                 .child(
-                    button(p, "confirm-open", "開く", true, true)
-                        .track_focus(&confirm_open)
-                        .role(Role::Button)
-                        .aria_label("開く")
-                        .on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx)))
-                        .test_support(),
+                    keyed_push("confirm-open", "開く", true, &confirm_open)
+                        .on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx))),
                 )
                 .into_any_element(),
         ];
