@@ -339,12 +339,7 @@ impl Colet {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .child(with_marks(&entry.name, &entry.marks.name, mark)),
-                    )
+                    .child(div().min_w_0().truncate().child(with_marks(&entry.name, &entry.marks.name, mark)))
                     // A badge, tinted with the row's own ink so it shows on any of its fills.
                     .when_some(within, |d, filter| {
                         d.child(
