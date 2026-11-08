@@ -158,7 +158,7 @@ impl Colet {
     /// the path bar's above, its own, and the status bar's below. Where the column is cut, it runs along
     /// the edge of the view. Read at paint, it stays on the column as it scrolls.
     fn scrolling_frame(&self) -> impl IntoElement {
-        let active = if self.search_focused { None } else { self.scrolling().1 };
+        let active = if self.columns_marked { self.scrolling().1 } else { None };
         let (scroll, width, color) = (self.sideways.scroll.clone(), self.widths.column, self.palette.accent);
         // A pixel past the view on every side but the right, where the window ends; drawn last, or the
         // status bar drawn after the columns would cover its bottom.

@@ -480,6 +480,9 @@ pub struct Colet {
     pub(crate) stops: HashMap<String, FocusHandle>,
     /// The keys are in the column worked in: its focused row is ringed.
     pub keys_in_column: bool,
+    /// The keys are in the columns or home, or with a menu, dialog or the history that gives them back
+    /// there: the column worked in is framed and its selection lit. Elsewhere, it steps back.
+    pub columns_marked: bool,
     pub popup: Option<Popup>,
     /// The open menu's lines, drawn and picked by the component library, and the closing it tells of.
     pub menu_view: Option<(Entity<gpui_kit::component::menu::PopupMenu>, FocusHandle, Subscription)>,
@@ -582,6 +585,7 @@ impl Colet {
             home_drag: HomeDragging::default(),
             stops: HashMap::new(),
             keys_in_column: false,
+            columns_marked: false,
             popup: None,
             sort_focus: cx.focus_handle().tab_stop(true),
             crumbs: Trail::default(),
@@ -683,6 +687,7 @@ impl Colet {
     pub fn follow_focus(&mut self, window: &Window, cx: &mut Context<Self>) {
         let (home, columns) = (self.home_focus.is_focused(window), self.columns_focus.is_focused(window));
         self.keys_in_column = home || columns;
+        self.columns_marked = self.keys_in_column || self.keys_go_back_to_columns();
         if home && self.state.active != 0 {
             self.state.set_active(0);
         } else if columns && self.state.active == 0 && self.state.columns.len() > 1 {
@@ -1184,6 +1189,17 @@ impl Colet {
     /// What takes the keys for the column at `index`: home's pane, or the columns beside it.
     pub fn column_focus(&self, index: usize) -> &FocusHandle {
         if index == 0 { &self.home_focus } else { &self.columns_focus }
+    }
+
+    /// A menu, dialog or the history holds the keys, and closing gives them back to the columns or home,
+    /// as [`Colet::restore_keys`] does.
+    fn keys_go_back_to_columns(&self) -> bool {
+        (self.menu_view.is_some() || self.dialog.is_some() || self.history.open)
+            && self
+                .keys_before
+                .as_ref()
+                .and_then(|before| before.upgrade())
+                .is_none_or(|before| before == self.home_focus || before == self.columns_focus)
     }
 
     /// A menu, dialog or the history opening: where the keys are now is where they go back to as it closes.

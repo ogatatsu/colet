@@ -245,7 +245,7 @@ impl Colet {
 
     pub(super) fn render_column(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let marked = index == self.state.active && !self.search_focused;
+        let marked = index == self.state.active && self.columns_marked;
         let c: &Column = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
         let (width, of) = match kind {

@@ -83,3 +83,25 @@ fn a_tab_left_while_typing_an_address_takes_it_up_again(cx: &mut TestAppContext)
     ui.input(cx, "rk");
     assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\work"));
 }
+
+#[gpui_kit::test]
+fn the_column_worked_in_is_marked_only_while_the_keys_are_in_the_columns_or_go_back_there(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.click(cx, row(r"D:\work\b.txt"));
+    assert!(ui.read(cx, |v| v.columns_marked && v.keys_in_column));
+    // In the address field, it steps back.
+    ui.press(cx, "ctrl-l");
+    assert!(ui.address_focused(cx));
+    assert!(ui.read(cx, |v| !v.columns_marked));
+    // A dialog that gives the keys back to the column leaves it marked, but its row unringed.
+    ui.click(cx, row(r"D:\work\b.txt"));
+    ui.click(cx, "preferences");
+    assert!(ui.read(cx, |v| v.columns_marked && !v.keys_in_column));
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.columns_marked && v.keys_in_column));
+    // One that gives them back to the search field does not.
+    ui.press(cx, "ctrl-f");
+    assert!(ui.read(cx, |v| !v.columns_marked));
+    ui.click(cx, "preferences");
+    assert!(ui.read(cx, |v| !v.columns_marked));
+}
