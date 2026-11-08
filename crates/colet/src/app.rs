@@ -366,7 +366,7 @@ impl SearchRefresh {
 /// through `write`: none while the file could not be read and is still there, so it is never written over.
 fn kept<T: Default + Clone + Send + 'static>(
     read: Result<T, LoadError>,
-    write: impl Fn(&T) -> Result<(), String> + Send + 'static,
+    write: impl Fn(&T) -> Result<(), String> + Send + Sync + 'static,
 ) -> (T, Saves<T>, Option<String>) {
     let (value, problem, still_there) = match read {
         Ok(value) => (value, None, false),

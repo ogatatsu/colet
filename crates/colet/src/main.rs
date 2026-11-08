@@ -8,6 +8,7 @@ mod crumbs;
 mod dialogs;
 mod icons;
 mod instance;
+mod lane;
 mod menus;
 mod metrics;
 mod ops;

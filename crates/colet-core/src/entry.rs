@@ -8,6 +8,7 @@ use std::{
     time::UNIX_EPOCH,
 };
 
+use serde::{Deserialize, Serialize};
 use windows::Win32::UI::Shell::StrCmpLogicalW;
 
 use crate::paths::{path_key, shown};
@@ -131,7 +132,8 @@ impl Entry {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Sort {
     #[default]
     Name,
@@ -152,8 +154,8 @@ impl Sort {
 }
 
 /// A sort and the way it runs. Descending turns the whole listing round, as Explorer does, so folders
-/// come last; ties still go by name from A.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+/// come last; ties still go by name from A. Kept as `{"by": "size", "descending": true}`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Order {
     pub by: Sort,
     pub descending: bool,

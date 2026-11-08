@@ -276,7 +276,7 @@ impl Column {
 }
 
 /// A search result or favorite's own column, the anchor, and whether the folders above it are out.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Fold<A> {
     pub anchor: A,
     pub open: bool,

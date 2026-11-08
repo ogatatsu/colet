@@ -3,19 +3,20 @@
 //! the hidden items show, and where the window was. The way back and forth and what is picked besides are not kept.
 use std::{
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{Arc, mpsc},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use colet_core::{
-    entry::{Order, Sort},
+    entry::Order,
     paths::{folder_name, path_key, shown},
 };
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     app::{COLUMN_WIDTHS, SEARCH_FIELD_WIDTH, SEARCH_FIELD_WIDTHS, SIDEBAR_WIDTHS},
-    state::{Kept, favorite_key, favorite_parts, narrow_words, narrowed_folder, narrowing, saved_query, search_key},
+    lane::Lane,
+    state::{Fold, Kept, favorite_key, favorite_parts, narrow_words, narrowed_folder, narrowing, saved_query, search_key},
 };
 
 /// A search kept in home. An empty name shows the query itself.
@@ -44,10 +45,12 @@ impl SavedSearch {
 }
 
 /// A folder kept in home, narrowed to some names or not. An empty name shows the folder's own.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Favorite {
     pub path: PathBuf,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub narrow: Option<String>,
 }
 
@@ -138,7 +141,8 @@ impl Theme {
 }
 
 /// A tab kept between starts: where it was, and the filter its next search is narrowed by, by name.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "TabFile", into = "TabFile")]
 pub struct KeptTab {
     pub place: Kept,
     pub filter: Option<String>,
@@ -165,20 +169,16 @@ pub struct Settings {
     pub sidebar_width: f32,
     /// The search field in the toolbar.
     pub search_field_width: f32,
-    #[serde(with = "favorites")]
     pub favorites: Vec<Favorite>,
     pub saved_searches: Vec<SavedSearch>,
     /// Home's rows pinned above the rest, in their order, by the path each row has: a folder's, or a
     /// narrowed favorite's or a saved search's key.
-    #[serde(with = "paths")]
     pub pinned: Vec<PathBuf>,
     pub filters: Vec<SearchFilter>,
     /// The tabs, in their order, and the one in front.
-    #[serde(with = "tabs")]
     pub tabs: Vec<KeptTab>,
     pub tab: usize,
     /// The one order the folders and the search results share.
-    #[serde(with = "order")]
     pub sort: Order,
     pub theme: Theme,
     /// Whether the folders list their hidden and system items, as Explorer leaves them out by default.
@@ -301,6 +301,23 @@ impl Settings {
         let (path, narrow) = favorite_parts(key);
         self.favorite(&path, narrow.as_deref()).is_some()
     }
+
+    /// The settings as they can be written: the file holds a path only as text, so a favorite, pin or tab
+    /// with a path that is not (an unpaired surrogate, which Windows allows in a name) is left out.
+    fn writable(&self) -> Settings {
+        let text = |path: &Path| path.to_str().is_some();
+        let tab_text = |tab: &KeptTab| {
+            tab.place.folders.iter().all(|(path, highlight)| text(path) && highlight.as_deref().is_none_or(text))
+                && tab.place.picks.iter().flatten().all(|pick| text(pick))
+        };
+        let mut settings = self.clone();
+        settings.favorites.retain(|f| text(&f.path));
+        settings.pinned.retain(|pin| text(pin));
+        settings.tab -= self.tabs.iter().take(self.tab).filter(|tab| !tab_text(tab)).count();
+        settings.tabs.retain(tab_text);
+        settings.tab = settings.tab.min(settings.tabs.len().saturating_sub(1));
+        settings
+    }
 }
 
 /// What tells home's rows apart: a place whatever its case, a saved search by its query, filter and
@@ -320,194 +337,59 @@ pub fn pin_key(path: &Path) -> std::ffi::OsString {
     }
 }
 
-/// The favorites and the pins, each as its path's text; one whose path is not text (an unpaired surrogate,
-/// which Windows allows in a name) as `{"utf16": [...]}`, the units Windows holds, so it still names that
-/// folder alone. One read neither way (a file edited by hand) is left out alone.
-pub(crate) mod paths {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-
-    use super::*;
-
-    #[derive(Serialize, Deserialize)]
-    #[serde(untagged)]
-    enum Kept {
-        Text(String),
-        Wide { utf16: Vec<u16> },
-    }
-
-    /// One path as it is written.
-    pub fn kept(path: &Path) -> serde_json::Value {
-        let kept = match path.to_str() {
-            Some(text) => Kept::Text(text.to_owned()),
-            None => Kept::Wide { utf16: path.as_os_str().encode_wide().collect() },
-        };
-        serde_json::to_value(kept).unwrap_or_default()
-    }
-
-    /// One path as it is written; none, when it reads neither way.
-    pub fn read(value: serde_json::Value) -> Option<PathBuf> {
-        match serde_json::from_value(value).ok()? {
-            Kept::Text(text) => Some(PathBuf::from(text)),
-            Kept::Wide { utf16 } => Some(OsString::from_wide(&utf16).into()),
-        }
-    }
-
-    pub fn serialize<S: Serializer>(paths: &[PathBuf], serializer: S) -> Result<S::Ok, S::Error> {
-        paths.iter().map(|path| kept(path)).collect::<Vec<_>>().serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<PathBuf>, D::Error> {
-        let values = Vec::<serde_json::Value>::deserialize(deserializer)?;
-        Ok(values.into_iter().filter_map(read).collect())
-    }
+/// A tab as the file holds it: `{"query": ..., "search_filter": ..., "filter": ..., "folders": [{"path": ...,
+/// "highlight": ...}], "picks": [...], "active": ..., "fold": {"anchor": ..., "open": ...}}`, what it lacks
+/// left out.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct TabFile {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    search_filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filter: Option<String>,
+    folders: Vec<FolderFile>,
+    picks: Vec<Option<PathBuf>>,
+    active: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fold: Option<Fold<usize>>,
 }
 
-/// The favorites, each as `{"path": ..., "name": ..., "narrow": ...}`, its path as [`paths`] writes one, and
-/// with no narrowing none. One written by an older Colet, its path alone, is read as a favorite of it; one
-/// read neither way (a file edited by hand) is left out alone.
-pub(crate) mod favorites {
-    use serde_json::{Map, Value};
-
-    use super::*;
-
-    pub fn serialize<S: Serializer>(favorites: &[Favorite], serializer: S) -> Result<S::Ok, S::Error> {
-        favorites
-            .iter()
-            .map(|f| {
-                let mut kept = Map::new();
-                kept.insert("path".into(), paths::kept(&f.path));
-                kept.insert("name".into(), f.name.clone().into());
-                if let Some(narrow) = &f.narrow {
-                    kept.insert("narrow".into(), narrow.clone().into());
-                }
-                Value::Object(kept)
-            })
-            .collect::<Vec<_>>()
-            .serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Favorite>, D::Error> {
-        let values = Vec::<Value>::deserialize(deserializer)?;
-        Ok(values.into_iter().filter_map(read).collect())
-    }
-
-    fn read(mut value: Value) -> Option<Favorite> {
-        let Some(path) = value.get_mut("path").map(Value::take) else { return paths::read(value).map(Favorite::new) };
-        let text = |value: &Value, field: &str| value.get(field).and_then(Value::as_str).map(str::to_owned);
-        Some(Favorite { path: paths::read(path)?, name: text(&value, "name").unwrap_or_default(), narrow: text(&value, "narrow") })
-    }
+#[derive(Serialize, Deserialize)]
+struct FolderFile {
+    path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    highlight: Option<PathBuf>,
 }
 
-/// The tabs, each as `{"query": ..., "search_filter": ..., "filter": ..., "folders": [{"path": ...,
-/// "highlight": ...}], "picks": [...], "active": ..., "fold": {"anchor": ..., "open": ...}}`, its paths as
-/// [`paths`] writes one and what it lacks left out. Read leniently: what is missing or not read goes without
-/// it, and a tab read no way at all (a file edited by hand) is left out alone.
-pub(crate) mod tabs {
-    use serde_json::{Map, Value};
-
-    use super::*;
-
-    pub fn serialize<S: Serializer>(tabs: &[KeptTab], serializer: S) -> Result<S::Ok, S::Error> {
-        tabs.iter().map(kept).collect::<Vec<_>>().serialize(serializer)
-    }
-
-    fn kept(tab: &KeptTab) -> Value {
-        let place = &tab.place;
-        let mut kept = Map::new();
-        if !place.query.is_empty() {
-            kept.insert("query".into(), place.query.clone().into());
-        }
-        if let Some(name) = &place.search_filter {
-            kept.insert("search_filter".into(), name.clone().into());
-        }
-        if let Some(name) = &tab.filter {
-            kept.insert("filter".into(), name.clone().into());
-        }
-        let folders = place
-            .folders
-            .iter()
-            .map(|(path, highlight)| {
-                let mut folder = Map::new();
-                folder.insert("path".into(), paths::kept(path));
-                if let Some(highlight) = highlight {
-                    folder.insert("highlight".into(), paths::kept(highlight));
-                }
-                Value::Object(folder)
-            })
-            .collect();
-        kept.insert("folders".into(), Value::Array(folders));
-        kept.insert("picks".into(), place.picks.iter().map(|pick| pick.as_deref().map_or(Value::Null, paths::kept)).collect());
-        kept.insert("active".into(), place.active.into());
-        if let Some((anchor, open)) = place.fold {
-            kept.insert("fold".into(), serde_json::json!({ "anchor": anchor, "open": open }));
-        }
-        Value::Object(kept)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<KeptTab>, D::Error> {
-        let values = Vec::<Value>::deserialize(deserializer)?;
-        Ok(values.into_iter().filter_map(read).collect())
-    }
-
-    fn read(mut value: Value) -> Option<KeptTab> {
-        value.as_object()?;
-        let text = |value: &Value, field: &str| value.get(field).and_then(Value::as_str).map(str::to_owned);
-        let folders: Vec<(PathBuf, Option<PathBuf>)> = match value.get_mut("folders").map(Value::take) {
-            Some(Value::Array(folders)) => folders
-                .into_iter()
-                .filter_map(|mut folder| {
-                    let path = paths::read(folder.get_mut("path")?.take())?;
-                    Some((path, folder.get_mut("highlight").map(Value::take).and_then(paths::read)))
-                })
-                .collect(),
-            _ => Vec::new(),
-        };
-        let picks = match value.get_mut("picks").map(Value::take) {
-            Some(Value::Array(picks)) => picks.into_iter().map(paths::read).collect(),
-            _ => Vec::new(),
-        };
-        let fold = value.get("fold").and_then(|fold| Some((fold.get("anchor")?.as_u64()? as usize, fold.get("open")?.as_bool()?)));
+impl From<TabFile> for KeptTab {
+    fn from(file: TabFile) -> Self {
+        let folders: Vec<_> = file.folders.into_iter().map(|f| (f.path, f.highlight)).collect();
         let place = Kept {
-            query: text(&value, "query").unwrap_or_default(),
-            search_filter: text(&value, "search_filter"),
-            fold: fold.filter(|(anchor, _)| *anchor < folders.len()),
+            query: file.query,
+            search_filter: file.search_filter,
+            fold: file.fold.filter(|fold| fold.anchor < folders.len()).map(|fold| (fold.anchor, fold.open)),
             folders,
-            picks,
-            active: value.get("active").and_then(Value::as_u64).unwrap_or_default() as usize,
+            picks: file.picks,
+            active: file.active,
         };
-        Some(KeptTab { place, filter: text(&value, "filter") })
+        KeptTab { place, filter: file.filter }
     }
 }
 
-/// The sort order as `{"by": "size", "descending": true}`, read leniently: what is missing or not known
-/// (a file edited by hand, or written by a later Colet) goes back to its default alone, rather than have
-/// the whole file taken for broken.
-pub(crate) mod order {
-    use super::*;
-
-    fn name(by: Sort) -> &'static str {
-        match by {
-            Sort::Name => "name",
-            Sort::Size => "size",
-            Sort::Modified => "modified",
+impl From<KeptTab> for TabFile {
+    fn from(tab: KeptTab) -> Self {
+        let place = tab.place;
+        TabFile {
+            query: place.query,
+            search_filter: place.search_filter,
+            filter: tab.filter,
+            folders: place.folders.into_iter().map(|(path, highlight)| FolderFile { path, highlight }).collect(),
+            picks: place.picks,
+            active: place.active,
+            fold: place.fold.map(|(anchor, open)| Fold { anchor, open }),
         }
-    }
-
-    #[derive(Serialize)]
-    struct Kept {
-        by: &'static str,
-        descending: bool,
-    }
-
-    pub fn serialize<S: Serializer>(order: &Order, serializer: S) -> Result<S::Ok, S::Error> {
-        Kept { by: name(order.by), descending: order.descending }.serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Order, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let by = value["by"].as_str().and_then(|by| Sort::ALL.into_iter().find(|s| name(*s) == by));
-        Ok(Order { by: by.unwrap_or_default(), descending: value["descending"].as_bool().unwrap_or_default() })
     }
 }
 
@@ -539,29 +421,24 @@ pub struct File {
 
 pub const SETTINGS: File = File { stem: "settings", what: "設定", file: "設定ファイル", fallback: "既定の設定" };
 
-type Done = mpsc::Sender<Result<(), String>>;
+/// Writes a file kept on a lane of its own, one save after another in the order they were sent, so an
+/// older save never lands over a newer one: the final save on close waits for those before it.
+pub struct Saver<T> {
+    lane: Lane,
+    write: Arc<Write<T>>,
+}
 
-/// Writes a file kept on a thread of its own, one save after another in the order they were sent, so
-/// an older save never lands over a newer one: the final save on close waits for those before it.
-pub struct Saver<T>(mpsc::Sender<(T, Done)>);
+type Write<T> = dyn Fn(&T) -> Result<(), String> + Send + Sync;
 
 impl<T: Send + 'static> Saver<T> {
-    pub fn new(write: impl Fn(&T) -> Result<(), String> + Send + 'static) -> Self {
-        let (saves, queued) = mpsc::channel::<(T, Done)>();
-        // Ends once the saver is dropped and the saves sent before are written.
-        std::thread::spawn(move || {
-            for (kept, done) in queued {
-                let _ = done.send(write(&kept));
-            }
-        });
-        Self(saves)
+    pub fn new(write: impl Fn(&T) -> Result<(), String> + Send + Sync + 'static) -> Self {
+        Self { lane: Lane::default(), write: Arc::new(write) }
     }
 
     /// Queues `kept` behind the saves before it; the receiver hears how its write went.
     pub fn save(&self, kept: T) -> mpsc::Receiver<Result<(), String>> {
-        let (done, result) = mpsc::channel();
-        let _ = self.0.send((kept, done));
-        result
+        let write = self.write.clone();
+        self.lane.run(move || write(&kept))
     }
 }
 
@@ -661,7 +538,7 @@ pub fn save(settings: &Settings) -> Result<(), String> {
 }
 
 fn save_to(settings: &Settings, path: &Path) -> Result<(), String> {
-    write(settings, path, &SETTINGS)
+    write(&settings.writable(), path, &SETTINGS)
 }
 
 /// Writes `kept` beside `path` and then over it, so a failed write leaves the old one whole.
@@ -676,6 +553,8 @@ pub fn write<T: Serialize>(kept: &T, path: &Path, file: &File) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
+    use colet_core::entry::Sort;
+
     use super::*;
 
     #[test]
@@ -710,7 +589,7 @@ mod tests {
 
     #[test]
     fn fills_in_what_a_partial_file_lacks() {
-        let settings: Settings = serde_json::from_str(r#"{"column_width":300,"favorites":["D:\\"]}"#).unwrap();
+        let settings: Settings = serde_json::from_str(r#"{"column_width":300,"favorites":[{"path":"D:\\"}]}"#).unwrap();
         assert_eq!(settings.column_width, 300.);
         assert_eq!(settings.sidebar_width, 240.);
         assert_eq!(settings.favorites, [Favorite::new(r"D:\")]);
@@ -720,28 +599,62 @@ mod tests {
     }
 
     #[test]
-    fn keeps_a_favorite_whose_path_is_not_text_as_it_is() {
+    fn leaves_out_what_names_a_path_that_is_not_text_as_it_is_written() {
         use std::os::windows::ffi::OsStringExt;
         let wide: Vec<u16> = r"D:\a".encode_utf16().chain([0xD800]).collect();
         let odd = PathBuf::from(std::ffi::OsString::from_wide(&wide));
-        let settings = Settings { favorites: vec![Favorite::new(r"D:\b"), odd.clone().into()], ..Settings::default() };
-        let json = serde_json::to_string(&settings).unwrap();
-        assert!(json.contains(r#""favorites":[{"path":"D:\\b","name":""},{"path":{"utf16":[68,58,92,97,55296]},"name":""}]"#), "{json}");
-        assert_eq!(serde_json::from_str::<Settings>(&json).unwrap().favorites, [Favorite::new(r"D:\b"), Favorite::new(odd)]);
-        // One read neither way is left out alone.
-        let settings: Settings = serde_json::from_str(r#"{"favorites":[1,"D:\\c"]}"#).unwrap();
-        assert_eq!(settings.favorites, [Favorite::new(r"D:\c")]);
+        let tab = |path: &Path| KeptTab { place: Kept { folders: vec![(path.into(), None)], ..Kept::default() }, filter: None };
+        let settings = Settings {
+            favorites: vec![Favorite::new(r"D:\b"), odd.clone().into()],
+            pinned: vec![odd.clone(), r"D:\b".into()],
+            tabs: vec![tab(&odd), tab(Path::new(r"D:\b")), tab(Path::new(r"D:\c"))],
+            tab: 2,
+            ..Settings::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        save_to(&settings, &path).unwrap();
+        let read = load_from(&path).unwrap();
+        assert_eq!(read.favorites, [Favorite::new(r"D:\b")]);
+        assert_eq!(read.pinned, [PathBuf::from(r"D:\b")]);
+        // The tab in front stays in front.
+        assert_eq!(read.tabs, [tab(Path::new(r"D:\b")), tab(Path::new(r"D:\c"))]);
+        assert_eq!(read.tab, 1);
     }
 
     #[test]
-    fn reads_a_favorite_written_as_its_path_alone_and_writes_each_whole() {
+    fn writes_each_favorite_whole() {
         let settings: Settings =
-            serde_json::from_str(r#"{"favorites":["D:\\a",{"path":"D:\\b","name":"書類","narrow":"pdf"},{"name":"no path"}]}"#).unwrap();
+            serde_json::from_str(r#"{"favorites":[{"path":"D:\\a"},{"path":"D:\\b","name":"書類","narrow":"pdf"}]}"#).unwrap();
         let narrowed = Favorite { path: r"D:\b".into(), name: "書類".into(), narrow: Some("pdf".into()) };
         assert_eq!(settings.favorites, [Favorite::new(r"D:\a"), narrowed]);
         let json = serde_json::to_string(&settings).unwrap();
         assert!(json.contains(r#""favorites":[{"path":"D:\\a","name":""},{"path":"D:\\b","name":"書類","narrow":"pdf"}]"#), "{json}");
         assert_eq!(serde_json::from_str::<Settings>(&json).unwrap().favorites, settings.favorites);
+    }
+
+    #[test]
+    fn writes_a_tab_with_what_it_lacks_left_out() {
+        let tab = KeptTab {
+            place: Kept {
+                query: "cat".into(),
+                search_filter: None,
+                folders: vec![(r"D:\a".into(), Some(r"D:\a\b".into())), (r"D:\a\b".into(), None)],
+                picks: vec![None, Some(r"D:\a".into())],
+                active: 2,
+                fold: Some((0, true)),
+            },
+            filter: Some("画像".into()),
+        };
+        let json = serde_json::to_string(&tab).unwrap();
+        assert_eq!(
+            json,
+            r#"{"query":"cat","filter":"画像","folders":[{"path":"D:\\a","highlight":"D:\\a\\b"},{"path":"D:\\a\\b"}],"picks":[null,"D:\\a"],"active":2,"fold":{"anchor":0,"open":true}}"#
+        );
+        assert_eq!(serde_json::from_str::<KeptTab>(&json).unwrap(), tab);
+        // A fold whose anchor is not among the folders goes.
+        let read: KeptTab = serde_json::from_str(r#"{"folders":[{"path":"D:\\a"}],"fold":{"anchor":1,"open":false}}"#).unwrap();
+        assert_eq!(read.place.fold, None);
     }
 
     #[test]
@@ -779,7 +692,7 @@ mod tests {
 
     #[test]
     fn reads_a_file_that_still_names_an_everything_instance() {
-        let settings: Settings = serde_json::from_str(r#"{"instance":"1.5a","favorites":["D:\\"]}"#).unwrap();
+        let settings: Settings = serde_json::from_str(r#"{"instance":"1.5a","favorites":[{"path":"D:\\"}]}"#).unwrap();
         assert_eq!(settings.favorites, [Favorite::new(r"D:\")]);
         assert!(!serde_json::to_string(&settings).unwrap().contains("instance"));
     }
@@ -802,23 +715,9 @@ mod tests {
 
     #[test]
     fn sorts_by_name_from_a_to_z_when_the_file_keeps_no_order() {
-        let settings: Settings = serde_json::from_str(r#"{"favorites":["D:\\"]}"#).unwrap();
+        let settings: Settings = serde_json::from_str(r#"{"favorites":[{"path":"D:\\"}]}"#).unwrap();
         assert_eq!(settings.sort, Order::default());
         assert_eq!(settings.favorites, [Favorite::new(r"D:\")]);
-    }
-
-    #[test]
-    fn puts_back_only_what_it_cannot_read_of_the_sort_order() {
-        let sort = |json: &str| serde_json::from_str::<Settings>(json).unwrap().sort;
-        assert_eq!(sort(r#"{"sort":{"by":"size"}}"#), Order { by: Sort::Size, descending: false });
-        assert_eq!(sort(r#"{"sort":{"descending":true}}"#), Order { by: Sort::Name, descending: true });
-        assert_eq!(sort(r#"{"sort":{"by":"type","descending":true}}"#), Order { by: Sort::Name, descending: true });
-        assert_eq!(sort(r#"{"sort":{"by":"size","descending":"yes"}}"#), Order { by: Sort::Size, descending: false });
-        assert_eq!(sort(r#"{"sort":"size"}"#), Order::default());
-        assert_eq!(sort(r#"{"sort":null}"#), Order::default());
-        // The rest of the file is read as ever.
-        let settings: Settings = serde_json::from_str(r#"{"sort":3,"theme":"dark"}"#).unwrap();
-        assert_eq!((settings.sort, settings.theme), (Order::default(), Theme::Dark));
     }
 
     #[test]

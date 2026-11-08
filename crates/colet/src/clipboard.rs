@@ -12,6 +12,8 @@ use std::{
 
 use colet_core::{paths::path_key, shell::clipboard::ClipboardFiles};
 
+use crate::lane::Lane;
+
 pub struct Clipboard {
     /// The files on it, marked in their rows until it changes.
     pub files: ClipboardFiles,
@@ -21,6 +23,7 @@ pub struct Clipboard {
     changed: Arc<AtomicBool>,
     /// Copies and cuts still being put on it.
     writes: usize,
+    /// Puts them on it one after another in the order asked, so an earlier copy never lands over a later.
     lane: Lane,
     /// A paste asked for while they were, into this folder: run once they are done, so it pastes them.
     paste_waiting: Option<PathBuf>,
@@ -69,7 +72,7 @@ impl Clipboard {
     /// Queues `work` behind the writes before it; the receiver hears how it went.
     pub fn write(&mut self, work: impl FnOnce() -> Result<(), String> + Send + 'static) -> mpsc::Receiver<Result<(), String>> {
         self.writes += 1;
-        self.lane.write(work)
+        self.lane.run(work)
     }
 
     /// A write ended, `written` or not: the paste waiting on the last of them, unless it failed, as the
@@ -89,33 +92,5 @@ impl Clipboard {
             return None;
         }
         Some(destination)
-    }
-}
-
-/// Puts things on the clipboard on a thread of its own, one write after another in the order asked, so
-/// an earlier copy never lands over a later one.
-struct Lane(mpsc::Sender<Box<dyn FnOnce() + Send>>);
-
-impl Default for Lane {
-    fn default() -> Self {
-        let (writes, queued) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
-        // Ends once the lane is dropped and the writes sent before are done.
-        std::thread::spawn(move || {
-            for write in queued {
-                write();
-            }
-        });
-        Self(writes)
-    }
-}
-
-impl Lane {
-    /// Queues `work` behind the writes before it; the receiver hears how it went.
-    fn write(&self, work: impl FnOnce() -> Result<(), String> + Send + 'static) -> mpsc::Receiver<Result<(), String>> {
-        let (done, result) = mpsc::channel();
-        let _ = self.0.send(Box::new(move || {
-            let _ = done.send(work());
-        }));
-        result
     }
 }

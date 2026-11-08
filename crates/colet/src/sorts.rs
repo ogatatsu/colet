@@ -7,14 +7,15 @@ use std::{
 };
 
 use colet_core::{entry::Order, paths::path_key};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
-use crate::settings::{self, File, LoadError, order, paths};
+use crate::settings::{self, File, LoadError};
 
 pub const SORTS: File =
     File { stem: "sort", what: "カラムの並び順", file: "カラムの並び順のファイル", fallback: "既定の並び順" };
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "SortsFile", into = "SortsFile")]
 pub struct Sorts {
     /// By the folder's path key, with the path as it was given.
     folders: BTreeMap<OsString, (PathBuf, Order)>,
@@ -40,55 +41,38 @@ impl Sorts {
     }
 }
 
-/// `{"search": {"by": "size", "descending": true}, "folders": [{"path": "D:\\a", "order": {...}}]}`; a
-/// folder whose path reads neither way is left out alone, as a favorite is.
-impl Serialize for Sorts {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        #[derive(Serialize)]
-        struct Folder {
-            path: serde_json::Value,
-            #[serde(with = "order")]
-            order: Order,
+/// The orders as the file holds them: `{"search": {"by": "size", "descending": true}, "folders": [{"path":
+/// "D:\a", "order": {...}}]}`. A folder whose path is not text (an unpaired surrogate, which Windows allows
+/// in a name) is left out, as the file holds a path only as text.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct SortsFile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    search: Option<Order>,
+    folders: Vec<FolderSort>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct FolderSort {
+    path: PathBuf,
+    order: Order,
+}
+
+impl From<SortsFile> for Sorts {
+    fn from(file: SortsFile) -> Self {
+        let mut sorts = Sorts { search: file.search, ..Sorts::default() };
+        for FolderSort { path, order } in file.folders.into_iter().filter(|f| !f.path.as_os_str().is_empty()) {
+            // The first of a folder written twice by hand stands.
+            sorts.folders.entry(path_key(&path)).or_insert((path, order));
         }
-        #[derive(Serialize)]
-        struct Kept {
-            #[serde(skip_serializing_if = "Option::is_none")]
-            search: Option<Search>,
-            folders: Vec<Folder>,
-        }
-        #[derive(Serialize)]
-        struct Search(#[serde(with = "order")] Order);
-        let folders = self.folders.values().map(|(path, order)| Folder { path: paths::kept(path), order: *order }).collect();
-        Kept { search: self.search.map(Search), folders }.serialize(serializer)
+        sorts
     }
 }
 
-impl<'de> Deserialize<'de> for Sorts {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        struct Folder {
-            path: serde_json::Value,
-            #[serde(with = "order")]
-            order: Order,
-        }
-        #[derive(Deserialize)]
-        struct Search(#[serde(with = "order")] Order);
-        #[derive(Deserialize, Default)]
-        #[serde(default)]
-        struct Kept {
-            search: Option<Search>,
-            folders: Vec<serde_json::Value>,
-        }
-        let kept = Kept::deserialize(deserializer)?;
-        let mut sorts = Sorts { search: kept.search.map(|s| s.0), ..Sorts::default() };
-        for folder in kept.folders {
-            let Ok(folder) = serde_json::from_value::<Folder>(folder) else { continue };
-            if let Some(path) = paths::read(folder.path).filter(|p| !p.as_os_str().is_empty()) {
-                // The first of a folder written twice by hand stands.
-                sorts.folders.entry(path_key(&path)).or_insert((path, folder.order));
-            }
-        }
-        Ok(sorts)
+impl From<Sorts> for SortsFile {
+    fn from(sorts: Sorts) -> Self {
+        let folders = sorts.folders.into_values().filter(|(path, _)| path.to_str().is_some());
+        SortsFile { search: sorts.search, folders: folders.map(|(path, order)| FolderSort { path, order }).collect() }
     }
 }
 
@@ -132,27 +116,27 @@ mod tests {
     }
 
     #[test]
-    fn leaves_out_alone_a_folder_it_cannot_read() {
+    fn keeps_the_first_of_a_folder_written_twice() {
         let sorts: Sorts = serde_json::from_str(
-            r#"{"folders":[1,{"path":2,"order":{"by":"size"}},{"path":"D:\\a","order":{"by":"size"}},{"path":"d:\\A","order":{"by":"modified"}}]}"#,
+            r#"{"folders":[{"path":"","order":{"by":"name","descending":true}},{"path":"D:\\a","order":{"by":"size","descending":false}},{"path":"d:\\A","order":{"by":"modified","descending":false}}]}"#,
         )
         .unwrap();
         assert_eq!(sorts.folder(Path::new(r"D:\a")), Some(Order { by: Sort::Size, descending: false }));
+        assert_eq!(sorts.folder(Path::new("")), None);
         assert_eq!(sorts.search, None);
     }
 
     #[test]
-    fn keeps_a_folder_whose_path_is_not_text_as_it_is() {
+    fn leaves_out_a_folder_whose_path_is_not_text() {
         use std::os::windows::ffi::OsStringExt;
         let wide: Vec<u16> = r"D:\a".encode_utf16().chain([0xD800]).collect();
         let odd = PathBuf::from(OsString::from_wide(&wide));
         let mut sorts = Sorts::default();
         sorts.set_folder(&odd, Some(Order { by: Sort::Size, descending: true }));
-        let json = serde_json::to_string(&sorts).unwrap();
-        assert!(json.contains(r#"{"utf16":[68,58,92,97,55296]}"#), "{json}");
-        let read: Sorts = serde_json::from_str(&json).unwrap();
-        assert_eq!(read.folder(&odd), sorts.folder(&odd));
-        assert_eq!(read.folder(Path::new("D:\\a\u{FFFD}")), None);
+        sorts.set_folder(Path::new(r"D:\b"), Some(Order { by: Sort::Size, descending: true }));
+        let read: Sorts = serde_json::from_str(&serde_json::to_string(&sorts).unwrap()).unwrap();
+        assert_eq!(read.folder(&odd), None);
+        assert_eq!(read.folder(Path::new(r"D:\b")), sorts.folder(Path::new(r"D:\b")));
     }
 
     #[test]
