@@ -23,6 +23,11 @@ pub struct Clipboard {
     changed: Arc<AtomicBool>,
     /// Copies and cuts still being put on it.
     writes: usize,
+    /// The writes asked for so far, the last of them the one that lands last.
+    asked: u64,
+    /// Whether that last one was written, once it ended: told in whatever order they end, a paste
+    /// waiting on them goes by it alone.
+    last_written: bool,
     /// Puts them on it one after another in the order asked, so an earlier copy never lands over a later.
     lane: Lane,
     /// A paste asked for while they were, into this folder: run once they are done, so it pastes them.
@@ -37,6 +42,8 @@ impl Default for Clipboard {
             held: HashSet::new(),
             changed: Arc::new(AtomicBool::new(true)),
             writes: 0,
+            asked: 0,
+            last_written: false,
             lane: Lane::default(),
             paste_waiting: None,
         }
@@ -69,20 +76,26 @@ impl Clipboard {
         !self.held.is_empty() && self.held.contains(&path_key(path))
     }
 
-    /// Queues `work` behind the writes before it; the receiver hears how it went.
-    pub fn write(&mut self, work: impl FnOnce() -> Result<(), String> + Send + 'static) -> mpsc::Receiver<Result<(), String>> {
+    /// Queues `work` behind the writes before it: which write it is, and a receiver that hears how it
+    /// went.
+    pub fn write(&mut self, work: impl FnOnce() -> Result<(), String> + Send + 'static) -> (u64, mpsc::Receiver<Result<(), String>>) {
         self.writes += 1;
-        self.lane.run(work)
+        self.asked += 1;
+        (self.asked, self.lane.run(work))
     }
 
-    /// A write ended, `written` or not: the paste waiting on the last of them, unless it failed, as the
-    /// clipboard then still holds what was there before, never what it was meant to paste.
-    pub fn write_ended(&mut self, written: bool) -> Option<PathBuf> {
+    /// The write `which` ended, `written` or not: once all have, the paste waiting on them, unless the
+    /// last asked failed, as the clipboard then holds what was there before it, never what it was meant
+    /// to paste. They may be told of in another order than they ran.
+    pub fn write_ended(&mut self, which: u64, written: bool) -> Option<PathBuf> {
         self.writes -= 1;
+        if which == self.asked {
+            self.last_written = written;
+        }
         if self.writes > 0 {
             return None;
         }
-        self.paste_waiting.take().filter(|_| written)
+        self.paste_waiting.take().filter(|_| self.last_written)
     }
 
     /// A paste into `destination`, to run now; none while writes are under way, as it waits for them.
@@ -92,5 +105,27 @@ impl Clipboard {
             return None;
         }
         Some(destination)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two writes, the first and then the second written or not as given, with a paste into `D:\to`
+    /// asked while they run; they are told of the second first. What paste runs once both are told of.
+    fn pasted_told_backwards(first: bool, second: bool) -> Option<PathBuf> {
+        let mut clipboard = Clipboard::default();
+        let (a, _) = clipboard.write(|| Ok(()));
+        let (b, _) = clipboard.write(|| Ok(()));
+        assert_eq!(clipboard.paste_into(PathBuf::from(r"D:\to")), None);
+        assert_eq!(clipboard.write_ended(b, second), None);
+        clipboard.write_ended(a, first)
+    }
+
+    #[test]
+    fn pastes_by_the_last_write_asked_not_the_last_told_of() {
+        assert_eq!(pasted_told_backwards(false, true), Some(PathBuf::from(r"D:\to")));
+        assert_eq!(pasted_told_backwards(true, false), None);
     }
 }

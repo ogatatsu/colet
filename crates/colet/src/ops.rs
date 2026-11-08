@@ -382,7 +382,7 @@ impl Colet {
     /// Puts something on the clipboard off the UI thread; a paste asked for meanwhile waits for it, so it
     /// never pastes what was there before.
     fn write_clipboard(&mut self, work: impl FnOnce() -> Result<(), String> + Send + 'static, done: String, cx: &mut Context<Self>) {
-        let result = self.clipboard.write(work);
+        let (which, result) = self.clipboard.write(work);
         // A lane that stopped, as after a write panicked, never says.
         let task = cx
             .background_executor()
@@ -395,7 +395,7 @@ impl Colet {
                     Ok(()) => this.notify(done, Tone::Info, cx),
                     Err(error) => this.notify(error, Tone::Error, cx),
                 }
-                if let Some(destination) = this.clipboard.write_ended(written) {
+                if let Some(destination) = this.clipboard.write_ended(which, written) {
                     this.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
                 }
             })
