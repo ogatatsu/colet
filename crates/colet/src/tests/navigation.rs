@@ -90,6 +90,38 @@ fn brings_the_folded_folders_out_with_ctrl_u_leaving_the_keys_be(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
+fn the_strip_pressed_by_keys_hands_them_to_the_column_worked_in(cx: &mut TestAppContext) {
+    let deep = file(r"D:\a\b\zeta.txt");
+    let fake = Arc::new(Fake::default().with_results(vec![deep.clone()]).with_folders(&[
+        (r"D:\", vec![folder(r"D:\a")]),
+        (r"D:\a", vec![folder(r"D:\a\b")]),
+        (r"D:\a\b", vec![deep.clone()]),
+    ]));
+    let ui = open(cx, fake);
+    ui.input(cx, "zeta");
+    ui.click(cx, row(&deep.path));
+    for key in ["enter", "space"] {
+        if ui.read(cx, |v| v.state.folded_away()) == 0 {
+            let results = ui.read(cx, |v| v.state.columns[1].id);
+            ui.click_in(cx, ("column", results), row(&deep.path));
+        }
+        // Into the file and back to the results, past the folders folded away.
+        ui.press(cx, "right");
+        ui.press(cx, "left");
+        assert_eq!(ui.active(cx), 1);
+        assert_eq!(ui.read(cx, |v| v.state.folded_away()), 2);
+        let strip = ui.read(cx, |v| v.stops.borrow().get("unfold").cloned()).expect("the strip's stop");
+        ui.act(cx, |window, cx| strip.focus(window, cx));
+        ui.press(cx, key);
+        assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0, "{key}");
+        assert!(ui.act(cx, |window, _| window.try_find("unfold").is_none()));
+        // The strip gone, the keys are in the results rather than nowhere.
+        assert_eq!(ui.active(cx), 1, "{key}");
+        assert!(ui.columns_focused(cx), "{key}");
+    }
+}
+
+#[gpui_kit::test]
 fn takes_the_keys_home_with_ctrl_h_on_the_row_they_were_on(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(drive_d()));
     ui.press(cx, "down");

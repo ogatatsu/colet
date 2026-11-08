@@ -84,16 +84,21 @@ impl Colet {
             // The button laid over the whole strip: its ring's room would push the heading's line off the
             // columns'.
             .child(
-                // Gone once pressed: the keys stay where they were rather than go with it.
+                // Gone once pressed: clicked, the keys stay where they were rather than go with it; pressed
+                // with the keys on it, they go to the column worked in.
                 keep_focus(ring(div().id("unfold").track_focus(&focus), p, focus.is_focused(window), 0.))
                     .role(Role::Button)
                     .aria_label(format!("上の階層を表示（{away}階層）"))
                     .absolute()
                     .inset_0()
                     .tip(format!("上の階層を表示（{away}階層）"))
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         this.state.unfold();
-                        this.changed(cx);
+                        if event.is_keyboard() {
+                            this.focus_active(window, cx);
+                        } else {
+                            this.changed(cx);
+                        }
                     }))
                     .test_support(),
             )

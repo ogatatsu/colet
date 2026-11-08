@@ -30,6 +30,11 @@ impl Colet {
         self.home_focus.is_focused(window) || self.columns_focus.is_focused(window)
     }
 
+    /// The keys are on one of the buttons that are stops for Tab.
+    fn stop_focused(&self, window: &Window) -> bool {
+        self.stops.borrow().values().any(|stop| stop.is_focused(window))
+    }
+
     /// `act` on `A`, a key that moves through the rows or between columns, while the keys are on the rows.
     /// On a field or a button among them, it is theirs to take or leave: it moves nothing.
     fn on_rows<A: Action>(
@@ -109,6 +114,11 @@ impl Colet {
                 this.open_menu(this.state.active, None, at, window, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenItem, window, cx| {
+                // A button among the rows is pressed by it, as by space.
+                if this.stop_focused(window) {
+                    cx.propagate();
+                    return;
+                }
                 let index = this.state.active;
                 // Several picked open together, as the menu's 開く does.
                 if this.state.columns[index].shown_selected().len() > 1 {
