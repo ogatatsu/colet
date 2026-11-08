@@ -37,7 +37,7 @@ fn shows_homes_places_in_quick_look_but_not_its_saved_searches(cx: &mut TestAppC
     assert_eq!(fake.quick_looked(), [(Switch, r"D:\b".into()), (Switch, r"D:\c".into())]);
     // A saved search is no file: the preview is left as it is.
     ui.press(cx, "down");
-    assert!(ui.read(cx, |v| crate::state::saved_query(v.state.columns[0].focused.as_ref().unwrap()).is_some()));
+    assert!(ui.read(cx, |v| crate::state::HomeKey::of(v.state.columns[0].focused.as_ref().unwrap()).is_search()));
     ui.press(cx, "space");
     assert!(fake.quick_looked().is_empty());
     // Past the saved searches, on to a drive.

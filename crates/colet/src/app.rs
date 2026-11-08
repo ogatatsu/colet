@@ -1269,7 +1269,7 @@ impl Colet {
     /// A folder opens beside it, as picking does; a file opens in its app.
     pub fn open(&mut self, index: usize, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self.state.columns.get(index).and_then(|c| c.entry(path)).cloned() else { return };
-        if crate::state::saved_query(&entry.path).is_some() {
+        if crate::state::HomeKey::of(&entry.path).is_search() {
             self.pick(index, entry.path, window, cx);
             return;
         }

@@ -334,70 +334,102 @@ pub struct Folded {
     pub open: bool,
 }
 
-/// Home keys a saved search by its query behind this, its filter's name after a NUL, and what its results
-/// are narrowed to after another, none of which can hold one; no path starts this way, a drive letter being
-/// one character.
+/// What a row of home stands for, read from the path it is keyed by. Home's rows go through the columns
+/// as any other's, by path, so a narrowed favorite and a saved search are keyed by paths no folder has:
+/// a favorite narrowed to some names by its folder's path, a NUL and the narrowing, which no path can hold;
+/// a saved search by [`SEARCH_KEY`] and its query, its filter's name after a NUL, and what its results are
+/// narrowed to after another, none of which can hold one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HomeKey<'a> {
+    /// A place, or a favorite: its folder, and what a favorite opens narrowed to.
+    Folder { path: Cow<'a, Path>, narrow: Option<Cow<'a, str>> },
+    /// A saved search: its query, the filter it runs within, and what its results are narrowed to.
+    Search { query: &'a str, filter: Option<&'a str>, narrow: Option<&'a str> },
+}
+
+/// What a saved search's key starts with; no path starts this way, a drive letter being one character.
 const SEARCH_KEY: &str = "search:";
 
-pub fn search_key(query: &str, filter: Option<&str>, narrow: Option<&str>) -> PathBuf {
-    let mut key = format!("{SEARCH_KEY}{query}");
-    // A filter's name is never empty: an empty one stands for none, before a narrowing.
-    if filter.is_some() || narrow.is_some() {
-        key.push('\0');
-        key.push_str(filter.unwrap_or_default());
+impl<'a> HomeKey<'a> {
+    pub fn favorite(path: &'a Path, narrow: Option<&'a str>) -> Self {
+        HomeKey::Folder { path: Cow::Borrowed(path), narrow: narrow.map(Cow::Borrowed) }
     }
-    if let Some(narrow) = narrow {
-        key.push('\0');
-        key.push_str(narrow);
+
+    pub fn search(query: &'a str, filter: Option<&'a str>, narrow: Option<&'a str>) -> Self {
+        HomeKey::Search { query, filter, narrow }
     }
-    key.into()
-}
 
-/// The query a home row runs, the filter it runs within and what its results are narrowed to, when it is
-/// a saved search.
-pub fn saved_query(path: &Path) -> Option<(&str, Option<&str>, Option<&str>)> {
-    let key = path.to_str()?.strip_prefix(SEARCH_KEY)?;
-    let mut parts = key.splitn(3, '\0');
-    let query = parts.next().unwrap_or_default();
-    let filter = parts.next().filter(|filter| !filter.is_empty());
-    Some((query, filter, parts.next()))
-}
-
-/// Home keys a favorite narrowed to some names by its folder's path, then a NUL and the narrowing, which no
-/// path can hold; one not narrowed, by its path alone.
-pub fn favorite_key(path: &Path, narrow: Option<&str>) -> PathBuf {
-    let Some(narrow) = narrow else { return path.to_owned() };
-    let mut key = path.as_os_str().to_owned();
-    key.push("\0");
-    key.push(narrow);
-    key.into()
-}
-
-/// The folder a favorite's key names, and what it is narrowed to; none for a key with no narrowing, or a
-/// saved search's.
-pub fn narrowed_folder(key: &Path) -> Option<(PathBuf, String)> {
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    if saved_query(key).is_some() {
-        return None;
+    /// What `key` stands for.
+    pub fn of(key: &'a Path) -> Self {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        if let Some(search) = key.to_str().and_then(|key| key.strip_prefix(SEARCH_KEY)) {
+            let mut parts = search.splitn(3, '\0');
+            let query = parts.next().unwrap_or_default();
+            // A filter's name is never empty: an empty one stands for none, before a narrowing.
+            let filter = parts.next().filter(|filter| !filter.is_empty());
+            return HomeKey::Search { query, filter, narrow: parts.next() };
+        }
+        let wide: Vec<u16> = key.as_os_str().encode_wide().collect();
+        match wide.iter().position(|&unit| unit == 0) {
+            Some(at) => HomeKey::Folder {
+                path: Cow::Owned(OsString::from_wide(&wide[..at]).into()),
+                narrow: Some(Cow::Owned(String::from_utf16_lossy(&wide[at + 1..]))),
+            },
+            None => HomeKey::Folder { path: Cow::Borrowed(key), narrow: None },
+        }
     }
-    let wide: Vec<u16> = key.as_os_str().encode_wide().collect();
-    let at = wide.iter().position(|&unit| unit == 0)?;
-    Some((OsString::from_wide(&wide[..at]).into(), String::from_utf16_lossy(&wide[at + 1..])))
-}
 
-/// What a row of home stands for on disk: a favorite's folder, narrowed or not; any other row's own path.
-pub fn home_path(key: &Path) -> Cow<'_, Path> {
-    match narrowed_folder(key) {
-        Some((path, _)) => Cow::Owned(path),
-        None => Cow::Borrowed(key),
+    /// The path its row is keyed by.
+    pub fn key(&self) -> PathBuf {
+        match self {
+            HomeKey::Folder { path, narrow: None } => path.to_path_buf(),
+            HomeKey::Folder { path, narrow: Some(narrow) } => {
+                let mut key = path.as_os_str().to_owned();
+                key.push("\0");
+                key.push(narrow.as_ref());
+                key.into()
+            }
+            HomeKey::Search { query, filter, narrow } => {
+                let mut key = format!("{SEARCH_KEY}{query}");
+                if filter.is_some() || narrow.is_some() {
+                    key.push('\0');
+                    key.push_str(filter.unwrap_or_default());
+                }
+                if let Some(narrow) = narrow {
+                    key.push('\0');
+                    key.push_str(narrow);
+                }
+                key.into()
+            }
+        }
     }
-}
 
-/// A favorite's folder and what it is narrowed to, from its key.
-pub fn favorite_parts(key: &Path) -> (Cow<'_, Path>, Option<String>) {
-    match narrowed_folder(key) {
-        Some((path, narrow)) => (Cow::Owned(path), Some(narrow)),
-        None => (Cow::Borrowed(key), None),
+    pub fn is_search(&self) -> bool {
+        matches!(self, HomeKey::Search { .. })
+    }
+
+    /// What tells home's rows apart: a place whatever its case, a saved search by its query, filter and
+    /// narrowing exactly, and a narrowed favorite by its folder whatever its case and its narrowing exactly.
+    pub fn pin(&self) -> OsString {
+        match self {
+            HomeKey::Folder { path, narrow } => {
+                let mut pin = path_key(path);
+                if let Some(narrow) = narrow {
+                    pin.push("\0");
+                    pin.push(narrow.as_ref());
+                }
+                pin
+            }
+            HomeKey::Search { .. } => self.key().into_os_string(),
+        }
+    }
+
+    /// What the row of `key` stands for on disk: a place's or favorite's folder, a saved search's own key.
+    pub fn on_disk(key: &Path) -> Cow<'_, Path> {
+        match HomeKey::of(key) {
+            HomeKey::Folder { path, .. } => path,
+            HomeKey::Search { .. } => Cow::Borrowed(key),
+        }
     }
 }
 
@@ -786,9 +818,10 @@ impl State {
     pub fn select(&mut self, index: usize, paths: Vec<PathBuf>) {
         // A folder picked in home opens narrowed as its favorite keeps it, or not narrowed at all.
         let opened = match (self.columns.get(index), paths.as_slice()) {
-            (Some(c), [key]) if c.kind == Kind::Home && saved_query(key).is_none() && c.entry(key).is_some_and(|e| e.directory) => {
-                Some(favorite_parts(key)).map(|(path, narrow)| (path.into_owned(), narrow))
-            }
+            (Some(c), [key]) if c.kind == Kind::Home && c.entry(key).is_some_and(|e| e.directory) => match HomeKey::of(key) {
+                HomeKey::Folder { path, narrow } => Some((path.into_owned(), narrow.map(Cow::into_owned))),
+                HomeKey::Search { .. } => None,
+            },
             _ => None,
         };
         self.select_rows(index, paths);
@@ -804,7 +837,7 @@ impl State {
         let here = self.snapshot();
         if c.kind == Kind::Home
             && let [path] = paths.as_slice()
-            && saved_query(path).is_some()
+            && HomeKey::of(path).is_search()
         {
             let path = path.clone();
             self.run_saved_search(index, path, here);
@@ -818,7 +851,7 @@ impl State {
     /// A saved search in home runs its query beside it, narrowed as it was kept. Home keeps the pick and
     /// the focus, so the next one is a keystroke away.
     fn run_saved_search(&mut self, index: usize, path: PathBuf, here: Location) {
-        let Some((query, filter, narrow)) = saved_query(&path) else { return };
+        let HomeKey::Search { query, filter, narrow } = HomeKey::of(&path) else { return };
         let same = self.query == query && self.search_filter.as_deref() == filter && self.search_narrowing().as_deref() == narrow;
         if same && self.columns.len() == 2 && self.columns[index].selected == [path.clone()] {
             self.active = index;
@@ -859,7 +892,7 @@ impl State {
         // Like Finder, only a single selection opens a column to the right.
         let entry = (paths.len() == 1).then(|| c.entry(&paths[0]).cloned()).flatten();
         // A favorite narrowed is keyed apart from its folder, which is what opens.
-        let entry = entry.map(|e| Entry { path: home_path(&e.path).into_owned(), ..e });
+        let entry = entry.map(|e| Entry { path: HomeKey::on_disk(&e.path).into_owned(), ..e });
         // The pointer from a search result has done its job once the user picks something here; leaving
         // it would read as a second selection.
         {
@@ -961,7 +994,7 @@ impl State {
             && let [pick] = c.selected.as_slice()
         {
             // A favorite narrowed is keyed apart from its folder, which is what is shown.
-            let pick = home_path(pick);
+            let pick = HomeKey::on_disk(pick);
             let later = || self.columns.iter().enumerate().skip(index + 1);
             let shown = later()
                 .find(|(_, c)| c.kind == Kind::Folder && c.path == *pick)
@@ -1039,7 +1072,10 @@ impl State {
         let c = self.columns.get(self.active)?;
         let listed = |p: &&PathBuf| c.entry(p).is_some();
         let path = c.focused.as_ref().filter(listed).or(c.highlight.as_ref().filter(listed))?;
-        saved_query(path).is_none().then(|| home_path(path))
+        match HomeKey::of(path) {
+            HomeKey::Folder { path, .. } => Some(path),
+            HomeKey::Search { .. } => None,
+        }
     }
 
     /// Ctrl+click: adds the row to the selection, or takes it out; in home, which picks one row at a time,

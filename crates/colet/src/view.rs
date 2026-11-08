@@ -23,8 +23,8 @@ use crate::{
     metrics,
     places::{HomeDrag, movable},
     reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
+    state::HomeKey,
     state::{Column, ColumnId, Kind},
-    state::{favorite_key, narrowed_folder, saved_query},
 };
 
 mod column;

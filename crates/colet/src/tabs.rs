@@ -17,7 +17,7 @@ use crate::{
     metrics,
     reveal::Sideways,
     settings::{KeptTab, Settings},
-    state::{ColumnId, Kind, State, favorite_parts},
+    state::{ColumnId, HomeKey, Kind, State},
     view::TipExt,
 };
 
@@ -140,7 +140,7 @@ pub fn title(state: &State, settings: &Settings) -> Title {
     // before it.
     let opened = match state.columns[0].selected.as_slice() {
         [key] => {
-            let path = favorite_parts(key).0;
+            let path = HomeKey::on_disk(key);
             state.columns.iter().rposition(|c| c.kind == Kind::Folder && path_key(&c.path) == path_key(&path))
         }
         _ => None,

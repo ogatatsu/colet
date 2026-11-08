@@ -3,7 +3,7 @@
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 
-use crate::{app::Colet, places::Dialog, settings::SearchFilter};
+use crate::{app::Colet, places::Dialog, settings::SearchFilter, state::HomeKey};
 
 /// A filter being added, or edited, found by the name it had as the edit began.
 pub struct FilterEdit {
@@ -105,10 +105,10 @@ impl Colet {
                     }
                     // A pinned search keeps its pin under the name.
                     for pin in &mut s.pinned {
-                        if let Some((query, Some(filter), narrow)) = crate::state::saved_query(pin)
+                        if let HomeKey::Search { query, filter: Some(filter), narrow } = HomeKey::of(pin)
                             && filter == from
                         {
-                            *pin = crate::state::search_key(query, Some(&to), narrow);
+                            *pin = HomeKey::search(query, Some(&to), narrow).key();
                         }
                     }
                 }

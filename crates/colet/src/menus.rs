@@ -18,7 +18,7 @@ use crate::{
     app::Colet,
     ops::{Menu, NEEDS_FILE, NEEDS_FOLDER, ONE_ITEM, Reasons},
     places::Dialog,
-    state::{ColumnId, Kind, saved_query},
+    state::{ColumnId, HomeKey, Kind},
     tabs::TabId,
     view::TipExt,
 };
@@ -446,7 +446,7 @@ impl Colet {
             line("menu-pin", "pin", "ピン留め", None, None, Command::Pin(path.clone()))
         };
         let in_tab = line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(path.clone()));
-        if saved_query(&path).is_some() {
+        if HomeKey::of(&path).is_search() {
             return vec![
                 line("menu-open", "external-link", "開く", Some("Enter"), None, Command::Open),
                 in_tab,
@@ -543,7 +543,7 @@ impl Colet {
             }
             Command::EditSearch(key) => self.open_edit(&key, window, cx),
             Command::Unsave(key) => {
-                if let Some((query, filter, narrow)) = saved_query(&key) {
+                if let HomeKey::Search { query, filter, narrow } = HomeKey::of(&key) {
                     self.toggle_saved(query, filter.map(str::to_owned), narrow.map(str::to_owned), cx);
                 }
             }

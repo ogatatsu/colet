@@ -428,7 +428,7 @@ fn enters_home_without_picking_and_results_picking_the_first() {
 #[test]
 fn runs_a_saved_search_picked_in_home_keeping_homes_pick() {
     let mut s = State::new();
-    let pdf = search_key("ext:pdf", None, None);
+    let pdf = HomeKey::search("ext:pdf", None, None).key();
     with_entries(&mut s, 0, vec![Entry::folder(&pdf, "PDF"), folder(r"D:\")]);
     s.select(0, one(&pdf));
     assert_eq!(s.query, "ext:pdf");
@@ -918,11 +918,11 @@ fn searches_with_a_filter_alone_and_steps_back_to_the_filter_before() {
 #[test]
 fn runs_a_saved_search_within_its_filter() {
     let mut s = State::new();
-    let images = search_key("cat", Some("画像"), None);
-    let plain = search_key("cat", None, None);
+    let images = HomeKey::search("cat", Some("画像"), None).key();
+    let plain = HomeKey::search("cat", None, None).key();
     assert_ne!(images, plain);
-    assert_eq!(saved_query(&images), Some(("cat", Some("画像"), None)));
-    assert_eq!(saved_query(&plain), Some(("cat", None, None)));
+    assert_eq!(HomeKey::of(&images), HomeKey::search("cat", Some("画像"), None));
+    assert_eq!(HomeKey::of(&plain), HomeKey::search("cat", None, None));
     with_entries(&mut s, 0, vec![Entry::folder(&images, "cat"), Entry::folder(&plain, "cat"), folder(r"D:\")]);
     s.select(0, one(&images));
     assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", Some("画像")));
@@ -938,16 +938,15 @@ fn runs_a_saved_search_within_its_filter() {
 
 #[test]
 fn keys_a_favorite_and_a_saved_search_by_what_they_are_narrowed_to() {
-    let narrowed = favorite_key(Path::new(r"D:\Work"), Some("a b"));
-    assert_eq!(favorite_key(Path::new(r"D:\Work"), None), PathBuf::from(r"D:\Work"));
-    assert_eq!(narrowed_folder(&narrowed), Some((PathBuf::from(r"D:\Work"), "a b".to_owned())));
-    assert_eq!(home_path(&narrowed), Path::new(r"D:\Work"));
-    assert_eq!(narrowed_folder(Path::new(r"D:\Work")), None);
-    let search = search_key("cat", None, Some("a"));
-    assert_eq!(saved_query(&search), Some(("cat", None, Some("a"))));
-    assert_eq!(saved_query(&search_key("cat", Some("画像"), Some("a"))), Some(("cat", Some("画像"), Some("a"))));
-    assert_eq!(narrowed_folder(&search), None);
-    assert_eq!(home_path(&search), search.as_path());
+    let narrowed = HomeKey::favorite(Path::new(r"D:\Work"), Some("a b")).key();
+    assert_eq!(HomeKey::favorite(Path::new(r"D:\Work"), None).key(), PathBuf::from(r"D:\Work"));
+    assert_eq!(HomeKey::of(&narrowed), HomeKey::favorite(Path::new(r"D:\Work"), Some("a b")));
+    assert_eq!(HomeKey::on_disk(&narrowed), Path::new(r"D:\Work"));
+    assert_eq!(HomeKey::of(Path::new(r"D:\Work")), HomeKey::favorite(Path::new(r"D:\Work"), None));
+    let search = HomeKey::search("cat", None, Some("a")).key();
+    assert_eq!(HomeKey::of(&search), HomeKey::search("cat", None, Some("a")));
+    assert_eq!(HomeKey::of(&HomeKey::search("cat", Some("画像"), Some("a")).key()), HomeKey::search("cat", Some("画像"), Some("a")));
+    assert_eq!(HomeKey::on_disk(&search), search.as_path());
 }
 
 #[test]
@@ -962,7 +961,7 @@ fn keeps_a_narrowing_as_it_would_be_typed_again() {
 #[test]
 fn opens_a_favorite_from_home_narrowed_as_it_was_kept() {
     let mut s = State::new();
-    let narrowed = favorite_key(Path::new(r"D:\a"), Some("x"));
+    let narrowed = HomeKey::favorite(Path::new(r"D:\a"), Some("x")).key();
     with_entries(&mut s, 0, vec![Entry::folder(&narrowed, "a"), folder(r"D:\a")]);
     s.select(0, one(&narrowed));
     let last = s.columns.last().unwrap();
@@ -972,7 +971,7 @@ fn opens_a_favorite_from_home_narrowed_as_it_was_kept() {
     let last = s.columns.last().unwrap();
     assert_eq!((last.path.as_path(), last.narrow.is_none()), (Path::new(r"D:\a"), true));
     // A saved search runs narrowed as it was kept.
-    let search = search_key("cat", None, Some("y"));
+    let search = HomeKey::search("cat", None, Some("y")).key();
     with_entries(&mut s, 0, vec![Entry { directory: false, ..Entry::folder(&search, "cat") }]);
     s.select(0, one(&search));
     assert_eq!((s.query.as_str(), s.search_narrowing().as_deref()), ("cat", Some("y")));

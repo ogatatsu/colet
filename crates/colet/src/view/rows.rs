@@ -81,15 +81,14 @@ impl Colet {
         let c = &self.state.columns[index];
         let kind = c.kind;
         let selected = c.selected.contains(&entry.path);
-        let saved = saved_query(&entry.path);
+        let key = HomeKey::of(&entry.path);
         // Home lights the saved search that is running, narrowed as it was kept.
         let highlighted = c.highlight.as_ref() == Some(&entry.path)
-            || saved.is_some_and(|(q, f, n)| {
-                self.state.pinned()
-                    && q == self.state.query
-                    && f == self.state.search_filter.as_deref()
-                    && n == self.state.search_narrowing().as_deref()
-            });
+            || matches!(key, HomeKey::Search { query, filter, narrow }
+                if self.state.pinned()
+                    && query == self.state.query
+                    && filter == self.state.search_filter.as_deref()
+                    && narrow == self.state.search_narrowing().as_deref());
         // On the clipboard, cut or copied, whoever put it there.
         let held = self.clipboard.holds(&entry.path);
         let cut = held && self.clipboard.files.cut;
@@ -114,11 +113,16 @@ impl Colet {
             faded: (entry.hidden.is_hidden() || cut) && !selected,
             dragged: kind == Kind::Home && self.home_drag.carried.as_ref().is_some_and(|d| d.path == entry.path),
             // The filter a saved search runs within, faint beside its name.
-            within: saved.and_then(|(_, f, _)| f).map(str::to_owned),
+            within: match &key {
+                HomeKey::Search { filter, .. } => filter.map(str::to_owned),
+                HomeKey::Folder { .. } => None,
+            },
             // What a favorite or saved search opens narrowed to, fainter after it.
-            narrow: (kind == Kind::Home)
-                .then(|| saved.map(|(_, _, n)| n.map(str::to_owned)).unwrap_or_else(|| narrowed_folder(&entry.path).map(|(_, n)| n)))
-                .flatten(),
+            narrow: match key {
+                _ if kind != Kind::Home => None,
+                HomeKey::Search { narrow, .. } => narrow.map(str::to_owned),
+                HomeKey::Folder { narrow, .. } => narrow.map(std::borrow::Cow::into_owned),
+            },
         }
     }
 
@@ -130,11 +134,12 @@ impl Colet {
         let kind = c.kind;
         // While a row in home is carried, only the line tells where it goes.
         let dragging = kind == Kind::Home && self.home_drag.carried.is_some();
-        let saved = saved_query(&entry.path);
+        let key = HomeKey::of(&entry.path);
+        let saved = key.is_search();
         // A narrowed favorite's is its folder's: a drive's own, say.
-        let image = match narrowed_folder(&entry.path) {
-            Some((path, _)) => self.icons.get(&Entry { path, ..entry.clone() }, cx),
-            None => self.icons.get(entry, cx),
+        let image = match key {
+            HomeKey::Folder { path, narrow: Some(_) } => self.icons.get(&Entry { path: path.into_owned(), ..entry.clone() }, cx),
+            _ => self.icons.get(entry, cx),
         };
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
         let path = entry.path.clone();
@@ -145,9 +150,9 @@ impl Colet {
         });
         let name = entry.name.clone();
         let picture = match (saved, image) {
-            (Some(_), _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
-            (None, Some(image)) => img(image).size(px(16.)).flex_none().into_any_element(),
-            (None, None) => div().size(px(16.)).flex_none().into_any_element(),
+            (true, _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
+            (false, Some(image)) => img(image).size(px(16.)).flex_none().into_any_element(),
+            (false, None) => div().size(px(16.)).flex_none().into_any_element(),
         };
         let menu_path = entry.path.clone();
         let tab_path = entry.path.clone();
@@ -184,7 +189,7 @@ impl Colet {
                     .on_drag(drag, move |drag, _, _, cx| {
                         view.update(cx, |this, cx| this.start_home_drag(drag, cx)).ok();
                         let width = rows.borrow().iter().find(|(path, _)| *path == drag.path).map_or(px(200.), |(_, b)| b.size.width);
-                        let (name, search, image) = (name.clone(), saved_query(&drag.path).is_some(), image.clone());
+                        let (name, search, image) = (name.clone(), HomeKey::of(&drag.path).is_search(), image.clone());
                         cx.new(|_| HomeGhost { name, search, image, width, palette: p })
                     })
             })

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     app::{COLUMN_WIDTHS, SEARCH_FIELD_WIDTH, SEARCH_FIELD_WIDTHS, SIDEBAR_WIDTHS},
     lane::Lane,
-    state::{Fold, Kept, favorite_key, favorite_parts, narrow_words, narrowed_folder, narrowing, saved_query, search_key},
+    state::{Fold, HomeKey, Kept, narrow_words, narrowing},
 };
 
 /// A search kept in home. An empty name shows the query itself.
@@ -40,7 +40,7 @@ impl SavedSearch {
 
     /// Its row's key in home.
     pub fn key(&self) -> PathBuf {
-        search_key(&self.query, self.filter.as_deref(), self.narrow.as_deref())
+        HomeKey::search(&self.query, self.filter.as_deref(), self.narrow.as_deref()).key()
     }
 }
 
@@ -75,9 +75,14 @@ impl Favorite {
         if self.name.is_empty() { shown(folder_name(&self.path)) } else { self.name.clone() }
     }
 
+    /// What its row in home stands for.
+    pub fn home_key(&self) -> HomeKey<'_> {
+        HomeKey::favorite(&self.path, self.narrow.as_deref())
+    }
+
     /// Its row's key in home.
     pub fn key(&self) -> PathBuf {
-        favorite_key(&self.path, self.narrow.as_deref())
+        self.home_key().key()
     }
 
     /// Whether it is the favorite of `path` narrowed to `narrow`, whatever the path's case.
@@ -249,28 +254,32 @@ impl Settings {
         let mut seen = std::collections::HashSet::new();
         self.saved_searches.retain(|s| !s.query.trim().is_empty() && seen.insert((s.query.clone(), s.filter.clone(), s.narrow.clone())));
         for favorite in &mut self.favorites {
-            let was = pin_key(&favorite.key());
+            let was = favorite.home_key().pin();
             favorite.narrow = favorite.narrow.as_deref().and_then(narrowing);
-            let is = favorite.key();
-            if pin_key(&is) == was {
+            if favorite.home_key().pin() == was {
                 continue;
             }
-            for pin in self.pinned.iter_mut().filter(|pin| pin_key(pin) == was) {
+            let is = favorite.key();
+            for pin in self.pinned.iter_mut().filter(|pin| HomeKey::of(pin).pin() == was) {
                 *pin = is.clone();
             }
         }
         let mut seen = std::collections::HashSet::new();
-        self.favorites.retain(|f| !f.path.as_os_str().is_empty() && seen.insert(pin_key(&f.key())));
+        self.favorites.retain(|f| !f.path.as_os_str().is_empty() && seen.insert(f.home_key().pin()));
         // A pin is one of each row, and goes with the saved search or narrowed favorite it pins.
         let saved: std::collections::HashSet<PathBuf> = self.saved_searches.iter().map(SavedSearch::key).collect();
         let narrowed: std::collections::HashSet<std::ffi::OsString> =
-            self.favorites.iter().filter(|f| f.narrow.is_some()).map(|f| pin_key(&f.key())).collect();
+            self.favorites.iter().filter(|f| f.narrow.is_some()).map(|f| f.home_key().pin()).collect();
         let mut seen = std::collections::HashSet::new();
         self.pinned.retain(|pin| {
+            let key = HomeKey::of(pin);
             !pin.as_os_str().is_empty()
-                && (saved_query(pin).is_none() || saved.contains(pin))
-                && (narrowed_folder(pin).is_none() || narrowed.contains(&pin_key(pin)))
-                && seen.insert(pin_key(pin))
+                && match &key {
+                    HomeKey::Search { .. } => saved.contains(pin),
+                    HomeKey::Folder { narrow: Some(_), .. } => narrowed.contains(&key.pin()),
+                    HomeKey::Folder { narrow: None, .. } => true,
+                }
+                && seen.insert(key.pin())
         });
         if self.window.is_some_and(|w| !(w.width >= 200. && w.height >= 150.)) {
             self.window = None;
@@ -292,14 +301,16 @@ impl Settings {
     }
 
     pub fn is_pinned(&self, path: &Path) -> bool {
-        let key = pin_key(path);
-        self.pinned.iter().any(|pin| pin_key(pin) == key)
+        let key = HomeKey::of(path).pin();
+        self.pinned.iter().any(|pin| HomeKey::of(pin).pin() == key)
     }
 
     /// Whether `key`, a folder's path or a narrowed favorite's key, is a favorite.
     pub fn is_favorite(&self, key: &Path) -> bool {
-        let (path, narrow) = favorite_parts(key);
-        self.favorite(&path, narrow.as_deref()).is_some()
+        match HomeKey::of(key) {
+            HomeKey::Folder { path, narrow } => self.favorite(&path, narrow.as_deref()).is_some(),
+            HomeKey::Search { .. } => false,
+        }
     }
 
     /// The settings as they can be written: the file holds a path only as text, so a favorite, pin or tab
@@ -317,23 +328,6 @@ impl Settings {
         settings.tabs.retain(tab_text);
         settings.tab = settings.tab.min(settings.tabs.len().saturating_sub(1));
         settings
-    }
-}
-
-/// What tells home's rows apart: a place whatever its case, a saved search by its query, filter and
-/// narrowing exactly, and a narrowed favorite by its folder whatever its case and its narrowing exactly.
-pub fn pin_key(path: &Path) -> std::ffi::OsString {
-    if saved_query(path).is_some() {
-        return path.as_os_str().to_owned();
-    }
-    match narrowed_folder(path) {
-        Some((folder, narrow)) => {
-            let mut key = path_key(&folder);
-            key.push("\0");
-            key.push(narrow);
-            key
-        }
-        None => path_key(path),
     }
 }
 
@@ -673,9 +667,9 @@ mod tests {
             ],
             saved_searches: vec![search(Some(" a")), search(Some("a")), search(None), search(Some(""))],
             pinned: vec![
-                favorite_key(Path::new(r"D:\Work"), Some("  a   b ")),
-                favorite_key(Path::new(r"D:\Work"), Some("gone")),
-                search_key("cat", None, Some(" a")),
+                HomeKey::favorite(Path::new(r"D:\Work"), Some("  a   b ")).key(),
+                HomeKey::favorite(Path::new(r"D:\Work"), Some("gone")).key(),
+                HomeKey::search("cat", None, Some(" a")).key(),
             ],
             ..Settings::default()
         };
@@ -684,10 +678,13 @@ mod tests {
         assert_eq!(narrows, [None, Some("a b"), Some("A b"), Some("\"x  y\"")]);
         assert_eq!(settings.saved_searches, [search(Some("a")), search(None)]);
         // A pin follows its row's narrowing as it is kept, and goes with a narrowed favorite gone.
-        assert_eq!(settings.pinned, [favorite_key(Path::new(r"D:\Work"), Some("a b")), search_key("cat", None, Some("a"))]);
-        assert!(settings.is_favorite(&favorite_key(Path::new(r"d:\WORK"), Some("a b"))));
-        assert!(!settings.is_favorite(&favorite_key(Path::new(r"D:\Work"), Some("a"))));
-        assert!(settings.is_pinned(&favorite_key(Path::new(r"d:\work"), Some("a b"))));
+        assert_eq!(
+            settings.pinned,
+            [HomeKey::favorite(Path::new(r"D:\Work"), Some("a b")).key(), HomeKey::search("cat", None, Some("a")).key()]
+        );
+        assert!(settings.is_favorite(&HomeKey::favorite(Path::new(r"d:\WORK"), Some("a b")).key()));
+        assert!(!settings.is_favorite(&HomeKey::favorite(Path::new(r"D:\Work"), Some("a")).key()));
+        assert!(settings.is_pinned(&HomeKey::favorite(Path::new(r"d:\work"), Some("a b")).key()));
     }
 
     #[test]
@@ -757,12 +754,12 @@ mod tests {
             pinned: vec![
                 r"D:\Work".into(),
                 r"d:\work".into(),
-                search_key("gone", None, None),
-                search_key("cat", None, None),
-                search_key("CAT", None, None),
+                HomeKey::search("gone", None, None).key(),
+                HomeKey::search("cat", None, None).key(),
+                HomeKey::search("CAT", None, None).key(),
                 // Its filter gone, the search it is now keeps the pin.
-                search_key("dog", Some("動画"), None),
-                search_key("cow", Some("画像"), None),
+                HomeKey::search("dog", Some("動画"), None).key(),
+                HomeKey::search("cow", Some("画像"), None).key(),
                 PathBuf::new(),
             ],
             ..Settings::default()
@@ -772,12 +769,12 @@ mod tests {
             settings.pinned,
             [
                 PathBuf::from(r"D:\Work"),
-                search_key("cat", None, None),
-                search_key("dog", None, None),
-                search_key("cow", Some("画像"), None)
+                HomeKey::search("cat", None, None).key(),
+                HomeKey::search("dog", None, None).key(),
+                HomeKey::search("cow", Some("画像"), None).key()
             ]
         );
-        assert!(settings.is_pinned(Path::new(r"d:\WORK")) && !settings.is_pinned(&search_key("Cat", None, None)));
+        assert!(settings.is_pinned(Path::new(r"d:\WORK")) && !settings.is_pinned(&HomeKey::search("Cat", None, None).key()));
         let written = serde_json::to_string(&settings).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&written).unwrap().pinned, settings.pinned);
     }

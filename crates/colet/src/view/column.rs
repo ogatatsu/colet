@@ -388,7 +388,7 @@ impl Colet {
         let narrowing = c.narrowing();
         let kept = match kind {
             Kind::Search => self.settings.saved(&self.state.query, self.state.search_filter.as_deref(), narrowing.as_deref()).is_some(),
-            _ => self.settings.is_favorite(&favorite_key(&c.path, narrowing.as_deref())),
+            _ => self.settings.favorite(&c.path, narrowing.as_deref()).is_some(),
         };
         let label = match (kind, kept) {
             (Kind::Search, true) => "保存した検索を解除（Ctrl+D）",

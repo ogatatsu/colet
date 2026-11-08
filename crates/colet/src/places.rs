@@ -20,9 +20,9 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, Engine, Tone, WidthOf},
     search_filters::FilterEdit,
-    settings::{Favorite, Placement, SavedSearch, Settings, Theme, pin_key, written},
+    settings::{Favorite, Placement, SavedSearch, Settings, Theme, written},
     sorts::Sorts,
-    state::{Kind, favorite_key, favorite_parts, narrowing, saved_query},
+    state::{HomeKey, Kind, narrowing},
 };
 
 pub enum Dialog {
@@ -95,10 +95,10 @@ pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
     let favorites = settings.favorites.iter().map(|f| Entry::folder(f.key(), &f.label()));
     let searches = settings.saved_searches.iter().map(|s| Entry { directory: false, ..Entry::folder(s.key(), s.label()) });
     let mut seen = std::collections::HashSet::new();
-    let mut rest: Vec<Entry> = favorites.chain(searches).chain(drives).filter(|e| seen.insert(pin_key(&e.path))).collect();
+    let mut rest: Vec<Entry> = favorites.chain(searches).chain(drives).filter(|e| seen.insert(HomeKey::of(&e.path).pin())).collect();
     let mut pinned = Vec::new();
-    for pin in settings.pinned.iter().map(|pin| pin_key(pin)) {
-        if let Some(at) = rest.iter().position(|e| pin_key(&e.path) == pin) {
+    for pin in settings.pinned.iter().map(|pin| HomeKey::of(pin).pin()) {
+        if let Some(at) = rest.iter().position(|e| HomeKey::of(&e.path).pin() == pin) {
             pinned.push(rest.remove(at));
         }
     }
@@ -110,7 +110,7 @@ pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
 pub fn home_groups<'a>(settings: &Settings, entries: &'a [Entry]) -> Vec<(&'static str, Vec<&'a Entry>)> {
     let pinned = |e: &&Entry| settings.is_pinned(&e.path);
     let favorite = |e: &&Entry| !pinned(e) && settings.is_favorite(&e.path);
-    let search = |e: &&Entry| !pinned(e) && saved_query(&e.path).is_some();
+    let search = |e: &&Entry| !pinned(e) && HomeKey::of(&e.path).is_search();
     [
         ("ピン留め", entries.iter().filter(pinned).collect::<Vec<_>>()),
         ("お気に入り", entries.iter().filter(favorite).collect()),
@@ -213,7 +213,7 @@ impl HomeDragging {
 pub fn movable(settings: &Settings, path: &Path) -> Option<Shelf> {
     if settings.is_pinned(path) {
         Some(Shelf::Pinned)
-    } else if saved_query(path).is_some() {
+    } else if HomeKey::of(path).is_search() {
         Some(Shelf::Search)
     } else {
         settings.is_favorite(path).then_some(Shelf::Favorite)
@@ -361,16 +361,16 @@ impl Colet {
 
     /// Keeps or lets go of the favorite `key` names: a folder's path, or a narrowed favorite's key.
     pub fn toggle_favorite(&mut self, key: &Path, cx: &mut Context<Self>) {
-        let (path, narrow) = favorite_parts(key);
-        let (path, narrow) = (path.into_owned(), narrow);
+        let HomeKey::Folder { path, narrow } = HomeKey::of(key) else { return };
+        let (path, narrow) = (path.into_owned(), narrow.map(std::borrow::Cow::into_owned));
         let found = self.settings.favorite(&path, narrow.as_deref()).cloned();
         self.update_settings(
             |s| match &found {
                 Some(found) => {
                     // Its pin goes with it.
-                    let key = pin_key(&found.key());
+                    let key = found.home_key().pin();
                     s.favorites.retain(|f| !f.is(&path, narrow.as_deref()));
-                    s.pinned.retain(|pin| pin_key(pin) != key);
+                    s.pinned.retain(|pin| HomeKey::of(pin).pin() != key);
                 }
                 None => s.favorites.push(Favorite { path: path.clone(), name: String::new(), narrow: narrow.clone() }),
             },
@@ -385,7 +385,7 @@ impl Colet {
     /// The favorite a folder column's star and Ctrl+D keep: its folder, narrowed as it is now.
     pub fn favorite_key_of(&self, index: usize) -> PathBuf {
         let c = &self.state.columns[index];
-        favorite_key(&c.path, c.narrowing().as_deref())
+        HomeKey::favorite(&c.path, c.narrowing().as_deref()).key()
     }
 
     /// Pins a row of home at the end of the pinned ones, or puts it back among its own kind.
@@ -394,8 +394,8 @@ impl Colet {
         self.update_settings(
             |s| {
                 if s.is_pinned(&path) {
-                    let key = pin_key(&path);
-                    s.pinned.retain(|pin| pin_key(pin) != key);
+                    let key = HomeKey::of(&path).pin();
+                    s.pinned.retain(|pin| HomeKey::of(pin).pin() != key);
                 } else {
                     s.pinned.push(path);
                 }
@@ -477,9 +477,9 @@ impl Colet {
         let (path, before) = (drag.path.as_path(), before.as_deref());
         self.update_settings(
             |s| match drag.shelf {
-                Shelf::Pinned => move_before(&mut s.pinned, |pin, key| pin_key(pin) == pin_key(key), path, before),
+                Shelf::Pinned => move_before(&mut s.pinned, |pin, key| HomeKey::of(pin).pin() == HomeKey::of(key).pin(), path, before),
                 Shelf::Search => move_before(&mut s.saved_searches, |s, key| s.key() == key, path, before),
-                Shelf::Favorite => move_before(&mut s.favorites, |f, key| pin_key(&f.key()) == pin_key(key), path, before),
+                Shelf::Favorite => move_before(&mut s.favorites, |f, key| f.home_key().pin() == HomeKey::of(key).pin(), path, before),
             },
             cx,
         );
@@ -553,7 +553,7 @@ impl Colet {
     }
 
     pub fn open_edit(&mut self, key: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((query, filter, narrow)) = saved_query(key) else { return };
+        let HomeKey::Search { query, filter, narrow } = HomeKey::of(key) else { return };
         let Some(found) = self.settings.saved(query, filter, narrow).cloned() else { return };
         self.take_menu();
         self.begin_dialog(window, cx);
@@ -632,7 +632,7 @@ impl Colet {
 
     /// The favorite `key` names, its name and narrowing to edit.
     pub fn open_favorite_edit(&mut self, key: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        let (path, narrow) = favorite_parts(key);
+        let HomeKey::Folder { path, narrow } = HomeKey::of(key) else { return };
         let Some(found) = self.settings.favorite(&path, narrow.as_deref()).cloned() else { return };
         self.take_menu();
         self.begin_dialog(window, cx);
@@ -666,14 +666,14 @@ impl Colet {
             return;
         }
         let (Some(Dialog::EditFavorite { original, .. }), Some(edited)) = (&self.dialog, self.edited_favorite(cx)) else { return };
-        let (was, is) = (pin_key(&original.key()), edited.key());
+        let (was, is) = (original.home_key().pin(), edited.key());
         let original = original.clone();
         self.update_settings(
             |s| {
                 if let Some(favorite) = s.favorites.iter_mut().find(|f| f.is(&original.path, original.narrow.as_deref())) {
                     *favorite = edited;
                     // Its pin follows it, where it was.
-                    for pin in s.pinned.iter_mut().filter(|pin| pin_key(pin) == was) {
+                    for pin in s.pinned.iter_mut().filter(|pin| HomeKey::of(pin).pin() == was) {
                         *pin = is.clone();
                     }
                 }

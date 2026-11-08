@@ -33,7 +33,7 @@ use crate::{
     places::Dialog,
     settings::{LoadError, SavedSearch, SearchFilter, Settings, Theme},
     sorts::Sorts,
-    state::{ColumnId, Kind, search_key},
+    state::{ColumnId, HomeKey, Kind},
     theme::Palette,
 };
 

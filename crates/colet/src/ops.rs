@@ -23,7 +23,7 @@ use crate::{
     backend::PathKind,
     places::Dialog,
     settings::Favorite,
-    state::{Column, ColumnId, Kind as ColumnKind, favorite_key, favorite_parts, home_path, saved_query},
+    state::{Column, ColumnId, HomeKey, Kind as ColumnKind},
 };
 
 /// The most operations kept, and the most items of each.
@@ -323,9 +323,9 @@ impl Colet {
         let picked = self.picked_paths();
         let at_home = self.action_column().is_none_or(|c| c.kind == ColumnKind::Home);
         let at_server = self.at_server();
-        let search = picked.iter().any(|p| saved_query(p).is_some());
+        let search = picked.iter().any(|p| HomeKey::of(p).is_search());
         let none = picked.is_empty();
-        let drive = picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(&home_path(p)).is_none());
+        let drive = picked.iter().any(|p| !p.as_os_str().is_empty() && parent_folder(&HomeKey::on_disk(p)).is_none());
         let apart = picked.first().map(|p| parent(p)).is_some_and(|first| picked.iter().any(|p| parent(p) != first));
 
         // What works on the items picked needs some, and not in home or a server's shares.
@@ -373,7 +373,7 @@ impl Colet {
             self.refuse(if cut { "切り取り" } else { "コピー" }, reason, cx);
             return;
         }
-        let picked: Vec<PathBuf> = picked.iter().map(|p| home_path(p).into_owned()).collect();
+        let picked: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
         let (backend, owner) = (self.backend.clone(), self.owner);
         let done = format!("{} 項目を{}しました", picked.len(), if cut { "切り取り" } else { "コピー" });
         self.write_clipboard(move || backend.copy_files(&picked, cut, owner), done, cx);
@@ -421,9 +421,9 @@ impl Colet {
             if i > 0 {
                 text.push("\r\n");
             }
-            match saved_query(p) {
-                Some((query, ..)) => text.push(query),
-                None => text.push(home_path(p).as_os_str()),
+            match HomeKey::of(p) {
+                HomeKey::Search { query, .. } => text.push(query),
+                HomeKey::Folder { .. } => text.push(HomeKey::on_disk(p).as_os_str()),
             }
         }
         let (backend, owner) = (self.backend.clone(), self.owner);
@@ -450,7 +450,7 @@ impl Colet {
         let at_home = self.action_column().is_some_and(|c| c.kind == ColumnKind::Home);
         self.take_menu();
         if let [path] = picked.as_slice() {
-            if saved_query(path).is_some() {
+            if HomeKey::of(path).is_search() {
                 self.open_edit(path, window, cx);
                 return;
             }
@@ -595,7 +595,7 @@ impl Colet {
         if let Some(reason) = reasons.delete {
             let hint = if reason != NOT_AT_HOME {
                 ""
-            } else if picked.iter().any(|p| saved_query(p).is_some()) {
+            } else if picked.iter().any(|p| HomeKey::of(p).is_search()) {
                 "保存した検索は右クリックメニューの「保存した検索を解除」で外せます。"
             } else {
                 "お気に入りは右クリックメニューの「お気に入りを解除」で外せます。"
@@ -678,7 +678,7 @@ impl Colet {
                 self.in_background(move || backend.open(&folder, owner).map_err(|error| format!("開けません: {error}")), None, cx);
             }
             _ if !picked.is_empty() => {
-                let paths: Vec<PathBuf> = picked.into_iter().map(|e| home_path(&e.path).into_owned()).collect();
+                let paths: Vec<PathBuf> = picked.into_iter().map(|e| HomeKey::on_disk(&e.path).into_owned()).collect();
                 self.in_background(move || backend.reveal(&paths), None, cx);
             }
             _ => {}
@@ -698,7 +698,7 @@ impl Colet {
         if picked.is_empty() {
             picked.extend(self.folder_here());
         }
-        let paths: Vec<PathBuf> = picked.iter().map(|p| home_path(p).into_owned()).collect();
+        let paths: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
         let (backend, owner) = (self.backend.clone(), self.owner);
         self.in_background(move || backend.properties(&paths, owner), None, cx);
     }
@@ -724,7 +724,7 @@ impl Colet {
             Some(paths) => paths.clone(),
             None => self.state.columns[index].shown_selected().into_owned(),
         };
-        let paths: Vec<PathBuf> = paths.iter().map(|p| home_path(p).into_owned()).collect();
+        let paths: Vec<PathBuf> = paths.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
         let background = if paths.is_empty() { self.state.columns[index].path.clone() } else { PathBuf::new() };
         let (backend, owner, at) = (self.backend.clone(), self.owner, menu.screen);
         let task = cx.background_executor().spawn(async move { backend.shell_menu(paths, background, at, owner) });
@@ -771,7 +771,7 @@ impl Colet {
             return;
         }
         let name = self.send_targets.iter().find(|t| t.path == target).map_or_else(|| shown(folder_name(&target)), |t| t.name.clone());
-        let paths: Vec<PathBuf> = picked.iter().map(|p| home_path(p).into_owned()).collect();
+        let paths: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
         let (backend, owner) = (self.backend.clone(), self.owner);
         let task = cx.background_executor().spawn(async move { backend.send_to(&target, &paths, shift, owner) });
         cx.spawn(async move |this, cx| {
@@ -874,8 +874,11 @@ impl Colet {
             let from = &paths[0];
             let moved_path = |p: &Path| colet_core::paths::moved(p, from, to);
             let moved_key = |key: &PathBuf| {
-                let (path, narrow) = favorite_parts(key);
-                moved_path(&path).map_or_else(|| key.clone(), |path| favorite_key(&path, narrow.as_deref()))
+                match HomeKey::of(key) {
+                    HomeKey::Folder { path, narrow } => moved_path(&path).map(|path| HomeKey::Folder { path: path.into(), narrow }.key()),
+                    HomeKey::Search { .. } => None,
+                }
+                .unwrap_or_else(|| key.clone())
             };
             let pinned: Vec<PathBuf> = self.settings.pinned.iter().map(moved_key).collect();
             let pinned = (pinned != self.settings.pinned).then_some(pinned);

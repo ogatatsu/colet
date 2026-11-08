@@ -219,7 +219,7 @@ fn opens_a_file_in_a_tab_with_the_keys_on_its_row(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mut TestAppContext) {
     use crate::settings::Favorite;
-    use crate::state::favorite_key;
+    use crate::state::HomeKey;
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],
         ..Fake::default()
@@ -227,7 +227,7 @@ fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mu
     });
     fake.settings.lock().unwrap().favorites = vec![Favorite { narrow: Some("pdf".into()), ..Favorite::new(r"D:\work") }];
     let ui = open(cx, fake);
-    let key = favorite_key(Path::new(r"D:\work"), Some("pdf"));
+    let key = HomeKey::favorite(Path::new(r"D:\work"), Some("pdf")).key();
     ui.view.update(cx, |v, cx| v.open_in_tab(0, &key, cx));
     settle(cx);
     // Named for the favorite it opened while still behind, not for home.
