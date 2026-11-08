@@ -305,3 +305,48 @@ fn keeps_the_arrows_and_enter_in_a_filter_field_to_itself(cx: &mut TestAppContex
     assert_eq!(ui.selected(cx, 1), [r"D:\beta.txt"]);
     assert!(fake.opened.lock().unwrap().is_empty());
 }
+
+#[gpui_kit::test]
+fn the_keys_that_move_through_the_rows_move_nothing_from_its_field_or_a_button(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.click(cx, row(r"D:\work\b.txt"));
+    let id = ui.read(cx, |v| v.state.columns[2].id);
+    let field = ui.read(cx, |v| v.narrow_fields[&id].input.clone());
+    let moves = [
+        "up",
+        "pageup",
+        "pagedown",
+        "shift-up",
+        "shift-down",
+        "ctrl-up",
+        "ctrl-down",
+        "ctrl-pageup",
+        "ctrl-pagedown",
+        "ctrl-shift-up",
+        "ctrl-shift-down",
+        "ctrl-space",
+    ];
+    let focused = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[2].focused.as_deref().map(text));
+    // In the field, the rows stay as they were and the keys stay there.
+    ui.act(cx, |window, cx| field.update(cx, |input, cx| input.focus(window, cx)));
+    for key in moves {
+        ui.press(cx, key);
+        assert_eq!(ui.selected(cx, 2), [r"D:\work\b.txt"], "{key}");
+        assert_eq!(focused(&ui, cx).as_deref(), Some(r"D:\work\b.txt"), "{key}");
+    }
+    assert!(!ui.columns_focused(cx));
+    assert_eq!(ui.active(cx), 2);
+    // On the column's order button, nor do these or the keys between columns.
+    let sort = ui.read(cx, |v| v.stops[&format!("column-sort:{id}")].clone());
+    ui.act(cx, |window, cx| sort.focus(window, cx));
+    for key in moves.into_iter().chain(["home", "end", "left", "right"]) {
+        ui.press(cx, key);
+        assert_eq!(ui.selected(cx, 2), [r"D:\work\b.txt"], "{key}");
+        assert_eq!(ui.active(cx), 2, "{key}");
+    }
+    assert!(ui.has_keys(cx, ("column-sort", id)));
+    // Back on the rows, they move again.
+    ui.click(cx, row(r"D:\work\b.txt"));
+    ui.press(cx, "up");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
+}

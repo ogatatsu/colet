@@ -25,18 +25,56 @@ impl Colet {
         self.changed(cx);
     }
 
+    /// The keys are on the rows, home's or the columns', not on a field or a button among them.
+    fn keys_on_rows(&self, window: &Window) -> bool {
+        self.home_focus.is_focused(window) || self.columns_focus.is_focused(window)
+    }
+
+    /// `act` on `A`, a key that moves through the rows or between columns, while the keys are on the rows.
+    /// On a field or a button among them, it is theirs to take or leave: it moves nothing.
+    fn on_rows<A: Action>(
+        el: Stateful<Div>,
+        cx: &mut Context<Self>,
+        act: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) -> Stateful<Div> {
+        el.on_action(cx.listener(move |this, _: &A, window, cx| {
+            if this.keys_on_rows(window) {
+                act(this, window, cx);
+            } else {
+                cx.propagate();
+            }
+        }))
+    }
+
     /// The keys that move through a column and between them, for home's pane and the columns alike.
     pub(super) fn column_keys(&self, el: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
-        el.key_context(COLUMNS)
-            .on_action(cx.listener(|this, _: &SelectPrevious, window, cx| this.step(-1, window, cx)))
-            .on_action(cx.listener(|this, _: &SelectNext, window, cx| this.step(1, window, cx)))
-            .on_action(cx.listener(|this, _: &SelectPageUp, window, cx| this.step(-10, window, cx)))
-            .on_action(cx.listener(|this, _: &SelectPageDown, window, cx| this.step(10, window, cx)))
-            .on_action(cx.listener(|this, _: &SelectFirst, window, cx| this.step(-isize::MAX / 2, window, cx)))
-            .on_action(cx.listener(|this, _: &SelectLast, window, cx| this.step(isize::MAX / 2, window, cx)))
-            .on_action(cx.listener(|this, _: &ColumnLeft, window, cx| this.move_column(false, window, cx)))
-            .on_action(cx.listener(|this, _: &ColumnRight, window, cx| this.move_column(true, window, cx)))
-            .on_action(cx.listener(|this, _: &GoBack, window, cx| this.back(window, cx)))
+        let el = el.key_context(COLUMNS);
+        let el = Self::on_rows::<SelectPrevious>(el, cx, |this, window, cx| this.step(-1, window, cx));
+        let el = Self::on_rows::<SelectNext>(el, cx, |this, window, cx| this.step(1, window, cx));
+        let el = Self::on_rows::<SelectPageUp>(el, cx, |this, window, cx| this.step(-10, window, cx));
+        let el = Self::on_rows::<SelectPageDown>(el, cx, |this, window, cx| this.step(10, window, cx));
+        let el = Self::on_rows::<SelectFirst>(el, cx, |this, window, cx| this.step(-isize::MAX / 2, window, cx));
+        let el = Self::on_rows::<SelectLast>(el, cx, |this, window, cx| this.step(isize::MAX / 2, window, cx));
+        let el = Self::on_rows::<ColumnLeft>(el, cx, |this, window, cx| this.move_column(false, window, cx));
+        let el = Self::on_rows::<ColumnRight>(el, cx, |this, window, cx| this.move_column(true, window, cx));
+        // Shift+↑↓ pick on the way, Ctrl moves the keys alone, both together add.
+        let el = Self::on_rows::<ExtendUp>(el, cx, |this, window, cx| this.extend_step(-1, false, window, cx));
+        let el = Self::on_rows::<ExtendDown>(el, cx, |this, window, cx| this.extend_step(1, false, window, cx));
+        let el = Self::on_rows::<AddUp>(el, cx, |this, window, cx| this.extend_step(-1, true, window, cx));
+        let el = Self::on_rows::<AddDown>(el, cx, |this, window, cx| this.extend_step(1, true, window, cx));
+        let el = Self::on_rows::<FocusPrevious>(el, cx, |this, _, cx| this.focus_step(-1, cx));
+        let el = Self::on_rows::<FocusNext>(el, cx, |this, _, cx| this.focus_step(1, cx));
+        let el = Self::on_rows::<FocusPageUp>(el, cx, |this, _, cx| this.focus_step(-10, cx));
+        let el = Self::on_rows::<FocusPageDown>(el, cx, |this, _, cx| this.focus_step(10, cx));
+        let el = Self::on_rows::<FocusFirst>(el, cx, |this, _, cx| this.focus_step(-isize::MAX / 2, cx));
+        let el = Self::on_rows::<FocusLast>(el, cx, |this, _, cx| this.focus_step(isize::MAX / 2, cx));
+        let el = Self::on_rows::<TogglePicked>(el, cx, |this, window, cx| {
+            this.state.toggle_focused();
+            // A saved search picked alone in home runs, which the field shows.
+            this.sync_search_field(window, cx);
+            this.changed(cx);
+        });
+        el.on_action(cx.listener(|this, _: &GoBack, window, cx| this.back(window, cx)))
             .on_action(cx.listener(|this, _: &GoForward, window, cx| this.forward(window, cx)))
             .on_action(cx.listener(|this, _: &RenameItem, window, cx| this.ask_rename(window, cx)))
             .on_action(cx.listener(|this, _: &CopyItems, _, cx| this.copy(false, cx)))
@@ -54,24 +92,8 @@ impl Colet {
                     this.changed(cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ExtendUp, window, cx| this.extend_step(-1, false, window, cx)))
-            .on_action(cx.listener(|this, _: &ExtendDown, window, cx| this.extend_step(1, false, window, cx)))
-            .on_action(cx.listener(|this, _: &AddUp, window, cx| this.extend_step(-1, true, window, cx)))
-            .on_action(cx.listener(|this, _: &AddDown, window, cx| this.extend_step(1, true, window, cx)))
-            .on_action(cx.listener(|this, _: &FocusPrevious, _, cx| this.focus_step(-1, cx)))
-            .on_action(cx.listener(|this, _: &FocusNext, _, cx| this.focus_step(1, cx)))
-            .on_action(cx.listener(|this, _: &FocusPageUp, _, cx| this.focus_step(-10, cx)))
-            .on_action(cx.listener(|this, _: &FocusPageDown, _, cx| this.focus_step(10, cx)))
-            .on_action(cx.listener(|this, _: &FocusFirst, _, cx| this.focus_step(-isize::MAX / 2, cx)))
-            .on_action(cx.listener(|this, _: &FocusLast, _, cx| this.focus_step(isize::MAX / 2, cx)))
-            .on_action(cx.listener(|this, _: &TogglePicked, window, cx| {
-                this.state.toggle_focused();
-                // A saved search picked alone in home runs, which the field shows.
-                this.sync_search_field(window, cx);
-                this.changed(cx);
-            }))
             .on_action(cx.listener(|this, _: &QuickLook, window, cx| {
-                if this.home_focus.is_focused(window) || this.columns_focus.is_focused(window) {
+                if this.keys_on_rows(window) {
                     this.quick_look(cx);
                 } else {
                     // A field types it, a button is pressed by it.
