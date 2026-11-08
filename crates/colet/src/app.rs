@@ -483,6 +483,9 @@ pub struct Colet {
     pub popup: Option<Popup>,
     /// The open menu's lines, drawn and picked by the component library, and the closing it tells of.
     pub menu_view: Option<(Entity<gpui_kit::component::menu::PopupMenu>, FocusHandle, Subscription)>,
+    /// The last press on a button that opens a menu or the history found it open; see
+    /// [`Colet::opener`].
+    pub pressed_open: bool,
     /// The sort order's button, a stop for Tab.
     pub sort_focus: FocusHandle,
     pub crumbs: Trail,
@@ -580,6 +583,7 @@ impl Colet {
             sort_focus: cx.focus_handle().tab_stop(true),
             crumbs: Trail::default(),
             menu_view: None,
+            pressed_open: false,
             focused_row: Default::default(),
             running: None,
             unsaved_close: false,

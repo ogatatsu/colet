@@ -416,10 +416,11 @@ impl Colet {
                     .hover(|d| d.bg(p.hover))
                     .when(open, |d| d.bg(p.hover))
                     .child(icon("arrow-up-down", 14., if own { p.accent } else { p.text_muted }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
+                    .map(|d| Self::opener(d, move |this| this.column_sort_open() == Some(id), cx))
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         if this.column_sort_open() == Some(id) {
                             this.close_menus(true, window, cx);
-                        } else {
+                        } else if !this.pressed_shut(event) {
                             this.open_column_sort(id, window, cx);
                         }
                     })),

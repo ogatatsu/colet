@@ -744,7 +744,7 @@ impl Colet {
         let p = self.palette;
         let unseen = self.history.unseen;
         let label = if unseen > 0 { format!("操作履歴（問題のある操作 {unseen} 件）") } else { "操作履歴".to_owned() };
-        Button::new("history-button")
+        let button = Button::new("history-button")
             .ghost()
             .xsmall()
             .map(|b| if self.running.is_some() { b.icon(Spinner::new()) } else { b.icon(crate::view::glyph("clock")) })
@@ -768,11 +768,15 @@ impl Colet {
                         .child(unseen.to_string()),
                 )
             })
-            .on_click(cx.listener(|this, _, window, cx| {
-                let open = !this.history.open;
-                this.show_history(open, None, window, cx);
-            }))
-            .into_any_element()
+            .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                if this.history.open {
+                    this.show_history(false, None, window, cx);
+                } else if !this.pressed_shut(event) {
+                    this.show_history(true, None, window, cx);
+                }
+            }));
+        // The button takes no listener for the press, so the box round it notes it.
+        Self::opener(div().flex(), |this| this.history.open, cx).child(button).into_any_element()
     }
 
     /// The file operations run since Colet opened, newest first.

@@ -220,13 +220,15 @@ impl Colet {
                     .hover(|d| d.bg(p.hover))
                     .tip("上の階層")
                     .child(icon("ellipsis", 15., if current { p.text } else { p.text_muted }))
+                    .map(|d| Self::opener(d, Self::crumbs_open, cx))
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         if this.crumbs_open() {
                             this.close_crumb_menu(event.is_keyboard(), window, cx);
-                        } else {
+                        } else if !this.pressed_shut(event) {
                             this.open_crumb_menu(window, cx);
                         }
-                    })),
+                    }))
+                    .test_support(),
             )
             .when_some(menu, |d, menu| {
                 d.child(deferred(div().absolute().top(px(28.)).left_0().min_w(px(160.)).child(menu)).with_priority(1))

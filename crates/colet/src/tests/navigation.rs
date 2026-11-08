@@ -452,6 +452,22 @@ fn marks_under_the_crumbs_what_is_on_screen_while_some_are_folded(cx: &mut TestA
     assert_eq!(ui.act(cx, |window, _| window.try_find("crumb-bar").is_some()), hidden);
 }
 
+/// Pressed again while its menu is open, the button closes it and leaves it closed.
+#[gpui_kit::test]
+fn closes_the_folders_folded_off_the_trail_from_their_button(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    cx.simulate_window_resize(ui.window, size(px(560.), px(800.)));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    ui.press_and_release(cx, "crumb-fold");
+    assert!(ui.read(cx, |v| v.crumbs_open()));
+    ui.press_and_release(cx, "crumb-fold");
+    assert!(!ui.read(cx, |v| v.crumbs_open()));
+}
+
 #[gpui_kit::test]
 fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();

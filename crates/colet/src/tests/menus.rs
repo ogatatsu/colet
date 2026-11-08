@@ -466,3 +466,32 @@ fn keeps_the_keys_in_the_menu_from_a_row_or_the_folder_s_empty_space(cx: &mut Te
         ui.press(cx, "escape");
     }
 }
+
+/// Pressed again while its menu is open, a button closes it and leaves it closed: the press outside
+/// the menu that closes it is not taken for one that opens it again.
+#[gpui_kit::test]
+fn closes_the_menus_from_the_buttons_that_opened_them(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.press_and_release(cx, "sort");
+    assert!(ui.read(cx, |v| v.sort_open()));
+    ui.press_and_release(cx, "sort");
+    assert!(!ui.read(cx, |v| v.sort_open()));
+    assert!(ui.columns_focused(cx));
+    ui.press_and_release(cx, ("column-sort", work));
+    assert_eq!(ui.read(cx, |v| v.column_sort_open()), Some(work));
+    ui.press_and_release(cx, ("column-sort", work));
+    assert_eq!(ui.read(cx, |v| v.column_sort_open()), None);
+    ui.press_and_release(cx, "search-filter");
+    assert!(ui.read(cx, |v| v.filter_open()));
+    ui.press_and_release(cx, "search-filter");
+    assert!(!ui.read(cx, |v| v.filter_open()));
+    ui.press_and_release(cx, "history-button");
+    assert!(ui.read(cx, |v| v.history.open));
+    ui.press_and_release(cx, "history-button");
+    assert!(ui.read(cx, |v| !v.history.open));
+    assert!(ui.columns_focused(cx));
+    // Pressed once more, each opens again.
+    ui.press_and_release(cx, "sort");
+    assert!(ui.read(cx, |v| v.sort_open()));
+}

@@ -470,6 +470,22 @@ impl Ui {
         settle(cx);
     }
 
+    /// Clicks `id` as a hand does: the press and the release each an event of its own, with what the
+    /// press set off run before the release comes.
+    fn press_and_release(&self, cx: &mut TestAppContext, id: impl Into<ElementId>) {
+        use gpui_kit::{MouseButton, test::TestEventExt};
+        let id = id.into();
+        let at = self.act(cx, |window, cx| {
+            let at = window.find(id).bounds().center();
+            window.pointer_move(at, None, cx);
+            window.pointer_down(at, MouseButton::Left, cx);
+            at
+        });
+        cx.run_until_parked();
+        self.act(cx, |window, cx| window.pointer_up(at, MouseButton::Left, cx));
+        settle(cx);
+    }
+
     fn click_with(&self, cx: &mut TestAppContext, id: impl Into<ElementId>, modifiers: Modifiers) {
         let id = id.into();
         self.act(cx, |window, cx| window.click_with_modifiers(id, modifiers, cx));

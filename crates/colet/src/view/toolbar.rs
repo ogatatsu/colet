@@ -176,10 +176,11 @@ impl Colet {
                                 .child(icon("arrow-up-down", 14., p.text_muted))
                                 .child(sort.label())
                                 .child(icon("chevron-down", 14., p.text_faint))
-                                .on_click(cx.listener(|this, _, window, cx| {
+                                .map(|d| Self::opener(d, Self::sort_open, cx))
+                                .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                                     if this.sort_open() {
                                         this.close_menus(true, window, cx);
-                                    } else {
+                                    } else if !this.pressed_shut(event) {
                                         this.open_sort(window, cx);
                                     }
                                 }))
@@ -251,10 +252,11 @@ impl Colet {
                         .child(icon("funnel", 14., if on { p.accent } else { p.text_muted }))
                         .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| "フィルター".into())))
                         .child(icon("chevron-down", 14., p.text_faint))
-                        .on_click(cx.listener(|this, _, window, cx| {
+                        .map(|d| Self::opener(d, Self::filter_open, cx))
+                        .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                             if this.filter_open() {
                                 this.close_menus(true, window, cx);
-                            } else {
+                            } else if !this.pressed_shut(event) {
                                 this.open_filter_menu(window, cx);
                             }
                         }))

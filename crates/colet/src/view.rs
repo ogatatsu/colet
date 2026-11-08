@@ -115,6 +115,20 @@ fn with_marks(text: &str, marks: &[Range<usize>], color: Hsla) -> StyledText {
 }
 
 impl Colet {
+    /// A button that opens a menu or the history, `open` telling whether it is, and closes it pressed
+    /// again. A press outside what it opened closes that before the button's click comes, so the press
+    /// notes whether it was open and [`Colet::pressed_shut`] tells the click.
+    pub(crate) fn opener<E: InteractiveElement>(el: E, open: impl Fn(&Colet) -> bool + 'static, cx: &mut Context<Self>) -> E {
+        el.capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, _, _| this.pressed_open = open(this)))
+    }
+
+    /// The press `event` ends found open what its button opens, and closed it already: the click is not
+    /// to open it again. Enter and Space press nothing; a press left noted by no click is noted over by
+    /// the next press, the only one a click can end.
+    pub(crate) fn pressed_shut(&mut self, event: &ClickEvent) -> bool {
+        std::mem::take(&mut self.pressed_open) && !event.is_keyboard()
+    }
+
     /// The keys are in home's pane.
     fn in_home(&self) -> bool {
         self.state.columns.get(self.state.active).is_some_and(|c| c.kind == Kind::Home)
