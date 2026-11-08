@@ -483,6 +483,9 @@ pub struct Colet {
     pub popup: Option<Popup>,
     /// The open menu's lines, drawn and picked by the component library, and the closing it tells of.
     pub menu_view: Option<(Entity<gpui_kit::component::menu::PopupMenu>, FocusHandle, Subscription)>,
+    /// Where the keys were as the menu, dialog or history open now was opened, the first of them when one
+    /// opened another; they go back there as the last closes. See [`Colet::remember_keys`].
+    pub(crate) keys_before: Option<WeakFocusHandle>,
     /// The last press on a button that opens a menu or the history found it open; see
     /// [`Colet::opener`].
     pub pressed_open: bool,
@@ -583,6 +586,7 @@ impl Colet {
             sort_focus: cx.focus_handle().tab_stop(true),
             crumbs: Trail::default(),
             menu_view: None,
+            keys_before: None,
             pressed_open: false,
             focused_row: Default::default(),
             running: None,
@@ -1180,6 +1184,23 @@ impl Colet {
     /// What takes the keys for the column at `index`: home's pane, or the columns beside it.
     pub fn column_focus(&self, index: usize) -> &FocusHandle {
         if index == 0 { &self.home_focus } else { &self.columns_focus }
+    }
+
+    /// A menu, dialog or the history opening: where the keys are now is where they go back to as it closes.
+    /// One opened from another leaves it as the first found it.
+    pub(crate) fn remember_keys(&mut self, window: &Window, cx: &App) {
+        if self.menu_view.is_none() && self.dialog.is_none() && !self.history.open {
+            self.keys_before = window.focused(cx).map(|focus| focus.downgrade());
+        }
+    }
+
+    /// The last menu, dialog or history closing: the keys go back to where they were as the first opened.
+    /// Gone since, or in a column, they go to the column worked in.
+    pub(crate) fn restore_keys(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.keys_before.take().and_then(|before| before.upgrade()) {
+            Some(before) if before != self.home_focus && before != self.columns_focus => before.focus(window, cx),
+            _ => self.column_focus(self.state.active).focus(window, cx),
+        }
     }
 
     /// The keys go to the active column: home's pane or the columns beside it.

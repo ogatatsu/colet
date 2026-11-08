@@ -556,7 +556,7 @@ impl Colet {
         let Some((query, filter, narrow)) = saved_query(key) else { return };
         let Some(found) = self.settings.saved(query, filter, narrow).cloned() else { return };
         self.take_menu();
-        self.begin_dialog();
+        self.begin_dialog(window, cx);
         let name = self.edit_field(found.name.clone(), found.query.clone(), Self::submit_edit, window, cx);
         let query = self.edit_field(found.query.clone(), String::new(), Self::submit_edit, window, cx);
         let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), "なし".into(), Self::submit_edit, window, cx);
@@ -635,7 +635,7 @@ impl Colet {
         let (path, narrow) = favorite_parts(key);
         let Some(found) = self.settings.favorite(&path, narrow.as_deref()).cloned() else { return };
         self.take_menu();
-        self.begin_dialog();
+        self.begin_dialog(window, cx);
         let name = self.edit_field(found.name.clone(), shown(folder_name(&found.path)), Self::submit_favorite_edit, window, cx);
         let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), "なし".into(), Self::submit_favorite_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
@@ -684,7 +684,7 @@ impl Colet {
     }
 
     pub fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.begin_dialog();
+        self.begin_dialog(window, cx);
         // The theme now chosen takes the keys, as a radio group's checked one does.
         self.stop(format!("theme:{:?}", self.settings.theme), cx).focus(window, cx);
         self.dialog = Some(Dialog::Preferences);
@@ -715,16 +715,18 @@ impl Colet {
     }
 
     /// Lets go of what the dialog before listened to. Called first by whatever opens one, before it makes
-    /// the fields the new dialog listens to.
-    pub(crate) fn begin_dialog(&mut self) {
+    /// the fields the new dialog listens to, and before the keys go into it: where they are is where they go
+    /// back to as it closes.
+    pub(crate) fn begin_dialog(&mut self, window: &Window, cx: &App) {
+        self.remember_keys(window, cx);
         self.dialog_subscriptions.clear();
     }
 
-    /// The keys go back to the column they came from.
+    /// The keys go back to where they were as the dialog opened, or the menu that opened it.
     pub fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog = None;
         self.dialog_subscriptions.clear();
-        self.column_focus(self.state.active).focus(window, cx);
+        self.restore_keys(window, cx);
         cx.notify();
     }
 

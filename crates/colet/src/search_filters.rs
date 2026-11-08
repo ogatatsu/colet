@@ -29,7 +29,7 @@ impl Colet {
 
     /// The list of filters, back from an edit or a deletion asked about.
     pub fn back_to_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.begin_dialog();
+        self.begin_dialog(window, cx);
         self.dialog = Some(Dialog::Filters { edit: None, deleting: None });
         self.dialog_focus.focus(window, cx);
         cx.notify();
@@ -48,7 +48,7 @@ impl Colet {
         let found = original.as_deref().and_then(|name| self.settings.filters.iter().find(|f| f.name == name)).cloned().unwrap_or_default();
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("画像").default_value(found.name));
         let query = cx.new(|cx| InputState::new(window, cx).placeholder("ext:jpg;png;gif").default_value(found.query));
-        self.begin_dialog();
+        self.begin_dialog(window, cx);
         for input in [&name, &query] {
             let subscription = cx.subscribe_in(input, window, |this: &mut Self, _, event, window, cx| match event {
                 InputEvent::PressEnter { .. } => this.submit_filter(window, cx),
@@ -129,7 +129,7 @@ impl Colet {
 
     /// Asks before the filter named `name` goes.
     pub fn ask_delete_filter(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.begin_dialog();
+        self.begin_dialog(window, cx);
         self.dialog = Some(Dialog::Filters { edit: None, deleting: Some(name) });
         self.dialog_focus.focus(window, cx);
         cx.notify();

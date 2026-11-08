@@ -208,7 +208,7 @@ impl Colet {
         div()
             .relative()
             .child(
-                ring(div().id("crumb-fold").track_focus(&focus), p)
+                ring(crate::view::keep_focus(div().id("crumb-fold")).track_focus(&focus), p)
                     .role(Role::Button)
                     .aria_label("上の階層")
                     .aria_expanded(open)

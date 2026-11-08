@@ -45,12 +45,18 @@ pub struct Parked {
 }
 
 /// Where a tab's keys are.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Keys {
     Search,
     Column,
     /// The field narrowing the column.
     NarrowField(ColumnId),
+    /// The address being typed, as it was left: what it holds and the text picked in it.
+    Address {
+        text: String,
+        picked: std::ops::Range<usize>,
+        reversed: bool,
+    },
 }
 
 impl Parked {
@@ -329,6 +335,12 @@ impl Colet {
         if self.search_focused {
             return Keys::Search;
         }
+        // Open, the field has the keys, or had them until the press that switches tabs.
+        if self.address.is_open() {
+            let field = self.address.field.read(cx);
+            let text = field.value().to_string();
+            return Keys::Address { text, picked: field.selected_range(), reversed: field.is_selection_reversed() };
+        }
         match self.narrow_fields.iter().find(|(_, field)| self.has_keys(&field.input, window, cx)) {
             Some((id, _)) => Keys::NarrowField(*id),
             None => Keys::Column,
@@ -358,7 +370,7 @@ impl Colet {
             return;
         }
         let Some(incoming) = self.tabs.list.get_mut(index).and_then(|tab| tab.parked.take()) else { return };
-        let keys = incoming.keys;
+        let keys = incoming.keys.clone();
         let outgoing = self.swap_in(incoming, self.keys(window, cx));
         let current = self.tabs.current;
         self.tabs.list[current].parked = Some(outgoing);
@@ -374,6 +386,10 @@ impl Colet {
             }
             Keys::Column => self.focus_active(window, cx),
             Keys::NarrowField(id) => self.focus_narrow_field(id, window, cx),
+            Keys::Address { text, picked, reversed } => {
+                self.reopen_address(text, picked, reversed, window, cx);
+                self.changed(cx);
+            }
         }
     }
 

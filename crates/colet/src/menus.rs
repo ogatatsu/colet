@@ -566,22 +566,18 @@ impl Colet {
         self.close_menus(to_column, window, cx);
     }
 
-    /// Closes whichever menu is open, handing the keys back to the column when `to_column`; a text field's
-    /// menu hands them back to its field, and the filters' menu to the search field, when it had them.
-    pub fn close_menus(&mut self, to_column: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Closes whichever menu is open, handing the keys back when `restore`: to where they were as it opened,
+    /// or, in a dialog, to the text field whose menu it was.
+    pub fn close_menus(&mut self, restore: bool, window: &mut Window, cx: &mut Context<Self>) {
         let popup = self.popup.take();
         self.menu_view = None;
+        if let Some(Popup::Text(menu)) = &popup {
+            menu.input.update(cx, |input, cx| input.set_selection_focus(None, cx));
+        }
+        let within = self.dialog.is_some() || self.history.open;
         match popup {
-            Some(Popup::Text(menu)) => menu.input.update(cx, |input, cx| {
-                input.set_selection_focus(None, cx);
-                if to_column {
-                    input.focus(window, cx);
-                }
-            }),
-            Some(Popup::Filters { from_search: true }) if to_column => self.search.update(cx, |input, cx| input.focus(window, cx)),
-            // Esc in the trail's menu goes back to the button that opened it.
-            Some(Popup::Crumbs) if to_column => self.stop("crumb-fold", cx).focus(window, cx),
-            _ if to_column => self.column_focus(self.state.active).focus(window, cx),
+            Some(Popup::Text(menu)) if restore && within => menu.input.update(cx, |input, cx| input.focus(window, cx)),
+            _ if restore && !within => self.restore_keys(window, cx),
             _ => {}
         }
         cx.notify();
@@ -726,6 +722,7 @@ impl Colet {
             }
         });
         let focus = menu.focus_handle(cx);
+        self.remember_keys(window, cx);
         focus.focus(window, cx);
         self.menu_view = Some((menu, focus, dismissed));
         cx.notify();

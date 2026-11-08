@@ -155,8 +155,7 @@ impl Colet {
                     .relative()
                     .child(
                         frame(p, sort_keyed).m(px(-3.)).child(
-                            div()
-                                .id("sort")
+                            crate::view::keep_focus(div().id("sort"))
                                 .track_focus(&self.sort_focus)
                                 .key_context(SORT)
                                 .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(window, cx)))
@@ -226,8 +225,7 @@ impl Colet {
             .min_w(px(60.))
             .child(
                 frame(p, keyed(&focus, window)).min_w_0().m(px(-3.)).child(
-                    div()
-                        .id("search-filter")
+                    crate::view::keep_focus(div().id("search-filter"))
                         .track_focus(&focus)
                         .key_context(SORT)
                         .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_filter_menu(window, cx)))

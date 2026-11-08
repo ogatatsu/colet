@@ -93,6 +93,24 @@ impl Colet {
         cx.notify();
     }
 
+    /// Back to a tab left while typing an address: the field, holding what was typed and picked there.
+    pub(crate) fn reopen_address(
+        &mut self,
+        text: String,
+        picked: std::ops::Range<usize>,
+        reversed: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.address.set_open(true);
+        self.address.field.update(cx, |input, cx| {
+            input.set_value(text, window, cx);
+            input.focus(window, cx);
+            input.set_selected_range_with_direction(picked, reversed, cx);
+        });
+        cx.notify();
+    }
+
     /// Lets go of what was typed; the trail shows again. Any answer still on its way is let go of too.
     pub fn close_address(&mut self, cx: &mut Context<Self>) {
         self.address.set_open(false);

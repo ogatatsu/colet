@@ -40,6 +40,7 @@ use crate::{
 mod address;
 mod column_filter;
 mod file_ops;
+mod focus;
 mod hidden;
 mod home;
 mod menus;

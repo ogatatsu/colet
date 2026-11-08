@@ -487,7 +487,7 @@ impl Colet {
 
     /// The name dialog for `request`, starting from its name with the first `select_end` bytes selected.
     fn ask_name(&mut self, request: Request, select_end: usize, window: &mut Window, cx: &mut Context<Self>) {
-        self.begin_dialog();
+        self.begin_dialog(window, cx);
         let input = cx.new(|cx| InputState::new(window, cx).default_value(request.name.clone()));
         let subscription = cx.subscribe_in(&input, window, |this: &mut Self, _, event, window, cx| match event {
             InputEvent::PressEnter { .. } => this.submit_name(window, cx),
@@ -617,7 +617,7 @@ impl Colet {
             _ => {
                 let files: Vec<PathBuf> = picked.into_iter().filter(|e| !e.directory).map(|e| e.path).collect();
                 if files.len() >= ASK_TO_OPEN {
-                    self.begin_dialog();
+                    self.begin_dialog(window, cx);
                     self.dialog = Some(Dialog::Open { paths: files });
                     self.stop("confirm-open", cx).focus(window, cx);
                     cx.notify();
@@ -950,11 +950,15 @@ impl Colet {
         self.changed(cx);
     }
 
-    /// Opened, the history has been seen; closed, the keys go back to the column.
+    /// Opened, the history has been seen; closed, the keys go back to where they were as it opened.
     pub fn show_history(&mut self, open: bool, entry: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
+        let was_open = self.history.open;
+        if open && !was_open {
+            self.remember_keys(window, cx);
+        }
         self.history.set_open(open, entry);
-        if !open {
-            self.column_focus(self.state.active).focus(window, cx);
+        if !open && was_open {
+            self.restore_keys(window, cx);
         }
         cx.notify();
     }

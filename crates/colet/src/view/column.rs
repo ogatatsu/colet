@@ -396,8 +396,7 @@ impl Colet {
             .relative()
             .flex_none()
             .child(
-                div()
-                    .id(("column-sort", id))
+                crate::view::keep_focus(div().id(("column-sort", id)))
                     .test_support()
                     .track_focus(&focus)
                     .key_context(SORT)
