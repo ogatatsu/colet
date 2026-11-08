@@ -11,6 +11,7 @@ use gpui_kit::base::input::{self, Input, InputState};
 use gpui_kit::component::{
     Disableable, FocusableExt, Selectable, Sizable,
     button::{Button, ButtonVariants},
+    spinner::Spinner,
     status_bar::StatusBar,
 };
 use gpui_kit::prelude::FluentBuilder;
@@ -53,13 +54,6 @@ impl<E: StatefulInteractiveElement> TipExt for E {
 /// The icon named `name` among Colet's, for a button.
 pub fn glyph(name: &str) -> gpui_kit::component::Icon {
     gpui_kit::component::Icon::empty().path(format!("icons/{name}.svg"))
-}
-
-/// The loading icon, turning once a second.
-pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> AnimationElement<Svg> {
-    icon("loader-circle", size, color).with_animation(id, Animation::new(std::time::Duration::from_secs(1)).repeat(), |svg, delta| {
-        svg.with_transformation(Transformation::rotate(percentage(delta)))
-    })
 }
 
 /// A thin scrollbar laid over a list, as the old app's; its thumb is Colet's color.

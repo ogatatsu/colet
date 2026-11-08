@@ -4,6 +4,10 @@
 use std::{collections::HashMap, path::Path};
 
 use colet_core::paths::{folder_name, path_key, shown};
+use gpui_kit::component::{
+    Sizable,
+    button::{Button, ButtonVariants},
+};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -203,6 +207,19 @@ impl Render for DraggedTab {
             .text_size(px(metrics::TEXT_LARGE))
             .text_color(p.text)
     }
+}
+
+/// A small button with a glyph on the tab bar, which the mouse alone presses: Tab passes it by.
+fn tab_button(p: crate::theme::Palette, id: impl Into<ElementId>, glyph: &str, label: &'static str, tip: &'static str) -> Button {
+    Button::new(id)
+        .ghost()
+        .rounded(px(4.))
+        .icon(crate::view::glyph(glyph))
+        .accessibility_label(label)
+        .tooltip(tip)
+        .tab_stop(false)
+        .flex_none()
+        .text_color(p.text_muted)
 }
 
 /// Decoration only: the tab's hitbox stays rectangular and the curves have no mouse listeners.
@@ -746,21 +763,10 @@ impl Colet {
                     .children(tabs),
             )
             .child(
-                div()
-                    .id("new-tab")
-                    .flex_none()
+                tab_button(p, "new-tab", "plus", "新しいタブ", "新しいタブ（Ctrl+T）")
+                    .small()
                     .size(px(26.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(4.))
-                    .hover(|d| d.bg(p.hover))
-                    .role(Role::Button)
-                    .aria_label("新しいタブ")
-                    .tip("新しいタブ（Ctrl+T）")
-                    .child(svg().path("icons/plus.svg").size(px(14.)).text_color(p.text_muted))
-                    .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx)))
-                    .test_support(),
+                    .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
             )
             // A double-click in the room left opens another, as in a browser.
             .child(
@@ -829,28 +835,14 @@ impl Colet {
                 p.text_muted
             }))
             .child(div().flex_1().min_w_0().truncate().child(name))
-            .child(
-                div()
-                    .id(("tab-close", id as usize))
-                    .flex_none()
-                    .size(px(20.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(4.))
-                    .hover(|d| d.bg(p.raised_hover))
-                    .role(Role::Button)
-                    .aria_label("タブを閉じる")
-                    .tip("タブを閉じる（Ctrl+W）")
-                    .child(svg().path("icons/x.svg").size(px(12.)).text_color(p.text_muted))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        if let Some(index) = this.tabs.position(id) {
-                            this.close_tab(index, window, cx);
-                        }
-                    }))
-                    .test_support(),
-            )
+            .child(tab_button(p, ("tab-close", id as usize), "x", "タブを閉じる", "タブを閉じる（Ctrl+W）").xsmall().on_click(cx.listener(
+                move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    if let Some(index) = this.tabs.position(id) {
+                        this.close_tab(index, window, cx);
+                    }
+                },
+            )))
             .on_click(cx.listener(move |this, _, window, cx| {
                 if let Some(index) = this.tabs.position(id) {
                     this.switch_tab(index, window, cx);

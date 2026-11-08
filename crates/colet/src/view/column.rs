@@ -175,7 +175,7 @@ impl Colet {
             .py_3()
             .text_size(px(metrics::TEXT_BODY))
             .text_color(p.text_muted)
-            .child(spinner("loading", 15., p.text_muted))
+            .child(Spinner::new().icon(glyph("loader-circle")).color(p.text_muted).with_size(px(15.)))
             .child("読み込み中…")
     }
 
