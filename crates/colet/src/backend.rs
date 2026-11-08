@@ -61,8 +61,15 @@ pub trait Backend: Send + Sync + 'static {
     fn save_settings(&self, settings: &Settings) -> Result<(), String>;
     fn load_sorts(&self) -> Result<Sorts, LoadError>;
     fn save_sorts(&self, sorts: &Sorts) -> Result<(), String>;
-    /// Carries out a file operation, telling `report` how each item ends. Blocks until it is done.
-    fn operate(&self, request: Request, owner: Owner, report: Box<dyn FnMut(Event) + Send>) -> Result<(), String>;
+    /// Carries out a file operation, telling `report` how each item ends; a paste pastes `clipboard`, the
+    /// files read from it, or when `None` reads them itself. Blocks until it is done.
+    fn operate(
+        &self,
+        request: Request,
+        clipboard: Option<ClipboardFiles>,
+        owner: Owner,
+        report: Box<dyn FnMut(Event) + Send>,
+    ) -> Result<(), String>;
     /// The files on the clipboard; `None` while another app holds it.
     fn clipboard_files(&self) -> Option<ClipboardFiles>;
     fn copy_files(&self, paths: &[PathBuf], cut: bool, owner: Owner) -> Result<(), String>;
@@ -180,8 +187,14 @@ impl Backend for Live {
         sorts::save(sorts)
     }
 
-    fn operate(&self, request: Request, owner: Owner, report: Box<dyn FnMut(Event) + Send>) -> Result<(), String> {
-        operations::run(request, owner, report)
+    fn operate(
+        &self,
+        request: Request,
+        clipboard: Option<ClipboardFiles>,
+        owner: Owner,
+        report: Box<dyn FnMut(Event) + Send>,
+    ) -> Result<(), String> {
+        operations::run(request, clipboard, owner, report)
     }
 
     fn clipboard_files(&self) -> Option<ClipboardFiles> {

@@ -204,7 +204,13 @@ impl Backend for Fake {
     }
 
     /// Acts on the listings as the shell would on the disk.
-    fn operate(&self, request: Request, _: Owner, mut report: Box<dyn FnMut(Event) + Send>) -> Result<(), String> {
+    fn operate(
+        &self,
+        request: Request,
+        read: Option<ClipboardFiles>,
+        _: Owner,
+        mut report: Box<dyn FnMut(Event) + Send>,
+    ) -> Result<(), String> {
         self.operations.lock().unwrap().push(request.clone());
         let stuck = self.stuck.lock().unwrap().clone();
         let mut failed = false;
@@ -244,7 +250,7 @@ impl Backend for Fake {
                 report(Event::Done { path });
             }
             Operation::Paste => {
-                let files = self.clipboard.lock().unwrap().clone();
+                let files = read.unwrap_or_else(|| self.clipboard.lock().unwrap().clone());
                 for path in files.paths {
                     let name = colet_core::paths::shown(folder_name(&path));
                     let parent = ancestors(&path).into_iter().rev().nth(1).unwrap();

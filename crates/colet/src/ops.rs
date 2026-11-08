@@ -802,24 +802,45 @@ impl Colet {
         self.departed.clear();
         let events = OperationEvents::default();
         self.running = Some(Running { id, tab: self.current_tab(), events: events.clone(), made: None, placed: Vec::new() });
-        // What leaves its place goes unwatched first, with the folders inside it.
-        let leaving = match request.kind {
-            Kind::Recycle | Kind::Delete | Kind::Rename => request.paths.as_slice(),
-            Kind::Paste if self.clipboard.files.cut => self.clipboard.files.paths.as_slice(),
-            Kind::Paste | Kind::NewFolder => &[],
-        };
-        self.watching.released = leaving.iter().map(|p| path_key(p)).collect();
-        let released = self.watch(cx);
-        let (backend, owner, asked) = (self.backend.clone(), self.owner, request.clone());
-        let task = cx.background_executor().spawn(async move {
-            if let Some(released) = released {
-                let _ = released.recv();
-            }
-            backend.operate(asked, owner, Box::new(move |event| events.lock().unwrap().push(event)))
-        });
         cx.notify();
+        let (backend, owner, asked) = (self.backend.clone(), self.owner, request.clone());
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            // A paste reads the clipboard once, and both lets go of and pastes what it read: what was last
+            // seen on it may be a moment old.
+            let clipboard = if asked.kind == Kind::Paste {
+                let backend = backend.clone();
+                cx.background_executor().spawn(async move { backend.clipboard_files() }).await
+            } else {
+                None
+            };
+            // What leaves its place goes unwatched first, with the folders inside it.
+            let Ok(released) = this.update(cx, |this, cx| {
+                let leaving = match asked.kind {
+                    Kind::Recycle | Kind::Delete | Kind::Rename => asked.paths.as_slice(),
+                    Kind::Paste => match &clipboard {
+                        Some(files) if files.cut => files.paths.as_slice(),
+                        Some(_) => &[],
+                        // Unread, as while another app holds it: the paste reads it again, and most likely
+                        // fails as this did.
+                        None if this.clipboard.files.cut => this.clipboard.files.paths.as_slice(),
+                        None => &[],
+                    },
+                    Kind::NewFolder => &[],
+                };
+                this.watching.released = leaving.iter().map(|p| path_key(p)).collect();
+                this.watch(cx)
+            }) else {
+                return;
+            };
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    if let Some(released) = released {
+                        let _ = released.recv();
+                    }
+                    backend.operate(asked, clipboard, owner, Box::new(move |event| events.lock().unwrap().push(event)))
+                })
+                .await;
             this.update(cx, |this, cx| this.finished(request, result, cx)).ok();
         })
         .detach();

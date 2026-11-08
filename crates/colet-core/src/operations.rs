@@ -266,11 +266,18 @@ fn prepare(request: Request, clipboard: impl FnOnce() -> Result<clipboard::Clipb
     Ok(Prepared { operation, paths, rename, cut })
 }
 
-/// Carries out `request`, telling `report` how each item ends. Fails with [`CANCELLED`] when the user
-/// stopped it, and says so when some items failed. Blocks until the shell is done.
-pub fn run(request: Request, owner: Owner, report: impl FnMut(Event) + Send + 'static) -> Result<(), String> {
-    let files = match request.kind {
-        Kind::Paste => clipboard::read_files().map_err(|e| message(e.code()))?,
+/// Carries out `request`, telling `report` how each item ends; a paste pastes `read`, what was read from
+/// the clipboard, or when `None` reads it now. Fails with [`CANCELLED`] when the user stopped it, and
+/// says so when some items failed. Blocks until the shell is done.
+pub fn run(
+    request: Request,
+    read: Option<clipboard::ClipboardFiles>,
+    owner: Owner,
+    report: impl FnMut(Event) + Send + 'static,
+) -> Result<(), String> {
+    let files = match (request.kind, read) {
+        (Kind::Paste, Some(files)) => files,
+        (Kind::Paste, None) => clipboard::read_files().map_err(|e| message(e.code()))?,
         _ => clipboard::ClipboardFiles::default(),
     };
     if request.kind == Kind::Paste && files.paths.is_empty() {
@@ -527,7 +534,7 @@ mod tests {
         assert_eq!((files.paths.len(), files.items, files.cut), (0, true, false));
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = events.clone();
-        run(request(Kind::Paste, vec![], &out, ""), 0, move |event| seen.lock().unwrap().push(event)).unwrap();
+        run(request(Kind::Paste, vec![], &out, ""), None, 0, move |event| seen.lock().unwrap().push(event)).unwrap();
         assert_eq!(std::fs::read(out.join("inner.txt")).unwrap(), b"zipped");
         let events = events.lock().unwrap();
         assert!(matches!(&events[0], Event::Done { path } if path.ends_with(r"archive.zip\inner.txt")), "{events:?}");
@@ -544,7 +551,7 @@ mod tests {
             let files = clipboard::read_files().unwrap();
             let events = Arc::new(std::sync::Mutex::new(Vec::new()));
             let seen = events.clone();
-            run(request(Kind::Paste, vec![], &destination, ""), 0, move |event| seen.lock().unwrap().push(event)).unwrap();
+            run(request(Kind::Paste, vec![], &destination, ""), None, 0, move |event| seen.lock().unwrap().push(event)).unwrap();
             let events = events.lock().unwrap().clone();
             (events, files)
         });
@@ -560,13 +567,13 @@ mod tests {
         let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = events.clone();
         let record = move |event| seen.lock().unwrap().push(event);
-        run(request(Kind::NewFolder, vec![], dir.path(), "child"), 0, record.clone()).unwrap();
+        run(request(Kind::NewFolder, vec![], dir.path(), "child"), None, 0, record.clone()).unwrap();
         let child = dir.path().join("child");
         assert!(child.is_dir());
-        run(request(Kind::Rename, vec![child.clone()], dir.path(), "renamed"), 0, record.clone()).unwrap();
+        run(request(Kind::Rename, vec![child.clone()], dir.path(), "renamed"), None, 0, record.clone()).unwrap();
         let renamed = dir.path().join("renamed");
         assert!(renamed.is_dir());
-        run(request(Kind::Recycle, vec![renamed.clone()], dir.path(), ""), 0, record).unwrap();
+        run(request(Kind::Recycle, vec![renamed.clone()], dir.path(), ""), None, 0, record).unwrap();
         assert!(!renamed.exists());
         let events = events.lock().unwrap();
         let done = events.iter().filter(|e| matches!(e, Event::Done { .. })).count();

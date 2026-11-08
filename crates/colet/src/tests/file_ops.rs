@@ -52,6 +52,23 @@ fn marks_a_row_another_app_put_on_the_clipboard_in_another_case(cx: &mut TestApp
 }
 
 #[gpui_kit::test]
+fn lets_go_of_what_a_paste_moves_as_the_clipboard_holds_it_not_as_last_seen(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    ui.press(cx, "ctrl-c");
+    assert!(ui.read(cx, |v| !v.clipboard.files.cut));
+    // Cut since, and not yet seen to be: what Colet last saw is the copy.
+    *fake.clipboard.lock().unwrap() = ClipboardFiles { paths: vec![r"D:\other".into()], cut: true, sequence: 2, ..Default::default() };
+    ui.view.update(cx, |v, cx| v.paste(cx));
+    while fake.operations.lock().unwrap().is_empty() {
+        assert!(cx.executor().tick(), "the paste never ran");
+    }
+    let released = ui.read(cx, |v| v.watching.released.clone());
+    assert_eq!(released, HashSet::from([colet_core::paths::path_key(Path::new(r"D:\other"))]));
+    settle(cx);
+    assert!(ui.read(cx, |v| v.running.is_none() && v.watching.released.is_empty()));
+}
+
+#[gpui_kit::test]
 fn renames_from_f2_refusing_a_name_windows_would_reject(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "f2");
