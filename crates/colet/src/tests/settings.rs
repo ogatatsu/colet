@@ -80,11 +80,11 @@ fn fixes_the_theme_from_the_preferences_at_once_and_keeps_it(cx: &mut TestAppCon
     assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::light().bg);
     assert_eq!(fake.settings.lock().unwrap().theme, Theme::System);
     // From the keys, as a stop for Tab.
-    let dark = ui.read(cx, |v| v.stops[&format!("theme:{:?}", Theme::Dark)].clone());
+    let dark = ui.read(cx, |v| v.stops.borrow()[&format!("theme:{:?}", Theme::Dark)].clone());
     ui.act(cx, |window, cx| dark.focus(window, cx));
     ui.press(cx, "space");
     assert_eq!(ui.read(cx, |v| v.settings.theme), Theme::Dark);
-    let light = ui.read(cx, |v| v.stops[&format!("theme:{:?}", Theme::Light)].clone());
+    let light = ui.read(cx, |v| v.stops.borrow()[&format!("theme:{:?}", Theme::Light)].clone());
     ui.act(cx, |window, cx| light.focus(window, cx));
     ui.press(cx, "enter");
     assert_eq!(ui.read(cx, |v| v.settings.theme), Theme::Light);

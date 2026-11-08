@@ -2,9 +2,9 @@
 use super::*;
 
 impl Colet {
-    pub(super) fn render_statusbar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_statusbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let history = self.history_button(cx);
+        let history = self.history_button(window, cx);
         let active = &self.state.columns[self.state.active];
         let place = match active.kind {
             Kind::Folder => shown(&active.path),

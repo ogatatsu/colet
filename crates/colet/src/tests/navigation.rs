@@ -385,7 +385,7 @@ fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &m
     // Three picked: one name cannot be changed for them all.
     ui.press(cx, "ctrl-a");
     // Into the file actions from the trail's last crumb, past the preferences' button.
-    let crumb = ui.read(cx, |v| v.stops[&format!("crumb:{}", v.state.columns.len() - 1)].clone());
+    let crumb = ui.read(cx, |v| v.stops.borrow()[&format!("crumb:{}", v.state.columns.len() - 1)].clone());
     ui.act(cx, |window, cx| crumb.focus(window, cx));
     for _ in 0..5 {
         ui.press(cx, "tab");
@@ -478,7 +478,7 @@ fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut
     for _ in 0..chain.len() {
         ui.press(cx, "right");
     }
-    let fold = ui.read(cx, |v| v.stops["crumb-fold"].clone());
+    let fold = ui.read(cx, |v| v.stops.borrow()["crumb-fold"].clone());
     ui.act(cx, |window, cx| fold.focus(window, cx));
     // Enter opens it; ↓ lights a line, Esc hands the keys back to the button.
     ui.press(cx, "enter");

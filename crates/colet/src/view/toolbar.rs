@@ -15,6 +15,31 @@ impl Colet {
 
         let filter_button = self.filter_button(window, cx);
         let address = self.render_address(window, cx);
+        let back = Self::icon_button("back", "arrow-left", "戻る", "戻る（Alt+←）", back)
+            .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)));
+        let back = self.ringed(back, "back", RingAt::Edge, window, cx);
+        let forward = Self::icon_button("forward", "arrow-right", "進む", "進む（Alt+→）", forward)
+            .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx)));
+        let forward = self.ringed(forward, "forward", RingAt::Edge, window, cx);
+        let refresh =
+            Self::icon_button("refresh", "refresh-cw", "更新", "更新（F5）", true).on_click(cx.listener(|this, _, _, cx| this.refresh(cx)));
+        let refresh = self.ringed(refresh, "refresh", RingAt::Edge, window, cx);
+        let preferences = Self::icon_button("preferences", "sliders-horizontal", "設定", "設定", true)
+            .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)));
+        let preferences = self.ringed(preferences, "preferences", RingAt::Edge, window, cx);
+        let clear = has_query.then(|| {
+            let clear = Button::new("clear-search")
+                .ghost()
+                .xsmall()
+                .icon(glyph("x"))
+                .accessibility_label("検索をクリア")
+                .tooltip("検索をクリア（Esc）")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.clear_search(window, cx);
+                    this.search.update(cx, |input, cx| input.focus(window, cx));
+                }));
+            self.ringed(clear, "clear-search", RingAt::Edge, window, cx)
+        });
         div()
             .h(px(48.))
             .flex_none()
@@ -22,88 +47,59 @@ impl Colet {
             .flex()
             .items_center()
             .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .gap(px(2.))
-                    .child(
-                        Self::icon_button("back", "arrow-left", "戻る", "戻る（Alt+←）", back)
-                            .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
-                    )
-                    .child(
-                        Self::icon_button("forward", "arrow-right", "進む", "進む（Alt+→）", forward)
-                            .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx))),
-                    )
-                    .child(
-                        keep_focus(Self::icon_button("refresh", "refresh-cw", "更新", "更新（F5）", true))
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                    ),
-            )
+            .child(div().flex().flex_none().gap(px(2.)).child(back).child(forward).child(refresh))
             .child(filter_button)
             .child(
                 // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row. It keeps
                 // its width while the address beside it gives way, then narrows, keeping room to type in.
-                frame(p, focused).flex_none().w(px(field_width)).flex_shrink(1.).min_w(px(SEARCH_FIELD_WIDTHS.0)).m(px(-3.)).child(
-                    div()
-                        .id("search-box")
-                        .w_full()
-                        .h(px(metrics::CONTROL_HEIGHT))
-                        .pl(px(10.))
-                        .pr(px(4.))
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .bg(p.surface)
-                        .border_1()
-                        .border_color(p.border_strong)
-                        .rounded(px(6.))
-                        .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .capture_any_mouse_down(Self::right_press_menu(&self.search, cx))
-                                .child(Input::new(&self.search)),
-                        )
-                        // ↓ goes into the results, as from a search field in Explorer; Esc clears the search.
-                        .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {
-                            cx.stop_propagation();
-                            this.leave_search(window, cx);
-                        }))
-                        // Esc empties the field, then lets go of the filter, and home shows alone.
-                        .on_action(cx.listener(|this, _: &input::Escape, window, cx| {
-                            if !this.state.query.is_empty() {
-                                this.clear_search(window, cx);
-                            } else if this.chosen_filter.is_some() {
-                                this.choose_filter(None, cx);
-                            }
-                        }))
-                        .when(has_query, |b| {
-                            b.child(
-                                Button::new("clear-search")
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(glyph("x"))
-                                    .accessibility_label("検索をクリア")
-                                    .tooltip("検索をクリア（Esc）")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.clear_search(window, cx);
-                                        this.search.update(cx, |input, cx| input.focus(window, cx));
-                                    })),
+                frame(p, focused, 6.)
+                    .flex_none()
+                    .w(px(field_width))
+                    .flex_shrink(1.)
+                    .min_w(px(SEARCH_FIELD_WIDTHS.0))
+                    .m(px(-RING_ROOM))
+                    .child(
+                        div()
+                            .id("search-box")
+                            .w_full()
+                            .h(px(metrics::CONTROL_HEIGHT))
+                            .pl(px(10.))
+                            .pr(px(4.))
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .bg(p.surface)
+                            .border_1()
+                            .border_color(p.border_strong)
+                            .rounded(px(6.))
+                            .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .capture_any_mouse_down(Self::right_press_menu(&self.search, cx))
+                                    .child(Input::new(&self.search)),
                             )
-                        })
-                        .test_support(),
-                ),
+                            // ↓ goes into the results, as from a search field in Explorer; Esc clears the search.
+                            .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {
+                                cx.stop_propagation();
+                                this.leave_search(window, cx);
+                            }))
+                            // Esc empties the field, then lets go of the filter, and home shows alone.
+                            .on_action(cx.listener(|this, _: &input::Escape, window, cx| {
+                                if !this.state.query.is_empty() {
+                                    this.clear_search(window, cx);
+                                } else if this.chosen_filter.is_some() {
+                                    this.choose_filter(None, cx);
+                                }
+                            }))
+                            .children(clear)
+                            .test_support(),
+                    ),
             )
             .child(self.field_resizer(cx))
             .child(address)
-            .child(
-                div().flex_none().child(
-                    Self::icon_button("preferences", "sliders-horizontal", "設定", "設定", true)
-                        .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
-                ),
-            )
+            .child(preferences)
             .into_any_element()
     }
 
@@ -142,9 +138,20 @@ impl Colet {
     pub(super) fn view_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let sort = self.settings.sort;
-        let sort_keyed = keyed(&self.sort_focus, window);
+        let sort_focused = self.sort_focus.is_focused(window);
         // Pressed while the hidden items show.
         let show = self.settings.show_hidden;
+        let hidden = Self::icon_button(
+            "show-hidden",
+            if show { "eye" } else { "eye-off" },
+            "隠しファイルを表示",
+            "隠しファイルを表示（Ctrl+H）",
+            true,
+        )
+        .selected(show)
+        .toggled(show)
+        .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx)));
+        let hidden = self.ringed(hidden, "show-hidden", RingAt::Edge, window, cx);
         div()
             .flex()
             .flex_none()
@@ -154,7 +161,7 @@ impl Colet {
                 div()
                     .relative()
                     .child(
-                        frame(p, sort_keyed).m(px(-3.)).child(
+                        ring(
                             crate::view::keep_focus(div().id("sort"))
                                 .track_focus(&self.sort_focus)
                                 .key_context(SORT)
@@ -182,28 +189,18 @@ impl Colet {
                                     } else if !this.pressed_shut(event) {
                                         this.open_sort(window, cx);
                                     }
-                                }))
-                                .test_support(),
-                        ),
+                                })),
+                            p,
+                            sort_focused,
+                            6.,
+                        )
+                        .test_support(),
                     )
                     .when_some(self.menu_element("sort-menu", "既定の並び順", cx).filter(|_| self.sort_open()), |d, menu| {
                         d.child(deferred(div().absolute().top(px(32.)).right_0().w(px(160.)).child(menu)).with_priority(1))
                     }),
             )
-            .child(
-                keep_focus(
-                    Self::icon_button(
-                        "show-hidden",
-                        if show { "eye" } else { "eye-off" },
-                        "隠しファイルを表示",
-                        "隠しファイルを表示（Ctrl+H）",
-                        true,
-                    )
-                    .selected(show)
-                    .toggled(show),
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx))),
-            )
+            .child(hidden)
             .into_any_element()
     }
 
@@ -224,8 +221,9 @@ impl Colet {
             // the sort order's.
             .min_w(px(60.))
             .child(
-                frame(p, keyed(&focus, window)).min_w_0().m(px(-3.)).child(
+                frame(p, focus.is_focused(window), 6.).min_w_0().m(px(-RING_ROOM)).child(
                     crate::view::keep_focus(div().id("search-filter"))
+                        .test_support()
                         .track_focus(&focus)
                         .key_context(SORT)
                         .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_filter_menu(window, cx)))
@@ -257,8 +255,7 @@ impl Colet {
                             } else if !this.pressed_shut(event) {
                                 this.open_filter_menu(window, cx);
                             }
-                        }))
-                        .test_support(),
+                        })),
                 ),
             )
             .when_some(self.menu_element("search-filter-menu", "検索フィルター", cx).filter(|_| self.filter_open()), |d, menu| {

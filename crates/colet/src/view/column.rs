@@ -181,11 +181,11 @@ impl Colet {
 
     /// What a column lists, or why it lists nothing.
     /// The column at `index` under its headings: its rows, or why it has none.
-    pub(super) fn column_body(&mut self, index: usize, marked: bool, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn column_body(&mut self, index: usize, marked: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let c = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
         if let Some(error) = c.error.clone() {
-            return self.column_error(id, kind, error, cx);
+            return self.column_error(id, kind, error, window, cx);
         }
         if c.unread() {
             return self.loading().into_any_element();
@@ -210,27 +210,26 @@ impl Colet {
 
     /// Why the column `id` could not be listed, with a button to try again; the search's, with one to
     /// the preferences too, where Everything is reconnected.
-    fn column_error(&self, id: ColumnId, kind: Kind, error: String, cx: &mut Context<Self>) -> AnyElement {
-        self.message("circle-alert", error)
-            .child(keep_focus(Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label("再試行")).on_click(cx.listener(
-                move |this, event: &ClickEvent, window, cx| {
-                    // The button goes as the column loads: the keys go back to the columns.
-                    if event.is_keyboard() {
-                        this.focus_active(window, cx);
-                    }
-                    this.load(id, 0, false, cx);
-                },
-            )))
-            .when(kind == Kind::Search, |d| {
-                d.child(
-                    Button::new("search-settings")
-                        .outline()
-                        .icon(glyph("sliders-horizontal"))
-                        .label("設定")
-                        .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx))),
-                )
-            })
-            .into_any_element()
+    fn column_error(&mut self, id: ColumnId, kind: Kind, error: String, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let retry = Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label("再試行").on_click(cx.listener(
+            move |this, event: &ClickEvent, window, cx| {
+                // The button goes as the column loads: the keys go back to the columns.
+                if event.is_keyboard() {
+                    this.focus_active(window, cx);
+                }
+                this.load(id, 0, false, cx);
+            },
+        ));
+        let retry = self.ringed(retry, format!("retry:{id}"), RingAt::Round, window, cx).m(px(-RING_ROOM));
+        let settings = (kind == Kind::Search).then(|| {
+            let settings = Button::new("search-settings")
+                .outline()
+                .icon(glyph("sliders-horizontal"))
+                .label("設定")
+                .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)));
+            self.ringed(settings, "search-settings", RingAt::Round, window, cx).m(px(-RING_ROOM))
+        });
+        self.message("circle-alert", error).child(retry).children(settings).into_any_element()
     }
 
     /// The edge a drag widens a column from: astride its border, so its scrollbar stays clear of it.
@@ -280,8 +279,8 @@ impl Colet {
         let narrowed = c.is_narrowed();
         let field = self.narrow_fields.get(&id).map(|field| field.input.clone());
         let path = shown(&c.path);
-        let star = self.star_button(index, cx);
-        let body = self.column_body(index, marked, cx);
+        let star = self.star_button(index, window, cx);
+        let body = self.column_body(index, marked, window, cx);
         let sort_button = self.sort_button(index, window, cx);
         let headings = self.headings(index, cx);
         div()
@@ -371,7 +370,7 @@ impl Colet {
 
     /// The star in the column's heading: keeps the folder as a favorite, or the search as a saved one, as
     /// it is narrowed now, or lets go of it.
-    fn star_button(&self, index: usize, cx: &mut Context<Self>) -> Button {
+    fn star_button(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = self.palette;
         let c = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
@@ -387,7 +386,7 @@ impl Colet {
             (_, true) => "お気に入りを解除（Ctrl+D）",
             (_, false) => "お気に入りに追加（Ctrl+D）",
         };
-        Button::new(("star", id))
+        let star = Button::new(("star", id))
             .ghost()
             .xsmall()
             .icon(if kept { glyph("star-fill").text_color(p.accent) } else { glyph("star") })
@@ -400,7 +399,8 @@ impl Colet {
                     let key = this.favorite_key_of(index);
                     this.toggle_favorite(&key, cx);
                 }
-            }))
+            }));
+        self.ringed(star, format!("star:{id}"), RingAt::Edge, window, cx)
     }
 
     /// The button of the column's own order, beside its star: accented while it is given one apart from
@@ -413,7 +413,7 @@ impl Colet {
         let open = self.column_sort_open() == Some(id);
         let label = format!("並び順: {}{}", order.label(), if own { "" } else { "（既定）" });
         let focus = self.stop(format!("column-sort:{id}"), cx);
-        let keyed = keyed(&focus, window);
+        let shown = focus.is_focused(window);
         div()
             .relative()
             .flex_none()
@@ -432,11 +432,10 @@ impl Colet {
                     .items_center()
                     .justify_center()
                     .rounded(px(4.))
-                    .border_2()
-                    .border_color(if keyed { p.focus } else { transparent_black() })
                     .hover(|d| d.bg(p.hover))
                     .when(open, |d| d.bg(p.hover))
                     .child(icon("arrow-up-down", 14., if own { p.accent } else { p.text_muted }))
+                    .map(|d| ring(d, p, shown, 4.))
                     .map(|d| Self::opener(d, move |this| this.column_sort_open() == Some(id), cx))
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         if this.column_sort_open() == Some(id) {
@@ -541,7 +540,7 @@ impl Colet {
 
     /// The field narrowing the column `id` to the names holding what is typed there.
     pub(super) fn column_narrow_field(
-        &self,
+        &mut self,
         id: ColumnId,
         narrowed: bool,
         input: &Entity<InputState>,
@@ -551,8 +550,27 @@ impl Colet {
         let p = self.palette;
         let focused = self.has_keys(input, window, cx);
         let has_text = !input.read(cx).value().is_empty();
+        let clear = has_text.then(|| {
+            let clear = Button::new(("clear-filter", id))
+                .ghost()
+                .xsmall()
+                .icon(glyph("x"))
+                .accessibility_label("フィルタをクリア")
+                .tooltip("フィルタをクリア（Esc）")
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if let Some(field) = this.narrow_fields.get(&id) {
+                        let input = field.input.clone();
+                        input.update(cx, |input, cx| {
+                            input.set_value("", window, cx);
+                            input.focus(window, cx);
+                        });
+                        this.narrow(id, "", cx);
+                    }
+                }));
+            self.ringed(clear, format!("clear-filter:{id}"), RingAt::Edge, window, cx)
+        });
         // Ringed as the search field is; the ring lies over the gaps around.
-        frame(p, focused).m(px(-3.)).child(
+        frame(p, focused, 6.).m(px(-RING_ROOM)).child(
             div()
                 .id(("filter", id))
                 .w_full()
@@ -583,26 +601,7 @@ impl Colet {
                 .on_action(|_: &input::MoveLeft, _, cx| cx.stop_propagation())
                 .on_action(|_: &input::MoveRight, _, cx| cx.stop_propagation())
                 .on_action(|_: &input::Enter, _, cx| cx.stop_propagation())
-                .when(has_text, |b| {
-                    b.child(
-                        Button::new(("clear-filter", id))
-                            .ghost()
-                            .xsmall()
-                            .icon(glyph("x"))
-                            .accessibility_label("フィルタをクリア")
-                            .tooltip("フィルタをクリア（Esc）")
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if let Some(field) = this.narrow_fields.get(&id) {
-                                    let input = field.input.clone();
-                                    input.update(cx, |input, cx| {
-                                        input.set_value("", window, cx);
-                                        input.focus(window, cx);
-                                    });
-                                    this.narrow(id, "", cx);
-                                }
-                            })),
-                    )
-                })
+                .children(clear)
                 .test_support(),
         )
     }

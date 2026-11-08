@@ -41,7 +41,7 @@ impl Colet {
     }
 
     /// The strip the `away` folders folded above a result stand in for, which brings them out.
-    pub(super) fn unfold_strip(&mut self, away: usize, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn unfold_strip(&mut self, away: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let focus = self.stop("unfold", cx);
         div()
@@ -85,7 +85,7 @@ impl Colet {
             // columns'.
             .child(
                 // Gone once pressed: the keys stay where they were rather than go with it.
-                keep_focus(ring(div().id("unfold").track_focus(&focus), p))
+                keep_focus(ring(div().id("unfold").track_focus(&focus), p, focus.is_focused(window), 0.))
                     .role(Role::Button)
                     .aria_label(format!("上の階層を表示（{away}階層）"))
                     .absolute()

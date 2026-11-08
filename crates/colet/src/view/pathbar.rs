@@ -87,7 +87,7 @@ impl Colet {
             .gap_4()
             .border_b_1()
             .border_color(p.border)
-            .child(self.render_actions(cx))
+            .child(self.render_actions(window, cx))
             .child(controls)
             .into_any_element()
     }
@@ -114,7 +114,7 @@ impl Colet {
         let shown: Vec<Crumb> = crumbs[folded..].to_vec();
         let menu_current = crumbs[..folded].iter().any(|c| c.column == self.state.active);
         self.crumbs.folded = crumbs[..folded].to_vec();
-        let fold = (folded > 0).then(|| self.crumb_fold(menu_current, cx));
+        let fold = (folded > 0).then(|| self.crumb_fold(menu_current, window, cx));
         let editing = self.address.is_open();
         let trail = div()
             .flex()
@@ -143,7 +143,7 @@ impl Colet {
             .children(fold)
             .children(shown.into_iter().enumerate().map(|(k, crumb)| {
                 let max_width = (folded + k == last).then_some(room / 2.);
-                self.crumb(crumb, k > 0 || folded > 0, max_width, cx)
+                self.crumb(crumb, k > 0 || folded > 0, max_width, window, cx)
             }))
             // The room past the crumbs: a press there turns the trail into the field.
             .child(
@@ -173,10 +173,10 @@ impl Colet {
             .child(Input::new(&self.address.field));
         // Ringed as the search field is while it takes the keys; the ring lies over the gaps around. It gives
         // way first in a narrow window, folding its crumbs.
-        frame(p, editing)
+        frame(p, editing, 6.)
             .flex_1()
             .min_w(px(ADDRESS_MIN))
-            .m(px(-3.))
+            .m(px(-RING_ROOM))
             .text_size(px(metrics::TEXT_BODY))
             .child(
                 div()
@@ -200,7 +200,7 @@ impl Colet {
 
     /// The "…" button the crumbs folded off the trail go into, with their menu while it is open;
     /// `current` while the column worked in is among them.
-    fn crumb_fold(&mut self, current: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn crumb_fold(&mut self, current: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let open = self.crumbs_open();
         let menu = if open { self.menu_element("crumb-menu", "上の階層", cx) } else { None };
@@ -208,7 +208,7 @@ impl Colet {
         div()
             .relative()
             .child(
-                ring(crate::view::keep_focus(div().id("crumb-fold")).track_focus(&focus), p)
+                ring(crate::view::keep_focus(div().id("crumb-fold")).track_focus(&focus), p, focus.is_focused(window), 4.)
                     .role(Role::Button)
                     .aria_label("上の階層")
                     .aria_expanded(open)
@@ -238,11 +238,14 @@ impl Colet {
 
     /// A crumb on the trail, a chevron before it unless it stands first; the last is clipped to
     /// `max_width`, the others keep their whole names.
-    pub(super) fn crumb(&self, crumb: Crumb, chevron: bool, max_width: Option<f32>, cx: &mut Context<Self>) -> Div {
+    pub(super) fn crumb(&self, crumb: Crumb, chevron: bool, max_width: Option<f32>, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = self.palette;
         let Crumb { column: index, name: label, path } = crumb;
         let current = index == self.state.active;
-        let focus = self.stops.get(&format!("crumb:{index}")).cloned().unwrap_or_else(|| self.columns_focus.clone());
+        let stop = self.stops.borrow().get(&format!("crumb:{index}")).cloned();
+        // Without a stop of its own it is never ringed, though it stands for the columns' keys.
+        let ringed = stop.as_ref().is_some_and(|s| s.is_focused(window));
+        let focus = stop.unwrap_or_else(|| self.columns_focus.clone());
         div()
             .flex()
             .items_center()
@@ -253,7 +256,8 @@ impl Colet {
             .when(max_width.is_none(), |d| d.flex_none())
             .when(chevron, |d| d.child(icon("chevron-right", 13., p.text_faint)))
             .child(
-                ring(div().id(("crumb", index)).track_focus(&focus), p)
+                // The mouse leaves the keys where they are; the column it goes to takes them.
+                ring(crate::view::keep_focus(div().id(("crumb", index))).track_focus(&focus), p, ringed, 4.)
                     .role(Role::Button)
                     .aria_label(label.clone())
                     .relative()

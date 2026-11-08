@@ -1,4 +1,5 @@
-//! Where the keys go as a menu, a dialog or the history closes, and as a tab comes back to the front.
+//! Where the keys go as a menu, a dialog or the history closes, and as a tab comes back to the front; and
+//! the ring round what has them.
 use super::*;
 
 impl Ui {
@@ -104,4 +105,70 @@ fn the_column_worked_in_is_marked_only_while_the_keys_are_in_the_columns_or_go_b
     assert!(ui.read(cx, |v| !v.columns_marked));
     ui.click(cx, "preferences");
     assert!(ui.read(cx, |v| !v.columns_marked));
+}
+
+impl Ui {
+    /// Where the focus ring is drawn, if anywhere.
+    fn ring(&self, cx: &mut TestAppContext) -> Option<Bounds<gpui_kit::Pixels>> {
+        self.act(cx, |window, _| window.try_find("focus-ring").map(|ring| ring.bounds()))
+    }
+
+    fn bounds_of(&self, cx: &mut TestAppContext, id: impl Into<ElementId>) -> Bounds<gpui_kit::Pixels> {
+        let id = id.into();
+        self.act(cx, |window, _| window.find(id).bounds())
+    }
+
+    /// The pointer moved, as a hand moves it over the window.
+    fn move_pointer(&self, cx: &mut TestAppContext) {
+        use gpui_kit::test::TestEventExt;
+        self.act(cx, |window, cx| window.pointer_move(point(px(600.), px(400.)), None, cx));
+        settle(cx);
+    }
+}
+
+#[gpui_kit::test]
+fn a_ring_stays_on_what_has_the_keys_while_the_mouse_moves(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    // One of Colet's own buttons, ringed on its edges.
+    ui.tab_to(cx, ("column-sort", work));
+    let sort = ui.bounds_of(cx, ("column-sort", work));
+    assert_eq!(ui.ring(cx), Some(sort));
+    ui.move_pointer(cx);
+    assert_eq!(ui.ring(cx), Some(sort));
+    // The library's, ringed on its edges as Colet's are.
+    ui.tab_to(cx, "refresh");
+    let refresh = ui.bounds_of(cx, "refresh");
+    assert_eq!(ui.ring(cx), Some(refresh));
+    ui.move_pointer(cx);
+    assert_eq!(ui.ring(cx), Some(refresh));
+    // One with a border of its own, ringed a pixel off it.
+    ui.tab_to(cx, "search-filter");
+    let filter = ui.bounds_of(cx, "search-filter").dilate(px(crate::view::RING_ROOM));
+    assert_eq!(ui.ring(cx), Some(filter));
+    ui.move_pointer(cx);
+    assert_eq!(ui.ring(cx), Some(filter));
+}
+
+#[gpui_kit::test]
+fn the_mouse_presses_a_button_leaving_the_keys_and_no_ring_on_it(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.click(cx, row(r"D:\work\b.txt"));
+    ui.click(cx, "refresh");
+    ui.click(cx, ("star", work));
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.ring(cx), None);
+}
+
+#[gpui_kit::test]
+fn a_theme_picked_with_the_mouse_takes_the_ring_with_it(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.click(cx, "preferences");
+    // The theme chosen has the keys as the preferences open, ringed round.
+    let system = ui.bounds_of(cx, ("theme", Theme::System as usize)).dilate(px(crate::view::RING_ROOM));
+    assert_eq!(ui.ring(cx), Some(system));
+    ui.click(cx, ("theme", Theme::Dark as usize));
+    let dark = ui.bounds_of(cx, ("theme", Theme::Dark as usize)).dilate(px(crate::view::RING_ROOM));
+    assert_eq!(ui.ring(cx), Some(dark));
 }

@@ -2,7 +2,7 @@
 //! folders, and takes the keys. `view.rs` draws it.
 use std::{
     borrow::Cow,
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     ffi::OsString,
     ops::Range,
@@ -477,7 +477,7 @@ pub struct Colet {
     pub home_scroll: ScrollHandle,
     pub home_drag: HomeDragging,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
-    pub(crate) stops: HashMap<String, FocusHandle>,
+    pub(crate) stops: RefCell<HashMap<String, FocusHandle>>,
     /// The keys are in the column worked in: its focused row is ringed.
     pub keys_in_column: bool,
     /// The keys are in the columns or home, or with a menu, dialog or the history that gives them back
@@ -583,7 +583,7 @@ impl Colet {
             dialog_shown: false,
             home_scroll: ScrollHandle::new(),
             home_drag: HomeDragging::default(),
-            stops: HashMap::new(),
+            stops: RefCell::default(),
             keys_in_column: false,
             columns_marked: false,
             popup: None,
@@ -677,8 +677,8 @@ impl Colet {
     }
 
     /// The focus a button keeps, a stop for Tab; Enter or Space presses it.
-    pub fn stop(&mut self, id: impl Into<String>, cx: &mut Context<Self>) -> FocusHandle {
-        self.stops.entry(id.into()).or_insert_with(|| cx.focus_handle().tab_stop(true)).clone()
+    pub fn stop(&self, id: impl Into<String>, cx: &App) -> FocusHandle {
+        self.stops.borrow_mut().entry(id.into()).or_insert_with(|| cx.focus_handle().tab_stop(true)).clone()
     }
 
     /// Tab moves the keys between home's pane and the columns: the column worked in follows them. Into the
@@ -1354,7 +1354,9 @@ impl Colet {
         let kept: HashSet<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
         self.narrow_fields.retain(|id, _| kept.contains(id));
         // So does its order's button's stop.
-        self.stops.retain(|key, _| key.strip_prefix("column-sort:").is_none_or(|id| id.parse().is_ok_and(|id| kept.contains(&id))));
+        self.stops
+            .get_mut()
+            .retain(|key, _| key.strip_prefix("column-sort:").is_none_or(|id| id.parse().is_ok_and(|id| kept.contains(&id))));
         for c in &self.state.columns {
             let id = c.id;
             match self.narrow_fields.get_mut(&id) {

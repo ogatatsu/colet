@@ -9,7 +9,7 @@ use colet_core::{
 };
 use gpui_kit::base::input::{self, Input, InputState};
 use gpui_kit::component::{
-    Disableable, FocusableExt, Selectable, Sizable,
+    ActiveTheme, Disableable, FocusableExt, Selectable, Sizable,
     button::{Button, ButtonVariants},
     spinner::Spinner,
     status_bar::StatusBar,
@@ -71,26 +71,43 @@ const RESIZER_WIDTH: f32 = 6.;
 /// How thick a scrollbar's track is.
 pub(crate) const SCROLLBAR_WIDTH: f32 = 8.;
 
-/// The focus ring of what Tab reached: two pixels in the focus color, kept clear until then.
-pub fn ring(el: Stateful<Div>, p: crate::theme::Palette) -> Stateful<Div> {
-    el.border_2().border_color(transparent_black()).focus_visible(|s| s.border_color(p.focus))
+/// How far a ring laid round what it rings stands out: a pixel's gap and its two pixels.
+pub const RING_ROOM: f32 = 3.;
+
+/// The focus ring itself: two pixels in the focus color, `inset` in from the edges of what holds it, its
+/// corners `radius`. Laid over what it rings, it takes no room and catches no pointer.
+fn ring_line(p: crate::theme::Palette, inset: f32, radius: f32) -> impl IntoElement {
+    div()
+        .id("focus-ring")
+        .test_support()
+        .absolute()
+        .top(px(inset))
+        .left(px(inset))
+        .right(px(inset))
+        .bottom(px(inset))
+        .rounded(px(radius))
+        .border_2()
+        .border_color(p.focus)
 }
 
-/// The ring of a field, or of a button with a border of its own: two pixels in the focus color a pixel
-/// off it, laid round it and kept clear until `shown`.
-pub fn frame(p: crate::theme::Palette, shown: bool) -> Div {
-    div().p(px(1.)).rounded(px(8.)).border_2().border_color(if shown { p.focus } else { transparent_black() })
+/// The ring of what has neither border nor fill of its own (a crumb, a ghost button, a row in the
+/// history): on its edges, its corners `radius`, while it has the keys (`shown`), however they came.
+/// Laid last, after what it holds.
+pub fn ring<E: ParentElement + FluentBuilder>(el: E, p: crate::theme::Palette, shown: bool, radius: f32) -> E {
+    el.when(shown, |el| el.child(ring_line(p, 0., radius)))
+}
+
+/// The ring of a field, or of a button with a border or fill of its own: a pixel off it, while it has the
+/// keys (`shown`). Its room, [`RING_ROOM`] all round, is kept clear until then; `radius` is the corners'
+/// of what it holds.
+pub fn frame(p: crate::theme::Palette, shown: bool, radius: f32) -> Div {
+    div().relative().p(px(RING_ROOM)).when(shown, |d| d.child(ring_line(p, 0., radius + RING_ROOM)))
 }
 
 /// The frame round the column worked in, laid over it on the lines round it: from the path bar's line
 /// above to its own on the right; the caller sets its left and bottom.
 fn active_frame(p: crate::theme::Palette) -> Div {
     div().absolute().top(px(-1.)).right_0().border_1().border_color(p.accent)
-}
-
-/// Tab, not the mouse, brought the keys to `focus`: when [`ring`] shows.
-pub fn keyed(focus: &FocusHandle, window: &Window) -> bool {
-    focus.is_focused(window) && window.last_input_was_keyboard()
 }
 
 /// A button the mouse presses without taking the keys from where they are; Tab still reaches it.
@@ -108,7 +125,29 @@ fn with_marks(text: &str, marks: &[Range<usize>], color: Hsla) -> StyledText {
     StyledText::new(text.to_owned()).with_highlights(marks.iter().map(|range| (range.clone(), style)))
 }
 
+/// Where a button's ring lies: on its edges if it has neither border nor fill, a pixel off them if it has.
+#[derive(Clone, Copy)]
+pub enum RingAt {
+    Edge,
+    Round,
+}
+
 impl Colet {
+    /// The library's `button`, Tab reaching it through the stop `key`, ringed as Colet's own controls are
+    /// rather than as the library rings it. The library's button leaves the keys where they are when the
+    /// mouse presses it. Ringed round it, the ring's room is the caller's to give or lay over the gaps.
+    pub(crate) fn ringed(&self, button: Button, key: impl Into<String>, at: RingAt, window: &Window, cx: &App) -> Div {
+        let p = self.palette;
+        let focus = self.stop(key, cx);
+        let shown = focus.is_focused(window);
+        let radius = f32::from(cx.theme().radius);
+        let button = button.track_focus(&focus).focus_ring(false);
+        match at {
+            RingAt::Edge => ring(div().flex().flex_none().relative().child(button), p, shown, radius),
+            RingAt::Round => frame(p, shown, radius).flex().flex_none().child(button),
+        }
+    }
+
     /// A button that opens a menu or the history, `open` telling whether it is, and closes it pressed
     /// again. A press outside what it opened closes that before the button's click comes, so the press
     /// notes whether it was open and [`Colet::pressed_shut`] tells the click.
@@ -136,7 +175,7 @@ impl Colet {
         let only_home = self.state.columns.len() == 1;
         self.sync_narrow_fields(window, cx);
         let pinned_column = pinned.then(|| self.render_column(1, window, cx));
-        let strip = (away > 0).then(|| self.unfold_strip(away, cx));
+        let strip = (away > 0).then(|| self.unfold_strip(away, window, cx));
         let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, window, cx)).collect();
         let scrolling = self.scrolling_columns(columns, cx);
         let main = div()
@@ -176,23 +215,19 @@ impl Colet {
             .child(div().flex().flex_wrap().justify_center().gap(px(2.)).children(
                 [("ext:pdf", "PDFファイル"), ("dm:today", "今日更新した項目"), ("size:>1gb", "1 GBを超えるファイル")].map(
                     |(query, label)| {
-                        let focus = self.stop(format!("hint:{query}"), cx);
-                        frame(p, keyed(&focus, window)).child(
-                            Button::new(query)
-                                .outline()
-                                .track_focus(&focus)
-                                .focus_ring(false)
-                                .accessibility_label(format!("{query} {label}"))
-                                .h(px(28.))
-                                .px(px(10.))
-                                .gap(px(6.))
-                                .child(div().text_color(p.accent).font_family("Consolas").child(query))
-                                .child(label)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    let filter = this.chosen_filter.clone();
-                                    this.search_for(query, filter, window, cx)
-                                })),
-                        )
+                        let button = Button::new(query)
+                            .outline()
+                            .accessibility_label(format!("{query} {label}"))
+                            .h(px(28.))
+                            .px(px(10.))
+                            .gap(px(6.))
+                            .child(div().text_color(p.accent).font_family("Consolas").child(query))
+                            .child(label)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                let filter = this.chosen_filter.clone();
+                                this.search_for(query, filter, window, cx)
+                            }));
+                        self.ringed(button, format!("hint:{query}"), RingAt::Round, window, cx)
                     },
                 ),
             ))
@@ -324,10 +359,10 @@ impl Render for Colet {
                     .w_full()
                     .flex()
                     .child(sidebar)
-                    .child(div().flex_1().min_w_0().h_full().flex().flex_col().child(main).child(self.render_statusbar(cx))),
+                    .child(div().flex_1().min_w_0().h_full().flex().flex_col().child(main).child(self.render_statusbar(window, cx))),
             )
             // Over a dialog, a field's menu is drawn with it.
             .children(if self.dialog.is_none() { self.render_menu(cx) } else { None })
-            .children(self.render_history(cx))
+            .children(self.render_history(window, cx))
     }
 }
