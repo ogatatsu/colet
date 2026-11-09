@@ -197,7 +197,10 @@ impl Colet {
                         .test_support(),
                     )
                     .when_some(self.menu_element("sort-menu", "既定の並び順", cx).filter(|_| self.sort_open()), |d, menu| {
-                        d.child(deferred(div().absolute().top(px(32.)).right_0().w(px(160.)).child(menu)).with_priority(1))
+                        d.child(
+                            deferred(div().absolute().top(px(32.)).right_0().w(px(160.)).child(menu))
+                                .with_priority(gpui_kit::base::POPUP_PRIORITY),
+                        )
                     }),
             )
             .child(hidden)
@@ -259,7 +262,10 @@ impl Colet {
                 ),
             )
             .when_some(self.menu_element("search-filter-menu", "検索フィルター", cx).filter(|_| self.filter_open()), |d, menu| {
-                d.child(deferred(div().absolute().top(px(36.)).left_0().min_w(px(200.)).max_w(px(320.)).child(menu)).with_priority(1))
+                d.child(
+                    deferred(div().absolute().top(px(36.)).left_0().min_w(px(200.)).max_w(px(320.)).child(menu))
+                        .with_priority(gpui_kit::base::POPUP_PRIORITY),
+                )
             })
             .into_any_element()
     }

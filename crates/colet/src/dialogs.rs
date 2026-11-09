@@ -703,7 +703,9 @@ impl Colet {
         self.load_send_targets(window, cx);
     }
 
-    /// The file menu, or a text field's, where it was opened; over a dialog too, for its fields'.
+    /// The file menu, or a text field's, where it was opened; over a dialog too, for its fields'. GPUI
+    /// paints every deferred draw in the order of its priority, nested or not, so the menu takes one over
+    /// the dialog's (ten and up) to be drawn in front of it as it is clicked in front of it.
     pub fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (at, id, label, width) = match self.popup.as_ref()? {
             Popup::File(menu) => (menu.at, "menu", "ファイル操作", 240.),
@@ -714,7 +716,7 @@ impl Colet {
         let menu = self.menu_element(id, label, cx)?;
         Some(
             deferred(anchored().position(at).snap_to_window_with_margin(px(8.)).child(div().min_w(px(width)).child(menu)))
-                .with_priority(2)
+                .with_priority(gpui_kit::base::POPUP_PRIORITY)
                 .into_any_element(),
         )
     }

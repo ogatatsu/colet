@@ -231,7 +231,10 @@ impl Colet {
                     .test_support(),
             )
             .when_some(menu, |d, menu| {
-                d.child(deferred(div().absolute().top(px(28.)).left_0().min_w(px(160.)).child(menu)).with_priority(1))
+                d.child(
+                    deferred(div().absolute().top(px(28.)).left_0().min_w(px(160.)).child(menu))
+                        .with_priority(gpui_kit::base::POPUP_PRIORITY),
+                )
             })
             .into_any_element()
     }
