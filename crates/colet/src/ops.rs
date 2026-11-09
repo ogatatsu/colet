@@ -872,6 +872,42 @@ impl Colet {
         true
     }
 
+    /// Home's favorites and pins at `from` or inside it, whatever their case, move to `to`; a narrowed
+    /// favorite's folder moves under its narrowing. Two that then name one row keep the first.
+    pub(crate) fn follow_move(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
+        let moved_path = |p: &Path| colet_core::paths::moved(p, from, to);
+        let moved_key = |key: &PathBuf| {
+            match HomeKey::of(key) {
+                HomeKey::Folder { path, narrow } => moved_path(&path).map(|path| HomeKey::Folder { path: path.into(), narrow }.key()),
+                HomeKey::Search { .. } => None,
+            }
+            .unwrap_or_else(|| key.clone())
+        };
+        let pinned: Vec<PathBuf> = self.settings.pinned.iter().map(moved_key).collect();
+        let pinned = (pinned != self.settings.pinned).then_some(pinned);
+        let favorites: Vec<Favorite> = self
+            .settings
+            .favorites
+            .iter()
+            .map(|f| Favorite { path: moved_path(&f.path).unwrap_or_else(|| f.path.clone()), ..f.clone() })
+            .collect();
+        let favorites = (favorites != self.settings.favorites).then_some(favorites);
+        if favorites.is_some() || pinned.is_some() {
+            // Settling the settings keeps the first of any two that now name one row.
+            self.update_settings(
+                |s| {
+                    if let Some(favorites) = favorites {
+                        s.favorites = favorites;
+                    }
+                    if let Some(pinned) = pinned {
+                        s.pinned = pinned;
+                    }
+                },
+                cx,
+            );
+        }
+    }
+
     fn finished(&mut self, request: Request, result: Result<(), String>, cx: &mut Context<Self>) {
         self.take_operation_events();
         let Some(Running { id, tab, made, placed: pasted, .. }) = self.running.take() else { return };
@@ -901,38 +937,7 @@ impl Colet {
                 state.renamed(&paths[0], to);
             }
             // Home's favorites and pins at it or inside it follow it, as the refresh below lists home again.
-            // A narrowed favorite's folder moves under its narrowing.
-            let from = &paths[0];
-            let moved_path = |p: &Path| colet_core::paths::moved(p, from, to);
-            let moved_key = |key: &PathBuf| {
-                match HomeKey::of(key) {
-                    HomeKey::Folder { path, narrow } => moved_path(&path).map(|path| HomeKey::Folder { path: path.into(), narrow }.key()),
-                    HomeKey::Search { .. } => None,
-                }
-                .unwrap_or_else(|| key.clone())
-            };
-            let pinned: Vec<PathBuf> = self.settings.pinned.iter().map(moved_key).collect();
-            let pinned = (pinned != self.settings.pinned).then_some(pinned);
-            let favorites: Vec<Favorite> = self
-                .settings
-                .favorites
-                .iter()
-                .map(|f| Favorite { path: moved_path(&f.path).unwrap_or_else(|| f.path.clone()), ..f.clone() })
-                .collect();
-            let favorites = (favorites != self.settings.favorites).then_some(favorites);
-            if favorites.is_some() || pinned.is_some() {
-                self.update_settings(
-                    |s| {
-                        if let Some(favorites) = favorites {
-                            s.favorites = favorites;
-                        }
-                        if let Some(pinned) = pinned {
-                            s.pinned = pinned;
-                        }
-                    },
-                    cx,
-                );
-            }
+            self.follow_move(&paths[0], to, cx);
         }
         if kind == Kind::NewFolder && result.is_ok() {
             // The shell says where it made the folder, which a name clash may have changed.

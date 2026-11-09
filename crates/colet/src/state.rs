@@ -2,7 +2,7 @@
 //! Knows nothing of drawing or of where listings come from.
 use std::{
     borrow::Cow,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ffi::OsString,
     ops::Range,
     path::{Path, PathBuf},
@@ -448,6 +448,9 @@ pub struct State {
     future: Vec<Location>,
     /// Something to tell the user, once.
     pub notice: Option<String>,
+    /// Paths held in another case than the disk's, found so by a listing, each with the disk's: what keeps
+    /// them, a favorite or a pin, takes it too.
+    pub respelled: Vec<(PathBuf, PathBuf)>,
     /// A search result or favorite opens on its own column with the folders above it folded away until
     /// asked for. Gone with the anchor.
     pub fold: Option<Fold<ColumnId>>,
@@ -538,6 +541,7 @@ impl State {
             past: Vec::new(),
             future: Vec::new(),
             notice: None,
+            respelled: Vec::new(),
             fold: None,
             last_folder: None,
             next_id: 0,
@@ -1512,6 +1516,35 @@ impl State {
         }
     }
 
+    /// What the folder column at `index` holds in another case than it lists, as a favorite kept from
+    /// before a rename elsewhere opens it, takes the case listed: the folder open beside it, and what is
+    /// picked or pointed at there. A name listed as it is held wins over one only its case sets apart.
+    fn respell(&mut self, index: usize) {
+        let c = &self.columns[index];
+        let listed: HashSet<&Path> = c.entries.iter().map(|e| e.path.as_path()).collect();
+        let held =
+            self.columns.get(index + 1).map(|child| &child.path).into_iter().chain(&c.selected).chain(&c.focused).chain(&c.highlight);
+        let mut strays: Vec<&PathBuf> = held.filter(|p| !listed.contains(p.as_path())).collect();
+        if strays.is_empty() {
+            return;
+        }
+        strays.dedup();
+        // Looked up rather than searched for: a folder may list thousands.
+        let keyed: HashMap<OsString, &PathBuf> = c.entries.iter().map(|e| (path_key(&e.path), &e.path)).collect();
+        let mut found: Vec<(PathBuf, PathBuf)> = Vec::new();
+        for from in strays {
+            if let Some(&to) = keyed.get(&path_key(from))
+                && !found.iter().any(|(f, _)| f == from)
+            {
+                found.push((from.clone(), to.clone()));
+            }
+        }
+        for (from, to) in found {
+            self.renamed(&from, &to);
+            self.respelled.push((from, to));
+        }
+    }
+
     /// What [`page`](Self::page) does with a listing that is the one the column waits for.
     fn list(&mut self, index: usize, entries: Vec<Entry>, total: usize, offset: usize, departed: &HashSet<OsString>) {
         let c = &mut self.columns[index];
@@ -1523,6 +1556,19 @@ impl State {
         } else {
             c.entries = entries;
         }
+        if c.kind == Kind::Folder {
+            // Listed under the folder as asked for, which may since have taken the disk's case.
+            let folder = c.path.clone();
+            if c.entries.iter().any(|e| !e.path.starts_with(&folder)) {
+                for e in &mut c.entries {
+                    if let Some(path) = paths::moved(&e.path, &folder, &folder) {
+                        e.path = path;
+                    }
+                }
+            }
+            self.respell(index);
+        }
+        let c = &mut self.columns[index];
         let paths: HashSet<&Path> = c.entries.iter().map(|e| e.path.as_path()).collect();
         // The rows the keys were on that are gone; the row now in the topmost one's place takes over, or
         // at the end, the last before it.

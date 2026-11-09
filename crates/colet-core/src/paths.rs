@@ -111,15 +111,20 @@ pub fn folder_name(path: &Path) -> &OsStr {
     }
 }
 
-/// `path` as it stands once `from` is moved to `to`: `from` itself, or what it holds, as written (case
-/// counts). `None` for any other path.
+/// `path` as it stands once `from` is moved to `to`: `from` itself, or what it holds, whatever its case,
+/// as Windows finds it. `None` for any other path.
 pub fn moved(path: &Path, from: &Path, to: &Path) -> Option<PathBuf> {
-    let rest = bytes(path).strip_prefix(bytes(from))?;
-    if !rest.is_empty() && !rest.starts_with(b"\\") {
+    let units: Vec<u16> = path.as_os_str().encode_wide().collect();
+    let from: Vec<u16> = from.as_os_str().encode_wide().collect();
+    let (head, rest) = (units.get(..from.len())?, &units[from.len()..]);
+    if rest.first().is_some_and(|&unit| unit != u16::from(b'\\')) {
+        return None;
+    }
+    if head != from.as_slice() && upper(head.to_vec()) != upper(from) {
         return None;
     }
     let mut moved = to.as_os_str().to_owned();
-    moved.push(path_of(rest));
+    moved.push(OsString::from_wide(rest));
     Some(moved.into())
 }
 
@@ -333,6 +338,16 @@ pub(crate) mod tests {
         assert_eq!(folder_name(p(r"D:\")), "D:");
         assert_eq!(folder_name(p(r"\\192.168.1.2")), "192.168.1.2");
         assert_eq!(folder_name(p(r"\\server\share")), "share");
+    }
+
+    #[test]
+    fn moves_a_path_and_what_it_holds_whatever_their_case() {
+        let to = p(r"D:\Job");
+        assert_eq!(moved(p(r"D:\work"), p(r"D:\work"), to), Some(PathBuf::from(r"D:\Job")));
+        assert_eq!(moved(p(r"d:\WORK\Sub\a.txt"), p(r"D:\work"), to), Some(PathBuf::from(r"D:\Job\Sub\a.txt")));
+        assert_eq!(moved(p(r"D:\workshop"), p(r"D:\work"), to), None);
+        assert_eq!(moved(p(r"D:\wor"), p(r"D:\work"), to), None);
+        assert_eq!(moved(p(r"E:\work"), p(r"D:\work"), to), None);
     }
 
     #[test]

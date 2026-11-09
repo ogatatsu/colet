@@ -242,6 +242,44 @@ fn brings_homes_focused_row_into_view_across_all_three_headings(cx: &mut TestApp
 }
 
 #[gpui_kit::test]
+fn opens_a_favorite_renamed_elsewhere_to_another_case_and_keeps_it_in_the_disks_case(cx: &mut TestAppContext) {
+    use crate::settings::Favorite;
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\work")]),
+            (r"D:\work", vec![folder(r"D:\work\sub")]),
+            (r"D:\work\sub", vec![file(r"D:\work\sub\a.txt")]),
+        ])
+    });
+    let ui = open(cx, fake.clone());
+    // Kept as they were named before Explorer lowered them; the second is the first in another case.
+    ui.view.update(cx, |v, cx| {
+        v.update_settings(
+            |s| {
+                s.favorites = vec![Favorite::new(r"D:\WORK\Sub"), Favorite::new(r"D:\Work")];
+                s.pinned = vec![r"D:\WORK".into()];
+            },
+            cx,
+        )
+    });
+    settle(cx);
+    ui.click(cx, row(r"D:\WORK\Sub"));
+    settle(cx);
+    // It opens, each folder on the way picked in the disk's case.
+    assert!(ui.toasts(cx).is_empty(), "{:?}", ui.toasts(cx));
+    let columns: Vec<String> = ui.read(cx, |v| v.state.columns.iter().skip(1).map(|c| text(&c.path)).collect());
+    assert_eq!(columns, [r"D:\", r"D:\work", r"D:\work\sub"]);
+    assert_eq!(ui.selected(cx, 1), [r"D:\work"]);
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\sub"]);
+    assert_eq!(ui.read(cx, |v| v.state.columns[3].entries.len()), 1);
+    // Kept so from now on, with the other favorite and the pin of the folder above it, whatever their case.
+    assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\work\sub", r"D:\work"]);
+    assert_eq!(texts(&fake.settings.lock().unwrap().pinned), [r"D:\work"]);
+    assert_eq!(ui.selected(cx, 0), [r"D:\work\sub"]);
+}
+
+#[gpui_kit::test]
 fn drags_a_favorite_to_a_new_place_among_the_favorites(cx: &mut TestAppContext) {
     let (fake, ui) = ordered_home(cx);
     let (a, c) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, r"D:\c"));

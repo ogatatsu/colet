@@ -139,7 +139,17 @@ impl Backend for Fake {
         self.lists.lock().unwrap().push(text(path));
         self.orders.lock().unwrap().push(sort);
         self.listed.lock().unwrap().push((text(path), sort));
-        self.folders.lock().unwrap().get(&text(path)).cloned().ok_or_else(|| "フォルダーを開けません".into())
+        // As the disk lists it: found whatever its case, each item under the folder as asked for.
+        let folders = self.folders.lock().unwrap();
+        let (folder, entries) = folders
+            .get_key_value(&text(path))
+            .or_else(|| folders.iter().find(|(p, _)| path_key(Path::new(p)) == path_key(path)))
+            .ok_or_else(|| "フォルダーを開けません".to_string())?;
+        let under = |e: &Entry| Entry {
+            path: colet_core::paths::moved(&e.path, Path::new(folder), path).unwrap_or_else(|| e.path.clone()),
+            ..e.clone()
+        };
+        Ok(entries.iter().map(under).collect())
     }
 
     fn search(&self, search: Search) -> Result<(Page, String), String> {

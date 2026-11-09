@@ -86,6 +86,16 @@ fn follows_a_rename_to_the_name_the_shell_gave_not_the_one_asked(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
+fn a_favorite_kept_in_another_case_follows_a_rename(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.view.update(cx, |v, cx| v.update_settings(|s| s.favorites = vec![Favorite::new(r"d:\WORK\Sub")], cx));
+    let request = Request { kind: Operation::Rename, paths: vec![r"D:\work".into()], destination: r"D:\".into(), name: "job".into() };
+    ui.view.update(cx, |v, cx| v.run(request, cx));
+    settle(cx);
+    assert_eq!(ui.read(cx, |v| v.settings.favorites.clone()), [Favorite::new(r"D:\job\Sub")]);
+}
+
+#[gpui_kit::test]
 fn renames_from_f2_refusing_a_name_windows_would_reject(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "f2");

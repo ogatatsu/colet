@@ -897,6 +897,11 @@ impl Colet {
                     self.state.counted(id, request, whole);
                 }
                 self.state.page(id, request, entries, total, offset, &self.departed);
+                // What the listing showed held in another case than the disk's, as a favorite kept from
+                // before a rename elsewhere, is kept in the disk's from now on.
+                for (from, to) in std::mem::take(&mut self.state.respelled) {
+                    self.follow_move(&from, &to, cx);
+                }
                 // One left behind still ends the wait for the connection.
                 if let Some(name) = connection.filter(|_| current || matches!(self.engine, Engine::Connecting)) {
                     let reached = !matches!(self.engine, Engine::Connected(_));
