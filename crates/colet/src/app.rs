@@ -41,7 +41,7 @@ use crate::{
     icons::Icons,
     menus::Popup,
     ops::{History, Running},
-    places::{Dialog, HomeDragging, home_entries, home_groups, places},
+    places::{Dialog, HomeDragging, home_entries, home_groups},
     reveal::Sideways,
     settings::{self, File, LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
@@ -853,7 +853,7 @@ impl Colet {
             Kind::Home => {
                 let settings = self.settings.clone();
                 cx.background_executor()
-                    .spawn(async move { Ok(Listed::all(home_entries(&settings, places(backend.roots(), backend.indexed_roots())))) })
+                    .spawn(async move { Ok(Listed::all(home_entries(&settings, backend.roots()))) })
             }
             Kind::Search => {
                 let filter = self.state.search_filter.as_deref().and_then(|name| self.settings.filter_query(name));
@@ -904,15 +904,7 @@ impl Colet {
                 }
                 // One left behind still ends the wait for the connection.
                 if let Some(name) = connection.filter(|_| current || matches!(self.engine, Engine::Connecting)) {
-                    let reached = !matches!(self.engine, Engine::Connected(_));
                     self.engine = Engine::Connected(name);
-                    // Home, listed while Everything could not be asked, gains the folders its index starts from.
-                    if reached {
-                        let homes: Vec<ColumnId> = self.state.columns.iter().filter(|c| c.kind == Kind::Home).map(|c| c.id).collect();
-                        for home in homes {
-                            self.load(home, 0, true, cx);
-                        }
-                    }
                 }
             }
             Err(error) => {

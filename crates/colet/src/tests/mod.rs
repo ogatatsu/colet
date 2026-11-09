@@ -58,8 +58,6 @@ mod window;
 #[derive(Default)]
 struct Fake {
     roots: Vec<Entry>,
-    /// The folders Everything's index starts from, none while searches fail.
-    indexed: Mutex<Vec<String>>,
     folders: Mutex<HashMap<String, Vec<Entry>>>,
     results: Mutex<Vec<Entry>>,
     /// Each search sent: its query and where its page starts.
@@ -129,10 +127,6 @@ impl Fake {
 impl Backend for Fake {
     fn roots(&self) -> Vec<Entry> {
         self.roots.clone()
-    }
-
-    fn indexed_roots(&self) -> Vec<PathBuf> {
-        if self.failing.lock().unwrap().is_some() { Vec::new() } else { self.indexed.lock().unwrap().iter().map(PathBuf::from).collect() }
     }
 
     fn list(&self, path: &Path, sort: Order, _: &AtomicBool, _: colet_core::shell::Owner) -> Result<Vec<Entry>, String> {

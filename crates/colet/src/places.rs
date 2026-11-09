@@ -2,7 +2,6 @@
 //! which Everything to ask; and the dialogs that edit them.
 use std::{
     cell::RefCell,
-    ffi::OsString,
     path::{Path, PathBuf},
     rc::Rc,
     time::Duration,
@@ -10,7 +9,7 @@ use std::{
 
 use colet_core::{
     entry::Entry,
-    paths::{child, folder_name, path_key, shown},
+    paths::{folder_name, shown},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::component::WindowExt;
@@ -65,27 +64,6 @@ impl Dialog {
             Dialog::Filters { .. } | Dialog::Preferences | Dialog::Open { .. } => Vec::new(),
         }
     }
-}
-
-/// The places home lists: the drives in letter order, then the other folders Everything's index starts
-/// from, by path and named by it. An indexed volume, `C:`, is the drive `C:\`.
-pub fn places(drives: Vec<Entry>, indexed: Vec<PathBuf>) -> Vec<Entry> {
-    let mut seen: std::collections::HashSet<OsString> = drives.iter().map(|e| path_key(&e.path)).collect();
-    let mut others: Vec<PathBuf> = indexed
-        .into_iter()
-        .map(|path| {
-            let volume = path.as_os_str().len() == 2 && path.as_os_str().as_encoded_bytes().ends_with(b":");
-            if volume { child(&path, "") } else { path }
-        })
-        .filter(|path| seen.insert(path_key(path)))
-        .collect();
-    // In lower case, which puts a server (`\\`) before a drive's letters.
-    others.sort_by_cached_key(|path| {
-        let mut key = path_key(path);
-        key.make_ascii_lowercase();
-        key
-    });
-    drives.into_iter().chain(others.into_iter().map(|path| Entry::folder(&path, &shown(&path)))).collect()
 }
 
 /// Home's rows: the pinned in their order, then the favorites, the saved searches and the places, each
@@ -755,9 +733,7 @@ impl Colet {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Entry, Placement, SavedSearch, Settings, Shelf, home_entries, home_groups, movable, move_before, places, restore_bounds, shown,
-    };
+    use super::{Entry, Placement, SavedSearch, Settings, Shelf, home_entries, home_groups, movable, move_before, restore_bounds};
     use gpui_kit::{Bounds, DisplayId, point, px, size};
     use std::path::Path;
 
@@ -803,24 +779,6 @@ mod tests {
         let rows: Vec<(&str, &str)> = entries.iter().map(|e| (e.path.to_str().unwrap(), e.name.as_str())).collect();
         assert_eq!(rows, [(r"D:\Work", "Work"), (r"C:\", "C:"), ("search:ext:pdf", "PDF"), ("search:cat\0画像", "猫"), (r"D:\", "D:")]);
         assert!(!entries[2].directory);
-    }
-
-    #[test]
-    fn lists_the_drives_then_the_other_index_roots_by_path_each_once() {
-        let drives = vec![Entry::folder(r"C:\", "OS (C:)"), Entry::folder(r"D:\", "データ (D:)")];
-        let indexed = vec!["C:".into(), r"\\nas\Share".into(), r"d:\Projects".into(), "E:".into(), r"D:\".into(), r"\\NAS\share".into()];
-        let rows: Vec<(String, String)> = places(drives, indexed).into_iter().map(|e| (shown(&e.path), e.name)).collect();
-        let at = |path: &str, name: &str| (path.to_string(), name.to_string());
-        assert_eq!(
-            rows,
-            [
-                at(r"C:\", "OS (C:)"),
-                at(r"D:\", "データ (D:)"),
-                at(r"\\nas\Share", r"\\nas\Share"),
-                at(r"d:\Projects", r"d:\Projects"),
-                at(r"E:\", r"E:\")
-            ]
-        );
     }
 
     #[test]

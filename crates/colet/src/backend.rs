@@ -45,8 +45,6 @@ pub struct Search {
 
 pub trait Backend: Send + Sync + 'static {
     fn roots(&self) -> Vec<Entry>;
-    /// The folders Everything's index starts from; none while it cannot be asked.
-    fn indexed_roots(&self) -> Vec<PathBuf>;
     /// A server that will not let the user in as they are asks them to sign in, in a dialog over `owner`.
     fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String>;
     /// The results and the name of what they came from.
@@ -128,12 +126,6 @@ impl Live {
 impl Backend for Live {
     fn roots(&self) -> Vec<Entry> {
         folders::roots()
-    }
-
-    fn indexed_roots(&self) -> Vec<PathBuf> {
-        // Held so it never connects as a search does.
-        let Ok(_session) = self.session.lock() else { return Vec::new() };
-        everything::roots().unwrap_or_default()
     }
 
     fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String> {

@@ -60,23 +60,6 @@ fn reports_a_failed_search_as_one_and_retries(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn adds_the_index_roots_to_home_once_a_search_reaches_everything(cx: &mut TestAppContext) {
-    let fake = Arc::new(Fake {
-        roots: vec![Entry::folder(r"D:\", "データ (D:)")],
-        indexed: Mutex::new(vec!["D:".into(), r"\\nas\share".into()]),
-        ..Fake::default().with_results(vec![file(r"D:\x.txt")])
-    });
-    *fake.failing.lock().unwrap() = Some("Everything 1.5に接続できません。".into());
-    let ui = open(cx, fake.clone());
-    let home = |cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[0].entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>());
-    assert_eq!(home(cx), [r"D:\"]);
-    *fake.failing.lock().unwrap() = None;
-    ui.input(cx, "x");
-    assert!(ui.read(cx, |v| matches!(v.engine, Engine::Connected(_))));
-    assert_eq!(home(cx), [r"D:\", r"\\nas\share"]);
-}
-
-#[gpui_kit::test]
 fn loads_the_next_page_of_results_as_the_list_nears_its_end(cx: &mut TestAppContext) {
     let results: Vec<Entry> = (0..1200).map(|i| file(&format!(r"D:\file{i:04}.txt"))).collect();
     let fake = Arc::new(Fake::default().with_results(results));
