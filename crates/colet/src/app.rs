@@ -1208,6 +1208,12 @@ impl Colet {
                 .is_none_or(|before| before == self.home_focus || before == self.columns_focus)
     }
 
+    /// A menu, dialog or the history holds the keys, and closing gives them back to `focus`.
+    pub(crate) fn keys_go_back_to(&self, focus: &FocusHandle) -> bool {
+        (self.menu_view.is_some() || self.dialog.is_some() || self.history.open)
+            && self.keys_before.as_ref().and_then(|before| before.upgrade()).is_some_and(|before| before == *focus)
+    }
+
     /// A menu, dialog or the history opening: where the keys are now is where they go back to as it closes.
     /// One opened from another leaves it as the first found it.
     pub(crate) fn remember_keys(&mut self, window: &Window, cx: &App) {

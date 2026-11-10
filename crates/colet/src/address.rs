@@ -124,9 +124,13 @@ impl Colet {
     }
 
     /// While the field is open, the keys going anywhere else close it, and an answer still on its way is
-    /// let go of; its own menu keeps it.
+    /// let go of; its own menu keeps it, and so does a menu, dialog or the history that gives the keys back
+    /// to it as it closes, with what was typed and picked there.
     pub(crate) fn follow_address(&mut self, window: &Window, cx: &App) {
-        if self.address.is_open() && !self.has_keys(&self.address.field, window, cx) {
+        if self.address.is_open()
+            && !self.has_keys(&self.address.field, window, cx)
+            && !self.keys_go_back_to(&self.address.field.read(cx).focus_handle(cx))
+        {
             self.address.set_open(false);
         }
     }

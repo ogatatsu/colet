@@ -86,6 +86,37 @@ fn a_tab_left_while_typing_an_address_takes_it_up_again(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+fn a_dialog_opened_while_typing_an_address_gives_it_back_as_typed(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "ctrl-l");
+    ui.input(cx, r"D:\wo");
+    ui.click(cx, "preferences");
+    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    // The field stays open behind it.
+    assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
+    assert!(ui.address_focused(cx));
+    // The caret where it was: typed on, it goes on from there.
+    ui.input(cx, "rk");
+    assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\work"));
+}
+
+#[gpui_kit::test]
+fn the_history_opened_while_typing_an_address_gives_it_back_as_typed(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "ctrl-l");
+    ui.input(cx, r"D:\wo");
+    ui.press_and_release(cx, "history-button");
+    assert!(ui.read(cx, |v| v.history.open));
+    ui.press_and_release(cx, "history-button");
+    assert!(ui.read(cx, |v| !v.history.open));
+    assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
+    assert!(ui.address_focused(cx));
+}
+
+#[gpui_kit::test]
 fn the_column_worked_in_is_marked_only_while_the_keys_are_in_the_columns_or_go_back_there(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.click(cx, row(r"D:\work\b.txt"));
