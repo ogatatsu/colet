@@ -235,7 +235,7 @@ fn brings_homes_focused_row_into_view_across_all_three_headings(cx: &mut TestApp
     assert_eq!(ui.selected(cx, 0), [r"D:\"]);
     // The scroll asked for as the row was focused is taken at the next frame, which finding it draws.
     assert!(ui.act(cx, |window, _| window.within("home-rows").find(row(r"D:\")).visible()));
-    assert!(ui.read(cx, |v| v.home_scroll.offset().y < px(0.)));
+    assert!(ui.read(cx, |v| v.scrolls.home.offset().y < px(0.)));
     ui.press(cx, "home");
     assert_eq!(ui.selected(cx, 0), [r"D:\favorite"]);
     assert!(ui.act(cx, |window, _| window.within("home-rows").find(row(r"D:\favorite")).visible()));
@@ -452,7 +452,7 @@ fn scrolls_home_while_a_drag_is_held_at_its_bottom_edge(cx: &mut TestAppContext)
     ui.hold_drag(cx, first.center(), edge);
     cx.executor().advance_clock(Duration::from_millis(500));
     cx.run_until_parked();
-    assert!(ui.read(cx, |v| v.home_scroll.offset().y < px(0.)));
+    assert!(ui.read(cx, |v| v.scrolls.home.offset().y < px(0.)));
     // Let go there, it lands among the rows scrolled to.
     ui.let_go(cx, edge);
     assert_ne!(fake.settings.lock().unwrap().saved_searches[0].query, "query0");

@@ -259,7 +259,7 @@ impl Colet {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.resizing = Some(Resize { of, start_x: event.position.x, start_width: width });
+                    this.widths.start_resize(of, event.position.x, width);
                     cx.stop_propagation();
                 }),
             )

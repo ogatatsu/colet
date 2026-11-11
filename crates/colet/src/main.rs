@@ -16,6 +16,7 @@ mod ops;
 mod overlays;
 mod places;
 mod reveal;
+mod scrolls;
 mod search_filters;
 mod settings;
 mod sorts;

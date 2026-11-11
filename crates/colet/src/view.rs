@@ -318,24 +318,12 @@ impl Render for Colet {
             // The mouse's back and forward buttons, as Alt+← and Alt+→.
             .on_mouse_down(MouseButton::Navigate(NavigationDirection::Back), cx.listener(|this, _, window, cx| this.back(window, cx)))
             .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, _, window, cx| this.forward(window, cx)))
-            .when(self.resizing.is_some(), |d| {
+            .when(self.widths.resizing().is_some(), |d| {
                 d.cursor_col_resize()
                     .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                        let Some(resize) = &this.resizing else { return };
-                        let (min, max) = match resize.of {
-                            WidthOf::Sidebar => SIDEBAR_WIDTHS,
-                            WidthOf::Field => SEARCH_FIELD_WIDTHS,
-                            WidthOf::Search | WidthOf::Column => COLUMN_WIDTHS,
-                        };
-                        // Display scaling makes the deltas fractional; widths stay whole pixels.
-                        let width = (resize.start_width + f32::from(event.position.x - resize.start_x)).clamp(min, max).round();
-                        match resize.of {
-                            WidthOf::Sidebar => this.widths.sidebar = width,
-                            WidthOf::Search => this.widths.search = width,
-                            WidthOf::Column => this.widths.column = width,
-                            WidthOf::Field => this.widths.field = width,
+                        if this.widths.drag_to(event.position.x) {
+                            cx.notify();
                         }
-                        cx.notify();
                     }))
                     .on_mouse_up(
                         MouseButton::Left,

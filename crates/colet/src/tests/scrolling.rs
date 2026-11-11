@@ -107,7 +107,7 @@ fn leaves_no_room_to_scroll_once_the_columns_slide_back(cx: &mut TestAppContext)
             std::thread::sleep(Duration::from_millis(16));
             ui.act(cx, |_, _| ());
             settle(cx);
-            if ui.read(cx, |v| v.sideways.slide.is_none()) {
+            if ui.read(cx, |v| v.scrolls.sideways.slide.is_none()) {
                 break;
             }
         }
@@ -117,12 +117,12 @@ fn leaves_no_room_to_scroll_once_the_columns_slide_back(cx: &mut TestAppContext)
         ui.press(cx, "right");
     }
     rest(&ui, cx);
-    assert!(ui.read(cx, |v| v.sideways.scroll.offset().x) < px(0.), "the chain scrolls the columns");
+    assert!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x) < px(0.), "the chain scrolls the columns");
     ui.click_in(cx, "home", row(r"D:\fav"));
     rest(&ui, cx);
     ui.act(cx, |_, _| ());
-    assert_eq!(ui.read(cx, |v| v.sideways.scroll.offset().x), px(0.));
-    assert_eq!(ui.read(cx, |v| v.sideways.scroll.max_offset().x), px(0.));
+    assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), px(0.));
+    assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.max_offset().x), px(0.));
     assert!(!ui.read(cx, |v| v.on_screen().hidden_left()));
 }
 
@@ -140,7 +140,7 @@ fn turns_the_wheel_down_a_column_without_moving_the_columns_or_shading_their_edg
             std::thread::sleep(Duration::from_millis(16));
             ui.act(cx, |_, _| ());
             settle(cx);
-            if ui.read(cx, |v| v.sideways.slide.is_none()) {
+            if ui.read(cx, |v| v.scrolls.sideways.slide.is_none()) {
                 break;
             }
         }
@@ -150,21 +150,21 @@ fn turns_the_wheel_down_a_column_without_moving_the_columns_or_shading_their_edg
         ui.press(cx, "right");
     }
     rest(&ui, cx);
-    let at = ui.read(cx, |v| v.sideways.scroll.offset().x);
+    let at = ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x);
     assert!(at < px(0.), "the chain scrolls the columns");
     // Down and up over a column scroll its rows; the columns stay where they rest.
     let column = ui.read(cx, |v| v.state.columns[v.state.active].id);
     for dy in [-120., 120.] {
         ui.act(cx, |window, cx| window.scroll(("column", column), ScrollDelta::Pixels(point(px(0.), px(dy))), cx));
         settle(cx);
-        assert_eq!(ui.read(cx, |v| v.sideways.scroll.offset().x), at);
+        assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), at);
     }
     // An offset past the bounds, as a wheel leaves it until the next layout, reads as where it will be drawn.
     ui.click_in(cx, "home", row(r"D:\"));
     rest(&ui, cx);
     ui.act(cx, |_, _| ());
-    assert_eq!(ui.read(cx, |v| v.sideways.scroll.max_offset().x), px(0.));
-    ui.read(cx, |v| v.sideways.scroll.set_offset(point(px(-300.), px(0.))));
+    assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.max_offset().x), px(0.));
+    ui.read(cx, |v| v.scrolls.sideways.scroll.set_offset(point(px(-300.), px(0.))));
     assert!(!ui.read(cx, |v| v.on_screen().hidden_left()));
 }
 
@@ -183,14 +183,14 @@ fn leaves_the_columns_where_they_are_once_left_brings_the_keys_back_home(cx: &mu
     rest(&ui, cx);
     assert_eq!(ui.read(cx, |v| v.state.active), 1, "the keys are on the first column");
     // Scrolled by hand short of the last column: going home would once have slid them to it.
-    ui.read(cx, |v| v.sideways.scroll.set_offset(point(px(-100.), px(0.))));
+    ui.read(cx, |v| v.scrolls.sideways.scroll.set_offset(point(px(-100.), px(0.))));
     ui.act(cx, |_, _| ());
-    let at = ui.read(cx, |v| v.sideways.scroll.offset().x);
-    assert!(at < px(0.) && ui.read(cx, |v| v.sideways.scroll.max_offset().x) > -at, "short of the last column");
+    let at = ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x);
+    assert!(at < px(0.) && ui.read(cx, |v| v.scrolls.sideways.scroll.max_offset().x) > -at, "short of the last column");
     ui.press(cx, "left");
     assert_eq!(ui.read(cx, |v| v.state.active), 0, "the keys are home");
     rest(&ui, cx);
-    assert_eq!(ui.read(cx, |v| v.sideways.scroll.offset().x), at);
+    assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), at);
 }
 
 #[gpui_kit::test]
@@ -206,7 +206,7 @@ fn slides_a_column_on_screen_once_a_press_in_its_header_or_its_empty_room_is_let
     rest(&ui, cx);
     // Brought back to the start by hand: the column cut by the right edge, and how far it reaches past it.
     let cut = |ui: &Ui, cx: &mut TestAppContext| {
-        ui.read(cx, |v| v.sideways.scroll.set_offset(point(px(0.), px(0.))));
+        ui.read(cx, |v| v.scrolls.sideways.scroll.set_offset(point(px(0.), px(0.))));
         ui.act(cx, |_, _| ());
         let ids: Vec<ColumnId> = ui.read(cx, |v| v.state.columns.iter().map(|c| c.id).collect());
         ui.act(cx, |window, _| {
@@ -251,14 +251,14 @@ fn keeps_the_last_column_at_the_right_edge_as_the_window_is_resized(cx: &mut Tes
         assert!(room.abs() < 1., "{width}: {room}");
         settle(cx);
         assert!(room_past_last(&ui, cx).abs() < 1.);
-        assert!(ui.read(cx, |v| v.sideways.scroll.offset().x) < px(0.), "{width}: the columns still scroll");
+        assert!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x) < px(0.), "{width}: the columns still scroll");
     }
     // Brought short of the end by hand, the left edge stays as the window narrows.
-    ui.read(cx, |v| v.sideways.scroll.set_offset(point(px(-100.), px(0.))));
+    ui.read(cx, |v| v.scrolls.sideways.scroll.set_offset(point(px(-100.), px(0.))));
     ui.act(cx, |_, _| ());
     cx.simulate_window_resize(ui.window, size(px(1100.), px(800.)));
     ui.act(cx, |_, _| ());
-    assert_eq!(ui.read(cx, |v| v.sideways.scroll.offset().x), px(-100.));
+    assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), px(-100.));
 }
 
 #[gpui_kit::test]
@@ -301,7 +301,7 @@ fn leaves_no_room_past_the_last_column_once_the_folders_folded_away_come_out(cx:
     ui.click(cx, "unfold");
     rest(&ui, cx);
     assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
-    assert!(ui.read(cx, |v| v.sideways.scroll.offset().x) < px(0.), "the folders that came out scroll the columns");
+    assert!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x) < px(0.), "the folders that came out scroll the columns");
     let room = room_past_last(&ui, cx);
     assert!(room.abs() < 1., "{room}");
 }
@@ -315,7 +315,7 @@ fn slides_the_folders_brought_out_by_their_strip_in_from_the_left_as_far_as_the_
     // The anchor stays where it was drawn rather than leap aside for the folders: it has moved only as
     // far as the slide has gone.
     let (moved, _) = column_edges(&ui, cx, anchor);
-    let gone = ui.read(cx, |v| v.sideways.slide.as_ref().map(|s| s.origin - s.position)).expect("they slide");
+    let gone = ui.read(cx, |v| v.scrolls.sideways.slide.as_ref().map(|s| s.origin - s.position)).expect("they slide");
     assert!((moved - before - gone).abs() < 1., "{before} {moved} {gone}");
     rest(&ui, cx);
     let (after, right) = column_edges(&ui, cx, anchor);
@@ -323,7 +323,7 @@ fn slides_the_folders_brought_out_by_their_strip_in_from_the_left_as_far_as_the_
     // At rest the anchor ends at the right edge, with the folders above it in the room on its left.
     let edge = ui.act(cx, |window, _| f32::from(window.find("columns-scroll").bounds().right()));
     assert!((edge - right).abs() < 1., "{edge} {right}");
-    assert!(ui.read(cx, |v| v.sideways.scroll.offset().x) < px(0.), "they do not all fit");
+    assert!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x) < px(0.), "they do not all fit");
 }
 
 #[gpui_kit::test]
@@ -334,7 +334,7 @@ fn slides_a_folded_crumb_picked_in_from_the_left_until_it_is_on_screen(cx: &mut 
     ui.click(cx, ("crumb", 3usize));
     assert_eq!(ui.active(cx), 3);
     let (moved, _) = column_edges(&ui, cx, anchor);
-    let gone = ui.read(cx, |v| v.sideways.slide.as_ref().map(|s| s.origin - s.position)).expect("they slide");
+    let gone = ui.read(cx, |v| v.scrolls.sideways.slide.as_ref().map(|s| s.origin - s.position)).expect("they slide");
     assert!((moved - before - gone).abs() < 1., "{before} {moved} {gone}");
     rest(&ui, cx);
     // Only as far as shows the column gone into, whole; the drive's stays out on the left.
@@ -364,13 +364,13 @@ fn turns_the_wheel_with_shift_to_send_the_columns_sideways_leaving_the_rows_unde
         std::thread::sleep(Duration::from_millis(16));
         ui.act(cx, |_, _| ());
         settle(cx);
-        if ui.read(cx, |v| v.sideways.slide.is_none()) {
+        if ui.read(cx, |v| v.scrolls.sideways.slide.is_none()) {
             break;
         }
     }
     let column = ui.read(cx, |v| v.state.columns.iter().find(|c| c.path == chain[7]).unwrap().id);
-    let rows = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.rows.handles[&column].0.borrow().base_handle.offset().y);
-    let columns = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.sideways.scroll.offset().x);
+    let rows = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.scrolls.rows.handles[&column].0.borrow().base_handle.offset().y);
+    let columns = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x);
     let wheel = |ui: &Ui, cx: &mut TestAppContext, x: f32, y: f32| {
         ui.act(cx, |window, cx| window.scroll(("column", column), ScrollDelta::Lines(point(x, y)), cx));
         settle(cx);
@@ -408,6 +408,6 @@ fn scrolls_a_column_s_last_row_clear_of_the_columns_scrollbar(cx: &mut TestAppCo
     assert_eq!(ui.selected(cx, active), std::slice::from_ref(&last));
     let (view, bottom) = ui.act(cx, |window, _| (window.find("columns-scroll").bounds(), window.find(row(&last)).bounds().bottom()));
     // The columns scroll sideways, so their scrollbar lies over the bottom.
-    assert!(ui.read(cx, |v| v.sideways.scroll.max_offset().x) > px(0.));
+    assert!(ui.read(cx, |v| v.scrolls.sideways.scroll.max_offset().x) > px(0.));
     assert!(bottom <= view.bottom() - px(crate::view::SCROLLBAR_WIDTH), "{bottom:?} against {view:?}");
 }

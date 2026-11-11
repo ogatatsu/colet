@@ -39,7 +39,7 @@ use crate::{
     ops::Operations,
     overlays::Overlays,
     places::{Dialog, HomeDragging, home_entries, home_groups},
-    reveal::Sideways,
+    scrolls::Scrolls,
     settings::{self, File, LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
@@ -198,6 +198,59 @@ pub struct Widths {
     pub search: f32,
     pub column: f32,
     pub field: f32,
+    /// The drag on an edge under way.
+    resizing: Option<Resize>,
+}
+
+impl Widths {
+    pub fn new(sidebar: f32, search: f32, column: f32, field: f32) -> Self {
+        Self { sidebar, search, column, field, resizing: None }
+    }
+
+    /// The width `of` names.
+    pub fn width(&self, of: WidthOf) -> f32 {
+        match of {
+            WidthOf::Sidebar => self.sidebar,
+            WidthOf::Search => self.search,
+            WidthOf::Column => self.column,
+            WidthOf::Field => self.field,
+        }
+    }
+
+    /// A drag on the edge of what `of` names starts at `x`, from `start_width`: the width it shows,
+    /// which a narrow window may have narrowed.
+    pub fn start_resize(&mut self, of: WidthOf, x: Pixels, start_width: f32) {
+        self.resizing = Some(Resize { of, start_x: x, start_width });
+    }
+
+    /// Which width a drag under way changes.
+    pub fn resizing(&self) -> Option<WidthOf> {
+        self.resizing.as_ref().map(|resize| resize.of)
+    }
+
+    /// The drag under way reached `x`: its width follows, within its bounds. False with none under way.
+    pub fn drag_to(&mut self, x: Pixels) -> bool {
+        let Some(resize) = &self.resizing else { return false };
+        let (min, max) = match resize.of {
+            WidthOf::Sidebar => SIDEBAR_WIDTHS,
+            WidthOf::Field => SEARCH_FIELD_WIDTHS,
+            WidthOf::Search | WidthOf::Column => COLUMN_WIDTHS,
+        };
+        // Display scaling makes the deltas fractional; widths stay whole pixels.
+        let width = (resize.start_width + f32::from(x - resize.start_x)).clamp(min, max).round();
+        match resize.of {
+            WidthOf::Sidebar => self.sidebar = width,
+            WidthOf::Search => self.search = width,
+            WidthOf::Column => self.column = width,
+            WidthOf::Field => self.field = width,
+        }
+        true
+    }
+
+    /// The drag under way is over: which width it changed.
+    pub fn end_resize(&mut self) -> Option<WidthOf> {
+        self.resizing.take().map(|resize| resize.of)
+    }
 }
 
 /// At its least a column keeps some of a name beside a row's size and modified time.
@@ -229,10 +282,10 @@ pub enum WidthOf {
     Field,
 }
 
-pub struct Resize {
-    pub of: WidthOf,
-    pub start_x: Pixels,
-    pub start_width: f32,
+struct Resize {
+    of: WidthOf,
+    start_x: Pixels,
+    start_width: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -253,31 +306,6 @@ fn kept<T: Default + Clone + Send + 'static>(
         Err(error) => (T::default(), Some(error.message), error.kept),
     };
     (value, Saves::new((!still_there).then(|| Saver::new(file, write))), problem)
-}
-
-/// The rows of each column, scrolled up and down apart from the others.
-#[derive(Default)]
-pub struct RowScrolls {
-    pub handles: HashMap<ColumnId, UniformListScrollHandle>,
-    /// The row each column was last scrolled to bring in sight.
-    scrolled_to: HashMap<ColumnId, PathBuf>,
-}
-
-impl RowScrolls {
-    pub fn handle(&mut self, id: ColumnId) -> &UniformListScrollHandle {
-        self.handles.entry(id).or_default()
-    }
-
-    /// The rows of `id` moved: the focused one is brought in sight again.
-    pub fn moved(&mut self, id: ColumnId) {
-        self.scrolled_to.remove(&id);
-    }
-
-    /// Only the columns `live` holds.
-    fn keep(&mut self, live: &HashSet<ColumnId>) {
-        self.handles.retain(|id, _| live.contains(id));
-        self.scrolled_to.retain(|id, _| live.contains(id));
-    }
 }
 
 /// What a listing came back with.
@@ -326,17 +354,14 @@ pub struct Colet {
     /// The window the notices go up in.
     window: AnyWindowHandle,
     pub(crate) next_toast: u64,
-    pub resizing: Option<Resize>,
-    pub rows: RowScrolls,
-    pub sideways: Sideways,
+    /// Where the tab in front is scrolled.
+    pub scrolls: Scrolls,
     pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
     /// The listings out, the search's reloads, the watch on the folders and the search engine.
     pub loading: Loading,
     /// The settings and the columns' own orders, as kept between starts.
     pub stored: Stored,
-    /// Home's list, for its scrollbar.
-    pub home_scroll: ScrollHandle,
     pub home_drag: HomeDragging,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
     pub(crate) stops: RefCell<HashMap<String, FocusHandle>>,
@@ -391,12 +416,7 @@ impl Colet {
             state: State::new(),
             chosen_filter: None,
             tabs: Tabs::default(),
-            widths: Widths {
-                sidebar: settings.sidebar_width,
-                search: settings.search_width,
-                column: settings.column_width,
-                field: settings.search_field_width,
-            },
+            widths: Widths::new(settings.sidebar_width, settings.search_width, settings.column_width, settings.search_field_width),
             palette: Palette::for_window(window, settings.theme),
             search,
             address: Address::new(address),
@@ -406,14 +426,11 @@ impl Colet {
             icons: Icons::default(),
             window: Window::window_handle(window),
             next_toast: 0,
-            resizing: None,
-            rows: RowScrolls::default(),
-            sideways: Sideways::default(),
+            scrolls: Scrolls::default(),
             owner,
             backend,
             loading: Loading::default(),
             stored: Stored::new(settings, settings_saves, sorts, sorts_saves),
-            home_scroll: ScrollHandle::new(),
             home_drag: HomeDragging::default(),
             stops: RefCell::default(),
             sort_focus: cx.focus_handle().tab_stop(true),
@@ -542,7 +559,7 @@ impl Colet {
     pub fn changed(&mut self, cx: &mut Context<Self>) {
         self.sync(cx);
         self.follow_quick_look();
-        self.sideways.ask();
+        self.scrolls.sideways.ask();
         self.keep_tabs(cx);
         cx.notify();
     }
@@ -568,7 +585,7 @@ impl Colet {
             });
         }
         self.loading.keep(&live);
-        self.rows.keep(&live);
+        self.scrolls.rows.keep(&live);
         let fresh: Vec<(ColumnId, Kind)> = self.state.columns.iter().filter(|c| self.loading.first(c.id)).map(|c| (c.id, c.kind)).collect();
         for (id, kind) in fresh {
             if kind == Kind::Search {
@@ -774,7 +791,7 @@ impl Colet {
         // The rows move: the focused ones are brought in sight again.
         let folders: Vec<ColumnId> = self.state.columns.iter().filter(|c| c.kind == Kind::Folder).map(|c| c.id).collect();
         for id in folders {
-            self.rows.moved(id);
+            self.scrolls.rows.moved(id);
         }
         self.changed(cx);
     }
@@ -1304,7 +1321,7 @@ impl Colet {
             .detach();
         }
         // The rows move: the focused one is brought in sight again.
-        self.rows.moved(id);
+        self.scrolls.rows.moved(id);
         self.changed(cx);
     }
 
@@ -1342,7 +1359,7 @@ impl Colet {
             field.applied.clear();
             field.input.clone().update(cx, |input, cx| input.set_value("", window, cx));
         }
-        self.rows.moved(id);
+        self.scrolls.rows.moved(id);
         self.leave_narrow_field(id, window, cx);
     }
 
@@ -1392,7 +1409,7 @@ impl Colet {
     pub fn scroll_rows(&mut self) {
         for c in &self.state.columns {
             let Some(path) = c.focused.as_ref().or(c.highlight.as_ref()) else { continue };
-            if self.rows.scrolled_to.get(&c.id) == Some(path) {
+            if self.scrolls.rows.scrolled_to.get(&c.id) == Some(path) {
                 continue;
             }
             let Some(index) = c.entries.iter().position(|e| &e.path == path) else { continue };
@@ -1401,21 +1418,21 @@ impl Colet {
                 for (_, entries) in home_groups(self.stored.settings(), &c.entries) {
                     row += 1; // The heading is a child of the same scroll container.
                     if let Some(at) = entries.iter().position(|e| &e.path == path) {
-                        self.home_scroll.scroll_to_item(row + at);
+                        self.scrolls.home.scroll_to_item(row + at);
                         break;
                     }
                     row += entries.len();
                 }
             } else {
-                let handle = self.rows.handle(c.id);
+                let handle = self.scrolls.rows.handle(c.id);
                 handle.scroll_to_item(index, ScrollStrategy::Nearest);
             }
-            self.rows.scrolled_to.insert(c.id, path.clone());
+            self.scrolls.rows.scrolled_to.insert(c.id, path.clone());
         }
     }
 
     pub fn list_handle(&mut self, id: ColumnId) -> UniformListScrollHandle {
-        self.rows.handle(id).clone()
+        self.scrolls.rows.handle(id).clone()
     }
 }
 

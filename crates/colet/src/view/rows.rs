@@ -461,7 +461,7 @@ impl Colet {
             .aria_label("ホーム")
             .size_full()
             .overflow_y_scroll()
-            .track_scroll(&self.home_scroll)
+            .track_scroll(&self.scrolls.home)
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<HomeDrag>, _, cx| this.drag_home(event.event.position, event.bounds, cx)),
             )
@@ -510,7 +510,7 @@ impl Colet {
             .min_h_0()
             .relative()
             .child(rows)
-            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&self.home_scroll), p)))
+            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&self.scrolls.home), p)))
             .into_any_element()
     }
 

@@ -108,7 +108,7 @@ impl Colet {
     fn field_resizer(&self, cx: &mut Context<Self>) -> AnyElement {
         const ID: &str = "search-field-resizer";
         let p = self.palette;
-        let dragging = self.resizing.as_ref().is_some_and(|r| r.of == WidthOf::Field);
+        let dragging = self.widths.resizing() == Some(WidthOf::Field);
         let width = self.widths.field;
         div()
             .id(ID)
@@ -124,7 +124,7 @@ impl Colet {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.resizing = Some(Resize { of: WidthOf::Field, start_x: event.position.x, start_width: width });
+                    this.widths.start_resize(WidthOf::Field, event.position.x, width);
                     cx.stop_propagation();
                     cx.notify();
                 }),

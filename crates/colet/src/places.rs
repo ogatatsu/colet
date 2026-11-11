@@ -318,14 +318,14 @@ impl Colet {
 
     /// A drag on an edge is over: keep the width it left.
     pub fn end_resize(&mut self, cx: &mut Context<Self>) {
-        let Some(resize) = self.resizing.take() else { return };
-        let widths = (self.widths.sidebar, self.widths.search, self.widths.column, self.widths.field);
+        let Some(of) = self.widths.end_resize() else { return };
+        let width = self.widths.width(of);
         self.update_settings(
-            |s| match resize.of {
-                WidthOf::Sidebar => s.sidebar_width = widths.0,
-                WidthOf::Search => s.search_width = widths.1,
-                WidthOf::Column => s.column_width = widths.2,
-                WidthOf::Field => s.search_field_width = widths.3,
+            |s| match of {
+                WidthOf::Sidebar => s.sidebar_width = width,
+                WidthOf::Search => s.search_width = width,
+                WidthOf::Column => s.column_width = width,
+                WidthOf::Field => s.search_field_width = width,
             },
             cx,
         );
@@ -423,12 +423,12 @@ impl Colet {
     /// the list is as far as it goes.
     fn scroll_home_drag(&mut self, cx: &mut Context<Self>) -> bool {
         let way = self.home_drag.edge();
-        let offset = self.home_scroll.offset();
-        let max = f32::from(self.home_scroll.max_offset().y);
+        let offset = self.scrolls.home.offset();
+        let max = f32::from(self.scrolls.home.max_offset().y);
         let to = way.map(|way| (f32::from(offset.y) - way * 8.).clamp(-max, 0.));
         match to {
             Some(y) if y != f32::from(offset.y) => {
-                self.home_scroll.set_offset(point(offset.x, px(y)));
+                self.scrolls.home.set_offset(point(offset.x, px(y)));
                 self.aim_home_drag(cx);
                 cx.notify();
                 true

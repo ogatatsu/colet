@@ -12,10 +12,10 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
-    app::{Colet, NarrowField, RowScrolls},
+    app::{Colet, NarrowField},
     menus::Popup,
     metrics,
-    reveal::Sideways,
+    scrolls::Scrolls,
     settings::{KeptTab, Settings},
     state::{ColumnId, HomeKey, Kind, State},
     view::TipExt,
@@ -41,9 +41,7 @@ pub struct Parked {
     /// The filter its next search is narrowed by.
     pub filter: Option<String>,
     narrow_fields: HashMap<ColumnId, NarrowField>,
-    rows: RowScrolls,
-    sideways: Sideways,
-    home_scroll: ScrollHandle,
+    scrolls: Scrolls,
     /// Where the keys were as it went, and go again as it comes back.
     keys: Keys,
 }
@@ -65,15 +63,7 @@ pub enum Keys {
 
 impl Parked {
     fn new(state: State, filter: Option<String>, keys: Keys) -> Self {
-        Self {
-            state,
-            filter,
-            narrow_fields: HashMap::new(),
-            rows: RowScrolls::default(),
-            sideways: Sideways::default(),
-            home_scroll: ScrollHandle::new(),
-            keys,
-        }
+        Self { state, filter, narrow_fields: HashMap::new(), scrolls: Scrolls::default(), keys }
     }
 }
 
@@ -366,16 +356,14 @@ impl Colet {
 
     /// Puts `parked` in front, handing back the tab that was with the keys where they are in it.
     fn swap_in(&mut self, parked: Parked, keys: Keys) -> Parked {
-        let Parked { mut state, filter, narrow_fields: filters, rows, sideways, home_scroll, keys: _ } = parked;
+        let Parked { mut state, filter, narrow_fields: filters, scrolls, keys: _ } = parked;
         // Shown or not while it was parked, the hidden items follow the setting now.
         state.set_showing(self.showing());
         Parked {
             state: std::mem::replace(&mut self.state, state),
             filter: std::mem::replace(&mut self.chosen_filter, filter),
             narrow_fields: std::mem::replace(&mut self.narrow_fields, filters),
-            rows: std::mem::replace(&mut self.rows, rows),
-            sideways: std::mem::replace(&mut self.sideways, sideways),
-            home_scroll: std::mem::replace(&mut self.home_scroll, home_scroll),
+            scrolls: std::mem::replace(&mut self.scrolls, scrolls),
             keys,
         }
     }
