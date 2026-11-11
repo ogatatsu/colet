@@ -16,7 +16,7 @@ use gpui_kit::component::WindowExt;
 use gpui_kit::*;
 
 use crate::{
-    app::{Colet, Engine, Tone, WidthOf},
+    app::{Colet, Tone, WidthOf},
     search_filters::FilterEdit,
     settings::{Favorite, Placement, Queued, SavedSearch, Settings, Theme},
     sorts::Sorts,
@@ -47,7 +47,7 @@ pub enum Dialog {
     /// The search filters, to add to, put in order, edit or delete: one at a time, in `edit`, or the one
     /// asked about before it goes.
     Filters { edit: Option<FilterEdit>, deleting: Option<String> },
-    /// The theme, the connection to Everything, and the keys.
+    /// The theme, the display, and the keys.
     Preferences,
     /// The files to open together, asked about first when they are many.
     Open { paths: Vec<PathBuf> },
@@ -672,23 +672,6 @@ impl Colet {
     pub fn set_theme(&mut self, theme: Theme, window: &mut Window, cx: &mut Context<Self>) {
         self.update_settings(|s| s.theme = theme, cx);
         self.apply_theme(window, cx);
-    }
-
-    /// Lets go of Everything and makes the search afresh, so it connects anew.
-    pub fn reconnect(&mut self, cx: &mut Context<Self>) {
-        let backend = self.backend.clone();
-        let task = cx.background_executor().spawn(async move { backend.reconnect() });
-        cx.spawn(async move |this, cx| {
-            task.await;
-            this.update(cx, |this, cx| {
-                this.engine = Engine::Unknown;
-                this.state.reset_search();
-                this.changed(cx);
-                this.notify("Everythingとの接続を切りました。次の検索で接続し直します。", Tone::Info, cx);
-            })
-            .ok();
-        })
-        .detach();
     }
 
     /// Lets go of what the dialog before listened to. Called first by whatever opens one, before it makes

@@ -26,7 +26,7 @@ use crate::{
     settings::{Favorite, Theme},
     state::Kind,
     theme::Palette,
-    view::{RING_ROOM, RingAt, TipExt},
+    view::{RING_ROOM, RingAt},
 };
 
 /// The keys the preferences list, as the old app's did.
@@ -504,12 +504,11 @@ impl Colet {
         (content, buttons)
     }
 
-    /// The theme, the connection to Everything, and the keys.
+    /// The theme, the display, and the keys.
     fn preferences_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> (Div, Buttons) {
         let p = self.palette;
         // Each theme a stop for Tab, kept across frames.
         let themes = Theme::ALL;
-        let (engine, said) = self.engine.describe();
         let content = div()
             .flex()
             .flex_col()
@@ -559,45 +558,6 @@ impl Colet {
                             .child("隠しファイルを表示しているときに効きます。"),
                     )
             })
-            .child(
-                div().flex().flex_col().gap_1().child(label(p, "Everything")).child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .id("engine-state")
-                                .flex_1()
-                                .min_w_0()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .text_size(px(metrics::TEXT_LARGE))
-                                .text_color(p.text)
-                                .role(Role::Status)
-                                .aria_label(said.clone())
-                                .tip(said)
-                                .child(format!("接続先：{engine}")),
-                        )
-                        .child(
-                            self.ringed(
-                                push("reconnect", "再接続", false, true).on_click(cx.listener(|this, _, _, cx| this.reconnect(cx))),
-                                "reconnect",
-                                RingAt::Round,
-                                window,
-                                cx,
-                            )
-                            .m(px(-RING_ROOM)),
-                        ),
-                ),
-            )
-            .child(
-                div()
-                    .text_size(px(metrics::TEXT_BODY))
-                    .text_color(p.text_muted)
-                    .child("Everything 1.5.0.1424以降を起動してお使いください。つながらないときは「再接続」を押してください。"),
-            )
             .child(div().pt_1().text_size(px(metrics::TEXT_LARGE)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
             // One by one: an array of them all would lie whole on the stack, past what a debug build has.
             .child(div().flex().flex_col().gap_1().text_size(px(metrics::TEXT_BODY)).children(SHORTCUTS.iter().map(|&(key, what)| {

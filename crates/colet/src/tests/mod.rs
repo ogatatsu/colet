@@ -80,7 +80,6 @@ struct Fake {
     sorts: Mutex<Sorts>,
     sort_saves: AtomicUsize,
     unreadable_sorts: Mutex<Option<LoadError>>,
-    reconnects: AtomicUsize,
     clipboard: Mutex<ClipboardFiles>,
     text: Mutex<String>,
     /// What each operation was asked, and the paths that refuse to go.
@@ -177,10 +176,6 @@ impl Backend for Fake {
 
     fn search_changed(&self) -> Result<bool, String> {
         Ok(self.changed.load(Ordering::Relaxed))
-    }
-
-    fn reconnect(&self) {
-        self.reconnects.fetch_add(1, Ordering::Relaxed);
     }
 
     fn load_settings(&self) -> Result<Settings, LoadError> {

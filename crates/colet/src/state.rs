@@ -796,7 +796,7 @@ impl State {
         self.restore(target);
     }
 
-    /// Makes the search afresh, as after connecting to another Everything; home is left be.
+    /// Makes the search afresh, as after its filter changes; home is left be.
     pub fn reset_search(&mut self) {
         if let Some(index) = self.columns.iter().position(|c| c.kind == Kind::Search) {
             let selected = std::mem::take(&mut self.columns[index].selected);

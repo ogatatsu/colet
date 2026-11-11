@@ -277,13 +277,18 @@ impl SearchSession {
             return Err("入力に使用できない文字が含まれています".into());
         }
         unsafe {
-            if self.client.is_null() {
+            let fresh = self.client.is_null();
+            if fresh {
                 self.connect()?;
             }
             if Everything3_IsDBLoaded(self.client) == 0 {
                 if Everything3_GetLastError() != 0 {
                     self.disconnect();
-                    return Err("Everythingとの接続が切れました。再接続してください。".into());
+                    // A connection left from before Everything restarted is spent: connect afresh, once.
+                    if !fresh {
+                        return self.search(query, order, offset, count, refresh);
+                    }
+                    return Err("Everythingとの接続が切れました。本体が起動しているか確認して、再試行してください。".into());
                 }
                 return Err("Everythingの索引を準備中です。しばらく待って再試行してください。".into());
             }
@@ -514,6 +519,22 @@ mod tests {
         assert!(session.key.is_none() && session.watch_retry_at.is_none());
         session.search(query, Order::default(), 0, PAGE, true).unwrap();
         assert!(!session.client.is_null() && session.watch.is_some());
+    }
+
+    #[test]
+    #[ignore = "needs a running Everything 1.5"]
+    fn a_search_on_a_spent_connection_connects_afresh_by_itself() {
+        let _alone = alone();
+        let query = "parent:\"C:\\colet-sdk-spent-probe\"";
+        let mut session = SearchSession::default();
+        session.search(query, Order::default(), 0, PAGE, true).unwrap();
+        let client = session.client;
+        // As after Everything restarted while nothing was searched: the pipe is gone, unnoticed.
+        unsafe {
+            assert_ne!(Everything3_ShutdownClient(session.client), 0);
+        }
+        session.search(query, Order::default(), 0, PAGE, true).unwrap();
+        assert!(!session.client.is_null() && session.client != client);
     }
 
     #[test]

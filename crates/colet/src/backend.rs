@@ -53,8 +53,6 @@ pub trait Backend: Send + Sync + 'static {
     fn count(&self, query: &str) -> Result<usize, String>;
     /// Whether the last search's results changed; so until it is searched afresh.
     fn search_changed(&self) -> Result<bool, String>;
-    /// Lets go of Everything, so the next search connects afresh.
-    fn reconnect(&self);
     fn load_settings(&self) -> Result<Settings, LoadError>;
     fn save_settings(&self, settings: &Settings) -> Result<(), String>;
     fn load_sorts(&self) -> Result<Sorts, LoadError>;
@@ -154,12 +152,6 @@ impl Backend for Live {
             // A search under way, perhaps waiting out a busy Everything, is asked next time.
             Err(std::sync::TryLockError::WouldBlock) => Ok(false),
             Err(error) => Err(error.to_string()),
-        }
-    }
-
-    fn reconnect(&self) {
-        if let Ok(mut session) = self.session.lock() {
-            session.disconnect();
         }
     }
 

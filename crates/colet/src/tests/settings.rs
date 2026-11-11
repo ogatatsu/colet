@@ -39,21 +39,14 @@ fn keeps_the_widths_it_is_left_with_and_starts_with_them(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
-fn reconnects_from_the_preferences_making_the_search_afresh(cx: &mut TestAppContext) {
+fn opens_the_preferences_with_the_theme_taking_the_keys(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
-    let before = ui.read(cx, |v| v.state.columns[1].id);
-    let searches = fake.queries().len();
     ui.click(cx, "preferences");
     assert!(ui.read(cx, |v| matches!(v.dialog, Some(crate::places::Dialog::Preferences))));
     // The theme chosen takes the keys, there being no field to type in.
     assert!(ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.stop("theme:System", cx).is_focused(window))));
-    ui.click(cx, "reconnect");
-    assert_eq!(fake.reconnects.load(Ordering::Relaxed), 1);
-    assert_ne!(ui.read(cx, |v| v.state.columns[1].id), before);
-    assert_eq!(fake.queries().len(), searches + 1);
-    assert!(matches!(ui.read(cx, |v| v.engine.clone()), Engine::Connected(_)));
     ui.click(cx, "close-preferences");
     assert!(ui.read(cx, |v| v.dialog.is_none()));
 }

@@ -195,7 +195,7 @@ impl Colet {
         let c = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
         if let Some(error) = c.error.clone() {
-            return self.column_error(id, kind, error, window, cx);
+            return self.column_error(id, error, window, cx);
         }
         if c.unread() {
             return self.loading().into_any_element();
@@ -218,9 +218,8 @@ impl Colet {
         self.column_rows(index, marked, cx)
     }
 
-    /// Why the column `id` could not be listed, with a button to try again; the search's, with one to
-    /// the preferences too, where Everything is reconnected.
-    fn column_error(&mut self, id: ColumnId, kind: Kind, error: String, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    /// Why the column `id` could not be listed, with a button to try again.
+    fn column_error(&mut self, id: ColumnId, error: String, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let retry = Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label("再試行").on_click(cx.listener(
             move |this, event: &ClickEvent, window, cx| {
                 // The button goes as the column loads: the keys go back to the columns.
@@ -231,15 +230,7 @@ impl Colet {
             },
         ));
         let retry = self.ringed(retry, format!("retry:{id}"), RingAt::Round, window, cx).m(px(-RING_ROOM));
-        let settings = (kind == Kind::Search).then(|| {
-            let settings = Button::new("search-settings")
-                .outline()
-                .icon(glyph("sliders-horizontal"))
-                .label("設定")
-                .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)));
-            self.ringed(settings, "search-settings", RingAt::Round, window, cx).m(px(-RING_ROOM))
-        });
-        self.message("circle-alert", error).child(retry).children(settings).into_any_element()
+        self.message("circle-alert", error).child(retry).into_any_element()
     }
 
     /// The edge a drag widens a column from: astride its border, so its scrollbar stays clear of it.
