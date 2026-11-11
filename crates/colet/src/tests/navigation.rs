@@ -110,7 +110,7 @@ fn the_strip_pressed_by_keys_hands_them_to_the_column_worked_in(cx: &mut TestApp
         ui.press(cx, "left");
         assert_eq!(ui.active(cx), 1);
         assert_eq!(ui.read(cx, |v| v.state.folded_away()), 2);
-        let strip = ui.read(cx, |v| v.stops.borrow().get("unfold").cloned()).expect("the strip's stop");
+        let strip = ui.read(cx, |v| v.stops.get(&"unfold".into())).expect("the strip's stop");
         ui.act(cx, |window, cx| strip.focus(window, cx));
         ui.press(cx, key);
         assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0, "{key}");
@@ -417,7 +417,7 @@ fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &m
     // Three picked: one name cannot be changed for them all.
     ui.press(cx, "ctrl-a");
     // Into the file actions from the trail's last crumb, past the preferences' button.
-    let crumb = ui.read(cx, |v| v.stops.borrow()[&format!("crumb:{}", v.state.columns.len() - 1)].clone());
+    let crumb = ui.read(cx, |v| v.stops.get(&Stop::Crumb(v.state.columns.len() - 1)).unwrap());
     ui.act(cx, |window, cx| crumb.focus(window, cx));
     for _ in 0..5 {
         ui.press(cx, "tab");
@@ -510,7 +510,7 @@ fn opens_the_folders_folded_off_the_trail_from_the_keys_and_goes_to_one(cx: &mut
     for _ in 0..chain.len() {
         ui.press(cx, "right");
     }
-    let fold = ui.read(cx, |v| v.stops.borrow()["crumb-fold"].clone());
+    let fold = ui.read(cx, |v| v.stops.get(&"crumb-fold".into()).unwrap());
     ui.act(cx, |window, cx| fold.focus(window, cx));
     // Enter opens it; ↓ lights a line, Esc hands the keys back to the button.
     ui.press(cx, "enter");

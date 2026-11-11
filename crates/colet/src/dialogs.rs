@@ -25,6 +25,7 @@ use crate::{
     search_filters::FilterEdit,
     settings::{Favorite, Theme},
     state::Kind,
+    stops::{FilterTool, Stop},
     theme::Palette,
     view::{RING_ROOM, RingAt},
 };
@@ -303,7 +304,7 @@ impl Colet {
                             let text = choice.clone().unwrap_or_else(|| "なし".into());
                             let button = filter_choice(("edit-search-filter", i).into(), &text, choice == chosen)
                                 .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(choice.clone(), cx)));
-                            self.ringed(button, format!("edit-search-filter:{i}"), RingAt::Round, window, cx)
+                            self.ringed(button, Stop::EditSearchFilter(i), RingAt::Round, window, cx)
                         })),
                 ),
             )
@@ -432,7 +433,7 @@ impl Colet {
                         self.ringed(
                             tool(("filter-up", i).into(), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
                                 .when(i > 0, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&up_name, -1, cx)))),
-                            format!("filter-up:{}", f.name),
+                            Stop::Filter(FilterTool::Up, f.name.clone()),
                             RingAt::Edge,
                             window,
                             cx,
@@ -442,7 +443,7 @@ impl Colet {
                         self.ringed(
                             tool(("filter-down", i).into(), "arrow-down", format!("「{}」を下へ", f.name), i < last)
                                 .when(i < last, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&down_name, 1, cx)))),
-                            format!("filter-down:{}", f.name),
+                            Stop::Filter(FilterTool::Down, f.name.clone()),
                             RingAt::Edge,
                             window,
                             cx,
@@ -452,7 +453,7 @@ impl Colet {
                         self.ringed(
                             tool(("filter-edit", i).into(), "pencil-line", format!("「{}」を編集", f.name), true)
                                 .on_click(cx.listener(move |this, _, window, cx| this.edit_filter(Some(edit_name.clone()), window, cx))),
-                            format!("filter-edit:{}", f.name),
+                            Stop::Filter(FilterTool::Edit, f.name.clone()),
                             RingAt::Edge,
                             window,
                             cx,
@@ -462,7 +463,7 @@ impl Colet {
                         self.ringed(
                             tool(("filter-delete", i).into(), "trash", format!("「{}」を削除", f.name), true)
                                 .on_click(cx.listener(move |this, _, window, cx| this.ask_delete_filter(name.clone(), window, cx))),
-                            format!("filter-delete:{}", f.name),
+                            Stop::Filter(FilterTool::Delete, f.name.clone()),
                             RingAt::Edge,
                             window,
                             cx,
@@ -525,13 +526,13 @@ impl Colet {
                             .role(Role::RadioButton)
                             .toggled(chosen)
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                let in_group = Theme::ALL.iter().any(|t| this.stop(format!("theme:{t:?}"), cx).is_focused(window));
+                                let in_group = Theme::ALL.iter().any(|t| this.stop(Stop::Theme(*t), cx).is_focused(window));
                                 if in_group {
-                                    this.stop(format!("theme:{theme:?}"), cx).focus(window, cx);
+                                    this.stop(Stop::Theme(theme), cx).focus(window, cx);
                                 }
                                 this.set_theme(theme, window, cx)
                             }));
-                        self.ringed(button, format!("theme:{theme:?}"), RingAt::Round, window, cx)
+                        self.ringed(button, Stop::Theme(theme), RingAt::Round, window, cx)
                     },
                 )),
             ))
@@ -830,14 +831,12 @@ impl Colet {
         // where they are, as before.
         let mut keys = Vec::new();
         for entry in &self.operations.history().entries {
-            keys.push(format!("history-entry:{}", entry.id));
+            keys.push(Stop::HistoryEntry(entry.id));
             if self.operations.history().expanded.contains(&entry.id) {
-                keys.extend(
-                    entry.items.iter().enumerate().filter(|(_, item)| !item.gone).map(|(k, _)| format!("history-item:{}:{k}", entry.id)),
-                );
+                keys.extend(entry.items.iter().enumerate().filter(|(_, item)| !item.gone).map(|(k, _)| Stop::HistoryItem(entry.id, k)));
             }
         }
-        let stops: std::collections::HashMap<String, FocusHandle> = keys.into_iter().map(|key| (key.clone(), self.stop(key, cx))).collect();
+        let stops: std::collections::HashMap<Stop, FocusHandle> = keys.into_iter().map(|key| (key.clone(), self.stop(key, cx))).collect();
         let entries: Vec<AnyElement> = self
             .operations
             .history()
@@ -854,9 +853,9 @@ impl Colet {
                     .border_color(p.border)
                     .child(
                         crate::view::keep_focus(crate::view::ring(
-                            div().id(("history-entry", id)).track_focus(&stops[&format!("history-entry:{id}")]),
+                            div().id(("history-entry", id)).track_focus(&stops[&Stop::HistoryEntry(id)]),
                             p,
-                            stops[&format!("history-entry:{id}")].is_focused(window),
+                            stops[&Stop::HistoryEntry(id)].is_focused(window),
                             0.,
                         ))
                         .role(Role::Button)
@@ -918,9 +917,9 @@ impl Colet {
                                             crate::view::keep_focus(crate::view::ring(
                                                 div()
                                                     .id(("history-item", (id << 16) | k as u64))
-                                                    .track_focus(&stops[&format!("history-item:{id}:{k}")]),
+                                                    .track_focus(&stops[&Stop::HistoryItem(id, k)]),
                                                 p,
-                                                stops[&format!("history-item:{id}:{k}")].is_focused(window),
+                                                stops[&Stop::HistoryItem(id, k)].is_focused(window),
                                                 4.,
                                             ))
                                             // Opened in Colet, not in a browser: a button, its name in the accent color.
@@ -991,8 +990,6 @@ impl Colet {
                                 crate::view::keep_focus(push("clear-history", "履歴を消去", false, clearable).ghost().small()).on_click(
                                     cx.listener(|this, _, _, cx| {
                                         this.operations.history_mut().entries.retain(|e| e.status == Status::Running);
-                                        // The rows' stops go with them; a running one's comes back as it is drawn.
-                                        this.stops.get_mut().retain(|key, _| !key.starts_with("history-"));
                                         cx.notify();
                                     }),
                                 ),

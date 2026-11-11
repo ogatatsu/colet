@@ -25,6 +25,7 @@ use crate::{
     reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
     state::HomeKey,
     state::{Column, ColumnId, Kind},
+    stops::Stop,
 };
 
 mod column;
@@ -136,7 +137,7 @@ impl Colet {
     /// The library's `button`, Tab reaching it through the stop `key`, ringed as Colet's own controls are
     /// rather than as the library rings it. The library's button leaves the keys where they are when the
     /// mouse presses it. Ringed round it, the ring's room is the caller's to give or lay over the gaps.
-    pub(crate) fn ringed(&self, button: Button, key: impl Into<String>, at: RingAt, window: &Window, cx: &App) -> Div {
+    pub(crate) fn ringed(&self, button: Button, key: impl Into<Stop>, at: RingAt, window: &Window, cx: &App) -> Div {
         let p = self.palette;
         let focus = self.stop(key, cx);
         let shown = focus.is_focused(window);
@@ -226,7 +227,7 @@ impl Colet {
                                 let filter = this.chosen_filter.clone();
                                 this.search_for(query, filter, window, cx)
                             }));
-                        self.ringed(button, format!("hint:{query}"), RingAt::Round, window, cx)
+                        self.ringed(button, Stop::Hint(query.to_string()), RingAt::Round, window, cx)
                     },
                 ),
             ))
@@ -266,6 +267,8 @@ impl Colet {
 
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Only the stops asked for over the last frame stay: those of buttons gone go with them.
+        self.stops.begin_frame(window);
         // The columns slide a frame at a time toward where the last frame's layout says they rest.
         // Stepped here, not in prepaint or a next-frame callback, on purpose: the trail of folders and the
         // edges' shades are built below from the offset this sets, so they move with the columns in the

@@ -124,7 +124,7 @@ fn closed(text: &str) -> std::borrow::Cow<'_, str> {
 }
 
 /// The colors Colet takes: Windows's setting, or one of its own whatever Windows says.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     #[default]

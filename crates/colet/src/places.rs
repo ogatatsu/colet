@@ -21,6 +21,7 @@ use crate::{
     settings::{Favorite, Placement, Queued, SavedSearch, Settings, Theme},
     sorts::Sorts,
     state::{HomeKey, Kind, narrowing},
+    stops::Stop,
 };
 
 pub enum Dialog {
@@ -660,7 +661,7 @@ impl Colet {
     pub fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.begin_dialog(window, cx);
         // The theme now chosen takes the keys, as a radio group's checked one does.
-        self.stop(format!("theme:{:?}", self.stored.settings().theme), cx).focus(window, cx);
+        self.stop(Stop::Theme(self.stored.settings().theme), cx).focus(window, cx);
         self.overlays.set_dialog(Dialog::Preferences);
         cx.notify();
     }

@@ -2,7 +2,7 @@
 //! folders, and takes the keys. `view.rs` draws it.
 use std::{
     borrow::Cow,
-    cell::{Cell, RefCell},
+    cell::Cell,
     collections::{HashMap, HashSet},
     ffi::OsString,
     ops::Range,
@@ -43,6 +43,7 @@ use crate::{
     settings::{self, File, LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
+    stops::{Stop, Stops},
     stored::Stored,
     tabs::Tabs,
     theme::Palette,
@@ -364,7 +365,7 @@ pub struct Colet {
     pub stored: Stored,
     pub home_drag: HomeDragging,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
-    pub(crate) stops: RefCell<HashMap<String, FocusHandle>>,
+    pub(crate) stops: Stops,
     /// The dialog and the menu open, and where the keys go back to as they close.
     pub overlays: Overlays,
     /// The sort order's button, a stop for Tab.
@@ -432,7 +433,7 @@ impl Colet {
             loading: Loading::default(),
             stored: Stored::new(settings, settings_saves, sorts, sorts_saves),
             home_drag: HomeDragging::default(),
-            stops: RefCell::default(),
+            stops: Stops::default(),
             sort_focus: cx.focus_handle().tab_stop(true),
             crumbs: Trail::default(),
             overlays: Overlays::new(cx),
@@ -533,8 +534,8 @@ impl Colet {
     }
 
     /// The focus a button keeps, a stop for Tab; Enter or Space presses it.
-    pub fn stop(&self, id: impl Into<String>, cx: &App) -> FocusHandle {
-        self.stops.borrow_mut().entry(id.into()).or_insert_with(|| cx.focus_handle().tab_stop(true)).clone()
+    pub fn stop(&self, stop: impl Into<Stop>, cx: &App) -> FocusHandle {
+        self.stops.get_or_make(stop.into(), cx)
     }
 
     /// Tab moves the keys between home's pane and the columns: the column worked in follows them. Into the
@@ -647,7 +648,7 @@ impl Colet {
                         .update(cx, |this, cx| {
                             this.show_history(true, Some(entry), window, cx);
                             if event.is_keyboard() {
-                                this.stop(format!("history-entry:{entry}"), cx).focus(window, cx);
+                                this.stop(Stop::HistoryEntry(entry), cx).focus(window, cx);
                             }
                         })
                         .ok();
@@ -1217,10 +1218,6 @@ impl Colet {
     pub fn sync_narrow_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let kept: HashSet<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
         self.narrow_fields.retain(|id, _| kept.contains(id));
-        // So does its order's button's stop.
-        self.stops
-            .get_mut()
-            .retain(|key, _| key.strip_prefix("column-sort:").is_none_or(|id| id.parse().is_ok_and(|id| kept.contains(&id))));
         for c in &self.state.columns {
             let id = c.id;
             match self.narrow_fields.get_mut(&id) {

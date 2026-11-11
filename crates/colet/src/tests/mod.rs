@@ -35,6 +35,7 @@ use crate::{
     settings::{LoadError, SavedSearch, SearchFilter, Settings, Theme},
     sorts::Sorts,
     state::{ColumnId, HomeKey, Kind},
+    stops::Stop,
     theme::Palette,
 };
 

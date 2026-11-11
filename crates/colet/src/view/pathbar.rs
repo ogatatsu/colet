@@ -109,7 +109,7 @@ impl Colet {
         let last = crumbs.len().saturating_sub(1);
         self.crumbs.bounds.borrow_mut().retain(|index, _| crumbs[folded..].iter().any(|c| c.column == *index));
         for Crumb { column: index, .. } in &crumbs[folded..] {
-            self.stop(format!("crumb:{index}"), cx);
+            self.stop(Stop::Crumb(*index), cx);
         }
         let shown: Vec<Crumb> = crumbs[folded..].to_vec();
         let menu_current = crumbs[..folded].iter().any(|c| c.column == self.state.active);
@@ -245,7 +245,7 @@ impl Colet {
         let p = self.palette;
         let Crumb { column: index, name: label, path } = crumb;
         let current = index == self.state.active;
-        let stop = self.stops.borrow().get(&format!("crumb:{index}")).cloned();
+        let stop = self.stops.get(&Stop::Crumb(index));
         // Without a stop of its own it is never ringed, though it stands for the columns' keys.
         let ringed = stop.as_ref().is_some_and(|s| s.is_focused(window));
         let focus = stop.unwrap_or_else(|| self.columns_focus.clone());

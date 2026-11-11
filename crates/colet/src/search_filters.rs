@@ -150,8 +150,6 @@ impl Colet {
         let name = name.clone();
         self.update_settings(|s| s.filters.retain(|f| f.name != name), cx);
         self.rename_filter_in_tabs(&name, None);
-        // Its buttons' stops go with it.
-        self.stops.get_mut().retain(|key, _| !(key.starts_with("filter-") && key.ends_with(&format!(":{name}"))));
         self.changed(cx);
         self.back_to_filters(window, cx);
     }

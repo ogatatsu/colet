@@ -337,7 +337,7 @@ fn the_keys_that_move_through_the_rows_move_nothing_from_its_field_or_a_button(c
     assert!(!ui.columns_focused(cx));
     assert_eq!(ui.active(cx), 2);
     // On the column's order button, nor do these or the keys between columns.
-    let sort = ui.read(cx, |v| v.stops.borrow()[&format!("column-sort:{id}")].clone());
+    let sort = ui.read(cx, |v| v.stops.get(&Stop::ColumnSort(id)).unwrap());
     ui.act(cx, |window, cx| sort.focus(window, cx));
     for key in moves.into_iter().chain(["home", "end", "left", "right"]) {
         ui.press(cx, key);

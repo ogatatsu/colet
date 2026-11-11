@@ -32,7 +32,7 @@ impl Colet {
 
     /// The keys are on one of the buttons that are stops for Tab.
     fn stop_focused(&self, window: &Window) -> bool {
-        self.stops.borrow().values().any(|stop| stop.is_focused(window))
+        self.stops.has_keys(window)
     }
 
     /// `act` on `A`, a key that moves through the rows or between columns, while the keys are on the rows.
@@ -231,7 +231,7 @@ impl Colet {
                 this.load(id, 0, false, cx);
             },
         ));
-        let retry = self.ringed(retry, format!("retry:{id}"), RingAt::Round, window, cx).m(px(-RING_ROOM));
+        let retry = self.ringed(retry, Stop::Retry(id), RingAt::Round, window, cx).m(px(-RING_ROOM));
         self.message("circle-alert", error).child(retry).into_any_element()
     }
 
@@ -405,7 +405,7 @@ impl Colet {
                     this.toggle_favorite(&key, cx);
                 }
             }));
-        self.ringed(star, format!("star:{id}"), RingAt::Edge, window, cx)
+        self.ringed(star, Stop::Star(id), RingAt::Edge, window, cx)
     }
 
     /// The button of the column's own order, beside its star: accented while it is given one apart from
@@ -417,7 +417,7 @@ impl Colet {
         let (order, own) = (self.order_of(c), self.own_order(c).is_some());
         let open = self.column_sort_open() == Some(id);
         let label = format!("並び順: {}{}", order.label(), if own { "" } else { "（既定）" });
-        let focus = self.stop(format!("column-sort:{id}"), cx);
+        let focus = self.stop(Stop::ColumnSort(id), cx);
         let shown = focus.is_focused(window);
         div()
             .relative()
@@ -574,7 +574,7 @@ impl Colet {
                         this.narrow(id, "", cx);
                     }
                 }));
-            self.ringed(clear, format!("clear-filter:{id}"), RingAt::Edge, window, cx)
+            self.ringed(clear, Stop::ClearFilter(id), RingAt::Edge, window, cx)
         });
         // Ringed as the search field is; the ring lies over the gaps around.
         frame(p, focused, 6.).m(px(-RING_ROOM)).child(
