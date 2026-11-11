@@ -76,7 +76,7 @@ fn a_tab_left_while_typing_an_address_takes_it_up_again(cx: &mut TestAppContext)
     ui.input(cx, r"D:\wo");
     ui.press(cx, "ctrl-t");
     assert_eq!(ui.typed_address(cx), None);
-    assert!(ui.read(cx, |v| v.search_focused));
+    assert!(ui.search_focused(cx));
     ui.press(cx, "ctrl-tab");
     assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
     assert!(ui.address_focused(cx));
@@ -120,22 +120,22 @@ fn the_history_opened_while_typing_an_address_gives_it_back_as_typed(cx: &mut Te
 fn the_column_worked_in_is_marked_only_while_the_keys_are_in_the_columns_or_go_back_there(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.click(cx, row(r"D:\work\b.txt"));
-    assert!(ui.read(cx, |v| v.columns_marked && v.keys_in_column));
+    assert!(ui.column_marks(cx) == (true, true));
     // In the address field, it steps back.
     ui.press(cx, "ctrl-l");
     assert!(ui.address_focused(cx));
-    assert!(ui.read(cx, |v| !v.columns_marked));
+    assert!(!ui.column_marks(cx).0);
     // A dialog that gives the keys back to the column leaves it marked, but its row unringed.
     ui.click(cx, row(r"D:\work\b.txt"));
     ui.click(cx, "preferences");
-    assert!(ui.read(cx, |v| v.columns_marked && !v.keys_in_column));
+    assert!(ui.column_marks(cx) == (true, false));
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.columns_marked && v.keys_in_column));
+    assert!(ui.column_marks(cx) == (true, true));
     // One that gives them back to the search field does not.
     ui.press(cx, "ctrl-f");
-    assert!(ui.read(cx, |v| !v.columns_marked));
+    assert!(!ui.column_marks(cx).0);
     ui.click(cx, "preferences");
-    assert!(ui.read(cx, |v| !v.columns_marked));
+    assert!(!ui.column_marks(cx).0);
 }
 
 impl Ui {

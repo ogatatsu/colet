@@ -77,7 +77,7 @@ struct RowLook {
 
 impl Colet {
     /// How the row of `entry` in the column at `index` stands, `marked` while that column is worked in.
-    fn row_look(&self, index: usize, entry: &Entry, marked: bool) -> RowLook {
+    fn row_look(&self, index: usize, entry: &Entry, marked: bool, keys: bool) -> RowLook {
         let c = &self.state.columns[index];
         let kind = c.kind;
         let selected = c.selected.contains(&entry.path);
@@ -103,7 +103,7 @@ impl Colet {
             barred: (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked),
             lit: selected && marked && !aside,
             // The keys are on it: ringed, selected or not, while they are in this column.
-            focused: marked && self.keys_in_column && c.focused.as_ref() == Some(&entry.path),
+            focused: keys && c.focused.as_ref() == Some(&entry.path),
             // What a right-click opened the menu on, which it leaves unselected: ringed, as in Finder, until
             // it closes.
             target: self.menu().is_some_and(|m| m.column == c.id && m.paths.as_deref() == Some(std::slice::from_ref(&entry.path))),
@@ -126,10 +126,10 @@ impl Colet {
         }
     }
 
-    pub(super) fn row(&mut self, index: usize, entry: &Entry, marked: bool, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn row(&mut self, index: usize, entry: &Entry, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let RowLook { selected, highlighted, barred, lit, focused, target, aside, held, cut, faded, dragged, within, narrow } =
-            self.row_look(index, entry, marked);
+            self.row_look(index, entry, marked, keys);
         let c = &self.state.columns[index];
         let kind = c.kind;
         // While a row in home is carried, only the line tells where it goes.
@@ -445,7 +445,7 @@ impl Colet {
 
     /// Home's rows: a handful of places, so no need to virtualize. The kinds stand under headings, so they
     /// don't read as one list; a drag among them shows where it would land.
-    pub(super) fn home_rows(&mut self, marked: bool, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn home_rows(&mut self, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let entries = self.state.columns[0].entries.clone();
         let groups = crate::places::home_groups(&self.settings, &entries);
@@ -489,7 +489,7 @@ impl Colet {
                     Some(before) => (*before == entry.path).then_some(true),
                     None => (i + 1 == items.len() && movable(&self.settings, &entry.path) == Some(*shelf)).then_some(false),
                 });
-                rows = rows.child(div().px_1().relative().child(self.row(0, entry, marked, cx)).when_some(line, |d, above| {
+                rows = rows.child(div().px_1().relative().child(self.row(0, entry, marked, keys, cx)).when_some(line, |d, above| {
                     d.child(
                         div()
                             .absolute()
@@ -515,7 +515,7 @@ impl Colet {
 
     /// The rows of a folder or the results: only those in sight are drawn, and the results load their
     /// next page as the list nears the end of what it has.
-    pub(super) fn column_rows(&mut self, index: usize, marked: bool, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn column_rows(&mut self, index: usize, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let c = &self.state.columns[index];
         let (id, count) = (c.id, c.entries.len());
@@ -531,7 +531,7 @@ impl Colet {
                     cx.defer(move |cx| view.update(cx, |this, cx| this.more(id, cx)));
                 }
                 let entries: Vec<Entry> = c.entries[range.start.min(c.entries.len())..range.end.min(c.entries.len())].to_vec();
-                entries.iter().map(|entry| this.row(index, entry, marked, cx)).collect()
+                entries.iter().map(|entry| this.row(index, entry, marked, keys, cx)).collect()
             })
         })
         .track_scroll(&handle)

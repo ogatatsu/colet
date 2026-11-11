@@ -8,7 +8,7 @@ impl Colet {
 
     pub(super) fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let focused = self.search_focused;
+        let focused = self.search_has_keys(window, cx);
         let has_query = !self.state.query.is_empty();
         let field_width = self.widths.field;
         let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());

@@ -7,7 +7,7 @@ impl Colet {
         let home = &self.state.columns[0];
         let (id, narrowed) = (home.id, home.narrow.is_some());
         let field = self.narrow_fields.get(&id).map(|field| field.input.clone());
-        let marked = self.state.active == 0 && self.columns_marked;
+        let marked = self.state.active == 0 && self.columns_marked(window);
         let body = self.column_body(0, marked, window, cx);
         let width = self.sidebar_width(window);
         let keys = div()

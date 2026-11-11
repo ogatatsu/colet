@@ -212,10 +212,12 @@ impl Colet {
             };
             return self.message(name, text.into()).into_any_element();
         }
+        // The keys are on the column worked in: its focused row is ringed.
+        let keys = marked && self.keys_in_column(window);
         if kind == Kind::Home {
-            return self.home_rows(marked, cx);
+            return self.home_rows(marked, keys, cx);
         }
-        self.column_rows(index, marked, cx)
+        self.column_rows(index, marked, keys, cx)
     }
 
     /// Why the column `id` could not be listed, with a button to try again.
@@ -267,7 +269,7 @@ impl Colet {
 
     pub(super) fn render_column(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let marked = index == self.state.active && self.columns_marked;
+        let marked = index == self.state.active && self.columns_marked(window);
         let c: &Column = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
         let (width, of) = match kind {

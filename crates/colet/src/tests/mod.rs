@@ -450,6 +450,8 @@ fn open(cx: &mut TestAppContext, fake: Arc<Fake>) -> Ui {
             )
         })
         .expect("open the window");
+    // In front, as a window just opened is: the focus listeners only hear of the keys in an active window.
+    cx.update_window(window, |_, window, _| window.activate_window()).unwrap();
     settle(cx);
     Ui { window, view }
 }
@@ -543,6 +545,21 @@ impl Ui {
         let last = self.read(cx, |v| v.next_toast);
         self.act(cx, |window, _| {
             (1..=last).filter_map(|id| window.try_find(("toast", id as usize))).filter_map(|t| t.label().map(str::to_owned)).collect()
+        })
+    }
+
+    /// The search field has the keys, or its menu has them for it.
+    fn search_focused(&self, cx: &mut TestAppContext) -> bool {
+        let view = self.view.clone();
+        self.act(cx, |window, cx| view.read(cx).search_has_keys(window, cx))
+    }
+
+    /// Whether the column worked in is marked, and whether its focused row is ringed.
+    fn column_marks(&self, cx: &mut TestAppContext) -> (bool, bool) {
+        let view = self.view.clone();
+        self.act(cx, |window, cx| {
+            let view = view.read(cx);
+            (view.columns_marked(window), view.keys_in_column(window))
         })
     }
 

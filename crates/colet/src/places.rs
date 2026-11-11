@@ -498,9 +498,9 @@ impl Colet {
 
     /// Ctrl+D saves what the active column shows: the search (from its field too), or the folder, each
     /// narrowed as it is.
-    pub fn save_current(&mut self, cx: &mut Context<Self>) {
+    pub fn save_current(&mut self, window: &Window, cx: &mut Context<Self>) {
         let active = &self.state.columns[self.state.active];
-        if self.search_focused || active.kind == Kind::Search {
+        if self.search_has_keys(window, cx) || active.kind == Kind::Search {
             self.toggle_saved_current(cx);
         } else if active.kind == Kind::Folder {
             let key = self.favorite_key_of(self.state.active);

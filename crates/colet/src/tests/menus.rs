@@ -368,7 +368,7 @@ fn edits_the_search_field_from_its_menu(cx: &mut TestAppContext) {
     ui.right_click_field(cx, &search);
     assert_eq!(ui.lines_on(cx), ["元に戻す", "切り取り", "コピー", "削除", "すべて選択"]);
     // The field still counts as having the keys, its text picked, while its menu has them.
-    assert!(ui.read(cx, |v| v.search_focused));
+    assert!(ui.search_focused(cx));
     assert_eq!(search.read_with(cx, |input, _| input.selected_range()), 0..3);
     ui.click(cx, "text-cut");
     assert_eq!(ui.field(cx), "");

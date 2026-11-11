@@ -639,7 +639,7 @@ impl Colet {
     pub fn open_filter_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let from_search = match self.popup {
             Some(Popup::Filters { from_search }) => from_search,
-            _ => self.search_focused,
+            _ => self.search_has_keys(window, cx),
         };
         self.popup = Some(Popup::Filters { from_search });
         self.show_menu(window, cx);

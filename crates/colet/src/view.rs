@@ -173,11 +173,10 @@ impl Colet {
         let away = self.state.folded_away();
         let first = if pinned { 2 } else { 1 } + away;
         let only_home = self.state.columns.len() == 1;
-        self.sync_narrow_fields(window, cx);
         let pinned_column = pinned.then(|| self.render_column(1, window, cx));
         let strip = (away > 0).then(|| self.unfold_strip(away, window, cx));
         let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, window, cx)).collect();
-        let scrolling = self.scrolling_columns(columns, cx);
+        let scrolling = self.scrolling_columns(columns, window, cx);
         let main = div()
             .id("main")
             .track_focus(&self.columns_focus)
@@ -237,8 +236,6 @@ impl Colet {
 
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.search_focused = self.has_keys(&self.search, window, cx);
-        self.follow_address(window, cx);
         // A drag in home let go of anywhere but its list.
         if self.home_drag.carried.is_some() && !cx.has_active_drag() {
             self.end_home_drag();
@@ -247,8 +244,7 @@ impl Render for Colet {
         if self.tabs.drag.carried.is_some() && !cx.has_active_drag() {
             self.end_tab_drag();
         }
-        self.follow_focus(window, cx);
-        self.scroll_rows();
+        // The columns slide a frame at a time toward where the last frame's layout says they rest.
         self.reveal(window);
         let p = self.palette;
         let tabbar = self.render_tabbar(window, cx);
@@ -314,9 +310,9 @@ impl Render for Colet {
             .on_action(cx.listener(|this, _: &PreviousTab, window, cx| this.step_tab(-1, window, cx)))
             .on_action(cx.listener(|this, _: &ReopenTab, window, cx| this.reopen_tab(window, cx)))
             .on_action(cx.listener(|this, _: &RefreshAll, _, cx| this.refresh(cx)))
-            .on_action(cx.listener(|this, _: &SaveCurrent, _, cx| {
+            .on_action(cx.listener(|this, _: &SaveCurrent, window, cx| {
                 if this.dialog.is_none() {
-                    this.save_current(cx);
+                    this.save_current(window, cx);
                 }
             }))
             // The mouse's back and forward buttons, as Alt+← and Alt+→.

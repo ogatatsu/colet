@@ -349,7 +349,7 @@ impl Colet {
 
     /// Where the keys are in the tab in front.
     fn keys(&self, window: &Window, cx: &App) -> Keys {
-        if self.search_focused {
+        if self.search_has_keys(window, cx) {
             return Keys::Search;
         }
         // Open, the field has the keys, or had them until the press that switches tabs.

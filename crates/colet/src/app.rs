@@ -438,8 +438,6 @@ pub struct Colet {
     pub widths: Widths,
     pub palette: Palette,
     pub search: Entity<InputState>,
-    /// The search field has the keys: no column is marked as worked in.
-    pub search_focused: bool,
     pub address: Address,
     /// The field of each column, narrowing it to some names.
     pub narrow_fields: HashMap<ColumnId, NarrowField>,
@@ -479,11 +477,6 @@ pub struct Colet {
     pub home_drag: HomeDragging,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
     pub(crate) stops: RefCell<HashMap<String, FocusHandle>>,
-    /// The keys are in the column worked in: its focused row is ringed.
-    pub keys_in_column: bool,
-    /// The keys are in the columns or home, or with a menu, dialog or the history that gives them back
-    /// there: the column worked in is framed and its selection lit. Elsewhere, it steps back.
-    pub columns_marked: bool,
     pub popup: Option<Popup>,
     /// The open menu's lines, drawn and picked by the component library, and the closing it tells of.
     pub menu_view: Option<(Entity<gpui_kit::component::menu::PopupMenu>, FocusHandle, Subscription)>,
@@ -559,7 +552,6 @@ impl Colet {
             },
             palette: Palette::for_window(window, settings.theme),
             search,
-            search_focused: false,
             address: Address::new(address),
             narrow_fields: HashMap::new(),
             home_focus: cx.focus_handle().tab_stop(true),
@@ -588,8 +580,6 @@ impl Colet {
             home_scroll: ScrollHandle::new(),
             home_drag: HomeDragging::default(),
             stops: RefCell::default(),
-            keys_in_column: false,
-            columns_marked: false,
             popup: None,
             sort_focus: cx.focus_handle().tab_stop(true),
             crumbs: Trail::default(),
@@ -612,9 +602,28 @@ impl Colet {
         this.palette.style_input(&this.search, cx);
         this.palette.style_input(&this.address.field, cx);
         this.restore_tabs(window, cx);
-        // The window's dialog follows `dialog` as each change to Colet settles.
+        // The window's dialog, the columns' fields and their scrolls follow `dialog` and the columns as each
+        // change to Colet settles, before it is drawn.
         let colet = cx.entity();
-        this._subscriptions.push(cx.observe_in(&colet, window, |this, _, window, cx| this.sync_dialog(window, cx)));
+        this._subscriptions.push(cx.observe_in(&colet, window, |this, _, window, cx| {
+            this.sync_narrow_fields(window, cx);
+            this.scroll_rows();
+            this.sync_dialog(window, cx);
+        }));
+        // Tab, a click or a closing overlay bringing the keys to home or the columns makes that the column
+        // worked in.
+        let (home, columns) = (this.home_focus.clone(), this.columns_focus.clone());
+        this._subscriptions.push(cx.on_focus(&home, window, |this, window, cx| this.follow_focus(window, cx)));
+        this._subscriptions.push(cx.on_focus(&columns, window, |this, window, cx| this.follow_focus(window, cx)));
+        // The keys leaving the open address field close it.
+        let address = this.address.field.read(cx).focus_handle(cx);
+        this._subscriptions.push(cx.on_focus_out(&address, window, |this, _, window, cx| {
+            if this.follow_address(window, cx) {
+                cx.notify();
+            }
+        }));
+        this.sync_narrow_fields(window, cx);
+        this.scroll_rows();
         crate::theme::apply(window, this.settings.theme, cx);
         let changed = this.clipboard.changed_flag();
         this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
@@ -636,14 +645,7 @@ impl Colet {
                 this.changed(cx);
             }
             InputEvent::PressEnter { .. } => this.leave_search(window, cx),
-            InputEvent::Focus => {
-                this.search_focused = true;
-                cx.notify();
-            }
-            InputEvent::Blur => {
-                this.search_focused = false;
-                cx.notify();
-            }
+            InputEvent::Focus | InputEvent::Blur => cx.notify(),
         });
         (search, typed)
     }
@@ -693,10 +695,8 @@ impl Colet {
     /// Tab moves the keys between home's pane and the columns: the column worked in follows them. Into the
     /// columns they land where → would, past the folders folded above a favorite.
     /// What landing there opens, a folder picked as → would, is listed as → would list it.
-    pub fn follow_focus(&mut self, window: &Window, cx: &mut Context<Self>) {
+    fn follow_focus(&mut self, window: &Window, cx: &mut Context<Self>) {
         let (home, columns) = (self.home_focus.is_focused(window), self.columns_focus.is_focused(window));
-        self.keys_in_column = home || columns;
-        self.columns_marked = self.keys_in_column || self.keys_go_back_to_columns();
         if home && self.state.active != 0 {
             self.state.set_active(0);
         } else if columns && self.state.active == 0 && self.state.columns.len() > 1 {
@@ -1195,6 +1195,22 @@ impl Colet {
     /// What takes the keys for the column at `index`: home's pane, or the columns beside it.
     pub fn column_focus(&self, index: usize) -> &FocusHandle {
         if index == 0 { &self.home_focus } else { &self.columns_focus }
+    }
+
+    /// The search field has the keys, or its menu has them for it: no column is marked as worked in.
+    pub fn search_has_keys(&self, window: &Window, cx: &App) -> bool {
+        self.has_keys(&self.search, window, cx)
+    }
+
+    /// The keys are in home's pane or the columns: the column worked in rings its focused row.
+    pub fn keys_in_column(&self, window: &Window) -> bool {
+        self.home_focus.is_focused(window) || self.columns_focus.is_focused(window)
+    }
+
+    /// The keys are in the columns or home, or with a menu, dialog or the history that gives them back
+    /// there: the column worked in is framed and its selection lit. Elsewhere, it steps back.
+    pub fn columns_marked(&self, window: &Window) -> bool {
+        self.keys_in_column(window) || self.keys_go_back_to_columns()
     }
 
     /// A menu, dialog or the history holds the keys, and closing gives them back to the columns or home,

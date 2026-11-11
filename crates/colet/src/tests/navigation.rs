@@ -86,7 +86,7 @@ fn brings_the_folded_folders_out_with_ctrl_u_leaving_the_keys_be(cx: &mut TestAp
     ui.press(cx, "ctrl-f");
     ui.press(cx, "ctrl-u");
     assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
-    assert!(ui.read(cx, |v| v.search_focused));
+    assert!(ui.search_focused(cx));
 }
 
 #[gpui_kit::test]

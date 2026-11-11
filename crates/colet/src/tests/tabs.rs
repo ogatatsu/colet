@@ -68,7 +68,7 @@ fn opens_a_tab_of_home_alone_and_goes_back_to_the_one_before_as_it_was(cx: &mut 
     ui.press(cx, "ctrl-t");
     assert_eq!(ui.tabs(cx), (2, 1));
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 1);
-    assert!(ui.read(cx, |v| v.search_focused));
+    assert!(ui.search_focused(cx));
     ui.input(cx, "cat");
     assert_eq!(ui.field(cx), "cat");
     // Round from the end, back to the first, with its columns, its pick and its keys.
