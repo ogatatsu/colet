@@ -109,6 +109,12 @@ fn tool(id: ElementId, glyph: &'static str, label: String, enabled: bool) -> But
     Button::new(id).ghost().small().icon(crate::view::glyph(glyph)).accessibility_label(label.clone()).tooltip(label).disabled(!enabled)
 }
 
+/// The tool `tool` on the search filter `name`: named after the filter, not its place, so it goes with the
+/// filter as the list is put in another order, as its stop does.
+pub(crate) fn filter_tool_id(tool: &'static str, name: &str) -> ElementId {
+    ElementId::NamedChild(std::sync::Arc::new(tool.into()), SharedString::from(name.to_owned()))
+}
+
 /// A choice among the filters, checked as a radio button is.
 fn filter_choice(id: ElementId, text: &str, chosen: bool) -> Button {
     push(id, text.to_owned(), chosen, true).role(Role::RadioButton).toggled(chosen)
@@ -431,7 +437,7 @@ impl Colet {
                     // Their stops named after the filter, to go with it.
                     .child(
                         self.ringed(
-                            tool(("filter-up", i).into(), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
+                            tool(filter_tool_id("filter-up", &f.name), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
                                 .when(i > 0, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&up_name, -1, cx)))),
                             Stop::Filter(FilterTool::Up, f.name.clone()),
                             RingAt::Edge,
@@ -441,7 +447,7 @@ impl Colet {
                     )
                     .child(
                         self.ringed(
-                            tool(("filter-down", i).into(), "arrow-down", format!("「{}」を下へ", f.name), i < last)
+                            tool(filter_tool_id("filter-down", &f.name), "arrow-down", format!("「{}」を下へ", f.name), i < last)
                                 .when(i < last, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&down_name, 1, cx)))),
                             Stop::Filter(FilterTool::Down, f.name.clone()),
                             RingAt::Edge,
@@ -451,7 +457,7 @@ impl Colet {
                     )
                     .child(
                         self.ringed(
-                            tool(("filter-edit", i).into(), "pencil-line", format!("「{}」を編集", f.name), true)
+                            tool(filter_tool_id("filter-edit", &f.name), "pencil-line", format!("「{}」を編集", f.name), true)
                                 .on_click(cx.listener(move |this, _, window, cx| this.edit_filter(Some(edit_name.clone()), window, cx))),
                             Stop::Filter(FilterTool::Edit, f.name.clone()),
                             RingAt::Edge,
@@ -461,7 +467,7 @@ impl Colet {
                     )
                     .child(
                         self.ringed(
-                            tool(("filter-delete", i).into(), "trash", format!("「{}」を削除", f.name), true)
+                            tool(filter_tool_id("filter-delete", &f.name), "trash", format!("「{}」を削除", f.name), true)
                                 .on_click(cx.listener(move |this, _, window, cx| this.ask_delete_filter(name.clone(), window, cx))),
                             Stop::Filter(FilterTool::Delete, f.name.clone()),
                             RingAt::Edge,

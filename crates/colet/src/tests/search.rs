@@ -189,7 +189,7 @@ fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAp
     let names = |fake: &Fake| fake.settings.lock().unwrap().filters.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
     assert_eq!(names(&fake), ["画像", "動画"]);
     // A name taken cannot be had; Esc goes back to the list.
-    ui.click(cx, ("filter-edit", 1usize));
+    ui.click(cx, filter_tool_id("filter-edit", "動画"));
     ui.type_filter(cx, "画像", "ext:mp4");
     ui.click(cx, "save-filter");
     assert!(!listing(&ui, cx));
@@ -206,7 +206,7 @@ fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAp
     // Renamed and asking another query, what names it follows, and the results ask again.
     ui.click(cx, "search-filter");
     ui.click(cx, "edit-filters");
-    ui.click(cx, ("filter-edit", 0usize));
+    ui.click(cx, filter_tool_id("filter-edit", "画像"));
     ui.type_filter(cx, "写真", "ext:jpg");
     ui.click(cx, "save-filter");
     assert_eq!(names(&fake), ["写真", "動画"]);
@@ -215,10 +215,10 @@ fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAp
     assert_eq!(ui.read(cx, |v| v.state.search_filter.clone()).as_deref(), Some("写真"));
     assert_eq!(last_query(&fake), "<ext:jpg> <cat>");
     // Put in another order.
-    ui.click(cx, ("filter-down", 0usize));
+    ui.click(cx, filter_tool_id("filter-down", "写真"));
     assert_eq!(names(&fake), ["動画", "写真"]);
     // Asked about first, with the saved searches that use it counted; gone, they go without it.
-    ui.click(cx, ("filter-delete", 1usize));
+    ui.click(cx, filter_tool_id("filter-delete", "写真"));
     assert_eq!(ui.read(cx, |v| v.filter_users("写真")), 1);
     assert!(ui.read(cx, |v| matches!(v.overlays.dialog(), Some(Dialog::Filters { deleting: Some(name), .. }) if name == "写真")));
     ui.click(cx, "delete-filter");

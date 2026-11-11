@@ -29,6 +29,7 @@ use gpui_kit::{
 use crate::{
     app::Colet,
     backend::{Backend, PathKind, Search},
+    dialogs::filter_tool_id,
     loading::Engine,
     ops::ItemStatus,
     places::Dialog,
