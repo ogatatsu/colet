@@ -390,3 +390,16 @@ fn leaves_the_tabs_as_they_were_let_go_of_off_the_bar(cx: &mut TestAppContext) {
     assert_eq!(ui.tab_ids(cx), ids);
     assert_eq!(ui.tab_drag(cx), (None, None));
 }
+
+#[gpui_kit::test]
+fn leaves_the_tabs_as_they_were_let_go_of_off_the_window(cx: &mut TestAppContext) {
+    let ui = four_tabs(cx);
+    let ids = ui.tab_ids(cx);
+    let (from, to) = (ui.tab_bounds(cx, ids[0]), ui.tab_bounds(cx, ids[2]));
+    ui.hold_drag(cx, from.center(), right_of(to));
+    assert_eq!(ui.tab_drag(cx), (Some(ids[0]), Some(3)));
+    // The window keeps the pointer while a button is held, so it hears it let go of past its edge.
+    ui.let_go(cx, point(px(-40.), px(-40.)));
+    assert_eq!(ui.tab_ids(cx), ids);
+    assert_eq!(ui.tab_drag(cx), (None, None));
+}

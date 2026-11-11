@@ -234,17 +234,43 @@ impl Colet {
     }
 }
 
+impl Colet {
+    /// While a row in home or a tab is carried, puts it down as it is let go of anywhere but where it
+    /// lands, off the window too. Drawn first, so it hears the press let go of after every place the drag
+    /// can land; a landing puts the drag down itself and keeps it from hearing it.
+    fn drag_let_go(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.home_drag.carried.is_none() && self.tabs.drag.carried.is_none() {
+            return None;
+        }
+        let view = cx.entity().downgrade();
+        let listen = move |_: Bounds<Pixels>, _: (), window: &mut Window, _: &mut App| {
+            let view = view.clone();
+            window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble {
+                    view.update(cx, |this, cx| this.let_go_of_drags(cx)).ok();
+                }
+            });
+        };
+        Some(canvas(|_, _, _| {}, listen).absolute().size_0().into_any_element())
+    }
+
+    /// The drag in home or of a tab is let go of where it does not land: nothing has moved.
+    fn let_go_of_drags(&mut self, cx: &mut Context<Self>) {
+        if self.home_drag.carried.is_some() || self.tabs.drag.carried.is_some() {
+            self.end_home_drag();
+            self.end_tab_drag();
+            cx.notify();
+        }
+    }
+}
+
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // A drag in home let go of anywhere but its list.
-        if self.home_drag.carried.is_some() && !cx.has_active_drag() {
-            self.end_home_drag();
-        }
-        // And a tab's let go of off the tab bar.
-        if self.tabs.drag.carried.is_some() && !cx.has_active_drag() {
-            self.end_tab_drag();
-        }
         // The columns slide a frame at a time toward where the last frame's layout says they rest.
+        // Stepped here, not in prepaint or a next-frame callback, on purpose: the trail of folders and the
+        // edges' shades are built below from the offset this sets, so they move with the columns in the
+        // same frame, and folders coming out of a fold are shifted in the frame they first appear in.
+        // It never notifies; it asks for another frame only while a slide is under way.
         self.reveal(window);
         let p = self.palette;
         let tabbar = self.render_tabbar(window, cx);
@@ -333,6 +359,7 @@ impl Render for Colet {
                         }),
                     )
             })
+            .children(self.drag_let_go(cx))
             .child(tabbar)
             .child(toolbar)
             .child(pathbar)
