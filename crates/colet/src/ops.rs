@@ -13,7 +13,7 @@ use colet_core::{
     entry::Entry,
     operations::{CANCELLED, Event, Kind, Request},
     paths::{child, folder_name, is_server, parent_folder, path_key, shown},
-    shell::Dropped,
+    shell::{Dropped, SendTarget},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -21,6 +21,7 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, Tone},
     backend::PathKind,
+    clipboard::Clipboard,
     places::Dialog,
     settings::Favorite,
     state::{Column, ColumnId, HomeKey, Kind as ColumnKind},
@@ -177,6 +178,124 @@ impl HistoryEntry {
     }
 }
 
+/// The file operations and what they leave behind, owned by the window: the one under way and the sends to
+/// Windows' Send To, the history, the clipboard as last read, what Send To offers, and what the latest
+/// operation sent away. Colet starts and ends them; this keeps their bookkeeping consistent.
+#[derive(Default)]
+pub struct Operations {
+    /// The file operation under way; they go one at a time.
+    running: Option<Running>,
+    /// The sends to Windows' Send To under way: their drops run in this process, so the window stays
+    /// until each returns.
+    sending: usize,
+    history: History,
+    clipboard: Clipboard,
+    /// What Windows' Send To offers, as last read: none until it is.
+    send_targets: Vec<SendTarget>,
+    /// What the latest operation sent away, by path key: a listing that finds it gone takes it as Colet's
+    /// own doing.
+    departed: HashSet<OsString>,
+}
+
+impl Operations {
+    /// A file operation is under way.
+    pub fn is_running(&self) -> bool {
+        self.running.is_some()
+    }
+
+    /// A send to Windows' Send To is under way.
+    pub fn is_sending(&self) -> bool {
+        self.sending > 0
+    }
+
+    pub fn history(&self) -> &History {
+        &self.history
+    }
+
+    pub fn history_mut(&mut self) -> &mut History {
+        &mut self.history
+    }
+
+    pub fn clipboard(&self) -> &Clipboard {
+        &self.clipboard
+    }
+
+    pub fn clipboard_mut(&mut self) -> &mut Clipboard {
+        &mut self.clipboard
+    }
+
+    pub fn send_targets(&self) -> &[SendTarget] {
+        &self.send_targets
+    }
+
+    /// Takes what Send To offers as read; tells whether it changed.
+    pub fn set_send_targets(&mut self, targets: Vec<SendTarget>) -> bool {
+        let changed = targets != self.send_targets;
+        if changed {
+            self.send_targets = targets;
+        }
+        changed
+    }
+
+    /// What the latest operation sent away, by path key.
+    pub fn departed(&self) -> &HashSet<OsString> {
+        &self.departed
+    }
+
+    /// Starts `request` in tab `tab`, kept at the top of the history: the channel its items' ends come
+    /// through. `None` while another runs.
+    fn begin(&mut self, request: &Request, tab: crate::tabs::TabId) -> Option<OperationEvents> {
+        if self.running.is_some() {
+            return None;
+        }
+        let id = self.history.start(request.clone());
+        self.departed.clear();
+        let events = OperationEvents::default();
+        self.running = Some(Running { id, tab, events: events.clone(), made: None, placed: Vec::new() });
+        Some(events)
+    }
+
+    /// Takes in how the items of the running operation ended so far; tells whether any did.
+    pub fn take_events(&mut self) -> bool {
+        let Some(running) = &mut self.running else { return false };
+        let events = std::mem::take(&mut *running.events.lock().unwrap());
+        if events.is_empty() {
+            return false;
+        }
+        let mut entry = self.history.entry_mut(running.id);
+        for event in events {
+            match &event {
+                Event::Done { path } => running.made = Some(path.clone()),
+                // A copy's source stays: only what left is expected to go from its listing.
+                Event::Left { path } => {
+                    self.departed.insert(path_key(path));
+                }
+                // What the shell writes out on its own is picked by its name once it is listed.
+                Event::Placed { path } | Event::Handed { path } => running.placed.push(path.clone()),
+                _ => {}
+            }
+            if let Some(entry) = &mut entry {
+                entry.record(event);
+            }
+        }
+        true
+    }
+
+    /// The running operation over: the last of its items' ends taken in, it is let go of.
+    fn end(&mut self) -> Option<Running> {
+        self.take_events();
+        self.running.take()
+    }
+
+    fn send_started(&mut self) {
+        self.sending += 1;
+    }
+
+    fn send_ended(&mut self) {
+        self.sending -= 1;
+    }
+}
+
 /// The file operations run since Colet opened, and how the history shows them.
 #[derive(Default)]
 pub struct History {
@@ -330,7 +449,7 @@ impl Colet {
 
         // What works on the items picked needs some, and not in home or a server's shares.
         let item = none.then_some(NEEDS_SELECTION).or(at_home.then_some(NOT_AT_HOME)).or(at_server.then_some(NOT_AT_SERVER));
-        let busy = self.running.is_some().then_some(BUSY);
+        let busy = self.operations.is_running().then_some(BUSY);
         // What works on a place: with nothing picked, the folder column's own folder; else the items', all
         // in one folder.
         let place = if none { self.folder_here().is_none().then_some(NEEDS_FOLDER) } else { apart.then_some(SAME_FOLDER) };
@@ -346,7 +465,7 @@ impl Colet {
             // With nothing picked, the folder column's own folder.
             copy_path: if none { place } else { None },
             // From several folders too, as a drag from them.
-            send_to: item.or(drive.then_some(NO_SEND_DRIVE)).or(self.send_targets.is_empty().then_some(NO_SEND_TARGETS)),
+            send_to: item.or(drive.then_some(NO_SEND_DRIVE)).or(self.operations.send_targets().is_empty().then_some(NO_SEND_TARGETS)),
             // Only looked at: in home and while an operation runs too, and from several folders. With
             // nothing picked, the folder column's own folder, a server's not.
             properties: if none {
@@ -382,7 +501,7 @@ impl Colet {
     /// Puts something on the clipboard off the UI thread; a paste asked for meanwhile waits for it, so it
     /// never pastes what was there before.
     fn write_clipboard(&mut self, work: impl FnOnce() -> Result<(), String> + Send + 'static, done: String, cx: &mut Context<Self>) {
-        let (which, result) = self.clipboard.write(work);
+        let (which, result) = self.operations.clipboard_mut().write(work);
         // A lane that stopped, as after a write panicked, never says.
         let task = cx
             .background_executor()
@@ -395,7 +514,7 @@ impl Colet {
                     Ok(()) => this.notify(done, Tone::Info, cx),
                     Err(error) => this.notify(error, Tone::Error, cx),
                 }
-                if let Some(destination) = this.clipboard.write_ended(which, written) {
+                if let Some(destination) = this.operations.clipboard_mut().write_ended(which, written) {
                     this.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
                 }
             })
@@ -437,7 +556,7 @@ impl Colet {
             Some(reason) => self.refuse("貼り付け", reason, cx),
             None => {
                 let destination = self.destination().unwrap_or_default();
-                if let Some(destination) = self.clipboard.paste_into(destination) {
+                if let Some(destination) = self.operations.clipboard_mut().paste_into(destination) {
                     self.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
                 }
             }
@@ -745,8 +864,7 @@ impl Colet {
         cx.spawn_in(window, async move |this, cx| {
             let targets = task.await;
             this.update_in(cx, |this, window, cx| {
-                if targets != this.send_targets {
-                    this.send_targets = targets;
+                if this.operations.set_send_targets(targets) {
                     if this.menu().is_some() {
                         this.show_menu(window, cx);
                     }
@@ -770,15 +888,20 @@ impl Colet {
             self.refuse("送る", reason, cx);
             return;
         }
-        let name = self.send_targets.iter().find(|t| t.path == target).map_or_else(|| shown(folder_name(&target)), |t| t.name.clone());
+        let name = self
+            .operations
+            .send_targets()
+            .iter()
+            .find(|t| t.path == target)
+            .map_or_else(|| shown(folder_name(&target)), |t| t.name.clone());
         let paths: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
         let (backend, owner) = (self.backend.clone(), self.owner);
         let task = cx.background_executor().spawn(async move { backend.send_to(&target, &paths, shift, owner) });
-        self.sending += 1;
+        self.operations.send_started();
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
-                this.sending -= 1;
+                this.operations.send_ended();
                 match result {
                     Ok(Dropped::Refused) => this.notify(format!("「{name}」は受け付けませんでした"), Tone::Info, cx),
                     Ok(_) => {}
@@ -794,14 +917,11 @@ impl Colet {
 
     /// Runs one file operation and keeps it in the history; a second waits for none, it is refused.
     pub fn run(&mut self, request: Request, cx: &mut Context<Self>) {
-        if self.running.is_some() {
+        let tab = self.current_tab();
+        let Some(events) = self.operations.begin(&request, tab) else {
             self.refuse(request.kind.title(), BUSY, cx);
             return;
-        }
-        let id = self.history.start(request.clone());
-        self.departed.clear();
-        let events = OperationEvents::default();
-        self.running = Some(Running { id, tab: self.current_tab(), events: events.clone(), made: None, placed: Vec::new() });
+        };
         cx.notify();
         let (backend, owner, asked) = (self.backend.clone(), self.owner, request.clone());
         cx.spawn(async move |this, cx| {
@@ -822,7 +942,7 @@ impl Colet {
                         Some(_) => &[],
                         // Unread, as while another app holds it: the paste reads it again, and most likely
                         // fails as this did.
-                        None if this.clipboard.files.cut => this.clipboard.files.paths.as_slice(),
+                        None if this.operations.clipboard().files.cut => this.operations.clipboard().files.paths.as_slice(),
                         None => &[],
                     },
                     Kind::NewFolder => &[],
@@ -844,32 +964,6 @@ impl Colet {
             this.update(cx, |this, cx| this.finished(request, result, cx)).ok();
         })
         .detach();
-    }
-
-    /// Takes in how the items of the running operation ended so far.
-    pub fn take_operation_events(&mut self) -> bool {
-        let Some(running) = &mut self.running else { return false };
-        let events = std::mem::take(&mut *running.events.lock().unwrap());
-        if events.is_empty() {
-            return false;
-        }
-        let mut entry = self.history.entry_mut(running.id);
-        for event in events {
-            match &event {
-                Event::Done { path } => running.made = Some(path.clone()),
-                // A copy's source stays: only what left is expected to go from its listing.
-                Event::Left { path } => {
-                    self.departed.insert(path_key(path));
-                }
-                // What the shell writes out on its own is picked by its name once it is listed.
-                Event::Placed { path } | Event::Handed { path } => running.placed.push(path.clone()),
-                _ => {}
-            }
-            if let Some(entry) = &mut entry {
-                entry.record(event);
-            }
-        }
-        true
     }
 
     /// Home's favorites and pins at `from` or inside it, whatever their case, move to `to`; a narrowed
@@ -909,8 +1003,7 @@ impl Colet {
     }
 
     fn finished(&mut self, request: Request, result: Result<(), String>, cx: &mut Context<Self>) {
-        self.take_operation_events();
-        let Some(Running { id, tab, made, placed: pasted, .. }) = self.running.take() else { return };
+        let Some(Running { id, tab, made, placed: pasted, .. }) = self.operations.end() else { return };
         // Watched again by the refresh below, which lists what changed while they were not.
         self.watching.released.clear();
         let Request { kind, paths, destination, name } = request;
@@ -945,8 +1038,8 @@ impl Colet {
                 state.created(&destination, &made.unwrap_or_else(|| child(&destination, &name)));
             }
         }
-        let Some(index) = self.history.entries.iter().position(|e| e.id == id) else { return };
-        let entry = &mut self.history.entries[index];
+        let Some(index) = self.operations.history().entries.iter().position(|e| e.id == id) else { return };
+        let entry = &mut self.operations.history_mut().entries[index];
         let counts = entry.item_problems();
         // A cut pasted where it already was moved nothing, and a deletion turned down at the shell's
         // question deleted nothing: no trace, as in Explorer.
@@ -956,7 +1049,7 @@ impl Colet {
             && entry.more == 0
             && entry.items.iter().all(|i| i.status == ItemStatus::Cancelled);
         if moved_nothing || declined {
-            self.history.entries.remove(index);
+            self.operations.history_mut().entries.remove(index);
         } else {
             // Told where it went, the item already says so.
             if let Some(to) = renamed.filter(|_| !told)
@@ -976,7 +1069,7 @@ impl Colet {
         }
         let problem = if counts.is_empty() { problem } else { Some(counts.join("・")) };
         if let Some(problem) = problem {
-            self.history.unseen += 1;
+            self.operations.history_mut().unseen += 1;
             self.notify_entry(format!("「{}」: {problem}", kind.title()), id, cx);
         }
         // Like Explorer, what was pasted is picked once listed, under the names it got.
@@ -992,11 +1085,11 @@ impl Colet {
 
     /// Opened, the history has been seen; closed, the keys go back to where they were as it opened.
     pub fn show_history(&mut self, open: bool, entry: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
-        let was_open = self.history.open;
+        let was_open = self.operations.history().open;
         if open && !was_open {
             self.remember_keys(window, cx);
         }
-        self.history.set_open(open, entry);
+        self.operations.history_mut().set_open(open, entry);
         if !open && was_open {
             self.restore_keys(window, cx);
         }
@@ -1006,7 +1099,7 @@ impl Colet {
     /// Only what is still there: an item moved on or deleted since says so. Whether it is, is asked off the UI
     /// thread, as a share can keep it waiting.
     pub fn reveal_from_history(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        self.history.revealing = Some(path.clone());
+        self.operations.history_mut().revealing = Some(path.clone());
         let backend = self.backend.clone();
         let asked = {
             let path = path.clone();
@@ -1022,11 +1115,11 @@ impl Colet {
     /// The answer for the item last pressed in the history, while the history is still open: another pressed
     /// since, or the history closed, has moved on from it.
     fn history_item_found(&mut self, path: PathBuf, kind: PathKind, window: &mut Window, cx: &mut Context<Self>) {
-        if self.history.revealing.as_ref() != Some(&path) {
+        if self.operations.history().revealing.as_ref() != Some(&path) {
             return;
         }
-        self.history.revealing = None;
-        if !self.history.open {
+        self.operations.history_mut().revealing = None;
+        if !self.operations.history().open {
             return;
         }
         match kind {

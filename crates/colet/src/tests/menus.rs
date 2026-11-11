@@ -226,7 +226,7 @@ fn keeps_the_window_while_a_send_runs(cx: &mut TestAppContext) {
     send_targets(&fake);
     let close = |cx: &mut TestAppContext| ui.view.update(cx, |v, cx| v.may_close(cx));
     ui.view.update(cx, |v, cx| {
-        v.send_targets = fake.send_targets();
+        v.operations.set_send_targets(fake.send_targets());
         v.send_to(r"C:\SendTo\USB.lnk".into(), false, cx);
     });
     // Its drop runs in this process: closing now would cut it off.
@@ -504,9 +504,9 @@ fn closes_the_menus_from_the_buttons_that_opened_them(cx: &mut TestAppContext) {
     ui.press_and_release(cx, "search-filter");
     assert!(!ui.read(cx, |v| v.filter_open()));
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| v.history.open));
+    assert!(ui.read(cx, |v| v.operations.history().open));
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| !v.history.open));
+    assert!(ui.read(cx, |v| !v.operations.history().open));
     assert!(ui.columns_focused(cx));
     // Pressed once more, each opens again.
     ui.press_and_release(cx, "sort");

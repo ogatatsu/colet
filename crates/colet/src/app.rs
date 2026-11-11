@@ -36,11 +36,10 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use crate::{
     address::Address,
     backend::{self, Search},
-    clipboard::Clipboard,
     crumbs::Trail,
     icons::Icons,
     menus::Popup,
-    ops::{History, Running},
+    ops::Operations,
     places::{Dialog, HomeDragging, home_entries, home_groups},
     reveal::Sideways,
     settings::{self, File, LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
@@ -462,9 +461,6 @@ pub struct Colet {
     /// written as the settings are.
     pub sorts: Sorts,
     pub(crate) sorts_saves: Saves<Sorts>,
-    /// What the latest operation sent away, by path key: a listing that finds it gone takes it as
-    /// Colet's own doing.
-    pub(crate) departed: HashSet<OsString>,
     pub dialog: Option<Dialog>,
     /// What the open dialog listens to, its fields: let go of by [`Colet::begin_dialog`] and on closing.
     pub(crate) dialog_subscriptions: Vec<Subscription>,
@@ -491,17 +487,10 @@ pub struct Colet {
     pub crumbs: Trail,
     /// Where the focused row of the active column was drawn, for the menu key.
     pub focused_row: Rc<Cell<Option<Bounds<Pixels>>>>,
-    /// The file operation under way; they go one at a time.
-    pub running: Option<Running>,
-    /// The sends to Windows' Send To under way: their drops run in this process, so the window stays
-    /// until each returns.
-    pub sending: usize,
+    /// The file operations, the history and the clipboard.
+    pub operations: Operations,
     /// The settings could not be written as the window closed: the next close goes without them.
     pub(crate) unsaved_close: bool,
-    pub history: History,
-    pub clipboard: Clipboard,
-    /// What Windows' Send To offers, as last read: none until it is.
-    pub send_targets: Vec<shell::SendTarget>,
     /// What QuickLook was last told to show: a preview open follows the keys from it.
     quick_looked: Option<PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -572,7 +561,6 @@ impl Colet {
             settings_saves,
             sorts,
             sorts_saves,
-            departed: HashSet::new(),
             dialog: None,
             dialog_subscriptions: Vec::new(),
             dialog_focus: cx.focus_handle(),
@@ -587,12 +575,8 @@ impl Colet {
             keys_before: None,
             pressed_open: false,
             focused_row: Default::default(),
-            running: None,
-            sending: 0,
             unsaved_close: false,
-            history: History::default(),
-            clipboard: Clipboard::default(),
-            send_targets: Vec::new(),
+            operations: Operations::default(),
             quick_looked: None,
             _subscriptions: subscriptions,
         };
@@ -625,7 +609,7 @@ impl Colet {
         this.sync_narrow_fields(window, cx);
         this.scroll_rows();
         crate::theme::apply(window, this.settings.theme, cx);
-        let changed = this.clipboard.changed_flag();
+        let changed = this.operations.clipboard().changed_flag();
         this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
         this.load_send_targets(window, cx);
         this.search.update(cx, |input, cx| input.focus(window, cx));
@@ -653,11 +637,11 @@ impl Colet {
     /// Whether the window may close: not while a file operation or a send runs. The settings are written at once,
     /// rather than a moment after the last change; when that fails, the next close goes without them.
     pub(crate) fn may_close(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.running.is_some() {
+        if self.operations.is_running() {
             self.notify("ファイル操作中です。完了を待つか、進捗ダイアログでキャンセルしてから閉じてください。", Tone::Info, cx);
             return false;
         }
-        if self.sending > 0 {
+        if self.operations.is_sending() {
             self.notify("「送る」の処理中です。完了を待ってから閉じてください。", Tone::Info, cx);
             return false;
         }
@@ -896,7 +880,7 @@ impl Colet {
                 if let Some(whole) = whole {
                     self.state.counted(id, request, whole);
                 }
-                self.state.page(id, request, entries, total, offset, &self.departed);
+                self.state.page(id, request, entries, total, offset, self.operations.departed());
                 // What the listing showed held in another case than the disk's, as a favorite kept from
                 // before a rename elsewhere, is kept in the disk's from now on.
                 for (from, to) in std::mem::take(&mut self.state.respelled) {
@@ -1119,20 +1103,20 @@ impl Colet {
     /// clipboard now holds.
     fn take_changes(&mut self, cx: &mut Context<Self>) {
         self.take_missed(cx);
-        if self.take_operation_events() {
+        if self.operations.take_events() {
             cx.notify();
         }
-        if self.clipboard.take_changed() {
+        if self.operations.clipboard().take_changed() {
             let backend = self.backend.clone();
             let read = cx.background_executor().spawn(async move { backend.clipboard_files() });
             cx.spawn(async move |this, cx| {
                 // None while another app holds it: try again next time.
                 match read.await {
                     Some(files) => this.update(cx, |this, cx| {
-                        this.clipboard.set_files(files);
+                        this.operations.clipboard_mut().set_files(files);
                         cx.notify();
                     }),
-                    None => this.update(cx, |this, _| this.clipboard.read_again()),
+                    None => this.update(cx, |this, _| this.operations.clipboard().read_again()),
                 }
                 .ok();
             })
@@ -1216,7 +1200,7 @@ impl Colet {
     /// A menu, dialog or the history holds the keys, and closing gives them back to the columns or home,
     /// as [`Colet::restore_keys`] does.
     fn keys_go_back_to_columns(&self) -> bool {
-        (self.menu_view.is_some() || self.dialog.is_some() || self.history.open)
+        (self.menu_view.is_some() || self.dialog.is_some() || self.operations.history().open)
             && self
                 .keys_before
                 .as_ref()
@@ -1226,14 +1210,14 @@ impl Colet {
 
     /// A menu, dialog or the history holds the keys, and closing gives them back to `focus`.
     pub(crate) fn keys_go_back_to(&self, focus: &FocusHandle) -> bool {
-        (self.menu_view.is_some() || self.dialog.is_some() || self.history.open)
+        (self.menu_view.is_some() || self.dialog.is_some() || self.operations.history().open)
             && self.keys_before.as_ref().and_then(|before| before.upgrade()).is_some_and(|before| before == *focus)
     }
 
     /// A menu, dialog or the history opening: where the keys are now is where they go back to as it closes.
     /// One opened from another leaves it as the first found it.
     pub(crate) fn remember_keys(&mut self, window: &Window, cx: &App) {
-        if self.menu_view.is_none() && self.dialog.is_none() && !self.history.open {
+        if self.menu_view.is_none() && self.dialog.is_none() && !self.operations.history().open {
             self.keys_before = window.focused(cx).map(|focus| focus.downgrade());
         }
     }

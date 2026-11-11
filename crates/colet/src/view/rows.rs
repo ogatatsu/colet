@@ -90,8 +90,8 @@ impl Colet {
                     && filter == self.state.search_filter.as_deref()
                     && narrow == self.state.search_narrowing().as_deref());
         // On the clipboard, cut or copied, whoever put it there.
-        let held = self.clipboard.holds(&entry.path);
-        let cut = held && self.clipboard.files.cut;
+        let held = self.operations.clipboard().holds(&entry.path);
+        let cut = held && self.operations.clipboard().files.cut;
         // The menu acts on a row outside the selection, or the folder itself: the selection steps back, so
         // only what the menu acts on stands out.
         let aside = self.menu().is_some_and(|m| m.column == c.id && m.paths.is_some());

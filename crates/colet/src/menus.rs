@@ -390,7 +390,7 @@ impl Colet {
             }
         };
         // Each item of Windows' Send To, by the shell's icon for it.
-        let targets = self.send_targets.iter().enumerate().map(|(i, target)| {
+        let targets = self.operations.send_targets().iter().enumerate().map(|(i, target)| {
             let command = Command::SendTo { target: target.path.clone(), shift: false };
             Line { picture: Some(IconSource::Item(target.path.clone())), ..choice(("send-to", i), target.name.clone(), command, false) }
         });
@@ -574,7 +574,7 @@ impl Colet {
         if let Some(Popup::Text(menu)) = &popup {
             menu.input.update(cx, |input, cx| input.set_selection_focus(None, cx));
         }
-        let within = self.dialog.is_some() || self.history.open;
+        let within = self.dialog.is_some() || self.operations.history().open;
         match popup {
             Some(Popup::Text(menu)) if restore && within => menu.input.update(cx, |input, cx| input.focus(window, cx)),
             _ if restore && !within => self.restore_keys(window, cx),
