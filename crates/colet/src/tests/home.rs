@@ -42,7 +42,7 @@ fn keeps_a_folder_narrowed_as_a_favorite_of_its_own_and_opens_it_narrowed(cx: &m
     ui.click(cx, ("star", work));
     // Narrowed, the star is another favorite's, kept with the narrowing as it would be typed again.
     ui.input(cx, "  pdf  ");
-    let kept = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.settings.is_favorite(&v.favorite_key_of(2)));
+    let kept = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.stored.settings().is_favorite(&v.favorite_key_of(2)));
     assert!(!kept(&ui, cx));
     ui.click(cx, ("star", work));
     assert!(kept(&ui, cx));

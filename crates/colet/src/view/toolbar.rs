@@ -137,10 +137,10 @@ impl Colet {
     /// the actions are, and whether the hidden items show.
     pub(super) fn view_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let sort = self.settings.sort;
+        let sort = self.stored.settings().sort;
         let sort_focused = self.sort_focus.is_focused(window);
         // Pressed while the hidden items show.
-        let show = self.settings.show_hidden;
+        let show = self.stored.settings().show_hidden;
         let hidden = Self::icon_button(
             "show-hidden",
             if show { "eye" } else { "eye-off" },

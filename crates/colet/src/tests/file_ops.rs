@@ -77,7 +77,7 @@ fn follows_a_rename_to_the_name_the_shell_gave_not_the_one_asked(cx: &mut TestAp
     let request = Request { kind: Operation::Rename, paths: vec![r"D:\work".into()], destination: r"D:\".into(), name: "job".into() };
     ui.view.update(cx, |v, cx| v.run(request, cx));
     settle(cx);
-    assert_eq!(ui.read(cx, |v| v.settings.favorites.clone()), [Favorite::new(r"D:\job (2)")]);
+    assert_eq!(ui.read(cx, |v| v.stored.settings().favorites.clone()), [Favorite::new(r"D:\job (2)")]);
     // It stays picked, and its column open, under that name.
     assert_eq!(ui.selected(cx, 1), [r"D:\job (2)"]);
     assert_eq!(ui.read(cx, |v| text(&v.state.columns[2].path)), r"D:\job (2)");
@@ -92,7 +92,7 @@ fn a_favorite_kept_in_another_case_follows_a_rename(cx: &mut TestAppContext) {
     let request = Request { kind: Operation::Rename, paths: vec![r"D:\work".into()], destination: r"D:\".into(), name: "job".into() };
     ui.view.update(cx, |v, cx| v.run(request, cx));
     settle(cx);
-    assert_eq!(ui.read(cx, |v| v.settings.favorites.clone()), [Favorite::new(r"D:\job\Sub")]);
+    assert_eq!(ui.read(cx, |v| v.stored.settings().favorites.clone()), [Favorite::new(r"D:\job\Sub")]);
 }
 
 #[gpui_kit::test]

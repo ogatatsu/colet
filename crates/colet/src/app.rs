@@ -46,6 +46,7 @@ use crate::{
     settings::{self, File, LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
+    stored::Stored,
     tabs::Tabs,
     theme::Palette,
     watching::Watching,
@@ -456,12 +457,8 @@ pub struct Colet {
     listings: Listings,
     pub(crate) watching: Watching,
     search_refresh: SearchRefresh,
-    pub settings: Settings,
-    pub(crate) settings_saves: Saves<Settings>,
-    /// The orders the columns are given apart from `settings.sort`, kept in a file of their own and
-    /// written as the settings are.
-    pub sorts: Sorts,
-    pub(crate) sorts_saves: Saves<Sorts>,
+    /// The settings and the columns' own orders, as kept between starts.
+    pub stored: Stored,
     /// Home's list, for its scrollbar.
     pub home_scroll: ScrollHandle,
     pub home_drag: HomeDragging,
@@ -476,8 +473,6 @@ pub struct Colet {
     pub focused_row: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The file operations, the history and the clipboard.
     pub operations: Operations,
-    /// The settings could not be written as the window closed: the next close goes without them.
-    pub(crate) unsaved_close: bool,
     /// What QuickLook was last told to show: a preview open follows the keys from it.
     quick_looked: Option<PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -544,10 +539,7 @@ impl Colet {
             listings: Listings::default(),
             watching: Watching::default(),
             search_refresh: SearchRefresh::default(),
-            settings,
-            settings_saves,
-            sorts,
-            sorts_saves,
+            stored: Stored::new(settings, settings_saves, sorts, sorts_saves),
             home_scroll: ScrollHandle::new(),
             home_drag: HomeDragging::default(),
             stops: RefCell::default(),
@@ -555,7 +547,6 @@ impl Colet {
             crumbs: Trail::default(),
             overlays: Overlays::new(cx),
             focused_row: Default::default(),
-            unsaved_close: false,
             operations: Operations::default(),
             quick_looked: None,
             _subscriptions: subscriptions,
@@ -588,7 +579,7 @@ impl Colet {
         }));
         this.sync_narrow_fields(window, cx);
         this.scroll_rows();
-        crate::theme::apply(window, this.settings.theme, cx);
+        crate::theme::apply(window, this.stored.settings().theme, cx);
         let changed = this.operations.clipboard().changed_flag();
         this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
         this.load_send_targets(window, cx);
@@ -625,13 +616,13 @@ impl Colet {
             self.notify("「送る」の処理中です。完了を待ってから閉じてください。", Tone::Info, cx);
             return false;
         }
-        if self.unsaved_close {
+        if self.stored.is_unsaved_close() {
             return true;
         }
         match self.flush_settings() {
             Ok(()) => true,
             Err(error) => {
-                self.unsaved_close = true;
+                self.stored.give_up_saving_on_close();
                 self.notify(format!("{error}。もう一度閉じると、設定を保存せずに終了します。"), Tone::Error, cx);
                 false
             }
@@ -640,8 +631,8 @@ impl Colet {
 
     /// Takes the colors the theme now gives, in the fields too, the dialog's among them.
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
-        self.palette = Palette::for_window(window, self.settings.theme);
-        crate::theme::apply(window, self.settings.theme, cx);
+        self.palette = Palette::for_window(window, self.stored.settings().theme);
+        crate::theme::apply(window, self.stored.settings().theme, cx);
         let mut inputs = vec![self.search.clone(), self.address.field.clone()];
         inputs.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         inputs.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
@@ -815,12 +806,11 @@ impl Colet {
         let backend = self.backend.clone();
         let task: Task<Listing> = match c.kind {
             Kind::Home => {
-                let settings = self.settings.clone();
-                cx.background_executor()
-                    .spawn(async move { Ok(Listed::all(home_entries(&settings, backend.roots()))) })
+                let settings = self.stored.settings().clone();
+                cx.background_executor().spawn(async move { Ok(Listed::all(home_entries(&settings, backend.roots()))) })
             }
             Kind::Search => {
-                let filter = self.state.search_filter.as_deref().and_then(|name| self.settings.filter_query(name));
+                let filter = self.state.search_filter.as_deref().and_then(|name| self.stored.settings().filter_query(name));
                 let whole = everything_query(&self.state.query, filter);
                 // Narrowed, the search is counted without it too, along with the first page.
                 let (query, whole) = match &c.narrow {
@@ -895,19 +885,19 @@ impl Colet {
 
     /// Which hidden items the folders list, as the settings say.
     pub fn showing(&self) -> Showing {
-        Showing { hidden: self.settings.show_hidden, protected: self.settings.show_protected }
+        Showing { hidden: self.stored.settings().show_hidden, protected: self.stored.settings().show_protected }
     }
 
     /// The folders list their hidden items, or leave them out, in every tab and from now on.
     pub fn toggle_hidden(&mut self, cx: &mut Context<Self>) {
-        let show = !self.settings.show_hidden;
+        let show = !self.stored.settings().show_hidden;
         self.update_settings(|s| s.show_hidden = show, cx);
         self.follow_showing(cx);
     }
 
     /// The protected operating system files show along with the hidden items, or stay out even then.
     pub fn toggle_protected(&mut self, cx: &mut Context<Self>) {
-        let show = !self.settings.show_protected;
+        let show = !self.stored.settings().show_protected;
         self.update_settings(|s| s.show_protected = show, cx);
         self.follow_showing(cx);
     }
@@ -944,15 +934,15 @@ impl Colet {
 
     /// The order the column `c` is listed in: its own, or the default.
     pub fn order_of(&self, c: &Column) -> Order {
-        self.own_order(c).unwrap_or(self.settings.sort)
+        self.own_order(c).unwrap_or(self.stored.settings().sort)
     }
 
     /// The order the column `c` is given apart from the default: its folder's, or the search results'.
     pub fn own_order(&self, c: &Column) -> Option<Order> {
         match c.kind {
             Kind::Home => None,
-            Kind::Search => self.sorts.search,
-            Kind::Folder => self.sorts.folder(&c.path),
+            Kind::Search => self.stored.sorts().search,
+            Kind::Folder => self.stored.sorts().folder(&c.path),
         }
     }
 
@@ -960,7 +950,7 @@ impl Colet {
     fn order_for(&self, target: Option<ColumnId>) -> Order {
         match target.and_then(|id| self.state.index_of(id)) {
             Some(index) => self.order_of(&self.state.columns[index]),
-            None => self.settings.sort,
+            None => self.stored.settings().sort,
         }
     }
 
@@ -992,10 +982,10 @@ impl Colet {
         };
         let before = orders(self);
         match target.and_then(|id| self.state.index_of(id)) {
-            None if target.is_none() && order != self.settings.sort => self.update_settings(|s| s.sort = order, cx),
+            None if target.is_none() && order != self.stored.settings().sort => self.update_settings(|s| s.sort = order, cx),
             Some(index) => {
                 let c = &self.state.columns[index];
-                let own = (order != self.settings.sort).then_some(order);
+                let own = (order != self.stored.settings().sort).then_some(order);
                 if own != self.own_order(c) {
                     let (kind, path) = (c.kind, c.path.clone());
                     self.update_sorts(
@@ -1542,7 +1532,7 @@ impl Colet {
             let Some(index) = c.entries.iter().position(|e| &e.path == path) else { continue };
             if c.kind == Kind::Home {
                 let mut row = 0;
-                for (_, entries) in home_groups(&self.settings, &c.entries) {
+                for (_, entries) in home_groups(self.stored.settings(), &c.entries) {
                     row += 1; // The heading is a child of the same scroll container.
                     if let Some(at) = entries.iter().position(|e| &e.path == path) {
                         self.home_scroll.scroll_to_item(row + at);

@@ -260,7 +260,7 @@ impl Colet {
         let p = self.palette;
         // The saved search's choice of filter, none first.
         let choices: Vec<Option<String>> =
-            std::iter::once(None).chain(self.settings.filters.iter().map(|f| Some(f.name.clone()))).collect();
+            std::iter::once(None).chain(self.stored.settings().filters.iter().map(|f| Some(f.name.clone()))).collect();
         let problem = self.edit_problem(cx);
         let chosen = filter.clone();
         let content = div()
@@ -396,7 +396,7 @@ impl Colet {
     /// The search filters, in their order.
     fn filters_dialog(&self, window: &Window, cx: &mut Context<Self>) -> (Div, Buttons) {
         let p = self.palette;
-        let filters = self.settings.filters.clone();
+        let filters = self.stored.settings().filters.clone();
         let last = filters.len().saturating_sub(1);
         let rows: Vec<AnyElement> = filters
             .into_iter()
@@ -518,7 +518,7 @@ impl Colet {
                 // Ringed as the fields are; the rings' room makes up most of the gaps.
                 div().id("themes").flex().gap(px(2.)).role(Role::RadioGroup).aria_label("テーマ").children(themes.into_iter().map(
                     |theme| {
-                        let chosen = self.settings.theme == theme;
+                        let chosen = self.stored.settings().theme == theme;
                         // The mouse leaves the keys where they are, but within the group they go with the
                         // pick, as with a radio group's checked one, so the ring does not stay on the last.
                         let button = push(("theme", theme as usize), theme.label(), chosen, true)
@@ -546,7 +546,7 @@ impl Colet {
                     .child(
                         Checkbox::new("show-protected")
                             .label("保護されたシステムファイルも表示する")
-                            .checked(self.settings.show_protected)
+                            .checked(self.stored.settings().show_protected)
                             .on_click(move |_, _, cx| {
                                 colet.update(cx, |this, cx| this.toggle_protected(cx)).ok();
                             }),

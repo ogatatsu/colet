@@ -145,9 +145,10 @@ impl Colet {
         let path = entry.path.clone();
         // A pinned row, favorite or saved search moves among its kind by dragging; it fades where it was meanwhile.
         // Narrowed, home hides some of its kind, and where among them it would land is not to be seen.
-        let drag = (kind == Kind::Home && c.narrow.is_none()).then(|| movable(&self.settings, &entry.path)).flatten().map(|shelf| {
-            (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_drag.rows.clone(), cx.entity().downgrade())
-        });
+        let drag =
+            (kind == Kind::Home && c.narrow.is_none()).then(|| movable(self.stored.settings(), &entry.path)).flatten().map(|shelf| {
+                (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_drag.rows.clone(), cx.entity().downgrade())
+            });
         let name = entry.name.clone();
         let picture = match (saved, image) {
             (true, _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
@@ -448,7 +449,7 @@ impl Colet {
     pub(super) fn home_rows(&mut self, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let entries = self.state.columns[0].entries.clone();
-        let groups = crate::places::home_groups(&self.settings, &entries);
+        let groups = crate::places::home_groups(self.stored.settings(), &entries);
         // Drawn afresh below, for a drag to find its place.
         self.home_drag.rows.borrow_mut().clear();
         self.home_drag.headings.borrow_mut().clear();
@@ -487,7 +488,7 @@ impl Colet {
             for (i, entry) in items.iter().enumerate() {
                 let line = landing.as_ref().and_then(|(shelf, before)| match before {
                     Some(before) => (*before == entry.path).then_some(true),
-                    None => (i + 1 == items.len() && movable(&self.settings, &entry.path) == Some(*shelf)).then_some(false),
+                    None => (i + 1 == items.len() && movable(self.stored.settings(), &entry.path) == Some(*shelf)).then_some(false),
                 });
                 rows = rows.child(div().px_1().relative().child(self.row(0, entry, marked, keys, cx)).when_some(line, |d, above| {
                     d.child(

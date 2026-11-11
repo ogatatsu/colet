@@ -19,6 +19,7 @@ mod search_filters;
 mod settings;
 mod sorts;
 mod state;
+mod stored;
 mod tabs;
 #[cfg(test)]
 mod tests;

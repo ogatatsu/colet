@@ -10,7 +10,7 @@ fn never_writes_over_settings_it_could_not_read(cx: &mut TestAppContext) {
     ui.input(cx, "ext:pdf");
     ui.press(cx, "ctrl-d");
     // Kept for the session, but the file stays as it was.
-    assert_eq!(ui.read(cx, |v| v.settings.saved_searches.len()), 1);
+    assert_eq!(ui.read(cx, |v| v.stored.settings().saved_searches.len()), 1);
     // Nor as the window closes.
     assert!(ui.view.update(cx, |v, _| v.flush_settings()).is_ok());
     assert_eq!(fake.saves.load(Ordering::Relaxed), 0);
@@ -76,11 +76,11 @@ fn fixes_the_theme_from_the_preferences_at_once_and_keeps_it(cx: &mut TestAppCon
     let dark = ui.read(cx, |v| v.stops.borrow()[&format!("theme:{:?}", Theme::Dark)].clone());
     ui.act(cx, |window, cx| dark.focus(window, cx));
     ui.press(cx, "space");
-    assert_eq!(ui.read(cx, |v| v.settings.theme), Theme::Dark);
+    assert_eq!(ui.read(cx, |v| v.stored.settings().theme), Theme::Dark);
     let light = ui.read(cx, |v| v.stops.borrow()[&format!("theme:{:?}", Theme::Light)].clone());
     ui.act(cx, |window, cx| light.focus(window, cx));
     ui.press(cx, "enter");
-    assert_eq!(ui.read(cx, |v| v.settings.theme), Theme::Light);
+    assert_eq!(ui.read(cx, |v| v.stored.settings().theme), Theme::Light);
 }
 
 #[gpui_kit::test]

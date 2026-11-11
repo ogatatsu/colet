@@ -286,8 +286,8 @@ impl Colet {
 
     /// The tabs as they were kept, the one in front among them; with none, home alone.
     pub(crate) fn restore_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let kept = std::mem::take(&mut self.settings.tabs);
-        let front = self.settings.tab.min(kept.len().saturating_sub(1));
+        let (kept, front) = self.stored.take_kept_tabs();
+        let front = front.min(kept.len().saturating_sub(1));
         for (i, KeptTab { place, filter }) in kept.into_iter().enumerate() {
             let state = State::from_kept(place);
             if i == front {
@@ -327,7 +327,7 @@ impl Colet {
             })
             .collect();
         let current = self.tabs.current;
-        if tabs != self.settings.tabs || current != self.settings.tab {
+        if tabs != self.stored.settings().tabs || current != self.stored.settings().tab {
             self.update_settings(
                 move |s| {
                     s.tabs = tabs;
@@ -790,7 +790,7 @@ impl Colet {
         let id = tab.id;
         let current = index == self.tabs.current;
         let group = SharedString::from(format!("tab-{id}"));
-        let Title { glyph, name, tip } = title(tab.parked.as_ref().map_or(&self.state, |parked| &parked.state), &self.settings);
+        let Title { glyph, name, tip } = title(tab.parked.as_ref().map_or(&self.state, |parked| &parked.state), self.stored.settings());
         let dragged = DraggedTab { id, name: name.clone(), glyph, width, palette: p };
         let dragging = self.tabs.drag.carried.is_some();
         let carried = self.tabs.drag.carried == Some(id);

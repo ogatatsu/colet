@@ -573,7 +573,7 @@ impl Colet {
                 self.open_edit(path, window, cx);
                 return;
             }
-            if at_home && self.settings.is_favorite(path) {
+            if at_home && self.stored.settings().is_favorite(path) {
                 self.open_favorite_edit(path, window, cx);
                 return;
             }
@@ -977,15 +977,16 @@ impl Colet {
             }
             .unwrap_or_else(|| key.clone())
         };
-        let pinned: Vec<PathBuf> = self.settings.pinned.iter().map(moved_key).collect();
-        let pinned = (pinned != self.settings.pinned).then_some(pinned);
+        let pinned: Vec<PathBuf> = self.stored.settings().pinned.iter().map(moved_key).collect();
+        let pinned = (pinned != self.stored.settings().pinned).then_some(pinned);
         let favorites: Vec<Favorite> = self
-            .settings
+            .stored
+            .settings()
             .favorites
             .iter()
             .map(|f| Favorite { path: moved_path(&f.path).unwrap_or_else(|| f.path.clone()), ..f.clone() })
             .collect();
-        let favorites = (favorites != self.settings.favorites).then_some(favorites);
+        let favorites = (favorites != self.stored.settings().favorites).then_some(favorites);
         if favorites.is_some() || pinned.is_some() {
             // Settling the settings keeps the first of any two that now name one row.
             self.update_settings(

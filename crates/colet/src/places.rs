@@ -256,27 +256,26 @@ impl Colet {
     /// never over a file that could not be read.
     pub fn update_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
         let listed = |s: &Settings| (s.favorites.clone(), s.saved_searches.clone(), s.pinned.clone());
-        let before = listed(&self.settings);
-        change(&mut self.settings);
-        self.settings.normalize();
-        if before != listed(&self.settings) {
+        let before = listed(self.stored.settings());
+        let saved = self.stored.change_settings(change);
+        if before != listed(self.stored.settings()) {
             // Home lists them.
             let home = self.state.columns[0].id;
             self.load(home, 0, true, cx);
         }
         cx.notify();
-        if let Some(change) = self.settings_saves.changed() {
-            Self::save_later(cx, move |this| this.settings_saves.save_if_last(change, &this.settings));
+        if let Some(change) = saved {
+            Self::save_later(cx, move |this| this.stored.settings_save(change));
         }
     }
 
     /// Changes the orders the columns are given apart from the default, and writes them as the settings
     /// are written.
     pub fn update_sorts(&mut self, change: impl FnOnce(&mut Sorts), cx: &mut Context<Self>) {
-        change(&mut self.sorts);
+        let saved = self.stored.change_sorts(change);
         cx.notify();
-        if let Some(change) = self.sorts_saves.changed() {
-            Self::save_later(cx, move |this| this.sorts_saves.save_if_last(change, &this.sorts));
+        if let Some(change) = saved {
+            Self::save_later(cx, move |this| this.stored.sorts_save(change));
         }
     }
 
@@ -297,11 +296,7 @@ impl Colet {
     /// Writes the settings and the columns' orders now, as the window closes, once the saves before are
     /// written; the saves still waiting out a burst are dropped.
     pub fn flush_settings(&mut self) -> Result<(), String> {
-        let settings = self.settings_saves.save_now(&self.settings);
-        let sorts = self.sorts_saves.save_now(&self.sorts);
-        let settings = settings.map_or(Ok(()), Queued::written);
-        let sorts = sorts.map_or(Ok(()), Queued::written);
-        settings.and(sorts)
+        self.stored.flush()
     }
 
     pub fn remember_window(&mut self, window: &Window, cx: &mut Context<Self>) {
@@ -316,7 +311,7 @@ impl Colet {
             height: f32::from(bounds.size.height),
             maximized,
         };
-        if self.settings.window != Some(placement) {
+        if self.stored.settings().window != Some(placement) {
             self.update_settings(|s| s.window = Some(placement), cx);
         }
     }
@@ -340,7 +335,7 @@ impl Colet {
     pub fn toggle_favorite(&mut self, key: &Path, cx: &mut Context<Self>) {
         let HomeKey::Folder { path, narrow } = HomeKey::of(key) else { return };
         let (path, narrow) = (path.into_owned(), narrow.map(std::borrow::Cow::into_owned));
-        let found = self.settings.favorite(&path, narrow.as_deref()).cloned();
+        let found = self.stored.settings().favorite(&path, narrow.as_deref()).cloned();
         self.update_settings(
             |s| match &found {
                 Some(found) => {
@@ -401,7 +396,7 @@ impl Colet {
     }
 
     fn aim_home_drag(&mut self, cx: &mut Context<Self>) {
-        if self.home_drag.aim(&self.settings) {
+        if self.home_drag.aim(self.stored.settings()) {
             cx.notify();
         }
     }
@@ -474,7 +469,7 @@ impl Colet {
             self.notify("検索語を入力すると保存できます", Tone::Info, cx);
             return;
         }
-        let found = self.settings.saved(query, filter.as_deref(), narrow.as_deref()).cloned();
+        let found = self.stored.settings().saved(query, filter.as_deref(), narrow.as_deref()).cloned();
         let query = query.to_owned();
         self.update_settings(
             |s| match &found {
@@ -531,7 +526,7 @@ impl Colet {
 
     pub fn open_edit(&mut self, key: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let HomeKey::Search { query, filter, narrow } = HomeKey::of(key) else { return };
-        let Some(found) = self.settings.saved(query, filter, narrow).cloned() else { return };
+        let Some(found) = self.stored.settings().saved(query, filter, narrow).cloned() else { return };
         self.take_menu();
         self.begin_dialog(window, cx);
         let name = self.edit_field(found.name.clone(), found.query.clone(), Self::submit_edit, window, cx);
@@ -569,7 +564,7 @@ impl Colet {
         if edited.query.trim().is_empty() {
             Some("")
         } else if edited.key() != original.key()
-            && self.settings.saved(&edited.query, edited.filter.as_deref(), edited.narrow.as_deref()).is_some()
+            && self.stored.settings().saved(&edited.query, edited.filter.as_deref(), edited.narrow.as_deref()).is_some()
         {
             Some("この検索は既に保存しています")
         } else {
@@ -610,7 +605,7 @@ impl Colet {
     /// The favorite `key` names, its name and narrowing to edit.
     pub fn open_favorite_edit(&mut self, key: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let HomeKey::Folder { path, narrow } = HomeKey::of(key) else { return };
-        let Some(found) = self.settings.favorite(&path, narrow.as_deref()).cloned() else { return };
+        let Some(found) = self.stored.settings().favorite(&path, narrow.as_deref()).cloned() else { return };
         self.take_menu();
         self.begin_dialog(window, cx);
         let name = self.edit_field(found.name.clone(), shown(folder_name(&found.path)), Self::submit_favorite_edit, window, cx);
@@ -634,7 +629,7 @@ impl Colet {
     pub fn favorite_edit_problem(&self, cx: &App) -> Option<&'static str> {
         let Some(Dialog::EditFavorite { original, .. }) = self.overlays.dialog() else { return None };
         let edited = self.edited_favorite(cx)?;
-        let other = edited.narrow != original.narrow && self.settings.favorite(&edited.path, edited.narrow.as_deref()).is_some();
+        let other = edited.narrow != original.narrow && self.stored.settings().favorite(&edited.path, edited.narrow.as_deref()).is_some();
         other.then_some("この絞り込みのお気に入りは既にあります")
     }
 
@@ -665,7 +660,7 @@ impl Colet {
     pub fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.begin_dialog(window, cx);
         // The theme now chosen takes the keys, as a radio group's checked one does.
-        self.stop(format!("theme:{:?}", self.settings.theme), cx).focus(window, cx);
+        self.stop(format!("theme:{:?}", self.stored.settings().theme), cx).focus(window, cx);
         self.overlays.set_dialog(Dialog::Preferences);
         cx.notify();
     }

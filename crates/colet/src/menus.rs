@@ -306,7 +306,7 @@ impl Colet {
         let column = self.column_sort_open().and_then(|id| self.state.index_of(id)).map(|i| &self.state.columns[i]);
         if self.sort_open() || column.is_some() {
             let target = column.map(|c| c.id);
-            let sort = column.map_or(self.settings.sort, |c| self.order_of(c));
+            let sort = column.map_or(self.stored.settings().sort, |c| self.order_of(c));
             let mut lines: Vec<Line> = Sort::ALL.map(|by| choice(by.label(), by.label(), Command::Sort(target, by), by == sort.by)).into();
             lines.extend([false, true].map(|descending| {
                 let label = direction_label(descending);
@@ -323,7 +323,7 @@ impl Colet {
         if self.filter_open() {
             let chosen = self.chosen_filter.as_deref();
             let mut lines = vec![choice("filter-none", "なし", Command::SearchFilter(None), chosen.is_none())];
-            lines.extend(self.settings.filters.iter().enumerate().map(|(i, f)| {
+            lines.extend(self.stored.settings().filters.iter().enumerate().map(|(i, f)| {
                 choice(("filter", i), f.name.clone(), Command::SearchFilter(Some(f.name.clone())), chosen == Some(f.name.as_str()))
             }));
             lines.push(line("edit-filters", "pencil-line", "フィルターを編集…", None, None, Command::EditFilters).grouped());
@@ -408,7 +408,7 @@ impl Colet {
         ];
         if one && entries[0].directory {
             let path = entries[0].path.clone();
-            let favorite = self.settings.is_favorite(&path);
+            let favorite = self.stored.settings().is_favorite(&path);
             lines.push(
                 line(
                     "menu-favorite",
@@ -434,7 +434,7 @@ impl Colet {
         let [path] = picked else { return Vec::new() };
         let path = path.clone();
         // A row of home is pinned above the rest, or put back.
-        let pin = if self.settings.is_pinned(&path) {
+        let pin = if self.stored.settings().is_pinned(&path) {
             line("menu-unpin", "pin-off", "ピン留めを外す", None, None, Command::Pin(path.clone()))
         } else {
             line("menu-pin", "pin", "ピン留め", None, None, Command::Pin(path.clone()))
@@ -457,7 +457,7 @@ impl Colet {
             line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, Command::CopyPath).grouped(),
         ];
         // F2 on a favorite edits it: a place has nothing to edit, and its folder is not renamed from here.
-        let favorite = self.settings.is_favorite(&path);
+        let favorite = self.stored.settings().is_favorite(&path);
         if favorite {
             lines.push(line("menu-edit-favorite", "pencil-line", "編集", Some("F2"), None, Command::Rename));
         }
@@ -543,7 +543,7 @@ impl Colet {
             }
             Command::Sort(target, by) => self.set_sort(target, by, cx),
             Command::Direction(target, descending) => self.set_direction(target, descending, cx),
-            Command::Unsort(id) => self.set_order(Some(id), self.settings.sort, cx),
+            Command::Unsort(id) => self.set_order(Some(id), self.stored.settings().sort, cx),
             Command::SearchFilter(name) => self.choose_filter(name, cx),
             Command::EditFilters => self.open_filters(window, cx),
             Command::Edit(_) => unreachable!("a field's edit is done above"),

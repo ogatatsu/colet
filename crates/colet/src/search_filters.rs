@@ -45,7 +45,11 @@ impl Colet {
 
     /// Edits the filter named `original`, or adds one.
     pub fn edit_filter(&mut self, original: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
-        let found = original.as_deref().and_then(|name| self.settings.filters.iter().find(|f| f.name == name)).cloned().unwrap_or_default();
+        let found = original
+            .as_deref()
+            .and_then(|name| self.stored.settings().filters.iter().find(|f| f.name == name))
+            .cloned()
+            .unwrap_or_default();
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("画像").default_value(found.name));
         let query = cx.new(|cx| InputState::new(window, cx).placeholder("ext:jpg;png;gif").default_value(found.query));
         self.begin_dialog(window, cx);
@@ -68,7 +72,7 @@ impl Colet {
         let name = edit.name.read(cx).value().trim().to_owned();
         if name.is_empty() || edit.query.read(cx).value().trim().is_empty() {
             Some("")
-        } else if edit.original.as_deref() != Some(name.as_str()) && self.settings.filter_query(&name).is_some() {
+        } else if edit.original.as_deref() != Some(name.as_str()) && self.stored.settings().filter_query(&name).is_some() {
             Some("この名前のフィルターは既にあります")
         } else {
             None
@@ -85,7 +89,7 @@ impl Colet {
         let original = edit.original.clone();
         let name = edit.name.read(cx).value().trim().to_owned();
         let query = edit.query.read(cx).value().trim().to_owned();
-        let before = original.as_deref().and_then(|from| self.settings.filter_query(from)).map(str::to_owned);
+        let before = original.as_deref().and_then(|from| self.stored.settings().filter_query(from)).map(str::to_owned);
         let edited = SearchFilter { name: name.clone(), query: query.clone() };
         let to = name.clone();
         self.update_settings(
@@ -137,7 +141,7 @@ impl Colet {
 
     /// How many saved searches run within the filter named `name`.
     pub fn filter_users(&self, name: &str) -> usize {
-        self.settings.saved_searches.iter().filter(|s| s.filter.as_deref() == Some(name)).count()
+        self.stored.settings().saved_searches.iter().filter(|s| s.filter.as_deref() == Some(name)).count()
     }
 
     /// Deletes the filter asked about: what named it goes without it.
@@ -154,9 +158,9 @@ impl Colet {
 
     /// Moves the filter named `name` up or down the menu by one.
     pub fn move_filter(&mut self, name: &str, by: isize, cx: &mut Context<Self>) {
-        let Some(at) = self.settings.filters.iter().position(|f| f.name == name) else { return };
+        let Some(at) = self.stored.settings().filters.iter().position(|f| f.name == name) else { return };
         let to = at as isize + by;
-        if to < 0 || to as usize >= self.settings.filters.len() {
+        if to < 0 || to as usize >= self.stored.settings().filters.len() {
             return;
         }
         self.update_settings(|s| s.filters.swap(at, to as usize), cx);

@@ -232,7 +232,7 @@ fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mu
     settle(cx);
     // Named for the favorite it opened while still behind, not for home.
     let (glyph, name) = ui.read(cx, |v| {
-        let title = crate::tabs::title(&v.tabs.list[1].parked.as_ref().unwrap().state, &v.settings);
+        let title = crate::tabs::title(&v.tabs.list[1].parked.as_ref().unwrap().state, v.stored.settings());
         (title.glyph, title.name)
     });
     assert_eq!((glyph, name.as_str()), ("star", "work"));
@@ -249,7 +249,7 @@ impl Ui {
     /// The front tab's icon, name and tip.
     fn title(&self, cx: &mut TestAppContext) -> (&'static str, String, String) {
         self.read(cx, |v| {
-            let title = crate::tabs::title(&v.state, &v.settings);
+            let title = crate::tabs::title(&v.state, v.stored.settings());
             (title.glyph, title.name, title.tip)
         })
     }
@@ -271,9 +271,9 @@ fn names_a_tab_for_the_favorite_it_opened_however_deep_it_goes(cx: &mut TestAppC
     ui.press(cx, "right");
     assert_eq!(ui.title(cx), ("star", "データ".into(), r"D:\work".into()));
     // Renamed, it follows; kept no more, the column worked in names it.
-    ui.view.update(cx, |v, _| v.settings.favorites[0].name = "倉庫".into());
+    ui.view.update(cx, |v, cx| v.update_settings(|s| s.favorites[0].name = "倉庫".into(), cx));
     assert_eq!(ui.title(cx).1, "倉庫");
-    ui.view.update(cx, |v, _| v.settings.favorites.clear());
+    ui.view.update(cx, |v, cx| v.update_settings(|s| s.favorites.clear(), cx));
     assert_eq!(ui.title(cx), ("folder", "work".into(), r"D:\work".into()));
 }
 

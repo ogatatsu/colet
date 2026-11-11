@@ -145,7 +145,7 @@ fn moves_a_filter_up_from_the_keys(cx: &mut TestAppContext) {
     // The second's way up; the first's is off, and Tab passes it by.
     ui.tab_to(cx, ("filter-up", 1usize));
     ui.press(cx, "enter");
-    assert_eq!(ui.read(cx, |v| v.settings.filters.iter().map(|f| f.name.clone()).collect::<Vec<_>>()), ["動画", "画像"]);
+    assert_eq!(ui.read(cx, |v| v.stored.settings().filters.iter().map(|f| f.name.clone()).collect::<Vec<_>>()), ["動画", "画像"]);
 }
 
 #[gpui_kit::test]
