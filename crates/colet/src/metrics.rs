@@ -17,3 +17,23 @@ pub const TEXT_TINY: f32 = 10.;
 pub const HEADING_HEIGHT: f32 = 34.;
 /// A text field, as the search field, the address and a dialog's fields, and a button standing beside one.
 pub const CONTROL_HEIGHT: f32 = 32.;
+/// A control set among smaller ones: the default order's button, a column's filter field, a hint to search.
+pub const SMALL_CONTROL_HEIGHT: f32 = 28.;
+/// A square button holding only a glyph: a column's order, the folded crumbs.
+pub const ICON_BUTTON: f32 = 24.;
+
+/// The corners of a row, a crumb, a tab and a quiet button. A ring drawn round one takes the same, so the
+/// two stay concentric.
+pub const RADIUS: f32 = 4.;
+/// The corners of a field and of a bordered control beside one; the frame that rings it takes the same.
+pub const FIELD_RADIUS: f32 = 6.;
+
+/// An item's own picture, as the shell draws it: in the rows, the menus and a row dragged in home.
+pub const ICON: f32 = 16.;
+/// Most of the glyphs drawn beside a label or alone in a button.
+pub const GLYPH: f32 = 14.;
+
+/// The window's text.
+pub const FONT_UI: &str = "Segoe UI";
+/// What is typed for Everything to read: a query, a filter's search.
+pub const FONT_CODE: &str = "Consolas";

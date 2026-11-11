@@ -683,9 +683,12 @@ impl Colet {
             let (colet, drawn) = (colet.clone(), colet.clone());
             let item = PopupMenuItem::element(move |_, cx| {
                 let picture = picture.as_ref().map(|source| match drawn.upgrade().and_then(|c| c.read(cx).icons.peek(source)) {
-                    Some(image) => img(image).size(px(16.)).flex_none().into_any_element(),
-                    None => div().size(px(16.)).flex_none().into_any_element(),
+                    Some(image) => img(image).size(px(crate::metrics::ICON)).flex_none().into_any_element(),
+                    None => div().size(px(crate::metrics::ICON)).flex_none().into_any_element(),
                 });
+                // Colet's own colors, as everything else it draws takes them; read as drawn, so a theme
+                // changed while the menu is open shows.
+                let muted = drawn.upgrade().map_or(cx.theme().muted_foreground, |c| c.read(cx).palette.text_muted);
                 div()
                     .id(id.clone())
                     .test_support()
@@ -694,10 +697,8 @@ impl Colet {
                     .items_center()
                     .gap_4()
                     .child(div().flex_1().flex().items_center().gap_2().children(picture).child(text.clone()))
-                    .when_some(hint, |d, key| d.child(div().text_xs().text_color(cx.theme().muted_foreground).child(key)))
-                    .when(chevron, |d| {
-                        d.child(svg().path("icons/chevron-right.svg").size(px(12.)).flex_none().text_color(cx.theme().muted_foreground))
-                    })
+                    .when_some(hint, |d, key| d.child(div().text_xs().text_color(muted).child(key)))
+                    .when(chevron, |d| d.child(svg().path("icons/chevron-right.svg").size(px(12.)).flex_none().text_color(muted)))
             })
             .when_some(glyph, |item, glyph| item.icon(crate::view::glyph(glyph)))
             .disabled(off.is_some())

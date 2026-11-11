@@ -69,7 +69,7 @@ impl Colet {
                     .justify_center()
                     .border_b_1()
                     .border_color(p.border)
-                    .child(icon("chevrons-left", 14., p.text_muted))
+                    .child(icon("chevrons-left", metrics::GLYPH, p.text_muted))
                     .test_support(),
             )
             .child(

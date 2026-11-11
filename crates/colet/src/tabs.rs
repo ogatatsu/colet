@@ -118,10 +118,10 @@ impl Render for DraggedTab {
             .items_center()
             .gap(px(6.))
             .child(tab_shape(p.bg, Some(p.border)))
-            .child(svg().path(format!("icons/{}.svg", self.glyph)).size(px(14.)).flex_none().text_color(p.text))
+            .child(svg().path(format!("icons/{}.svg", self.glyph)).size(px(metrics::GLYPH)).flex_none().text_color(p.text))
             .child(div().min_w_0().truncate().child(self.name.clone()))
             .opacity(0.5)
-            .font_family("Segoe UI")
+            .font_family(metrics::FONT_UI)
             .text_size(px(metrics::TEXT_LARGE))
             .text_color(p.text)
     }
@@ -131,7 +131,7 @@ impl Render for DraggedTab {
 fn tab_button(p: crate::theme::Palette, id: impl Into<ElementId>, glyph: &str, label: &'static str, tip: &'static str) -> Button {
     Button::new(id)
         .ghost()
-        .rounded(px(4.))
+        .rounded(px(metrics::RADIUS))
         .icon(crate::view::glyph(glyph))
         .accessibility_label(label)
         .tooltip(tip)
@@ -679,7 +679,7 @@ impl Colet {
             })
             .when(carried, |d| d.opacity(0.4))
             .tip(tip)
-            .child(svg().path(format!("icons/{glyph}.svg")).size(px(14.)).flex_none().text_color(if current {
+            .child(svg().path(format!("icons/{glyph}.svg")).size(px(metrics::GLYPH)).flex_none().text_color(if current {
                 p.text
             } else {
                 p.text_muted

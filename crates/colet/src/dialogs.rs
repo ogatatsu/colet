@@ -76,7 +76,7 @@ fn field(
     menu: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
     // The ring, two pixels in the focus color a pixel off the field, as the old app's outline.
-    crate::view::frame(p, focused, 6.).child(
+    crate::view::frame(p, focused, metrics::FIELD_RADIUS).child(
         div()
             .h(px(metrics::CONTROL_HEIGHT))
             .px(px(10.))
@@ -85,7 +85,7 @@ fn field(
             .bg(p.surface)
             .border_1()
             .border_color(p.border_strong)
-            .rounded(px(6.))
+            .rounded(px(metrics::FIELD_RADIUS))
             // Its padding too, round the text.
             .capture_any_mouse_down(menu)
             .child(div().flex_1().min_w_0().child(Input::new(input))),
@@ -440,7 +440,7 @@ impl Colet {
                                     .truncate()
                                     .text_size(px(metrics::TEXT_BODY))
                                     .text_color(p.text_muted)
-                                    .font_family("Consolas")
+                                    .font_family(metrics::FONT_CODE)
                                     .child(f.query.clone()),
                             ),
                     )
@@ -939,7 +939,7 @@ impl Colet {
                                             // Opened in Colet, not in a browser: a button, its name in the accent color.
                                             .role(Role::Button)
                                             .aria_label(name.clone())
-                                            .rounded(px(4.))
+                                            .rounded(px(metrics::RADIUS))
                                             .text_color(p.accent)
                                             .hover(|d| d.bg(p.raised_hover))
                                             .child(name)

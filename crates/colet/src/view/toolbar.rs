@@ -52,7 +52,7 @@ impl Colet {
             .child(
                 // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row. It keeps
                 // its width while the address beside it gives way, then narrows, keeping room to type in.
-                frame(p, focused, 6.)
+                frame(p, focused, metrics::FIELD_RADIUS)
                     .flex_none()
                     .w(px(field_width))
                     .flex_shrink(1.)
@@ -71,7 +71,7 @@ impl Colet {
                             .bg(p.surface)
                             .border_1()
                             .border_color(p.border_strong)
-                            .rounded(px(6.))
+                            .rounded(px(metrics::FIELD_RADIUS))
                             .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
                             .child(
                                 div()
@@ -120,7 +120,10 @@ impl Colet {
             .flex()
             .items_center()
             .cursor_col_resize()
-            .child(icon("chevron-right", 14., if dragging { p.accent } else { p.text_faint }).group_hover(ID, |s| s.text_color(p.accent)))
+            .child(
+                icon("chevron-right", metrics::GLYPH, if dragging { p.accent } else { p.text_faint })
+                    .group_hover(ID, |s| s.text_color(p.accent)),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -170,18 +173,18 @@ impl Colet {
                                 .aria_label(format!("既定の並び順: {}", sort.label()))
                                 .aria_expanded(self.sort_open())
                                 .tip("既定の並び順")
-                                .h(px(28.))
+                                .h(px(metrics::SMALL_CONTROL_HEIGHT))
                                 .px_2()
                                 .flex()
                                 .items_center()
                                 .gap(px(6.))
                                 .text_size(px(metrics::TEXT_BODY))
                                 .text_color(p.text)
-                                .rounded(px(6.))
+                                .rounded(px(metrics::FIELD_RADIUS))
                                 .hover(|d| d.bg(p.hover))
-                                .child(icon("arrow-up-down", 14., p.text_muted))
+                                .child(icon("arrow-up-down", metrics::GLYPH, p.text_muted))
                                 .child(sort.label())
-                                .child(icon("chevron-down", 14., p.text_faint))
+                                .child(icon("chevron-down", metrics::GLYPH, p.text_faint))
                                 .map(|d| Self::opener(d, Self::sort_open, cx))
                                 .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                                     if this.sort_open() {
@@ -221,7 +224,7 @@ impl Colet {
             // the sort order's.
             .min_w(px(60.))
             .child(
-                frame(p, focus.is_focused(window), 6.).min_w_0().m(px(-RING_ROOM)).child(
+                frame(p, focus.is_focused(window), metrics::FIELD_RADIUS).min_w_0().m(px(-RING_ROOM)).child(
                     crate::view::keep_focus(div().id("search-filter"))
                         .test_support()
                         .track_focus(&focus)
@@ -242,12 +245,12 @@ impl Colet {
                         .bg(p.surface)
                         .border_1()
                         .border_color(if on { p.accent } else { p.border_strong })
-                        .rounded(px(6.))
+                        .rounded(px(metrics::FIELD_RADIUS))
                         .hover(|d| d.bg(p.hover))
                         .tip(format!("{label}（Ctrl+Shift+F）"))
-                        .child(icon("funnel", 14., if on { p.accent } else { p.text_muted }))
+                        .child(icon("funnel", metrics::GLYPH, if on { p.accent } else { p.text_muted }))
                         .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| "フィルター".into())))
-                        .child(icon("chevron-down", 14., p.text_faint))
+                        .child(icon("chevron-down", metrics::GLYPH, p.text_faint))
                         .map(|d| Self::opener(d, Self::filter_open, cx))
                         .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                             if this.filter_open() {

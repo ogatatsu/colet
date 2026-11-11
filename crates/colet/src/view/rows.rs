@@ -15,8 +15,8 @@ impl Render for HomeGhost {
         let p = self.palette;
         let picture = match (self.search, self.image.clone()) {
             (true, _) => icon("search", 16., p.text_muted).into_any_element(),
-            (false, Some(image)) => img(image).size(px(16.)).flex_none().into_any_element(),
-            (false, None) => div().size(px(16.)).flex_none().into_any_element(),
+            (false, Some(image)) => img(image).size(px(metrics::ICON)).flex_none().into_any_element(),
+            (false, None) => div().size(px(metrics::ICON)).flex_none().into_any_element(),
         };
         div()
             .w(self.width)
@@ -25,13 +25,13 @@ impl Render for HomeGhost {
             .flex()
             .items_center()
             .gap_2()
-            .rounded(px(4.))
+            .rounded(px(metrics::RADIUS))
             .border_1()
             .border_color(p.border_strong)
             .bg(p.raised)
             // Faint enough that the landing line it passes over still shows through.
             .opacity(0.5)
-            .font_family("Segoe UI")
+            .font_family(metrics::FONT_UI)
             .text_size(px(metrics::TEXT_LARGE))
             .text_color(p.text)
             .child(picture)
@@ -153,8 +153,8 @@ impl Colet {
         let name = entry.name.clone();
         let picture = match (saved, image) {
             (true, _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
-            (false, Some(image)) => img(image).size(px(16.)).flex_none().into_any_element(),
-            (false, None) => div().size(px(16.)).flex_none().into_any_element(),
+            (false, Some(image)) => img(image).size(px(metrics::ICON)).flex_none().into_any_element(),
+            (false, None) => div().size(px(metrics::ICON)).flex_none().into_any_element(),
         };
         let menu_path = entry.path.clone();
         let tab_path = entry.path.clone();
@@ -202,7 +202,7 @@ impl Colet {
             .flex()
             .items_center()
             .gap_2()
-            .rounded(px(4.))
+            .rounded(px(metrics::RADIUS))
             .role(Role::ListBoxOption)
             .aria_label(entry.name.clone())
             .aria_selected(selected)
@@ -349,7 +349,7 @@ impl Colet {
                                 .flex_shrink_0()
                                 .max_w(px(96.))
                                 .px(px(6.))
-                                .rounded(px(4.))
+                                .rounded(px(metrics::RADIUS))
                                 .border_1()
                                 .border_color(ink.opacity(0.3))
                                 .bg(ink.opacity(0.1))

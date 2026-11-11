@@ -250,10 +250,10 @@ impl Colet {
                         let button = Button::new(query)
                             .outline()
                             .accessibility_label(format!("{query} {label}"))
-                            .h(px(28.))
+                            .h(px(metrics::SMALL_CONTROL_HEIGHT))
                             .px(px(10.))
                             .gap(px(6.))
-                            .child(div().text_color(p.accent).font_family("Consolas").child(query))
+                            .child(div().text_color(p.accent).font_family(metrics::FONT_CODE).child(query))
                             .child(label)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let filter = this.chosen_filter.clone();
@@ -321,7 +321,7 @@ impl Render for Colet {
             .flex_col()
             .bg(p.bg)
             .text_color(p.text)
-            .font_family("Segoe UI")
+            .font_family(metrics::FONT_UI)
             .text_size(px(metrics::TEXT_LARGE))
             // The window's keys. None of them needs to check for a dialog: the window draws its dialog
             // outside Colet's elements, and the dialog keeps the keys in itself, so while one is open these

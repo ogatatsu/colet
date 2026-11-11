@@ -52,7 +52,7 @@ impl Colet {
 
     /// Each crumb's whole width as drawn: its 13px name, padding, the chevron before it and the gap after.
     fn crumb_widths(&self, crumbs: &[Crumb], window: &Window) -> Vec<f32> {
-        let font = font("Segoe UI");
+        let font = font(metrics::FONT_UI);
         crumbs
             .iter()
             .enumerate()
@@ -174,7 +174,7 @@ impl Colet {
             .child(Input::new(self.address.field()));
         // Ringed as the search field is while it takes the keys; the ring lies over the gaps around. It gives
         // way first in a narrow window, folding its crumbs.
-        frame(p, editing, 6.)
+        frame(p, editing, metrics::FIELD_RADIUS)
             .flex_1()
             .min_w(px(ADDRESS_MIN))
             .m(px(-RING_ROOM))
@@ -191,7 +191,7 @@ impl Colet {
                     .bg(p.surface)
                     .border_1()
                     .border_color(p.border_strong)
-                    .rounded(px(6.))
+                    .rounded(px(metrics::FIELD_RADIUS))
                     .when(editing, |d| d.child(field))
                     .when(!editing, |d| d.child(trail))
                     .test_support(),
@@ -209,15 +209,15 @@ impl Colet {
         div()
             .relative()
             .child(
-                ring(crate::view::keep_focus(div().id("crumb-fold")).track_focus(&focus), p, focus.is_focused(window), 4.)
+                ring(crate::view::keep_focus(div().id("crumb-fold")).track_focus(&focus), p, focus.is_focused(window), metrics::RADIUS)
                     .role(Role::Button)
                     .aria_label("上の階層")
                     .aria_expanded(open)
-                    .size(px(24.))
+                    .size(px(metrics::ICON_BUTTON))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(4.))
+                    .rounded(px(metrics::RADIUS))
                     .hover(|d| d.bg(p.hover))
                     .tip("上の階層")
                     .child(icon("ellipsis", 15., if current { p.text } else { p.text_muted }))
@@ -256,7 +256,7 @@ impl Colet {
             .when(chevron, |d| d.child(icon("chevron-right", 13., p.text_faint)))
             .child(
                 // The mouse leaves the keys where they are; the column it goes to takes them.
-                ring(crate::view::keep_focus(div().id(("crumb", id))).track_focus(&focus), p, ringed, 4.)
+                ring(crate::view::keep_focus(div().id(("crumb", id))).track_focus(&focus), p, ringed, metrics::RADIUS)
                     .role(Role::Button)
                     .aria_label(label.clone())
                     .relative()
@@ -277,7 +277,7 @@ impl Colet {
                     .items_center()
                     .gap_1()
                     .min_w_0()
-                    .rounded(px(4.))
+                    .rounded(px(metrics::RADIUS))
                     .text_color(if current { p.text } else { p.text_muted })
                     .hover(|d| d.bg(p.hover))
                     .tip(path)

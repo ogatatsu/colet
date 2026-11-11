@@ -432,15 +432,15 @@ impl Colet {
                     .aria_label(label.clone())
                     .aria_expanded(open)
                     .tip(label)
-                    .size(px(24.))
+                    .size(px(metrics::ICON_BUTTON))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(4.))
+                    .rounded(px(metrics::RADIUS))
                     .hover(|d| d.bg(p.hover))
                     .when(open, |d| d.bg(p.hover))
-                    .child(icon("arrow-up-down", 14., if own { p.accent } else { p.text_muted }))
-                    .map(|d| ring(d, p, shown, 4.))
+                    .child(icon("arrow-up-down", metrics::GLYPH, if own { p.accent } else { p.text_muted }))
+                    .map(|d| ring(d, p, shown, metrics::RADIUS))
                     .map(|d| Self::opener(d, move |this| this.column_sort_open() == Some(id), cx))
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         if this.column_sort_open() == Some(id) {
@@ -480,7 +480,7 @@ impl Colet {
                 .flex()
                 .items_center()
                 .gap(px(2.))
-                .rounded(px(4.))
+                .rounded(px(metrics::RADIUS))
                 .hover(|d| d.bg(p.hover))
                 .text_color(if chosen { p.text } else { p.text_muted })
                 .child(by.label())
@@ -575,11 +575,11 @@ impl Colet {
             self.ringed(clear, Stop::ClearFilter(id), RingAt::Edge, window, cx)
         });
         // Ringed as the search field is; the ring lies over the gaps around.
-        frame(p, focused, 6.).m(px(-RING_ROOM)).child(
+        frame(p, focused, metrics::FIELD_RADIUS).m(px(-RING_ROOM)).child(
             div()
                 .id(("filter", id))
                 .w_full()
-                .h(px(28.))
+                .h(px(metrics::SMALL_CONTROL_HEIGHT))
                 .pl(px(8.))
                 .pr(px(2.))
                 .flex()
@@ -588,7 +588,7 @@ impl Colet {
                 .bg(p.surface)
                 .border_1()
                 .border_color(p.border_strong)
-                .rounded(px(6.))
+                .rounded(px(metrics::FIELD_RADIUS))
                 // Accented while it has the keys, or narrows the rows from out of them.
                 .child(icon("funnel", 13., if focused || narrowed { p.accent } else { p.text_muted }))
                 .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(input, cx)).child(Input::new(input)))
