@@ -512,3 +512,45 @@ fn closes_the_menus_from_the_buttons_that_opened_them(cx: &mut TestAppContext) {
     ui.press_and_release(cx, "sort");
     assert!(ui.read(cx, |v| v.sort_open()));
 }
+
+/// Each menu dropped from a button stands just under it, lined up with the side it drops on, whatever the
+/// button's height.
+#[gpui_kit::test]
+fn drops_each_menu_just_under_its_button(cx: &mut TestAppContext) {
+    let under = |ui: &Ui, cx: &mut TestAppContext, button: ElementId, menu: &'static str, left: bool| {
+        let (button, menu) = ui.act(cx, |window, _| (window.find(button).bounds(), window.within(menu).find("popup-menu").bounds()));
+        assert_eq!(menu.top(), button.bottom() + px(4.), "{menu:?} under {button:?}");
+        if left {
+            assert_eq!(menu.left(), button.left());
+        } else {
+            assert_eq!(menu.right(), button.right());
+        }
+    };
+    let (_, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.press_and_release(cx, "sort");
+    under(&ui, cx, "sort".into(), "sort-menu", false);
+    ui.press(cx, "escape");
+    ui.press_and_release(cx, ("column-sort", work));
+    under(&ui, cx, ("column-sort", work).into(), "column-sort-menu", false);
+    ui.press(cx, "escape");
+    ui.press_and_release(cx, "search-filter");
+    under(&ui, cx, "search-filter".into(), "search-filter-menu", true);
+    ui.press(cx, "escape");
+
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    cx.simulate_window_resize(ui.window, size(px(560.), px(800.)));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    // Near the window's right edge, a menu dropped to the right of its button's left edge is moved in to
+    // keep its margin from the edge rather than run off it.
+    ui.press_and_release(cx, "crumb-fold");
+    let (button, menu) =
+        ui.act(cx, |window, _| (window.find("crumb-fold").bounds(), window.within("crumb-menu").find("popup-menu").bounds()));
+    assert_eq!(menu.top(), button.bottom() + px(4.));
+    assert!(button.left() + menu.size.width > px(560. - crate::view::MENU_MARGIN));
+    assert_eq!(menu.right(), px(560. - crate::view::MENU_MARGIN));
+}

@@ -451,9 +451,7 @@ impl Colet {
                     })),
             )
             .when_some(self.menu_element("column-sort-menu", "並び順", cx).filter(|_| open), |d, menu| {
-                d.child(
-                    deferred(div().absolute().top(px(28.)).right_0().w(px(160.)).child(menu)).with_priority(gpui_kit::base::POPUP_PRIORITY),
-                )
+                d.child(drop_down(menu, MenuSide::Right, 160., Some(160.)))
             })
             .into_any_element()
     }

@@ -682,9 +682,11 @@ impl Colet {
         };
         let menu = self.menu_element(id, label, cx)?;
         Some(
-            deferred(anchored().position(at).snap_to_window_with_margin(px(8.)).child(div().min_w(px(width)).child(menu)))
-                .with_priority(gpui_kit::base::POPUP_PRIORITY)
-                .into_any_element(),
+            deferred(
+                anchored().position(at).snap_to_window_with_margin(px(crate::view::MENU_MARGIN)).child(div().min_w(px(width)).child(menu)),
+            )
+            .with_priority(gpui_kit::base::POPUP_PRIORITY)
+            .into_any_element(),
         )
     }
 

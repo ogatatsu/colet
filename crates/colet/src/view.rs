@@ -111,6 +111,38 @@ fn active_frame(p: crate::theme::Palette) -> Div {
     div().absolute().top(px(-1.)).right_0().border_1().border_color(p.accent)
 }
 
+/// How far in from the window's edges a menu is kept.
+pub const MENU_MARGIN: f32 = 8.;
+/// The room between a button and the menu dropped from it.
+const MENU_GAP: f32 = 4.;
+
+/// Which side of its button a menu dropped from it lines up with.
+#[derive(Clone, Copy)]
+pub enum MenuSide {
+    Left,
+    Right,
+}
+
+/// `menu` dropped from the button its parent holds, the parent `relative` and as tall as the button: just
+/// under it whatever its height, lined up with its `side`, `min` to `max` wide, and moved in to keep
+/// [`MENU_MARGIN`] from the window's edges rather than run off them. Every menu dropped from a button
+/// goes through here, so all of them keep to the same edges.
+pub fn drop_down(menu: impl IntoElement, side: MenuSide, min: f32, max: Option<f32>) -> impl IntoElement {
+    let (corner, at) = match side {
+        MenuSide::Left => (Anchor::TopLeft, div().left_0()),
+        MenuSide::Right => (Anchor::TopRight, div().right_0()),
+    };
+    deferred(
+        at.absolute().top_full().mt(px(MENU_GAP)).child(
+            anchored()
+                .anchor(corner)
+                .snap_to_window_with_margin(px(MENU_MARGIN))
+                .child(div().min_w(px(min)).when_some(max, |d, max| d.max_w(px(max))).child(menu)),
+        ),
+    )
+    .with_priority(gpui_kit::base::POPUP_PRIORITY)
+}
+
 /// A button the mouse presses without taking the keys from where they are; Tab still reaches it.
 pub fn keep_focus<E: InteractiveElement>(el: E) -> E {
     el.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
