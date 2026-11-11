@@ -331,7 +331,8 @@ fn slides_a_folded_crumb_picked_in_from_the_left_until_it_is_on_screen(cx: &mut 
     let ui = folded_deep(cx);
     let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
     let (before, _) = column_edges(&ui, cx, anchor);
-    ui.click(cx, ("crumb", 3usize));
+    let third = crumb(&ui, cx, 3);
+    ui.click(cx, third);
     assert_eq!(ui.active(cx), 3);
     let (moved, _) = column_edges(&ui, cx, anchor);
     let gone = ui.read(cx, |v| v.scrolls.sideways.slide.as_ref().map(|s| s.origin - s.position)).expect("they slide");

@@ -158,6 +158,11 @@ fn choice(id: impl Into<ElementId>, text: impl Into<SharedString>, command: Comm
     Line { id: id.into(), glyph: None, picture: None, text: text.into(), hint: None, off: None, command, group: false, chosen, sub: None }
 }
 
+/// The item of Windows' Send To for `target`: named after its path, not its place in the folder.
+pub(crate) fn send_to_id(target: &std::path::Path) -> ElementId {
+    ElementId::NamedChild(std::sync::Arc::new("send-to".into()), SharedString::from(target.to_string_lossy().into_owned()))
+}
+
 impl Line {
     fn grouped(mut self) -> Self {
         self.group = true;
@@ -323,8 +328,13 @@ impl Colet {
         if self.filter_open() {
             let chosen = self.chosen_filter.as_deref();
             let mut lines = vec![choice("filter-none", "なし", Command::SearchFilter(None), chosen.is_none())];
-            lines.extend(self.stored.settings().filters.iter().enumerate().map(|(i, f)| {
-                choice(("filter", i), f.name.clone(), Command::SearchFilter(Some(f.name.clone())), chosen == Some(f.name.as_str()))
+            lines.extend(self.stored.settings().filters.iter().map(|f| {
+                choice(
+                    crate::dialogs::filter_tool_id("filter", &f.name),
+                    f.name.clone(),
+                    Command::SearchFilter(Some(f.name.clone())),
+                    chosen == Some(f.name.as_str()),
+                )
             }));
             lines.push(line("edit-filters", "pencil-line", "フィルターを編集…", None, None, Command::EditFilters).grouped());
             return lines;
@@ -384,9 +394,12 @@ impl Colet {
             }
         };
         // Each item of Windows' Send To, by the shell's icon for it.
-        let targets = self.operations.read(cx).send_targets().iter().enumerate().map(|(i, target)| {
+        let targets = self.operations.read(cx).send_targets().iter().map(|target| {
             let command = Command::SendTo { target: target.path.clone(), shift: false };
-            Line { picture: Some(IconSource::Item(target.path.clone())), ..choice(("send-to", i), target.name.clone(), command, false) }
+            Line {
+                picture: Some(IconSource::Item(target.path.clone())),
+                ..choice(send_to_id(&target.path), target.name.clone(), command, false)
+            }
         });
         let send_to = Line {
             sub: Some(targets.collect()),
@@ -579,23 +592,23 @@ impl Colet {
     /// Opens the menu of the folders folded off the trail, as it was last drawn.
     pub fn open_crumb_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.overlays.set_popup(Popup::Crumbs);
-        let active = self.state.active;
+        let active = self.state.columns.get(self.state.active).map(|c| c.id);
         let colet = cx.weak_entity();
         let items = self
             .crumbs
             .folded
             .iter()
             .map(|crumb| {
-                let (index, label, path) = (crumb.column, crumb.name.clone(), crumb.path.clone());
+                let (id, label, path) = (crumb.column, crumb.name.clone(), crumb.path.clone());
                 let colet = colet.clone();
-                PopupMenuItem::element(move |_, _| div().id(("crumb-item", index)).test_support().tip(path.clone()).child(label.clone()))
+                PopupMenuItem::element(move |_, _| div().id(("crumb-item", id)).test_support().tip(path.clone()).child(label.clone()))
                     .icon(crate::view::glyph("folder"))
-                    .checked(index == active)
+                    .checked(Some(id) == active)
                     .on_click(move |_, window, cx| {
                         colet
                             .update(cx, |this, cx| {
                                 this.close_crumb_menu(false, window, cx);
-                                this.go_to(index, window, cx);
+                                this.go_to_column(id, window, cx);
                             })
                             .ok();
                     })

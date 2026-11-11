@@ -342,7 +342,7 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     assert!(ui.read(cx, |v| v.history_panel.expanded.contains(&entry.id)));
     assert_eq!(entry.items[0].error.as_deref(), Some("アクセスが拒否されました。"));
     // Still there: its name opens it in the columns.
-    ui.click(cx, ("history-item", entry.id << 16));
+    ui.click(cx, crate::dialogs::history_item_id(entry.id, 0));
     assert!(ui.read(cx, |v| !v.history_panel.open));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
 }

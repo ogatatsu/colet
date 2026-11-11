@@ -115,6 +115,11 @@ pub(crate) fn filter_tool_id(tool: &'static str, name: &str) -> ElementId {
     ElementId::NamedChild(std::sync::Arc::new(tool.into()), SharedString::from(name.to_owned()))
 }
 
+/// The item at `k` of the step `entry` in the history.
+pub(crate) fn history_item_id(entry: u64, k: usize) -> ElementId {
+    ElementId::NamedChild(std::sync::Arc::new(("history-item", entry).into()), SharedString::from(k.to_string()))
+}
+
 /// A choice among the filters, checked as a radio button is.
 fn filter_choice(id: ElementId, text: &str, chosen: bool) -> Button {
     push(id, text.to_owned(), chosen, true).role(Role::RadioButton).toggled(chosen)
@@ -306,11 +311,16 @@ impl Colet {
                         .role(Role::RadioGroup)
                         .aria_label("検索フィルター")
                         // Ringed as the fields are; the rings' room makes up most of the gaps.
-                        .children(choices.into_iter().enumerate().map(|(i, choice)| {
+                        .children(choices.into_iter().map(|choice| {
                             let text = choice.clone().unwrap_or_else(|| "なし".into());
-                            let button = filter_choice(("edit-search-filter", i).into(), &text, choice == chosen)
-                                .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(choice.clone(), cx)));
-                            self.ringed(button, Stop::EditSearchFilter(i), RingAt::Round, window, cx)
+                            let id = match &choice {
+                                Some(name) => filter_tool_id("edit-search-filter", name),
+                                None => "edit-search-filter-none".into(),
+                            };
+                            let picked = choice.clone();
+                            let button = filter_choice(id, &text, choice == chosen)
+                                .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(picked.clone(), cx)));
+                            self.ringed(button, Stop::EditSearchFilter(choice), RingAt::Round, window, cx)
                         })),
                 ),
             )
@@ -921,9 +931,7 @@ impl Colet {
                                             div().child(name).into_any_element()
                                         } else {
                                             crate::view::keep_focus(crate::view::ring(
-                                                div()
-                                                    .id(("history-item", (id << 16) | k as u64))
-                                                    .track_focus(&stops[&Stop::HistoryItem(id, k)]),
+                                                div().id(history_item_id(id, k)).track_focus(&stops[&Stop::HistoryItem(id, k)]),
                                                 p,
                                                 stops[&Stop::HistoryItem(id, k)].is_focused(window),
                                                 4.,

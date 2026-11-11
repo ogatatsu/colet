@@ -601,6 +601,11 @@ impl Ui {
     }
 }
 
+/// The crumb of the column at `index` as it stands now: crumbs are known by their column's id.
+fn crumb(ui: &Ui, cx: &mut TestAppContext, index: usize) -> ElementId {
+    ("crumb", ui.read(cx, |v| v.state.columns[index].id)).into()
+}
+
 fn row(path: impl AsRef<Path>) -> ElementId {
     ElementId::Name(id_text(path.as_ref()).into())
 }

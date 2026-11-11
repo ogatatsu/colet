@@ -34,12 +34,14 @@ fn the_trail_beside_the_search_starts_at_the_folder_the_results_lead_to(cx: &mut
     let ui = open(cx, fake);
     ui.input(cx, "a");
     // The results alone: the search field stands for them and the trail is empty.
-    assert!(ui.act(cx, |window, _| window.try_find(("crumb", 1usize)).is_none()));
+    let results = crumb(&ui, cx, 1);
+    assert!(ui.act(cx, |window, _| window.try_find(results.clone()).is_none()));
     ui.press(cx, "down");
+    let folder = crumb(&ui, cx, 2);
     // Their folder open: its crumb stands first, with none for the results before it.
     let (field, address, crumb) = ui.act(cx, |window, _| {
-        assert!(window.try_find(("crumb", 1usize)).is_none());
-        (window.find("search-box").bounds(), window.find("address").bounds(), window.find(("crumb", 2usize)).bounds())
+        assert!(window.try_find(results).is_none());
+        (window.find("search-box").bounds(), window.find("address").bounds(), window.find(folder).bounds())
     });
     assert!(field.right() < address.left() && address.left() <= crumb.left(), "{field:?} {address:?} {crumb:?}");
 }
@@ -67,13 +69,19 @@ fn loads_the_next_page_of_results_as_the_list_nears_its_end(cx: &mut TestAppCont
     ui.input(cx, "file");
     assert_eq!(ui.read(cx, |v| (v.state.columns[1].entries.len(), v.state.columns[1].total)), (500, 1200));
     let id = ui.read(cx, |v| v.state.columns[1].id);
+    let pages = |offset: usize| fake.searches.lock().unwrap().iter().filter(|(_, o)| *o == offset).count();
+    // Drawn with its first rows in sight, far from the end: nothing more is asked for.
+    ui.act(cx, |_, _| ());
+    settle(cx);
+    assert_eq!(pages(500), 0);
     let handle = ui.view.update(cx, |v, _| v.list_handle(id));
     handle.scroll_to_item(499, ScrollStrategy::Bottom);
     settle(cx);
     ui.act(cx, |_, _| ());
     settle(cx);
     assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 1000);
-    assert!(fake.searches.lock().unwrap().iter().any(|(_, offset)| *offset == 500));
+    // Asked for once, though every frame drawn near the end asks.
+    assert_eq!(pages(500), 1);
 }
 
 #[gpui_kit::test]
@@ -124,7 +132,7 @@ fn searches_within_the_filter_chosen_with_nothing_typed_too(cx: &mut TestAppCont
     let ui = open(cx, fake.clone());
     ui.click(cx, "search-filter");
     assert!(ui.read(cx, |v| v.filter_open()));
-    ui.click(cx, ("filter", 0usize));
+    ui.click(cx, crate::dialogs::filter_tool_id("filter", "画像"));
     assert!(!ui.read(cx, |v| v.filter_open()));
     assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
     assert_eq!(last_query(&fake), "<ext:jpg;png>");
@@ -199,7 +207,7 @@ fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAp
     ui.click(cx, "close-filters");
     // Chosen, saved with a search, and shown.
     ui.click(cx, "search-filter");
-    ui.click(cx, ("filter", 0usize));
+    ui.click(cx, crate::dialogs::filter_tool_id("filter", "画像"));
     ui.press(cx, "ctrl-f");
     ui.input(cx, "cat");
     ui.press(cx, "ctrl-d");

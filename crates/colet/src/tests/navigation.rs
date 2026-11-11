@@ -30,7 +30,8 @@ fn opens_a_deep_search_file_on_its_own_folder_and_right_jumps_to_it(cx: &mut Tes
     ui.click(cx, row(&deep.path));
     // The folders above it are folded away; their crumbs are still there.
     assert_eq!(ui.read(cx, |v| v.state.folded_away()), 2);
-    assert!(ui.act(cx, |window, _| window.try_find(("crumb", 2usize)).is_some()));
+    let folded = crumb(&ui, cx, 2);
+    assert!(ui.act(cx, |window, _| window.try_find(folded).is_some()));
     ui.press(cx, "right");
     assert_eq!(ui.active(cx), 4);
     assert_eq!(ui.selected(cx, 4), std::slice::from_ref(&deep.path));
@@ -54,7 +55,8 @@ fn opens_a_deep_search_file_on_its_own_folder_and_right_jumps_to_it(cx: &mut Tes
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.click_in(cx, ("column", results), row(&deep.path));
     assert_eq!(ui.read(cx, |v| v.state.folded_away()), 2);
-    ui.click(cx, ("crumb", 3usize));
+    let third = crumb(&ui, cx, 3);
+    ui.click(cx, third);
     assert_eq!(ui.active(cx), 3);
     assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
 }
@@ -309,7 +311,8 @@ fn goes_to_a_crumb_s_column_picking_nothing_in_it(cx: &mut TestAppContext) {
     let ui = open(cx, fake);
     ui.click_in(cx, "home", row(r"D:\"));
     assert_eq!(ui.active(cx), 0);
-    ui.click(cx, ("crumb", 1usize));
+    let drive = crumb(&ui, cx, 1);
+    ui.click(cx, drive);
     assert_eq!(ui.active(cx), 1);
     assert!(ui.columns_focused(cx));
     assert!(ui.selected(cx, 1).is_empty());
@@ -417,7 +420,7 @@ fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &m
     // Three picked: one name cannot be changed for them all.
     ui.press(cx, "ctrl-a");
     // Into the file actions from the trail's last crumb, past the preferences' button.
-    let crumb = ui.read(cx, |v| v.stops.get(&Stop::Crumb(v.state.columns.len() - 1)).unwrap());
+    let crumb = ui.read(cx, |v| v.stops.get(&Stop::Crumb(v.state.columns.last().unwrap().id)).unwrap());
     ui.act(cx, |window, cx| crumb.focus(window, cx));
     for _ in 0..5 {
         ui.press(cx, "tab");

@@ -94,7 +94,8 @@ fn alt_enter_opens_the_path_in_a_new_tab_in_front(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_press_past_the_crumbs_types_a_path_and_one_on_a_crumb_goes_there(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
-    ui.click(cx, ("crumb", 1usize));
+    let first = crumb(&ui, cx, 1);
+    ui.click(cx, first);
     assert_eq!(ui.address(cx), None);
     assert_eq!(ui.active(cx), 1);
     ui.click(cx, "address-room");

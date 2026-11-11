@@ -516,22 +516,19 @@ impl Colet {
     }
 
     /// The rows of a folder or the results: only those in sight are drawn, and the results load their
-    /// next page as the list nears the end of what it has.
+    /// next page as the list nears the end of what it has (see [`next_page_at_end`]).
     pub(super) fn column_rows(&mut self, index: usize, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let c = &self.state.columns[index];
         let (id, count) = (c.id, c.entries.len());
+        let more_to_come = c.kind == Kind::Search && count < c.total;
         let view = cx.entity();
         let handle = self.list_handle(id);
+        // Draws the rows asked for and nothing else: it can be called for any range, to measure as well.
         let mut list = uniform_list(("list", id), count, move |range, _, cx| {
             view.update(cx, |this, cx| {
                 let Some(index) = this.state.index_of(id) else { return Vec::new() };
                 let c = &this.state.columns[index];
-                // The next page of results, once the list nears the end of what it has.
-                if c.kind == Kind::Search && range.end + 50 >= c.entries.len() && c.entries.len() < c.total {
-                    let view = cx.entity();
-                    cx.defer(move |cx| view.update(cx, |this, cx| this.more(id, cx)));
-                }
                 let entries: Vec<Entry> = c.entries[range.start.min(c.entries.len())..range.end.min(c.entries.len())].to_vec();
                 entries.iter().map(|entry| this.row(index, entry, marked, keys, cx)).collect()
             })
@@ -553,6 +550,7 @@ impl Colet {
             .min_h_0()
             .relative()
             .child(list)
+            .when(more_to_come, |d| d.child(next_page_at_end(id, count, &handle, cx)))
             // Clear of the half of the edge that falls inside.
             .child(
                 div()
@@ -565,4 +563,35 @@ impl Colet {
             )
             .into_any_element()
     }
+}
+
+/// How near the end of what a search's list has its last row in sight brings the next page.
+const PAGE_AHEAD: usize = 50;
+
+/// Asks for the next page of the results `id` once the rows in sight come within [`PAGE_AHEAD`] of the
+/// `count` it has. Placed after the list, it reads the list's scroll as the list has just laid it out, a
+/// row moved to by the keys too, so the rows themselves are only drawn; the page is asked for after the
+/// frame, and [`Colet::more`] asks for nothing while one is on its way.
+fn next_page_at_end(id: ColumnId, count: usize, handle: &UniformListScrollHandle, cx: &mut Context<Colet>) -> impl IntoElement {
+    let (handle, view) = (handle.clone(), cx.entity().downgrade());
+    canvas(
+        move |_, _, cx| {
+            let state = handle.0.borrow();
+            let Some(size) = state.last_item_size else { return };
+            // A row's height as laid out, not as set: it follows the text's size.
+            let row = size.contents.height / count.max(1) as f32;
+            if row <= px(0.) {
+                return;
+            }
+            let in_sight = ((-state.base_handle.offset().y + size.item.height) / row).ceil().max(0.) as usize;
+            if in_sight + PAGE_AHEAD >= count {
+                cx.defer(move |cx| {
+                    view.update(cx, |this, cx| this.more(id, cx)).ok();
+                });
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .size_0()
 }

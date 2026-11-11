@@ -465,7 +465,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\cat.jpg")])));
     let ui = open(cx, fake.clone());
     ui.click(cx, "search-filter");
-    ui.click(cx, ("filter", 0usize));
+    ui.click(cx, crate::dialogs::filter_tool_id("filter", "画像"));
     ui.press(cx, "ctrl-f");
     ui.input(cx, "cat");
     ui.press(cx, "ctrl-d");
@@ -501,7 +501,7 @@ fn changes_the_filter_a_saved_search_runs_within_from_its_edit(cx: &mut TestAppC
     let ui = open(cx, fake.clone());
     ui.click(cx, row(HomeKey::search("cat", Some("画像"), None).key()));
     ui.press(cx, "f2");
-    ui.click(cx, ("edit-search-filter", 2usize));
+    ui.click(cx, crate::dialogs::filter_tool_id("edit-search-filter", "動画"));
     ui.click(cx, "save-search");
     assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter.as_deref(), Some("動画"));
     // The search showing follows it.

@@ -9,10 +9,13 @@ use std::{
 
 use gpui_kit::{Bounds, Pixels};
 
-/// A crumb on the trail: the column it goes to, its name, and the path its tip shows.
+use crate::state::ColumnId;
+
+/// A crumb on the trail: the column it goes to, its name, and the path its tip shows. It is known by the
+/// column's id, not its place: folding and unfolding move the columns, and its stop and its id go with it.
 #[derive(Clone)]
 pub struct Crumb {
-    pub column: usize,
+    pub column: ColumnId,
     pub name: String,
     pub path: String,
 }
@@ -24,7 +27,7 @@ pub struct Trail {
     pub folded: Vec<Crumb>,
     /// Where each crumb was drawn, by its column, and the row they stand in: the bar under them follows
     /// the columns on screen.
-    pub bounds: Rc<RefCell<HashMap<usize, Bounds<Pixels>>>>,
+    pub bounds: Rc<RefCell<HashMap<ColumnId, Bounds<Pixels>>>>,
     pub row: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The width the crumbs were last folded for.
     pub room: Rc<Cell<f32>>,

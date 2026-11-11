@@ -1173,6 +1173,13 @@ impl Colet {
         self.changed(cx);
     }
 
+    /// Goes to the column `id`, wherever it stands now; nothing if it has closed since it was pointed at.
+    pub fn go_to_column(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.state.index_of(id) {
+            self.go_to(index, window, cx);
+        }
+    }
+
     pub fn step(&mut self, by: isize, window: &mut Window, cx: &mut Context<Self>) {
         self.state.step(by);
         // Moving in home can run a saved search, which the field shows.

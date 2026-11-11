@@ -23,19 +23,20 @@ pub enum Stop {
     Star(ColumnId),
     /// A column's button lifting its narrowing.
     ClearFilter(ColumnId),
-    /// The crumb of the trail for a column, by its index.
-    Crumb(usize),
+    /// The crumb of the trail for a column.
+    Crumb(ColumnId),
     /// A theme among the preferences.
     Theme(Theme),
     /// A tool on a search filter in the filters' dialog, by the filter's name.
     Filter(FilterTool, String),
-    /// A choice of filter for a saved search being edited, by its place in the list.
-    EditSearchFilter(usize),
+    /// A choice of filter for a saved search being edited, by the filter's name; none for no filter.
+    EditSearchFilter(Option<String>),
     /// A hint to search for a query.
     Hint(String),
     /// A step in the history.
     HistoryEntry(u64),
-    /// One of the files of a step in the history, by its place in the step.
+    /// One of the files of a step in the history, by its place in the step: a step only ever adds its
+    /// items at the end, so the place stays the item's.
     HistoryItem(u64, usize),
 }
 

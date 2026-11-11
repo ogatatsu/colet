@@ -15,8 +15,9 @@ impl Colet {
         let head = screen.first + s0.floor() as usize;
         let tail = screen.first + (s1.ceil() as usize).saturating_sub(1);
         // Crumbs folded into the menu have no place to mark: start at the first one shown.
-        let from = (head..=tail).find(|i| bounds.contains_key(i))?;
-        let (first, last) = (bounds.get(&from)?, bounds.get(&tail)?);
+        let drawn = |index: usize| self.state.columns.get(index).and_then(|c| bounds.get(&c.id));
+        let from = (head..=tail).find(|&i| drawn(i).is_some())?;
+        let (first, last) = (drawn(from)?, drawn(tail)?);
         let into = if from == head { s0 - s0.floor() } else { 0. };
         let start = f32::from(first.left()) + f32::from(first.size.width) * into;
         let reach = s1 - (tail - screen.first) as f32;
@@ -44,9 +45,8 @@ impl Colet {
         self.state
             .columns
             .iter()
-            .enumerate()
-            .filter(|(_, c)| c.kind == Kind::Folder)
-            .map(|(index, c)| Crumb { column: index, name: shown(folder_name(&c.path)), path: shown(&c.path) })
+            .filter(|c| c.kind == Kind::Folder)
+            .map(|c| Crumb { column: c.id, name: shown(folder_name(&c.path)), path: shown(&c.path) })
             .collect()
     }
 
@@ -107,12 +107,13 @@ impl Colet {
         let room = row_width - crate::crumbs::TYPING_ROOM;
         let folded = crate::crumbs::folded(&widths, room);
         let last = crumbs.len().saturating_sub(1);
-        self.crumbs.bounds.borrow_mut().retain(|index, _| crumbs[folded..].iter().any(|c| c.column == *index));
-        for Crumb { column: index, .. } in &crumbs[folded..] {
-            self.stop(Stop::Crumb(*index), cx);
+        self.crumbs.bounds.borrow_mut().retain(|id, _| crumbs[folded..].iter().any(|c| c.column == *id));
+        for Crumb { column: id, .. } in &crumbs[folded..] {
+            self.stop(Stop::Crumb(*id), cx);
         }
         let shown: Vec<Crumb> = crumbs[folded..].to_vec();
-        let menu_current = crumbs[..folded].iter().any(|c| c.column == self.state.active);
+        let active = self.state.columns.get(self.state.active).map(|c| c.id);
+        let menu_current = crumbs[..folded].iter().any(|c| Some(c.column) == active);
         self.crumbs.folded = crumbs[..folded].to_vec();
         let fold = (folded > 0).then(|| self.crumb_fold(menu_current, window, cx));
         let editing = self.address.is_open();
@@ -238,9 +239,9 @@ impl Colet {
     /// `max_width`, the others keep their whole names.
     pub(super) fn crumb(&self, crumb: Crumb, chevron: bool, max_width: Option<f32>, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = self.palette;
-        let Crumb { column: index, name: label, path } = crumb;
-        let current = index == self.state.active;
-        let stop = self.stops.get(&Stop::Crumb(index));
+        let Crumb { column: id, name: label, path } = crumb;
+        let current = self.state.index_of(id) == Some(self.state.active);
+        let stop = self.stops.get(&Stop::Crumb(id));
         // Without a stop of its own it is never ringed, though it stands for the columns' keys.
         let ringed = stop.as_ref().is_some_and(|s| s.is_focused(window));
         let focus = stop.unwrap_or_else(|| self.columns_focus.clone());
@@ -255,7 +256,7 @@ impl Colet {
             .when(chevron, |d| d.child(icon("chevron-right", 13., p.text_faint)))
             .child(
                 // The mouse leaves the keys where they are; the column it goes to takes them.
-                ring(crate::view::keep_focus(div().id(("crumb", index))).track_focus(&focus), p, ringed, 4.)
+                ring(crate::view::keep_focus(div().id(("crumb", id))).track_focus(&focus), p, ringed, 4.)
                     .role(Role::Button)
                     .aria_label(label.clone())
                     .relative()
@@ -263,7 +264,7 @@ impl Colet {
                         let crumbs = self.crumbs.bounds.clone();
                         canvas(
                             move |bounds, _, _| {
-                                crumbs.borrow_mut().insert(index, bounds);
+                                crumbs.borrow_mut().insert(id, bounds);
                             },
                             |_, _, _, _| {},
                         )
@@ -281,7 +282,7 @@ impl Colet {
                     .hover(|d| d.bg(p.hover))
                     .tip(path)
                     .child(div().truncate().child(label))
-                    .on_click(cx.listener(move |this, _, window, cx| this.go_to(index, window, cx)))
+                    .on_click(cx.listener(move |this, _, window, cx| this.go_to_column(id, window, cx)))
                     .test_support(),
             )
     }
