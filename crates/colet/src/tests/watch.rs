@@ -52,7 +52,7 @@ fn lets_go_of_the_folders_at_or_inside_what_an_operation_moves() {
 fn watches_again_once_an_operation_ends(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "delete");
-    assert!(ui.read(cx, |v| !v.operations.is_running() && v.loading.watching().released.is_empty()));
+    assert!(ui.read_app(cx, |v, app| !v.operations.read(app).is_running() && v.loading.watching().released.is_empty()));
 }
 
 #[gpui_kit::test]

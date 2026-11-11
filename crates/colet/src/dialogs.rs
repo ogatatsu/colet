@@ -667,7 +667,7 @@ impl Colet {
         self.overlays.set_popup(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
         self.show_menu(window, cx);
         // Read afresh for each menu, so one added since is there.
-        self.load_send_targets(window, cx);
+        self.operations.update(cx, |operations, cx| operations.load_send_targets(cx));
     }
 
     /// The file menu, or a text field's, where it was opened; over a dialog too, for its fields'. GPUI
@@ -693,7 +693,7 @@ impl Colet {
     /// The file actions under the toolbar.
     pub fn render_actions(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let reasons = self.reasons();
+        let reasons = self.reasons(cx);
         let action = |id: &'static str, glyph: &'static str, label: &'static str, key: &'static str, off: Option<&'static str>| {
             let tip = match off {
                 Some(why) => format!("{label}（{why}）"),
@@ -791,12 +791,13 @@ impl Colet {
     /// with problems not seen yet.
     pub fn history_button(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        let unseen = self.operations.history().unseen;
+        let operations = self.operations.read(cx);
+        let (unseen, running) = (operations.history().unseen, operations.is_running());
         let label = if unseen > 0 { format!("操作履歴（問題のある操作 {unseen} 件）") } else { "操作履歴".to_owned() };
         let button = Button::new("history-button")
             .ghost()
             .xsmall()
-            .map(|b| if self.operations.is_running() { b.icon(Spinner::new()) } else { b.icon(crate::view::glyph("clock")) })
+            .map(|b| if running { b.icon(Spinner::new()) } else { b.icon(crate::view::glyph("clock")) })
             .accessibility_label(label.clone())
             .tooltip(label)
             .when(unseen > 0, |d| {
@@ -818,7 +819,7 @@ impl Colet {
                 )
             })
             .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                if this.operations.history().open {
+                if this.history_panel.open {
                     this.show_history(false, None, window, cx);
                 } else if !this.pressed_shut(event) {
                     this.show_history(true, None, window, cx);
@@ -826,33 +827,32 @@ impl Colet {
             }));
         // The button takes no listener for the press, so the box round it notes it.
         let button = self.ringed(button, "history-button", RingAt::Edge, window, cx);
-        Self::opener(div().flex(), |this| this.operations.history().open, cx).child(button).into_any_element()
+        Self::opener(div().flex(), |this| this.history_panel.open, cx).child(button).into_any_element()
     }
 
     /// The file operations run since Colet opened, newest first.
     pub fn render_history(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.operations.history().open {
+        if !self.history_panel.open {
             return None;
         }
         let p = self.palette;
         // Each row and each item that opens a stop for Tab; the mouse leaves the keys
         // where they are, as before.
         let mut keys = Vec::new();
-        for entry in &self.operations.history().entries {
+        for entry in &self.operations.read(cx).history().entries {
             keys.push(Stop::HistoryEntry(entry.id));
-            if self.operations.history().expanded.contains(&entry.id) {
+            if self.history_panel.expanded.contains(&entry.id) {
                 keys.extend(entry.items.iter().enumerate().filter(|(_, item)| !item.gone).map(|(k, _)| Stop::HistoryItem(entry.id, k)));
             }
         }
         let stops: std::collections::HashMap<Stop, FocusHandle> = keys.into_iter().map(|key| (key.clone(), self.stop(key, cx))).collect();
-        let entries: Vec<AnyElement> = self
-            .operations
-            .history()
+        let history = self.operations.read(cx).history();
+        let entries: Vec<AnyElement> = history
             .entries
             .iter()
             .map(|entry| {
                 let id = entry.id;
-                let open = self.operations.history().expanded.contains(&id);
+                let open = self.history_panel.expanded.contains(&id);
                 let problems = entry.has_problems();
                 div()
                     .flex()
@@ -887,9 +887,7 @@ impl Colet {
                         .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(entry.target()))
                         .child(div().text_color(if problems { p.danger } else { p.text_muted }).child(entry.outcome()))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if !this.operations.history_mut().expanded.remove(&id) {
-                                this.operations.history_mut().expanded.insert(id);
-                            }
+                            this.history_panel.toggle(id);
                             cx.notify();
                         }))
                         .test_support(),
@@ -966,7 +964,7 @@ impl Colet {
                     .into_any_element()
             })
             .collect();
-        let clearable = self.operations.history().entries.iter().any(|e| e.status != Status::Running);
+        let clearable = history.entries.iter().any(|e| e.status != Status::Running);
         Some(
             deferred(
                 div()
@@ -997,8 +995,10 @@ impl Colet {
                             .child(
                                 crate::view::keep_focus(push("clear-history", "履歴を消去", false, clearable).ghost().small()).on_click(
                                     cx.listener(|this, _, _, cx| {
-                                        this.operations.history_mut().entries.retain(|e| e.status == Status::Running);
-                                        cx.notify();
+                                        this.operations.update(cx, |operations, cx| {
+                                            operations.history_mut().clear();
+                                            cx.notify();
+                                        })
                                     }),
                                 ),
                             ),

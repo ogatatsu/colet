@@ -356,14 +356,16 @@ fn pins_rows_of_any_kind_above_the_rest_and_puts_them_in_order(cx: &mut TestAppC
     pin(&ui, cx, r"D:\b", "menu-favorite");
     pin(&ui, cx, "search:two", "menu-unsave");
     assert!(fake.settings.lock().unwrap().pinned.is_empty());
-    assert!(!ui.read(cx, |v| v.menu_lines().iter().any(|l| matches!(l.command, crate::menus::Command::Pin(_)))));
+    assert!(!ui.read_app(cx, |v, app| v.menu_lines(app).iter().any(|l| matches!(l.command, crate::menus::Command::Pin(_)))));
 }
 
 #[gpui_kit::test]
 fn offers_in_home_only_what_its_rows_can_do(cx: &mut TestAppContext) {
     let (_, ui) = ordered_home(cx);
     let lines = |ui: &Ui, cx: &mut TestAppContext| {
-        ui.read(cx, |v| v.menu_lines().into_iter().map(|l| format!("{}{}", if l.group { "| " } else { "" }, l.text)).collect::<Vec<_>>())
+        ui.read_app(cx, |v, app| {
+            v.menu_lines(app).into_iter().map(|l| format!("{}{}", if l.group { "| " } else { "" }, l.text)).collect::<Vec<_>>()
+        })
     };
     let menu = |ui: &Ui, cx: &mut TestAppContext, path: &str| {
         ui.press(cx, "escape");

@@ -8,7 +8,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{atomic::Ordering, mpsc},
+    sync::mpsc,
     time::Duration,
 };
 
@@ -36,7 +36,7 @@ use crate::{
     icons::Icons,
     loading::Loading,
     menus::Popup,
-    ops::Operations,
+    ops::{HistoryPanel, Operations},
     overlays::Overlays,
     places::{Dialog, HomeDragging, home_entries, home_groups},
     scrolls::Scrolls,
@@ -373,8 +373,11 @@ pub struct Colet {
     pub crumbs: Trail,
     /// Where the focused row of the active column was drawn, for the menu key.
     pub focused_row: Rc<Cell<Option<Bounds<Pixels>>>>,
-    /// The file operations, the history and the clipboard.
-    pub operations: Operations,
+    /// The file operations, the history and the clipboard: their own entity, which Colet starts and ends
+    /// operations on and hears from.
+    pub operations: Entity<Operations>,
+    /// How the history of the operations shows.
+    pub history_panel: HistoryPanel,
     /// What QuickLook was last told to show: a preview open follows the keys from it.
     quick_looked: Option<PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -392,7 +395,7 @@ impl Colet {
     ) -> Self {
         let (search, typed) = Self::search_field(window, cx);
         let (address, address_typed) = Self::address_field(window, cx);
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             typed,
             address_typed,
             // Followed only while the theme follows Windows.
@@ -413,6 +416,10 @@ impl Colet {
             Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
             _ => 0,
         };
+        let operations = cx.new(|cx| Operations::new(backend.clone(), owner, cx));
+        // The history's button, the rows' clipboard marks and the menu's Send To are drawn from it.
+        subscriptions.push(cx.observe(&operations, |_, _, cx| cx.notify()));
+        subscriptions.push(cx.subscribe_in(&operations, window, |this, _, event, window, cx| this.on_operations_event(event, window, cx)));
         let mut this = Self {
             state: State::new(),
             chosen_filter: None,
@@ -438,7 +445,8 @@ impl Colet {
             crumbs: Trail::default(),
             overlays: Overlays::new(cx),
             focused_row: Default::default(),
-            operations: Operations::default(),
+            operations,
+            history_panel: HistoryPanel::default(),
             quick_looked: None,
             _subscriptions: subscriptions,
         };
@@ -471,9 +479,6 @@ impl Colet {
         this.sync_narrow_fields(window, cx);
         this.scroll_rows();
         crate::theme::apply(window, this.stored.settings().theme, cx);
-        let changed = this.operations.clipboard().changed_flag();
-        this.backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
-        this.load_send_targets(window, cx);
         this.search.update(cx, |input, cx| input.focus(window, cx));
         this.sync(cx);
         this.poll(cx);
@@ -499,11 +504,11 @@ impl Colet {
     /// Whether the window may close: not while a file operation or a send runs. The settings are written at once,
     /// rather than a moment after the last change; when that fails, the next close goes without them.
     pub(crate) fn may_close(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.operations.is_running() {
+        if self.operations.read(cx).is_running() {
             self.notify("ファイル操作中です。完了を待つか、進捗ダイアログでキャンセルしてから閉じてください。", Tone::Info, cx);
             return false;
         }
-        if self.operations.is_sending() {
+        if self.operations.read(cx).is_sending() {
             self.notify("「送る」の処理中です。完了を待ってから閉じてください。", Tone::Info, cx);
             return false;
         }
@@ -738,7 +743,7 @@ impl Colet {
                 if let Some(whole) = whole {
                     self.state.counted(id, request, whole);
                 }
-                self.state.page(id, request, entries, total, offset, self.operations.departed());
+                self.state.page(id, request, entries, total, offset, self.operations.read(cx).departed());
                 // What the listing showed held in another case than the disk's, as a favorite kept from
                 // before a rename elsewhere, is kept in the disk's from now on.
                 for (from, to) in std::mem::take(&mut self.state.respelled) {
@@ -957,25 +962,7 @@ impl Colet {
     /// clipboard now holds.
     fn take_changes(&mut self, cx: &mut Context<Self>) {
         self.take_missed(cx);
-        if self.operations.take_events() {
-            cx.notify();
-        }
-        if self.operations.clipboard().take_changed() {
-            let backend = self.backend.clone();
-            let read = cx.background_executor().spawn(async move { backend.clipboard_files() });
-            cx.spawn(async move |this, cx| {
-                // None while another app holds it: try again next time.
-                match read.await {
-                    Some(files) => this.update(cx, |this, cx| {
-                        this.operations.clipboard_mut().set_files(files);
-                        cx.notify();
-                    }),
-                    None => this.update(cx, |this, _| this.operations.clipboard().read_again()),
-                }
-                .ok();
-            })
-            .detach();
-        }
+        self.operations.update(cx, |operations, cx| operations.take_changes(cx));
     }
 
     /// Reloads the folder columns whose listings changed.
@@ -1064,7 +1051,7 @@ impl Colet {
 
     /// A menu, dialog or the history is open, holding the keys.
     fn holds_keys(&self) -> bool {
-        self.overlays.is_open() || self.operations.history().open
+        self.overlays.is_open() || self.history_panel.open
     }
 
     /// A menu, dialog or the history opening: where the keys are now is where they go back to as it closes.

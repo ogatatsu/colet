@@ -291,7 +291,7 @@ impl Colet {
     }
 
     /// The lines of the open menu: a text field's, the sort order's, the search filters', or the file menu's.
-    pub fn menu_lines(&self) -> Vec<Line> {
+    pub fn menu_lines(&self, cx: &App) -> Vec<Line> {
         if let Some(menu) = self.text_menu() {
             let edit = menu.editable;
             return vec![
@@ -347,7 +347,7 @@ impl Colet {
         if self.menu().is_none() {
             return Vec::new();
         }
-        let reasons = self.reasons();
+        let reasons = self.reasons(cx);
         let picked = self.picked();
         if self.menu().and_then(|m| self.state.index_of(m.column)).is_some_and(|i| self.state.columns[i].kind == Kind::Home) {
             return self.home_lines(&picked, &reasons);
@@ -384,7 +384,7 @@ impl Colet {
             }
         };
         // Each item of Windows' Send To, by the shell's icon for it.
-        let targets = self.operations.send_targets().iter().enumerate().map(|(i, target)| {
+        let targets = self.operations.read(cx).send_targets().iter().enumerate().map(|(i, target)| {
             let command = Command::SendTo { target: target.path.clone(), shift: false };
             Line { picture: Some(IconSource::Item(target.path.clone())), ..choice(("send-to", i), target.name.clone(), command, false) }
         });
@@ -567,7 +567,7 @@ impl Colet {
         if let Some(Popup::Text(menu)) = &popup {
             menu.input.update(cx, |input, cx| input.set_selection_focus(None, cx));
         }
-        let within = self.overlays.has_dialog() || self.operations.history().open;
+        let within = self.overlays.has_dialog() || self.history_panel.open;
         match popup {
             Some(Popup::Text(menu)) if restore && within => menu.input.update(cx, |input, cx| input.focus(window, cx)),
             _ if restore && !within => self.restore_keys(window, cx),
@@ -640,7 +640,7 @@ impl Colet {
     /// Builds the open menu's lines into the component library's menu and gives it the keys: ↑↓ move,
     /// Enter picks, Esc closes, and the keys go back to where they were.
     pub fn show_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let items = self.menu_items(self.menu_lines(), window, cx);
+        let items = self.menu_items(self.menu_lines(cx), window, cx);
         self.show_items(items, window, cx);
     }
 

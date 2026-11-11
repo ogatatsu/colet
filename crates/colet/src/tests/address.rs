@@ -174,12 +174,12 @@ fn a_servers_shares_are_only_looked_at(cx: &mut TestAppContext) {
     assert_eq!(ui.active(cx), 1);
     ui.press(cx, "down");
     assert_eq!(ui.selected(cx, 1), [r"\\nas\share"]);
-    let reasons = ui.read(cx, |v| {
-        let r = v.reasons();
+    let reasons = ui.read_app(cx, |v, app| {
+        let r = v.reasons(app);
         [r.copy, r.cut, r.paste, r.rename, r.delete, r.shell, r.send_to]
     });
     assert_eq!(reasons, [Some(crate::ops::NOT_AT_SERVER); 7]);
-    let reasons = ui.read(cx, |v| [v.reasons().copy_path, v.reasons().explorer]);
+    let reasons = ui.read_app(cx, |v, app| [v.reasons(app).copy_path, v.reasons(app).explorer]);
     assert_eq!(reasons, [None, None]);
     // Nor is anything made or deleted there by its keys.
     ui.press(cx, "delete");
@@ -187,5 +187,5 @@ fn a_servers_shares_are_only_looked_at(cx: &mut TestAppContext) {
     assert!(fake.operations.lock().unwrap().is_empty());
     // A share's own folder takes a new folder as any does.
     ui.press(cx, "right");
-    assert_eq!(ui.read(cx, |v| v.reasons().paste), None);
+    assert_eq!(ui.read_app(cx, |v, app| v.reasons(app).paste), None);
 }

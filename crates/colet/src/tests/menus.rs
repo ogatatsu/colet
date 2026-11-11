@@ -8,7 +8,7 @@ fn offers_the_explorer_menu_only_for_items_in_one_folder(cx: &mut TestAppContext
     let ui = open(cx, fake);
     ui.input(cx, "x");
     ui.press(cx, "enter");
-    let reasons = |cx: &mut TestAppContext| ui.read(cx, |v| (v.reasons().shell, v.reasons().copy));
+    let reasons = |cx: &mut TestAppContext| ui.read_app(cx, |v, app| (v.reasons(app).shell, v.reasons(app).copy));
     assert_eq!(ui.selected(cx, 1), [r"D:\a\x.txt"]);
     assert_eq!(reasons(cx), (None, None));
     ui.press(cx, "shift-down");
@@ -114,7 +114,7 @@ fn copies_the_path_of_a_folder_column_and_opens_it_in_a_tab_by_keys_with_nothing
     });
     settle(cx);
     assert_eq!(ui.read(cx, |v| v.state.active), 2);
-    assert_eq!(ui.read(cx, |v| v.reasons().copy_path), None);
+    assert_eq!(ui.read_app(cx, |v, app| v.reasons(app).copy_path), None);
     ui.press(cx, "ctrl-shift-c");
     settle(cx);
     assert_eq!(*fake.text.lock().unwrap(), r"D:\work");
@@ -155,8 +155,8 @@ fn send_targets(fake: &Fake) {
 
 /// The lines of the file menu's "送る": whether it is on, and those of its menu.
 fn send_lines(ui: &Ui, cx: &mut TestAppContext) -> (bool, Vec<String>) {
-    ui.read(cx, |v| {
-        let lines = v.menu_lines();
+    ui.read_app(cx, |v, app| {
+        let lines = v.menu_lines(app);
         let send = lines.iter().find(|l| l.id == ElementId::from("menu-send-to")).expect("送る");
         (send.off.is_none(), send.sub.iter().flatten().map(|l| l.text.to_string()).collect())
     })
@@ -226,7 +226,7 @@ fn keeps_the_window_while_a_send_runs(cx: &mut TestAppContext) {
     send_targets(&fake);
     let close = |cx: &mut TestAppContext| ui.view.update(cx, |v, cx| v.may_close(cx));
     ui.view.update(cx, |v, cx| {
-        v.operations.set_send_targets(fake.send_targets());
+        v.operations.update(cx, |operations, _| operations.set_send_targets(fake.send_targets()));
         v.send_to(r"C:\SendTo\USB.lnk".into(), false, cx);
     });
     // Its drop runs in this process: closing now would cut it off.
@@ -504,9 +504,9 @@ fn closes_the_menus_from_the_buttons_that_opened_them(cx: &mut TestAppContext) {
     ui.press_and_release(cx, "search-filter");
     assert!(!ui.read(cx, |v| v.filter_open()));
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| v.operations.history().open));
+    assert!(ui.read(cx, |v| v.history_panel.open));
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| !v.operations.history().open));
+    assert!(ui.read(cx, |v| !v.history_panel.open));
     assert!(ui.columns_focused(cx));
     // Pressed once more, each opens again.
     ui.press_and_release(cx, "sort");

@@ -77,7 +77,7 @@ struct RowLook {
 
 impl Colet {
     /// How the row of `entry` in the column at `index` stands, `marked` while that column is worked in.
-    fn row_look(&self, index: usize, entry: &Entry, marked: bool, keys: bool) -> RowLook {
+    fn row_look(&self, index: usize, entry: &Entry, marked: bool, keys: bool, cx: &App) -> RowLook {
         let c = &self.state.columns[index];
         let kind = c.kind;
         let selected = c.selected.contains(&entry.path);
@@ -90,8 +90,9 @@ impl Colet {
                     && filter == self.state.search_filter.as_deref()
                     && narrow == self.state.search_narrowing().as_deref());
         // On the clipboard, cut or copied, whoever put it there.
-        let held = self.operations.clipboard().holds(&entry.path);
-        let cut = held && self.operations.clipboard().files.cut;
+        let clipboard = self.operations.read(cx).clipboard();
+        let held = clipboard.holds(&entry.path);
+        let cut = held && clipboard.files.cut;
         // The menu acts on a row outside the selection, or the folder itself: the selection steps back, so
         // only what the menu acts on stands out.
         let aside = self.menu().is_some_and(|m| m.column == c.id && m.paths.is_some());
@@ -129,7 +130,7 @@ impl Colet {
     pub(super) fn row(&mut self, index: usize, entry: &Entry, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let RowLook { selected, highlighted, barred, lit, focused, target, aside, held, cut, faded, dragged, within, narrow } =
-            self.row_look(index, entry, marked, keys);
+            self.row_look(index, entry, marked, keys, cx);
         let c = &self.state.columns[index];
         let kind = c.kind;
         // While a row in home is carried, only the line tells where it goes.

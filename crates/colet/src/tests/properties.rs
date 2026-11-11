@@ -12,7 +12,9 @@ fn shows_the_properties_of_the_row_right_clicked_or_of_the_folder_from_its_empty
     ui.act(cx, |window, cx| window.right_click(row(r"D:\work\c.txt"), cx));
     settle(cx);
     // Last but the Windows menu, the two in a group of their own.
-    let tail = ui.read(cx, |v| v.menu_lines().into_iter().rev().take(2).map(|l| (l.text.to_string(), l.group, l.off)).collect::<Vec<_>>());
+    let tail = ui.read_app(cx, |v, app| {
+        v.menu_lines(app).into_iter().rev().take(2).map(|l| (l.text.to_string(), l.group, l.off)).collect::<Vec<_>>()
+    });
     assert_eq!(tail, [("その他のオプションを確認".to_owned(), false, None), ("プロパティ".to_owned(), true, None)]);
     ui.click(cx, "menu-properties");
     settle(cx);
@@ -52,7 +54,7 @@ fn shows_the_properties_of_results_from_several_folders_together(cx: &mut TestAp
     ui.input(cx, "x");
     ui.press(cx, "down");
     ui.press(cx, "ctrl-a");
-    assert_eq!(ui.read(cx, |v| v.reasons().properties), None);
+    assert_eq!(ui.read_app(cx, |v, app| v.reasons(app).properties), None);
     ui.press(cx, "alt-enter");
     settle(cx);
     assert_eq!(shown(&fake), [vec![r"D:\a\x.txt".to_owned(), r"D:\b\y.txt".into()]]);
@@ -62,11 +64,11 @@ fn shows_the_properties_of_results_from_several_folders_together(cx: &mut TestAp
         cx.notify();
     });
     settle(cx);
-    assert_eq!(ui.read(cx, |v| v.reasons().properties), Some(crate::ops::NEEDS_FOLDER));
+    assert_eq!(ui.read_app(cx, |v, app| v.reasons(app).properties), Some(crate::ops::NEEDS_FOLDER));
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.act(cx, |window, cx| window.right_click(("column", results), cx));
     settle(cx);
-    let line = ui.read(cx, |v| v.menu_lines().into_iter().find(|l| l.text == "プロパティ").map(|l| l.off));
+    let line = ui.read_app(cx, |v, app| v.menu_lines(app).into_iter().find(|l| l.text == "プロパティ").map(|l| l.off));
     assert_eq!(line, Some(Some("")));
     ui.press(cx, "escape");
     ui.press(cx, "alt-enter");
@@ -89,8 +91,8 @@ fn shows_the_properties_of_a_drive_or_folder_in_home_but_not_of_a_saved_search(c
     // A saved search has none: not in its menu, and off by the keys.
     ui.act(cx, |window, cx| window.within("home").right_click(row("search:one"), cx));
     settle(cx);
-    assert!(!ui.read(cx, |v| v.menu_lines().iter().any(|l| l.command == crate::menus::Command::Properties)));
-    assert_eq!(ui.read(cx, |v| v.reasons().properties), Some("保存した検索には使えません"));
+    assert!(!ui.read_app(cx, |v, app| v.menu_lines(app).iter().any(|l| l.command == crate::menus::Command::Properties)));
+    assert_eq!(ui.read_app(cx, |v, app| v.reasons(app).properties), Some("保存した検索には使えません"));
     ui.press(cx, "escape");
     ui.click(cx, row("search:one"));
     ui.press(cx, "left");

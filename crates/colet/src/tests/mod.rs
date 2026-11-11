@@ -525,6 +525,17 @@ impl Ui {
         self.view.read_with(cx, |view, _| f(view))
     }
 
+    /// As [`read`](Self::read), with the app, for what Colet reads from its other entities.
+    fn read_app<R>(&self, cx: &mut TestAppContext, f: impl FnOnce(&Colet, &App) -> R) -> R {
+        self.view.read_with(cx, |view, app| f(view, app))
+    }
+
+    /// The file operations, the history and the clipboard.
+    fn ops<R>(&self, cx: &mut TestAppContext, f: impl FnOnce(&crate::ops::Operations) -> R) -> R {
+        let operations = self.read(cx, |v| v.operations.clone());
+        operations.read_with(cx, |operations, _| f(operations))
+    }
+
     fn selected(&self, cx: &mut TestAppContext, index: usize) -> Vec<String> {
         self.read(cx, |v| texts(&v.state.columns[index].selected))
     }
@@ -803,7 +814,7 @@ impl Ui {
 
     /// The lines of the open menu that are on.
     fn lines_on(&self, cx: &mut TestAppContext) -> Vec<String> {
-        self.read(cx, |v| v.menu_lines().into_iter().filter(|l| l.off.is_none()).map(|l| l.text.to_string()).collect())
+        self.read_app(cx, |v, app| v.menu_lines(app).into_iter().filter(|l| l.off.is_none()).map(|l| l.text.to_string()).collect())
     }
 
     fn has_focus(&self, cx: &mut TestAppContext, input: &Entity<gpui_kit::base::input::InputState>) -> bool {
