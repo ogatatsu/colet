@@ -85,3 +85,27 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
     cx.simulate_window_resize(ui.window, size(px(1200.), px(800.)));
     assert_eq!(ui.act(cx, |window, _| window.find("sidebar").bounds().size.width), px(480.));
 }
+
+#[gpui_kit::test]
+fn leaves_the_window_keys_alone_in_a_dialog(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "ctrl-shift-n");
+    let unchanged = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.read(cx, |v| {
+            (v.overlays.has_dialog(), v.overlays.has_menu(), v.stored.settings().show_hidden, v.tabs.len(), v.state.columns.len())
+        })
+    };
+    let before = unchanged(&ui, cx);
+    assert!(before.0);
+    for key in
+        ["ctrl-h", "ctrl-0", "ctrl-u", "ctrl-d", "ctrl-shift-f", "ctrl-l", "ctrl-f", "ctrl-t", "ctrl-w", "ctrl-tab", "ctrl-shift-t", "f5"]
+    {
+        ui.press(cx, key);
+        assert_eq!(unchanged(&ui, cx), before, "{key} went past the dialog");
+    }
+    // Tab goes round the dialog, never back into the window under it.
+    for key in ["tab", "tab", "tab", "tab", "shift-tab", "shift-tab", "shift-tab", "shift-tab"] {
+        ui.press(cx, key);
+        assert!(!ui.columns_focused(cx) && !ui.home_focused(cx) && !ui.search_focused(cx), "{key} left the dialog");
+    }
+}

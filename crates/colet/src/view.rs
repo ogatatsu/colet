@@ -323,6 +323,9 @@ impl Render for Colet {
             .text_color(p.text)
             .font_family("Segoe UI")
             .text_size(px(metrics::TEXT_LARGE))
+            // The window's keys. None of them needs to check for a dialog: the window draws its dialog
+            // outside Colet's elements, and the dialog keeps the keys in itself, so while one is open these
+            // are never on the way of a key (see `tests::window::leaves_the_window_keys_alone_in_a_dialog`).
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.search.update(cx, |input, cx| {
                     input.focus(window, cx);
@@ -331,28 +334,16 @@ impl Render for Colet {
             }))
             .on_action(cx.listener(|this, _: &FocusAddress, window, cx| this.open_address(window, cx)))
             .on_action(cx.listener(|this, _: &OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
-            .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| {
-                if !this.overlays.has_dialog() {
-                    this.open_filter_menu(window, cx);
-                }
-            }))
+            .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| this.open_filter_menu(window, cx)))
             // As the strip's button does: the keys stay where they are.
             .on_action(cx.listener(|this, _: &Unfold, _, cx| {
-                if !this.overlays.has_dialog() && this.state.folded_away() > 0 {
+                if this.state.folded_away() > 0 {
                     this.state.unfold();
                     this.changed(cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &FocusHome, window, cx| {
-                if !this.overlays.has_dialog() {
-                    this.focus_home(window, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ToggleHidden, _, cx| {
-                if !this.overlays.has_dialog() {
-                    this.toggle_hidden(cx);
-                }
-            }))
+            .on_action(cx.listener(|this, _: &FocusHome, window, cx| this.focus_home(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleHidden, _, cx| this.toggle_hidden(cx)))
             // Esc puts down a drag in home, before the keys reach anything else.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.home_drag.carried.is_some() && event.keystroke.key == "escape" {
@@ -371,11 +362,7 @@ impl Render for Colet {
             .on_action(cx.listener(|this, _: &PreviousTab, window, cx| this.step_tab(-1, window, cx)))
             .on_action(cx.listener(|this, _: &ReopenTab, window, cx| this.reopen_tab(window, cx)))
             .on_action(cx.listener(|this, _: &RefreshAll, _, cx| this.refresh(cx)))
-            .on_action(cx.listener(|this, _: &SaveCurrent, window, cx| {
-                if !this.overlays.has_dialog() {
-                    this.save_current(window, cx);
-                }
-            }))
+            .on_action(cx.listener(|this, _: &SaveCurrent, window, cx| this.save_current(window, cx)))
             // The mouse's back and forward buttons, as Alt+← and Alt+→.
             .on_mouse_down(MouseButton::Navigate(NavigationDirection::Back), cx.listener(|this, _, window, cx| this.back(window, cx)))
             .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, _, window, cx| this.forward(window, cx)))
