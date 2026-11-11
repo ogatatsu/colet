@@ -174,8 +174,9 @@ fn chooses_a_filter_from_the_keys_and_hands_them_back_to_the_field(cx: &mut Test
 fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\cat.jpg")]));
     let ui = open(cx, fake.clone());
-    let listing =
-        |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| matches!(v.dialog, Some(Dialog::Filters { edit: None, deleting: None })));
+    let listing = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.read(cx, |v| matches!(v.overlays.dialog(), Some(Dialog::Filters { edit: None, deleting: None })))
+    };
     ui.click(cx, "search-filter");
     ui.click(cx, "edit-filters");
     assert!(listing(&ui, cx));
@@ -219,12 +220,12 @@ fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAp
     // Asked about first, with the saved searches that use it counted; gone, they go without it.
     ui.click(cx, ("filter-delete", 1usize));
     assert_eq!(ui.read(cx, |v| v.filter_users("写真")), 1);
-    assert!(ui.read(cx, |v| matches!(&v.dialog, Some(Dialog::Filters { deleting: Some(name), .. }) if name == "写真")));
+    assert!(ui.read(cx, |v| matches!(v.overlays.dialog(), Some(Dialog::Filters { deleting: Some(name), .. }) if name == "写真")));
     ui.click(cx, "delete-filter");
     assert_eq!(names(&fake), ["動画"]);
     assert_eq!(fake.settings.lock().unwrap().tabs[0].filter, None);
     assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter, None);
     assert_eq!(last_query(&fake), "cat");
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
 }

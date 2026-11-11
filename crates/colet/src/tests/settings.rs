@@ -44,11 +44,11 @@ fn opens_the_preferences_with_the_theme_taking_the_keys(cx: &mut TestAppContext)
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
     ui.click(cx, "preferences");
-    assert!(ui.read(cx, |v| matches!(v.dialog, Some(crate::places::Dialog::Preferences))));
+    assert!(ui.read(cx, |v| matches!(v.overlays.dialog(), Some(crate::places::Dialog::Preferences))));
     // The theme chosen takes the keys, there being no field to type in.
     assert!(ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.stop("theme:System", cx).is_focused(window))));
     ui.click(cx, "close-preferences");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
 }
 
 #[gpui_kit::test]

@@ -187,7 +187,7 @@ pub enum Popup {
 impl Colet {
     /// The file menu, while it is open.
     pub fn menu(&self) -> Option<&Menu> {
-        match &self.popup {
+        match self.overlays.popup() {
             Some(Popup::File(menu)) => Some(menu),
             _ => None,
         }
@@ -195,18 +195,12 @@ impl Colet {
 
     /// Closes the file menu, giving back what it was opened on; any other menu stays.
     pub fn take_menu(&mut self) -> Option<Menu> {
-        match self.popup.take() {
-            Some(Popup::File(menu)) => Some(menu),
-            other => {
-                self.popup = other;
-                None
-            }
-        }
+        self.overlays.take_file_menu()
     }
 
     /// The text field's menu, while it is open.
     pub fn text_menu(&self) -> Option<&TextMenu> {
-        match &self.popup {
+        match self.overlays.popup() {
             Some(Popup::Text(menu)) => Some(menu),
             _ => None,
         }
@@ -249,9 +243,9 @@ impl Colet {
                 empty: field.value().is_empty(),
             }
         };
-        self.popup = Some(Popup::Text(menu));
+        self.overlays.set_popup(Popup::Text(menu));
         self.show_menu(window, cx);
-        let focus = self.menu_view.as_ref().map(|(_, focus, _)| focus.clone());
+        let focus = self.overlays.menu_focus().cloned();
         input.update(cx, |input, cx| input.set_selection_focus(focus, cx));
     }
 
@@ -272,28 +266,28 @@ impl Colet {
     fn text_fields(&self) -> Vec<Entity<InputState>> {
         let mut fields = vec![self.search.clone(), self.address.field.clone()];
         fields.extend(self.narrow_fields.values().map(|field| field.input.clone()));
-        fields.extend(self.dialog.iter().flat_map(Dialog::fields));
+        fields.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
         fields
     }
 
     pub fn sort_open(&self) -> bool {
-        matches!(self.popup, Some(Popup::Sort))
+        matches!(self.overlays.popup(), Some(Popup::Sort))
     }
 
     /// The column whose own order's menu is open, if one is.
     pub fn column_sort_open(&self) -> Option<ColumnId> {
-        match self.popup {
-            Some(Popup::ColumnSort(id)) => Some(id),
+        match self.overlays.popup() {
+            Some(Popup::ColumnSort(id)) => Some(*id),
             _ => None,
         }
     }
 
     pub fn filter_open(&self) -> bool {
-        matches!(self.popup, Some(Popup::Filters { .. }))
+        matches!(self.overlays.popup(), Some(Popup::Filters { .. }))
     }
 
     pub fn crumbs_open(&self) -> bool {
-        matches!(self.popup, Some(Popup::Crumbs))
+        matches!(self.overlays.popup(), Some(Popup::Crumbs))
     }
 
     /// The lines of the open menu: a text field's, the sort order's, the search filters', or the file menu's.
@@ -335,7 +329,7 @@ impl Colet {
             lines.push(line("edit-filters", "pencil-line", "フィルターを編集…", None, None, Command::EditFilters).grouped());
             return lines;
         }
-        if let Some(Popup::Tab { tab, .. }) = self.popup {
+        if let Some(&Popup::Tab { tab, .. }) = self.overlays.popup() {
             let at = self.tabs.list.iter().position(|t| t.id == tab).unwrap_or_default();
             let count = self.tabs.list.len();
             let reopen = self.can_reopen_tab();
@@ -562,19 +556,18 @@ impl Colet {
             }
         }
         // What the line opened, a dialog, takes the keys; otherwise they go back to the column.
-        let to_column = self.dialog.is_none();
+        let to_column = !self.overlays.has_dialog();
         self.close_menus(to_column, window, cx);
     }
 
     /// Closes whichever menu is open, handing the keys back when `restore`: to where they were as it opened,
     /// or, in a dialog, to the text field whose menu it was.
     pub fn close_menus(&mut self, restore: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let popup = self.popup.take();
-        self.menu_view = None;
+        let popup = self.overlays.close_menu();
         if let Some(Popup::Text(menu)) = &popup {
             menu.input.update(cx, |input, cx| input.set_selection_focus(None, cx));
         }
-        let within = self.dialog.is_some() || self.operations.history().open;
+        let within = self.overlays.has_dialog() || self.operations.history().open;
         match popup {
             Some(Popup::Text(menu)) if restore && within => menu.input.update(cx, |input, cx| input.focus(window, cx)),
             _ if restore && !within => self.restore_keys(window, cx),
@@ -585,7 +578,7 @@ impl Colet {
 
     /// Opens the menu of the folders folded off the trail, as it was last drawn.
     pub fn open_crumb_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.popup = Some(Popup::Crumbs);
+        self.overlays.set_popup(Popup::Crumbs);
         let active = self.state.active;
         let colet = cx.weak_entity();
         let items = self
@@ -614,8 +607,7 @@ impl Colet {
     /// Closes the trail's menu; `to_button` hands the keys back to the button that opened it.
     pub fn close_crumb_menu(&mut self, to_button: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.crumbs_open() {
-            self.popup = None;
-            self.menu_view = None;
+            self.overlays.close_menu();
         }
         if to_button {
             self.stop("crumb-fold", cx).focus(window, cx);
@@ -625,23 +617,23 @@ impl Colet {
 
     /// Opens the default order's menu.
     pub fn open_sort(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.popup = Some(Popup::Sort);
+        self.overlays.set_popup(Popup::Sort);
         self.show_menu(window, cx);
     }
 
     /// Opens the menu of the column `id`'s own order.
     pub fn open_column_sort(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
-        self.popup = Some(Popup::ColumnSort(id));
+        self.overlays.set_popup(Popup::ColumnSort(id));
         self.show_menu(window, cx);
     }
 
     /// Opens the search filters' menu.
     pub fn open_filter_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let from_search = match self.popup {
-            Some(Popup::Filters { from_search }) => from_search,
+        let from_search = match self.overlays.popup() {
+            Some(&Popup::Filters { from_search }) => from_search,
             _ => self.search_has_keys(window, cx),
         };
-        self.popup = Some(Popup::Filters { from_search });
+        self.overlays.set_popup(Popup::Filters { from_search });
         self.show_menu(window, cx);
     }
 
@@ -717,25 +709,25 @@ impl Colet {
         let menu = PopupMenu::build(window, cx, |menu, _, _| items.into_iter().fold(menu, |menu, item| menu.item(item)));
         // Closed by Esc or a press outside it; a line picked closes the menu itself first.
         let dismissed = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
-            if this.menu_view.is_some() {
+            if this.overlays.has_menu() {
                 this.close_menus(true, window, cx);
             }
         });
         let focus = menu.focus_handle(cx);
         self.remember_keys(window, cx);
         focus.focus(window, cx);
-        self.menu_view = Some((menu, focus, dismissed));
+        self.overlays.show_menu(menu, focus, dismissed);
         cx.notify();
     }
 
     /// The open menu has the keys.
     pub fn menu_has_keys(&self, window: &Window, cx: &App) -> bool {
-        self.menu_view.as_ref().is_some_and(|(_, focus, _)| focus.contains_focused(window, cx))
+        self.overlays.menu_focus().is_some_and(|focus| focus.contains_focused(window, cx))
     }
 
     /// The open menu, to lay out where it opened; Shift+F10 and the menu key close it, as they open it.
     pub fn menu_element(&self, id: &'static str, label: &'static str, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (menu, _, _) = self.menu_view.as_ref()?;
+        let menu = self.overlays.menu()?;
         Some(
             div()
                 .id(id)

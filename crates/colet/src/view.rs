@@ -152,14 +152,14 @@ impl Colet {
     /// again. A press outside what it opened closes that before the button's click comes, so the press
     /// notes whether it was open and [`Colet::pressed_shut`] tells the click.
     pub(crate) fn opener<E: InteractiveElement>(el: E, open: impl Fn(&Colet) -> bool + 'static, cx: &mut Context<Self>) -> E {
-        el.capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, _, _| this.pressed_open = open(this)))
+        el.capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, _, _| this.overlays.note_press(open(this))))
     }
 
     /// The press `event` ends found open what its button opens, and closed it already: the click is not
     /// to open it again. Enter and Space press nothing; a press left noted by no click is noted over by
     /// the next press, the only one a click can end.
     pub(crate) fn pressed_shut(&mut self, event: &ClickEvent) -> bool {
-        std::mem::take(&mut self.pressed_open) && !event.is_keyboard()
+        self.overlays.take_pressed_open() && !event.is_keyboard()
     }
 
     /// The keys are in home's pane.
@@ -271,24 +271,24 @@ impl Render for Colet {
             .on_action(cx.listener(|this, _: &FocusAddress, window, cx| this.open_address(window, cx)))
             .on_action(cx.listener(|this, _: &OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| {
-                if this.dialog.is_none() {
+                if !this.overlays.has_dialog() {
                     this.open_filter_menu(window, cx);
                 }
             }))
             // As the strip's button does: the keys stay where they are.
             .on_action(cx.listener(|this, _: &Unfold, _, cx| {
-                if this.dialog.is_none() && this.state.folded_away() > 0 {
+                if !this.overlays.has_dialog() && this.state.folded_away() > 0 {
                     this.state.unfold();
                     this.changed(cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &FocusHome, window, cx| {
-                if this.dialog.is_none() {
+                if !this.overlays.has_dialog() {
                     this.focus_home(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &ToggleHidden, _, cx| {
-                if this.dialog.is_none() {
+                if !this.overlays.has_dialog() {
                     this.toggle_hidden(cx);
                 }
             }))
@@ -311,7 +311,7 @@ impl Render for Colet {
             .on_action(cx.listener(|this, _: &ReopenTab, window, cx| this.reopen_tab(window, cx)))
             .on_action(cx.listener(|this, _: &RefreshAll, _, cx| this.refresh(cx)))
             .on_action(cx.listener(|this, _: &SaveCurrent, window, cx| {
-                if this.dialog.is_none() {
+                if !this.overlays.has_dialog() {
                     this.save_current(window, cx);
                 }
             }))
@@ -358,7 +358,7 @@ impl Render for Colet {
                     .child(div().flex_1().min_w_0().h_full().flex().flex_col().child(main).child(self.render_statusbar(window, cx))),
             )
             // Over a dialog, a field's menu is drawn with it.
-            .children(if self.dialog.is_none() { self.render_menu(cx) } else { None })
+            .children(if !self.overlays.has_dialog() { self.render_menu(cx) } else { None })
             .children(self.render_history(window, cx))
     }
 }

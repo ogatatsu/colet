@@ -28,7 +28,7 @@ fn keeps_a_dialog_taller_than_the_window_within_it_its_buttons_in_reach(cx: &mut
     // What does not fit scrolls between the heading and the buttons: more than the room it has.
     assert!(content.size.height > close.top() - content.top(), "{content:?} {close:?}");
     ui.click(cx, "close-preferences");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
 }
 
 #[gpui_kit::test]

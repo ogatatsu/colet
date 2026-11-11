@@ -611,7 +611,7 @@ impl Colet {
         let subscription = cx.subscribe_in(&input, window, |this: &mut Self, _, event, window, cx| match event {
             InputEvent::PressEnter { .. } => this.submit_name(window, cx),
             InputEvent::Change => {
-                if let Some(Dialog::Name { tried, checking, .. }) = &mut this.dialog {
+                if let Some(Dialog::Name { tried, checking, .. }) = this.overlays.dialog_mut() {
                     *tried = false;
                     // The answer on its way is about a name no longer there.
                     *checking = None;
@@ -621,25 +621,25 @@ impl Colet {
             InputEvent::Focus | InputEvent::Blur => cx.notify(),
         });
         self.palette.style_input(&input, cx);
-        self.dialog_subscriptions.push(subscription);
+        self.overlays.listen_in_dialog(subscription);
         input.update(cx, |input, cx| {
             input.focus(window, cx);
             input.set_selected_range(0..select_end, cx);
         });
-        self.dialog = Some(Dialog::Name { request, input, tried: false, taken: None, checking: None });
+        self.overlays.set_dialog(Dialog::Name { request, input, tried: false, taken: None, checking: None });
         cx.notify();
     }
 
     /// Why the name in the dialog cannot be used, as it stands.
     pub fn name_problem(&self, cx: &App) -> Option<&'static str> {
-        let Some(Dialog::Name { input, tried, taken, .. }) = &self.dialog else { return None };
+        let Some(Dialog::Name { input, tried, taken, .. }) = self.overlays.dialog() else { return None };
         let name = input.read(cx).value();
         colet_core::operations::name_problem(&name, *tried)
             .or(taken.as_deref().filter(|&taken| taken == name.as_ref()).map(|_| "同じ名前の項目があります"))
     }
 
     pub fn submit_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialog::Name { request, input, tried, checking, .. }) = &mut self.dialog else { return };
+        let Some(Dialog::Name { request, input, tried, checking, .. }) = self.overlays.dialog_mut() else { return };
         let name = input.read(cx).value().to_string();
         // Pressed again while the folder is asked about this very name: the answer sends it.
         if name.trim().is_empty() || checking.as_deref() == Some(name.as_str()) {
@@ -682,7 +682,7 @@ impl Colet {
     /// The folder answered whether it has `name`: taken, the dialog says so; free, it is sent. Only while the
     /// same dialog still waits on that name: closed, or typed on since, the answer is about nothing shown.
     fn name_checked(&mut self, dialog: EntityId, name: String, exists: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialog::Name { input, taken, checking, .. }) = &mut self.dialog else { return };
+        let Some(Dialog::Name { input, taken, checking, .. }) = self.overlays.dialog_mut() else { return };
         if input.entity_id() != dialog || checking.as_deref() != Some(name.as_str()) {
             return;
         }
@@ -696,7 +696,7 @@ impl Colet {
     }
 
     fn send_name(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialog::Name { request, .. }) = &self.dialog else { return };
+        let Some(Dialog::Name { request, .. }) = self.overlays.dialog() else { return };
         let request = Request { name, ..request.clone() };
         self.close_dialog(window, cx);
         self.run(request, cx);
@@ -737,7 +737,7 @@ impl Colet {
                 let files: Vec<PathBuf> = picked.into_iter().filter(|e| !e.directory).map(|e| e.path).collect();
                 if files.len() >= ASK_TO_OPEN {
                     self.begin_dialog(window, cx);
-                    self.dialog = Some(Dialog::Open { paths: files });
+                    self.overlays.set_dialog(Dialog::Open { paths: files });
                     self.stop("confirm-open", cx).focus(window, cx);
                     cx.notify();
                 } else {
@@ -749,7 +749,7 @@ impl Colet {
 
     /// Opens the files asked about.
     pub fn confirm_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialog::Open { paths }) = self.dialog.take() else { return };
+        let Some(Dialog::Open { paths }) = self.overlays.take_dialog() else { return };
         self.close_dialog(window, cx);
         self.open_files(paths, cx);
     }
@@ -832,7 +832,7 @@ impl Colet {
         if let Some(index) = index {
             self.state.set_active(index);
         }
-        let to_column = self.dialog.is_none() && self.menu_has_keys(window, cx);
+        let to_column = !self.overlays.has_dialog() && self.menu_has_keys(window, cx);
         self.close_menus(to_column, window, cx);
         let Some(index) = index else { return };
         if let Some(reason) = refused {

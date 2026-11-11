@@ -41,7 +41,7 @@ fn acts_from_the_menu_on_the_row_right_clicked_leaving_the_selection(cx: &mut Te
 fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     let dialog_paths = |ui: &Ui, cx: &mut TestAppContext| {
-        ui.read(cx, |v| match &v.dialog {
+        ui.read(cx, |v| match v.overlays.dialog() {
             Some(crate::places::Dialog::Name { request: Request { paths, .. }, .. }) => texts(paths),
             _ => Vec::new(),
         })
@@ -277,7 +277,7 @@ fn opens_the_file_menu_on_the_menu_key_and_closes_it_on_either_menu_key(cx: &mut
     ui.press(cx, "menu");
     assert!(ui.read(cx, |v| v.text_menu().is_some()));
     ui.press(cx, "menu");
-    assert!(ui.read(cx, |v| v.popup.is_none()));
+    assert!(ui.read(cx, |v| v.overlays.popup().is_none()));
     assert!(ui.search_field_focused(cx));
 }
 
@@ -337,7 +337,7 @@ fn refuses_a_stale_menu_even_when_another_column_takes_its_index(cx: &mut TestAp
         })
     });
     assert!(fake.menus.lock().unwrap().is_empty());
-    assert!(ui.read(cx, |v| v.menu().is_none() && v.menu_view.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none() && !v.overlays.has_menu()));
     assert!(ui.columns_focused(cx));
 }
 
@@ -348,7 +348,7 @@ fn showing_the_shell_menu_directly_returns_the_keys_to_its_column(cx: &mut TestA
     ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.show_shell_menu(window, cx)));
     settle(cx);
     assert_eq!(fake.menus.lock().unwrap().len(), 1);
-    assert!(ui.read(cx, |v| v.menu().is_none() && v.menu_view.is_none()));
+    assert!(ui.read(cx, |v| v.menu().is_none() && !v.overlays.has_menu()));
     assert!(ui.columns_focused(cx));
 }
 
@@ -361,7 +361,7 @@ fn edits_the_search_field_from_its_menu(cx: &mut TestAppContext) {
     assert!(ui.read(cx, |v| v.text_menu().is_some()));
     assert_eq!(ui.lines_on(cx), ["元に戻す"]);
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.popup.is_none()));
+    assert!(ui.read(cx, |v| v.overlays.popup().is_none()));
     assert!(ui.has_focus(cx, &search));
     ui.input(cx, "cat");
     ui.press(cx, "ctrl-a");
@@ -395,7 +395,7 @@ fn opens_a_fields_menu_from_the_keys(cx: &mut TestAppContext) {
     // Down passes over what is off, to picking all.
     ui.press(cx, "down");
     ui.press(cx, "enter");
-    assert!(ui.read(cx, |v| v.popup.is_none()));
+    assert!(ui.read(cx, |v| v.overlays.popup().is_none()));
     assert!(ui.has_focus(cx, &search));
     assert_eq!(search.read_with(cx, |input, _| input.selected_range()), 0..3);
     // Deleting from it takes the text picked.
@@ -409,7 +409,7 @@ fn opens_a_fields_menu_from_the_keys(cx: &mut TestAppContext) {
 fn copies_from_a_dialogs_field_with_its_menu_over_the_dialog(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "f2");
-    let input = ui.read(cx, |v| match &v.dialog {
+    let input = ui.read(cx, |v| match v.overlays.dialog() {
         Some(Dialog::Name { input, .. }) => input.clone(),
         _ => panic!("no dialog"),
     });
@@ -418,13 +418,13 @@ fn copies_from_a_dialogs_field_with_its_menu_over_the_dialog(cx: &mut TestAppCon
     assert!(ui.read(cx, |v| v.text_menu().is_some_and(|menu| menu.input == input)));
     ui.click(cx, "text-copy");
     assert_eq!(clipboard_text(cx).as_deref(), Some("a.txt"));
-    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    assert!(ui.read(cx, |v| v.overlays.has_dialog()));
     assert!(ui.has_focus(cx, &input));
     // The menu key in the field opens it too, and Esc closes only the menu.
     ui.press(cx, "shift-f10");
     assert!(ui.read(cx, |v| v.text_menu().is_some()));
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.popup.is_none() && v.dialog.is_some()));
+    assert!(ui.read(cx, |v| v.overlays.popup().is_none() && v.overlays.has_dialog()));
     assert!(ui.has_focus(cx, &input));
 }
 

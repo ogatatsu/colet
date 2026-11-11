@@ -524,7 +524,7 @@ impl Colet {
             InputEvent::PressEnter { .. } => submit(this, window, cx),
             InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
         });
-        self.dialog_subscriptions.push(subscription);
+        self.overlays.listen_in_dialog(subscription);
         self.palette.style_input(&input, cx);
         input
     }
@@ -539,13 +539,13 @@ impl Colet {
         let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), "なし".into(), Self::submit_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
         let filter = found.filter.clone();
-        self.dialog = Some(Dialog::EditSearch { original: found, name, query, filter, narrow });
+        self.overlays.set_dialog(Dialog::EditSearch { original: found, name, query, filter, narrow });
         cx.notify();
     }
 
     /// The filter the edited search is to run within.
     pub fn pick_edit_filter(&mut self, chosen: Option<String>, cx: &mut Context<Self>) {
-        if let Some(Dialog::EditSearch { filter, .. }) = &mut self.dialog {
+        if let Some(Dialog::EditSearch { filter, .. }) = self.overlays.dialog_mut() {
             *filter = chosen;
             cx.notify();
         }
@@ -553,7 +553,7 @@ impl Colet {
 
     /// The saved search as the dialog now has it, its name and narrowing as they are kept.
     fn edited_search(&self, cx: &App) -> Option<SavedSearch> {
-        let Some(Dialog::EditSearch { name, query, filter, narrow, .. }) = &self.dialog else { return None };
+        let Some(Dialog::EditSearch { name, query, filter, narrow, .. }) = self.overlays.dialog() else { return None };
         Some(SavedSearch {
             name: name.read(cx).value().trim().to_owned(),
             query: query.read(cx).value().to_string(),
@@ -564,7 +564,7 @@ impl Colet {
 
     /// Why the edited search cannot be saved as it stands, if it cannot.
     pub fn edit_problem(&self, cx: &App) -> Option<&'static str> {
-        let Some(Dialog::EditSearch { original, .. }) = &self.dialog else { return None };
+        let Some(Dialog::EditSearch { original, .. }) = self.overlays.dialog() else { return None };
         let edited = self.edited_search(cx)?;
         if edited.query.trim().is_empty() {
             Some("")
@@ -581,7 +581,7 @@ impl Colet {
         if self.edit_problem(cx).is_some() {
             return;
         }
-        let (Some(Dialog::EditSearch { original, .. }), Some(edited)) = (&self.dialog, self.edited_search(cx)) else { return };
+        let (Some(Dialog::EditSearch { original, .. }), Some(edited)) = (self.overlays.dialog(), self.edited_search(cx)) else { return };
         let original = original.clone();
         let (was, is) = (original.key(), edited.key());
         let query_filter = (edited.query.clone(), edited.filter.clone());
@@ -616,13 +616,13 @@ impl Colet {
         let name = self.edit_field(found.name.clone(), shown(folder_name(&found.path)), Self::submit_favorite_edit, window, cx);
         let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), "なし".into(), Self::submit_favorite_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
-        self.dialog = Some(Dialog::EditFavorite { original: found, name, narrow });
+        self.overlays.set_dialog(Dialog::EditFavorite { original: found, name, narrow });
         cx.notify();
     }
 
     /// The favorite as the dialog now has it, its name and narrowing as they are kept.
     fn edited_favorite(&self, cx: &App) -> Option<Favorite> {
-        let Some(Dialog::EditFavorite { original, name, narrow }) = &self.dialog else { return None };
+        let Some(Dialog::EditFavorite { original, name, narrow }) = self.overlays.dialog() else { return None };
         Some(Favorite {
             path: original.path.clone(),
             name: name.read(cx).value().trim().to_owned(),
@@ -632,7 +632,7 @@ impl Colet {
 
     /// Why the edited favorite cannot be kept as it stands, if it cannot.
     pub fn favorite_edit_problem(&self, cx: &App) -> Option<&'static str> {
-        let Some(Dialog::EditFavorite { original, .. }) = &self.dialog else { return None };
+        let Some(Dialog::EditFavorite { original, .. }) = self.overlays.dialog() else { return None };
         let edited = self.edited_favorite(cx)?;
         let other = edited.narrow != original.narrow && self.settings.favorite(&edited.path, edited.narrow.as_deref()).is_some();
         other.then_some("この絞り込みのお気に入りは既にあります")
@@ -642,7 +642,9 @@ impl Colet {
         if self.favorite_edit_problem(cx).is_some() {
             return;
         }
-        let (Some(Dialog::EditFavorite { original, .. }), Some(edited)) = (&self.dialog, self.edited_favorite(cx)) else { return };
+        let (Some(Dialog::EditFavorite { original, .. }), Some(edited)) = (self.overlays.dialog(), self.edited_favorite(cx)) else {
+            return;
+        };
         let (was, is) = (original.home_key().pin(), edited.key());
         let original = original.clone();
         self.update_settings(
@@ -664,7 +666,7 @@ impl Colet {
         self.begin_dialog(window, cx);
         // The theme now chosen takes the keys, as a radio group's checked one does.
         self.stop(format!("theme:{:?}", self.settings.theme), cx).focus(window, cx);
-        self.dialog = Some(Dialog::Preferences);
+        self.overlays.set_dialog(Dialog::Preferences);
         cx.notify();
     }
 
@@ -679,25 +681,20 @@ impl Colet {
     /// back to as it closes.
     pub(crate) fn begin_dialog(&mut self, window: &Window, cx: &App) {
         self.remember_keys(window, cx);
-        self.dialog_subscriptions.clear();
+        self.overlays.forget_dialog_listeners();
     }
 
     /// The keys go back to where they were as the dialog opened, or the menu that opened it.
     pub fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.dialog = None;
-        self.dialog_subscriptions.clear();
+        self.overlays.close_dialog();
         self.restore_keys(window, cx);
         cx.notify();
     }
 
-    /// Opens the window's dialog as [`Colet::dialog`] comes, and closes it as that goes; the keys stay where
+    /// Opens the window's dialog as [`Overlays::dialog`](crate::overlays::Overlays::dialog) comes, and closes it as that goes; the keys stay where
     /// Colet put them, in a field of the dialog or back in the columns.
     pub fn sync_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let open = self.dialog.is_some();
-        if open == self.dialog_shown {
-            return;
-        }
-        self.dialog_shown = open;
+        let Some(open) = self.overlays.take_dialog_change() else { return };
         let focused = window.focused(cx);
         if open {
             let colet = cx.weak_entity();

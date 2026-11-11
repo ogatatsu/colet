@@ -40,6 +40,7 @@ use crate::{
     icons::Icons,
     menus::Popup,
     ops::Operations,
+    overlays::Overlays,
     places::{Dialog, HomeDragging, home_entries, home_groups},
     reveal::Sideways,
     settings::{self, File, LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
@@ -461,27 +462,13 @@ pub struct Colet {
     /// written as the settings are.
     pub sorts: Sorts,
     pub(crate) sorts_saves: Saves<Sorts>,
-    pub dialog: Option<Dialog>,
-    /// What the open dialog listens to, its fields: let go of by [`Colet::begin_dialog`] and on closing.
-    pub(crate) dialog_subscriptions: Vec<Subscription>,
-    /// Takes the keys in a dialog with no field.
-    pub dialog_focus: FocusHandle,
-    /// The window's dialog is open for [`Colet::dialog`].
-    pub(crate) dialog_shown: bool,
     /// Home's list, for its scrollbar.
     pub home_scroll: ScrollHandle,
     pub home_drag: HomeDragging,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
     pub(crate) stops: RefCell<HashMap<String, FocusHandle>>,
-    pub popup: Option<Popup>,
-    /// The open menu's lines, drawn and picked by the component library, and the closing it tells of.
-    pub menu_view: Option<(Entity<gpui_kit::component::menu::PopupMenu>, FocusHandle, Subscription)>,
-    /// Where the keys were as the menu, dialog or history open now was opened, the first of them when one
-    /// opened another; they go back there as the last closes. See [`Colet::remember_keys`].
-    pub(crate) keys_before: Option<WeakFocusHandle>,
-    /// The last press on a button that opens a menu or the history found it open; see
-    /// [`Colet::opener`].
-    pub pressed_open: bool,
+    /// The dialog and the menu open, and where the keys go back to as they close.
+    pub overlays: Overlays,
     /// The sort order's button, a stop for Tab.
     pub sort_focus: FocusHandle,
     pub crumbs: Trail,
@@ -561,19 +548,12 @@ impl Colet {
             settings_saves,
             sorts,
             sorts_saves,
-            dialog: None,
-            dialog_subscriptions: Vec::new(),
-            dialog_focus: cx.focus_handle(),
-            dialog_shown: false,
             home_scroll: ScrollHandle::new(),
             home_drag: HomeDragging::default(),
             stops: RefCell::default(),
-            popup: None,
             sort_focus: cx.focus_handle().tab_stop(true),
             crumbs: Trail::default(),
-            menu_view: None,
-            keys_before: None,
-            pressed_open: false,
+            overlays: Overlays::new(cx),
             focused_row: Default::default(),
             unsaved_close: false,
             operations: Operations::default(),
@@ -664,7 +644,7 @@ impl Colet {
         crate::theme::apply(window, self.settings.theme, cx);
         let mut inputs = vec![self.search.clone(), self.address.field.clone()];
         inputs.extend(self.narrow_fields.values().map(|field| field.input.clone()));
-        inputs.extend(self.dialog.iter().flat_map(Dialog::fields));
+        inputs.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
         for input in &inputs {
             self.palette.style_input(input, cx);
         }
@@ -714,7 +694,7 @@ impl Colet {
             cx.defer(move |cx| {
                 cx.with_window(id, |window, cx| {
                     view.update(cx, |this, cx| {
-                        if this.popup.is_none() && this.menu_view.is_some() {
+                        if this.overlays.popup().is_none() && this.overlays.has_menu() {
                             let keys = this.menu_has_keys(window, cx);
                             this.close_menus(keys, window, cx);
                         }
@@ -1004,8 +984,8 @@ impl Colet {
     /// Gives the column `target` the order, or makes it the default; a column given the default follows
     /// it from then on. The columns whose order this changes are listed again.
     pub fn set_order(&mut self, target: Option<ColumnId>, order: Order, cx: &mut Context<Self>) {
-        if matches!(self.popup, Some(Popup::Sort | Popup::ColumnSort(_))) {
-            self.popup = None;
+        if matches!(self.overlays.popup(), Some(Popup::Sort | Popup::ColumnSort(_))) {
+            self.overlays.forget_popup();
         }
         let orders = |this: &Self| -> Vec<(ColumnId, Order)> {
             this.state.columns.iter().filter(|c| c.kind != Kind::Home).map(|c| (c.id, this.order_of(c))).collect()
@@ -1200,32 +1180,31 @@ impl Colet {
     /// A menu, dialog or the history holds the keys, and closing gives them back to the columns or home,
     /// as [`Colet::restore_keys`] does.
     fn keys_go_back_to_columns(&self) -> bool {
-        (self.menu_view.is_some() || self.dialog.is_some() || self.operations.history().open)
-            && self
-                .keys_before
-                .as_ref()
-                .and_then(|before| before.upgrade())
-                .is_none_or(|before| before == self.home_focus || before == self.columns_focus)
+        self.holds_keys() && self.overlays.keys_before().is_none_or(|before| before == self.home_focus || before == self.columns_focus)
     }
 
     /// A menu, dialog or the history holds the keys, and closing gives them back to `focus`.
     pub(crate) fn keys_go_back_to(&self, focus: &FocusHandle) -> bool {
-        (self.menu_view.is_some() || self.dialog.is_some() || self.operations.history().open)
-            && self.keys_before.as_ref().and_then(|before| before.upgrade()).is_some_and(|before| before == *focus)
+        self.holds_keys() && self.overlays.keys_before().is_some_and(|before| before == *focus)
+    }
+
+    /// A menu, dialog or the history is open, holding the keys.
+    fn holds_keys(&self) -> bool {
+        self.overlays.is_open() || self.operations.history().open
     }
 
     /// A menu, dialog or the history opening: where the keys are now is where they go back to as it closes.
     /// One opened from another leaves it as the first found it.
     pub(crate) fn remember_keys(&mut self, window: &Window, cx: &App) {
-        if self.menu_view.is_none() && self.dialog.is_none() && !self.operations.history().open {
-            self.keys_before = window.focused(cx).map(|focus| focus.downgrade());
+        if !self.holds_keys() {
+            self.overlays.remember_keys(window.focused(cx).as_ref());
         }
     }
 
     /// The last menu, dialog or history closing: the keys go back to where they were as the first opened.
     /// Gone since, or in a column, they go to the column worked in.
     pub(crate) fn restore_keys(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.keys_before.take().and_then(|before| before.upgrade()) {
+        match self.overlays.take_keys_before() {
             Some(before) if before != self.home_focus && before != self.columns_focus => before.focus(window, cx),
             _ => self.column_focus(self.state.active).focus(window, cx),
         }

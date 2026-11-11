@@ -65,7 +65,7 @@ fn keeps_a_folder_narrowed_as_a_favorite_of_its_own_and_opens_it_narrowed(cx: &m
     assert_eq!(opened(&ui, cx), (vec![r"D:\work\a.pdf".to_owned()], "pdf".to_owned()));
     // F2 there edits it, rather than renaming its folder.
     ui.press(cx, "f2");
-    let fields = ui.read(cx, |v| match &v.dialog {
+    let fields = ui.read(cx, |v| match v.overlays.dialog() {
         Some(crate::places::Dialog::EditFavorite { name, narrow, .. }) => Some((name.clone(), narrow.clone())),
         _ => None,
     });
@@ -162,20 +162,20 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     let ui = open(cx, fake.clone());
     ui.click(cx, row(HomeKey::search("ext:pdf", None, None).key()));
     ui.press(cx, "f2");
-    let (name, query) = ui.read(cx, |v| match &v.dialog {
+    let (name, query) = ui.read(cx, |v| match v.overlays.dialog() {
         Some(crate::places::Dialog::EditSearch { name, query, .. }) => (name.clone(), query.clone()),
         _ => panic!("no dialog"),
     });
     // A query already saved cannot be taken.
     ui.act(cx, |window, cx| query.update(cx, |input, cx| input.set_value("dm:today", window, cx)));
     ui.click(cx, "save-search");
-    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    assert!(ui.read(cx, |v| v.overlays.has_dialog()));
     ui.act(cx, |window, cx| {
         name.update(cx, |input, cx| input.set_value("PDF", window, cx));
         query.update(cx, |input, cx| input.set_value("ext:pdf dm:thisweek", window, cx));
     });
     ui.click(cx, "save-search");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert_eq!(
         fake.settings.lock().unwrap().saved_searches[0],
         SavedSearch { name: "PDF".into(), query: "ext:pdf dm:thisweek".into(), filter: None, narrow: None }
@@ -187,7 +187,7 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     ui.click(cx, row(HomeKey::search("ext:pdf dm:thisweek", None, None).key()));
     ui.press(cx, "f2");
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
 }
 
 #[gpui_kit::test]

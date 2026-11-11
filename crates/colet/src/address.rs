@@ -80,7 +80,7 @@ impl Colet {
     /// Ctrl+L, or a press on the trail away from its crumbs: the field, holding the deepest folder's path
     /// all picked, to be typed over.
     pub fn open_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog.is_some() {
+        if self.overlays.has_dialog() {
             return;
         }
         let text = self.deepest_folder().map(shown).unwrap_or_default();

@@ -765,7 +765,7 @@ impl Ui {
 
     /// Types into the fields of the filter being added or edited.
     fn type_filter(&self, cx: &mut TestAppContext, name: &str, query: &str) {
-        let (name_field, query_field) = self.read(cx, |v| match &v.dialog {
+        let (name_field, query_field) = self.read(cx, |v| match v.overlays.dialog() {
             Some(Dialog::Filters { edit: Some(edit), .. }) => (edit.name.clone(), edit.query.clone()),
             _ => panic!("no filter being edited"),
         });

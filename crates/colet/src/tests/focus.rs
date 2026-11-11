@@ -20,9 +20,9 @@ fn a_dialog_gives_the_keys_back_to_where_they_were_as_it_opened(cx: &mut TestApp
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-f");
     ui.click(cx, "preferences");
-    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    assert!(ui.read(cx, |v| v.overlays.has_dialog()));
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert!(ui.search_field_focused(cx));
     // From the column, back to it.
     ui.click(cx, row(r"D:\work\b.txt"));
@@ -48,9 +48,9 @@ fn a_dialog_opened_from_a_menu_gives_the_keys_back_to_where_the_menu_opened(cx: 
     ui.press(cx, "ctrl-f");
     ui.press(cx, "ctrl-shift-f");
     ui.click(cx, "edit-filters");
-    assert!(ui.read(cx, |v| matches!(v.dialog, Some(Dialog::Filters { .. }))));
+    assert!(ui.read(cx, |v| matches!(v.overlays.dialog(), Some(Dialog::Filters { .. }))));
     ui.click(cx, "close-filters");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert!(ui.search_field_focused(cx));
 }
 
@@ -65,7 +65,7 @@ fn the_keys_go_to_the_column_worked_in_when_where_they_were_is_gone(cx: &mut Tes
     ui.click(cx, "preferences");
     drop(gone);
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert!(ui.columns_focused(cx));
 }
 
@@ -91,11 +91,11 @@ fn a_dialog_opened_while_typing_an_address_gives_it_back_as_typed(cx: &mut TestA
     ui.press(cx, "ctrl-l");
     ui.input(cx, r"D:\wo");
     ui.click(cx, "preferences");
-    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    assert!(ui.read(cx, |v| v.overlays.has_dialog()));
     // The field stays open behind it.
     assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
     assert!(ui.address_focused(cx));
     // The caret where it was: typed on, it goes on from there.

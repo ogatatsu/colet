@@ -433,7 +433,7 @@ fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &m
     let view = ui.view.clone();
     ui.act(cx, |window, cx| view.read(cx).columns_focus.clone().focus(window, cx));
     ui.click(cx, "rename");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert!(ui.columns_focused(cx));
 }
 

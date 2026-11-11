@@ -30,14 +30,14 @@ impl Colet {
     /// The list of filters, back from an edit or a deletion asked about.
     pub fn back_to_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.begin_dialog(window, cx);
-        self.dialog = Some(Dialog::Filters { edit: None, deleting: None });
-        self.dialog_focus.focus(window, cx);
+        self.overlays.set_dialog(Dialog::Filters { edit: None, deleting: None });
+        self.overlays.dialog_focus().focus(window, cx);
         cx.notify();
     }
 
     /// Esc: from an edit or a deletion back to the list, otherwise out of the dialog.
     pub fn escape_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match &self.dialog {
+        match self.overlays.dialog() {
             Some(Dialog::Filters { edit, deleting }) if edit.is_some() || deleting.is_some() => self.back_to_filters(window, cx),
             _ => self.close_dialog(window, cx),
         }
@@ -54,17 +54,17 @@ impl Colet {
                 InputEvent::PressEnter { .. } => this.submit_filter(window, cx),
                 InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
             });
-            self.dialog_subscriptions.push(subscription);
+            self.overlays.listen_in_dialog(subscription);
             self.palette.style_input(input, cx);
         }
         name.update(cx, |input, cx| input.focus(window, cx));
-        self.dialog = Some(Dialog::Filters { edit: Some(FilterEdit { original, name, query }), deleting: None });
+        self.overlays.set_dialog(Dialog::Filters { edit: Some(FilterEdit { original, name, query }), deleting: None });
         cx.notify();
     }
 
     /// Why the edited filter cannot be kept as it stands, if it cannot; empty when no word is needed.
     pub fn filter_problem(&self, cx: &App) -> Option<&'static str> {
-        let Some(Dialog::Filters { edit: Some(edit), .. }) = &self.dialog else { return None };
+        let Some(Dialog::Filters { edit: Some(edit), .. }) = self.overlays.dialog() else { return None };
         let name = edit.name.read(cx).value().trim().to_owned();
         if name.is_empty() || edit.query.read(cx).value().trim().is_empty() {
             Some("")
@@ -81,7 +81,7 @@ impl Colet {
         if self.filter_problem(cx).is_some() {
             return;
         }
-        let Some(Dialog::Filters { edit: Some(edit), .. }) = &self.dialog else { return };
+        let Some(Dialog::Filters { edit: Some(edit), .. }) = self.overlays.dialog() else { return };
         let original = edit.original.clone();
         let name = edit.name.read(cx).value().trim().to_owned();
         let query = edit.query.read(cx).value().trim().to_owned();
@@ -130,8 +130,8 @@ impl Colet {
     /// Asks before the filter named `name` goes.
     pub fn ask_delete_filter(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
         self.begin_dialog(window, cx);
-        self.dialog = Some(Dialog::Filters { edit: None, deleting: Some(name) });
-        self.dialog_focus.focus(window, cx);
+        self.overlays.set_dialog(Dialog::Filters { edit: None, deleting: Some(name) });
+        self.overlays.dialog_focus().focus(window, cx);
         cx.notify();
     }
 
@@ -142,7 +142,7 @@ impl Colet {
 
     /// Deletes the filter asked about: what named it goes without it.
     pub fn delete_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialog::Filters { deleting: Some(name), .. }) = &self.dialog else { return };
+        let Some(Dialog::Filters { deleting: Some(name), .. }) = self.overlays.dialog() else { return };
         let name = name.clone();
         self.update_settings(|s| s.filters.retain(|f| f.name != name), cx);
         self.rename_filter_in_tabs(&name, None);

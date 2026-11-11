@@ -239,7 +239,7 @@ impl Colet {
     pub(super) fn resizer(&self, id: &'static str, of: WidthOf, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         // Over what lies past the border, drawn after it; none over a dialog, which covers it.
-        if self.dialog.is_some() {
+        if self.overlays.has_dialog() {
             return div().into_any_element();
         }
         let handle = div()

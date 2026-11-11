@@ -131,7 +131,7 @@ impl Colet {
     }
 
     fn dialog_parts(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(&'static str, Div, Buttons)> {
-        let title = match self.dialog.as_ref()? {
+        let title = match self.overlays.dialog()? {
             Dialog::Name { request: Request { kind: Operation::NewFolder, .. }, .. } => "新規フォルダー",
             Dialog::Name { .. } => "名前を変更",
             Dialog::EditSearch { .. } => "保存した検索を編集",
@@ -145,7 +145,7 @@ impl Colet {
         };
         // Each drawn by a function of its own: in a debug build one function drawing them all takes the room
         // of every one of them at once, past what the window's thread has.
-        let (content, buttons) = match self.dialog.as_ref()? {
+        let (content, buttons) = match self.overlays.dialog()? {
             Dialog::Name { request, input, checking, .. } => self.name_dialog(request, input, checking.is_some(), window, cx),
             Dialog::EditFavorite { original, name, narrow } => self.favorite_dialog(original, name, narrow, window, cx),
             Dialog::EditSearch { name, query, filter, narrow, .. } => self.search_dialog(name, query, filter, narrow, window, cx),
@@ -602,7 +602,7 @@ impl Colet {
 
     /// The dialog as the window draws it: the heading and the buttons stay, and what lies between scrolls
     /// when the window is too low. Esc steps back as [`Colet::escape_dialog`] does; the dialog closes only as
-    /// [`Colet::dialog`] goes.
+    /// [`Overlays::dialog`](crate::overlays::Overlays::dialog) goes.
     pub fn dialog_frame(&mut self, dialog: DialogFrame, window: &mut Window, cx: &mut Context<Self>) -> DialogFrame {
         let Some((title, content, buttons)) = self.dialog_parts(window, cx) else { return dialog };
         // Each ringed round as the fields are, Tab reaching it through a stop of its id; the rings lie over
@@ -629,7 +629,7 @@ impl Colet {
                     .id("dialog-content")
                     .test_support()
                     .aria_label(title)
-                    .track_focus(&self.dialog_focus)
+                    .track_focus(self.overlays.dialog_focus())
                     // The window's dialog lies outside Colet's own elements: the menu key in its fields is heard here.
                     .on_action(cx.listener(|this, _: &crate::app::OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
                     .child(content),
@@ -642,7 +642,7 @@ impl Colet {
     /// Opens the file menu on `paths` (`None` for the selection, empty for the folder itself) in the
     /// column at `index`, at `at` in the window. The keys stay where they were, as the selection does.
     pub fn open_menu(&mut self, index: usize, paths: Option<Vec<PathBuf>>, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog.is_some() {
+        if self.overlays.has_dialog() {
             return;
         }
         let Some(c) = self.state.columns.get(index) else { return };
@@ -657,7 +657,7 @@ impl Colet {
         let mut point = windows::Win32::Foundation::POINT { x: (f32::from(at.x) * scale) as i32, y: (f32::from(at.y) * scale) as i32 };
         let _ =
             unsafe { windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point) };
-        self.popup = Some(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
+        self.overlays.set_popup(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
         self.show_menu(window, cx);
         // Read afresh for each menu, so one added since is there.
         self.load_send_targets(window, cx);
@@ -667,7 +667,7 @@ impl Colet {
     /// paints every deferred draw in the order of its priority, nested or not, so the menu takes one over
     /// the dialog's (ten and up) to be drawn in front of it as it is clicked in front of it.
     pub fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (at, id, label, width) = match self.popup.as_ref()? {
+        let (at, id, label, width) = match self.overlays.popup()? {
             Popup::File(menu) => (menu.at, "menu", "ファイル操作", 240.),
             Popup::Text(menu) => (menu.at, "text-menu", "編集", 200.),
             Popup::Tab { at, .. } => (*at, "tab-menu", "タブ", 220.),

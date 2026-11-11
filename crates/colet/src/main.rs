@@ -12,6 +12,7 @@ mod lane;
 mod menus;
 mod metrics;
 mod ops;
+mod overlays;
 mod places;
 mod reveal;
 mod search_filters;

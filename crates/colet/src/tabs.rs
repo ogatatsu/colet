@@ -281,7 +281,7 @@ impl Colet {
 
     /// A menu or a dialog open holds the tabs where they are.
     fn tabs_held(&self) -> bool {
-        self.dialog.is_some() || self.popup.is_some()
+        self.overlays.has_dialog() || self.overlays.popup().is_some()
     }
 
     /// The tabs as they were kept, the one in front among them; with none, home alone.
@@ -644,10 +644,10 @@ impl Colet {
     }
 
     pub fn open_tab_menu(&mut self, id: TabId, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog.is_some() {
+        if self.overlays.has_dialog() {
             return;
         }
-        self.popup = Some(Popup::Tab { tab: id, at });
+        self.overlays.set_popup(Popup::Tab { tab: id, at });
         self.show_menu(window, cx);
     }
 

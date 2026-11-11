@@ -99,18 +99,18 @@ fn a_favorite_kept_in_another_case_follows_a_rename(cx: &mut TestAppContext) {
 fn renames_from_f2_refusing_a_name_windows_would_reject(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "f2");
-    let input = ui.read(cx, |v| match &v.dialog {
+    let input = ui.read(cx, |v| match v.overlays.dialog() {
         Some(crate::places::Dialog::Name { input, .. }) => input.clone(),
         _ => panic!("no dialog"),
     });
     ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("a:b", window, cx)));
     assert!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)).is_some());
     ui.click(cx, "submit-name");
-    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    assert!(ui.read(cx, |v| v.overlays.has_dialog()));
     assert!(fake.operations.lock().unwrap().is_empty());
     ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("renamed.txt", window, cx)));
     ui.click(cx, "submit-name");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert_eq!(fake.operations.lock().unwrap()[0].name, "renamed.txt");
     assert_eq!(ui.selected(cx, 2), [r"D:\work\renamed.txt"]);
 }
@@ -119,21 +119,21 @@ fn renames_from_f2_refusing_a_name_windows_would_reject(cx: &mut TestAppContext)
 fn refuses_a_rename_to_a_name_its_folder_has_but_not_its_own_in_another_case(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "f2");
-    let input = ui.read(cx, |v| match &v.dialog {
+    let input = ui.read(cx, |v| match v.overlays.dialog() {
         Some(crate::places::Dialog::Name { input, .. }) => input.clone(),
         _ => panic!("no dialog"),
     });
     ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("b.txt", window, cx)));
     assert_eq!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)), None);
     ui.click(cx, "submit-name");
-    assert!(ui.read(cx, |v| v.dialog.is_some()));
+    assert!(ui.read(cx, |v| v.overlays.has_dialog()));
     assert_eq!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)), Some("同じ名前の項目があります"));
     assert!(fake.operations.lock().unwrap().is_empty());
     // Typing again lifts it until the next try.
     ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("A.txt", window, cx)));
     assert_eq!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)), None);
     ui.click(cx, "submit-name");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert_eq!(fake.operations.lock().unwrap()[0].name, "A.txt");
 }
 
@@ -141,13 +141,13 @@ fn refuses_a_rename_to_a_name_its_folder_has_but_not_its_own_in_another_case(cx:
 fn asks_the_folder_about_a_new_name_off_the_ui_thread_and_lets_go_of_an_answer_overtaken(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "f2");
-    let input = ui.read(cx, |v| match &v.dialog {
+    let input = ui.read(cx, |v| match v.overlays.dialog() {
         Some(Dialog::Name { input, .. }) => input.clone(),
         _ => panic!("no dialog"),
     });
     ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("e.txt", window, cx)));
     settle(cx);
-    let checking = |v: &Colet| match &v.dialog {
+    let checking = |v: &Colet| match v.overlays.dialog() {
         Some(Dialog::Name { checking, .. }) => checking.clone(),
         _ => None,
     };
@@ -161,7 +161,7 @@ fn asks_the_folder_about_a_new_name_off_the_ui_thread_and_lets_go_of_an_answer_o
     settle(cx);
     // The answer, that "e.txt" is free, was about a name no longer there: nothing is sent.
     assert_eq!(ui.view.read_with(cx, |v, cx| v.name_problem(cx)), None);
-    assert!(ui.read(cx, |v| v.dialog.is_some() && checking(v).is_none()));
+    assert!(ui.read(cx, |v| v.overlays.has_dialog() && checking(v).is_none()));
     assert!(fake.operations.lock().unwrap().is_empty());
     // Pressed again while the folder is asked, it is sent once, once the folder answers.
     ui.act(cx, |window, cx| {
@@ -169,7 +169,7 @@ fn asks_the_folder_about_a_new_name_off_the_ui_thread_and_lets_go_of_an_answer_o
         ui.view.update(cx, |v, cx| v.submit_name(window, cx));
     });
     settle(cx);
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     let names: Vec<String> = fake.operations.lock().unwrap().iter().map(|r| r.name.clone()).collect();
     assert_eq!(names, ["e.txtd"]);
 }
@@ -248,7 +248,7 @@ fn sends_to_the_bin_the_item_picked_not_another_that_shows_alike(cx: &mut TestAp
     // Its name sent back as shown is no change, not a rename to what stood in for it.
     ui.press(cx, "f2");
     ui.click(cx, "submit-name");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert!(fake.operations.lock().unwrap().is_empty());
     ui.press(cx, "delete");
     let asked = fake.operations.lock().unwrap()[0].clone();
@@ -260,7 +260,7 @@ fn sends_to_the_bin_leaving_the_asking_to_the_shell_and_picks_the_next_row(cx: &
     let (fake, ui) = in_work(cx);
     ui.press(cx, "down");
     ui.press(cx, "delete");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     let asked = fake.operations.lock().unwrap()[0].clone();
     assert_eq!((asked.kind, asked.paths), (Operation::Recycle, vec![PathBuf::from(r"D:\work\b.txt")]));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\c.txt"]);
@@ -306,7 +306,7 @@ fn never_sends_a_drive_at_home_to_the_bin(cx: &mut TestAppContext) {
     let ui = open(cx, fake.clone());
     ui.click(cx, row(r"D:\"));
     ui.press(cx, "delete");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert!(ui.toasts(cx).iter().any(|t| t.starts_with("「ごみ箱へ移動」はホームでは使えません")), "{:?}", ui.toasts(cx));
     ui.press(cx, "ctrl-c");
     assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はホームでは使えません"), "{:?}", ui.toasts(cx));
@@ -439,16 +439,16 @@ fn asks_before_opening_many_files_together(cx: &mut TestAppContext) {
     ui.press(cx, "right");
     ui.press(cx, "ctrl-a");
     ui.press(cx, "enter");
-    assert!(ui.read(cx, |v| matches!(&v.dialog, Some(Dialog::Open { paths }) if paths.len() == crate::ops::ASK_TO_OPEN)));
+    assert!(ui.read(cx, |v| matches!(v.overlays.dialog(), Some(Dialog::Open { paths }) if paths.len() == crate::ops::ASK_TO_OPEN)));
     assert!(fake.opened.lock().unwrap().is_empty());
     // Turned down, nothing opens and the keys go back to the column.
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert!(ui.columns_focused(cx));
     assert!(fake.opened.lock().unwrap().is_empty());
     // The dialog's 開く takes the keys, so Enter again opens them all.
     ui.press(cx, "enter");
     ui.press(cx, "enter");
-    assert!(ui.read(cx, |v| v.dialog.is_none()));
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert_eq!(fake.opened.lock().unwrap().len(), crate::ops::ASK_TO_OPEN);
 }
