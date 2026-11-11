@@ -947,7 +947,7 @@ impl Colet {
                     },
                     Kind::NewFolder => &[],
                 };
-                this.watching.released = leaving.iter().map(|p| path_key(p)).collect();
+                this.loading.watching_mut().released = leaving.iter().map(|p| path_key(p)).collect();
                 this.watch(cx)
             }) else {
                 return;
@@ -1006,7 +1006,7 @@ impl Colet {
     fn finished(&mut self, request: Request, result: Result<(), String>, cx: &mut Context<Self>) {
         let Some(Running { id, tab, made, placed: pasted, .. }) = self.operations.end() else { return };
         // Watched again by the refresh below, which lists what changed while they were not.
-        self.watching.released.clear();
+        self.loading.watching_mut().released.clear();
         let Request { kind, paths, destination, name } = request;
         let (cancelled, problem) = match &result {
             Ok(()) => (false, None),

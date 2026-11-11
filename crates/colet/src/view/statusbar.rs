@@ -1,5 +1,6 @@
 //! The status bar along the bottom.
 use super::*;
+use crate::loading::Engine;
 
 impl Colet {
     pub(super) fn render_statusbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -31,8 +32,8 @@ impl Colet {
             }
             _ => String::new(),
         };
-        let (name, title) = self.engine.describe();
-        let (color, dot) = match &self.engine {
+        let (name, title) = self.loading.engine().describe();
+        let (color, dot) = match self.loading.engine() {
             Engine::Unknown | Engine::Connecting => (p.text_faint, None),
             Engine::Connected(_) => (p.text_faint, Some(p.accent)),
             Engine::Failed(_) => (p.danger, Some(p.danger)),

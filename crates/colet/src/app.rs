@@ -8,12 +8,8 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
-    time::{Duration, Instant},
+    sync::{atomic::Ordering, mpsc},
+    time::Duration,
 };
 
 use colet_core::{
@@ -38,6 +34,7 @@ use crate::{
     backend::{self, Search},
     crumbs::Trail,
     icons::Icons,
+    loading::Loading,
     menus::Popup,
     ops::Operations,
     overlays::Overlays,
@@ -49,7 +46,6 @@ use crate::{
     stored::Stored,
     tabs::Tabs,
     theme::Palette,
-    watching::Watching,
 };
 
 actions!(
@@ -239,128 +235,10 @@ pub struct Resize {
     pub start_width: f32,
 }
 
-/// Whether a search has reached Everything; unknown until one has, since home needs none.
-#[derive(Clone)]
-pub enum Engine {
-    Unknown,
-    /// A search is on its way while not connected, and may wait out a busy Everything.
-    Connecting,
-    Connected(String),
-    Failed(String),
-}
-
-impl Engine {
-    /// What the status bar shows, and what it says in full.
-    pub fn describe(&self) -> (String, String) {
-        match self {
-            Engine::Unknown => ("Everything".into(), "検索エンジン: Everything（検索すると接続します）".into()),
-            Engine::Connecting => ("Everything · 接続中…".into(), "検索エンジン: Everythingに接続しています".into()),
-            Engine::Connected(name) => (name.clone(), format!("検索エンジン: {name}（接続済み）")),
-            Engine::Failed(error) => ("Everything · 要確認".into(), error.clone()),
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     Info,
     Error,
-}
-
-/// The listings asked for, by column: each answer is told apart from those it was overtaken by.
-#[derive(Default)]
-struct Listings {
-    last_request: u64,
-    /// The columns listed at least once.
-    listed: HashSet<ColumnId>,
-    /// The latest listing still out for each column.
-    pending: HashMap<ColumnId, u64>,
-    /// What stops each folder's listing still out.
-    cancels: HashMap<ColumnId, Arc<AtomicBool>>,
-}
-
-impl Listings {
-    /// True the first time `id` is asked about: it is to be listed.
-    fn first(&mut self, id: ColumnId) -> bool {
-        self.listed.insert(id)
-    }
-
-    fn loading(&self, id: ColumnId) -> bool {
-        self.pending.contains_key(&id)
-    }
-
-    /// A listing of `id`, overtaking any still out: its number.
-    fn start(&mut self, id: ColumnId) -> u64 {
-        self.last_request += 1;
-        self.pending.insert(id, self.last_request);
-        self.last_request
-    }
-
-    /// What stops the folder listing of `id` just started; the one before it is stopped.
-    fn cancel_before(&mut self, id: ColumnId) -> Arc<AtomicBool> {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        if let Some(previous) = self.cancels.insert(id, cancelled.clone()) {
-            previous.store(true, Ordering::Relaxed);
-        }
-        cancelled
-    }
-
-    /// The answer to `request` came: true when it is the latest for `id`, which is then no longer out.
-    fn answered(&mut self, id: ColumnId, request: u64) -> bool {
-        let current = self.pending.get(&id) == Some(&request);
-        if current {
-            self.pending.remove(&id);
-        }
-        current
-    }
-
-    /// Only the columns `live` holds: a column gone stops its listing, and a late answer finds no column
-    /// and is dropped.
-    fn keep(&mut self, live: &HashSet<ColumnId>) {
-        self.cancels.retain(|id, cancelled| {
-            let keep = live.contains(id);
-            if !keep {
-                cancelled.store(true, Ordering::Relaxed);
-            }
-            keep
-        });
-        self.listed.retain(|id| live.contains(id));
-        self.pending.retain(|id, _| live.contains(id));
-    }
-}
-
-/// Reloads of the search for the changes Everything reports: one waiting at a time, and at most one every
-/// couple of seconds.
-#[derive(Default)]
-struct SearchRefresh {
-    /// A reload is waiting to go.
-    waiting: bool,
-    /// When the last one went.
-    last: Option<Instant>,
-}
-
-impl SearchRefresh {
-    const EVERY: Duration = Duration::from_secs(2);
-
-    /// A reload is to wait its turn: how long until it may go, or none when one is already waiting.
-    fn wait(&mut self) -> Option<Duration> {
-        if self.waiting {
-            return None;
-        }
-        self.waiting = true;
-        Some(self.last.map_or(Duration::ZERO, |at| Self::EVERY.saturating_sub(at.elapsed())))
-    }
-
-    /// The reload waiting went now.
-    fn went(&mut self) {
-        self.waiting = false;
-        self.last = Some(Instant::now());
-    }
-
-    /// The reload waiting is no longer to go.
-    fn cancel(&mut self) {
-        self.waiting = false;
-    }
 }
 
 /// A file kept between starts as it was `read`, or the defaults with what to say of it, and its saves
@@ -445,7 +323,6 @@ pub struct Colet {
     pub home_focus: FocusHandle,
     pub columns_focus: FocusHandle,
     pub icons: Icons,
-    pub engine: Engine,
     /// The window the notices go up in.
     window: AnyWindowHandle,
     pub(crate) next_toast: u64,
@@ -454,9 +331,8 @@ pub struct Colet {
     pub sideways: Sideways,
     pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
-    listings: Listings,
-    pub(crate) watching: Watching,
-    search_refresh: SearchRefresh,
+    /// The listings out, the search's reloads, the watch on the folders and the search engine.
+    pub loading: Loading,
     /// The settings and the columns' own orders, as kept between starts.
     pub stored: Stored,
     /// Home's list, for its scrollbar.
@@ -528,7 +404,6 @@ impl Colet {
             home_focus: cx.focus_handle().tab_stop(true),
             columns_focus: cx.focus_handle().tab_stop(true),
             icons: Icons::default(),
-            engine: Engine::Unknown,
             window: Window::window_handle(window),
             next_toast: 0,
             resizing: None,
@@ -536,9 +411,7 @@ impl Colet {
             sideways: Sideways::default(),
             owner,
             backend,
-            listings: Listings::default(),
-            watching: Watching::default(),
-            search_refresh: SearchRefresh::default(),
+            loading: Loading::default(),
             stored: Stored::new(settings, settings_saves, sorts, sorts_saves),
             home_scroll: ScrollHandle::new(),
             home_drag: HomeDragging::default(),
@@ -694,10 +567,9 @@ impl Colet {
                 });
             });
         }
-        self.listings.keep(&live);
+        self.loading.keep(&live);
         self.rows.keep(&live);
-        let fresh: Vec<(ColumnId, Kind)> =
-            self.state.columns.iter().filter(|c| self.listings.first(c.id)).map(|c| (c.id, c.kind)).collect();
+        let fresh: Vec<(ColumnId, Kind)> = self.state.columns.iter().filter(|c| self.loading.first(c.id)).map(|c| (c.id, c.kind)).collect();
         for (id, kind) in fresh {
             if kind == Kind::Search {
                 // Typing makes a new search per key; only the one still there after a pause runs.
@@ -796,10 +668,10 @@ impl Colet {
     /// Lists the column `id` from `offset` on; `quiet` keeps what it shows meanwhile.
     pub fn load(&mut self, id: ColumnId, offset: usize, quiet: bool, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
-        if offset > 0 && self.listings.loading(id) {
+        if offset > 0 && self.loading.is_loading(id) {
             return;
         }
-        let request = self.listings.start(id);
+        let request = self.loading.start(id);
         self.state.load(id, request, quiet);
         let c = &self.state.columns[index];
         let sort = self.order_of(c);
@@ -819,9 +691,7 @@ impl Colet {
                 };
                 // A refresh reloads all it has loaded, so later selections stay.
                 let count = if offset > 0 { PAGE } else { PAGE.max(c.entries.len()) };
-                if !matches!(self.engine, Engine::Connected(_)) {
-                    self.engine = Engine::Connecting;
-                }
+                self.loading.searching();
                 let search = Search { query, sort, offset, count, refresh: offset == 0, request };
                 cx.background_executor().spawn(async move {
                     let (page, connection) = backend.search(search)?;
@@ -831,7 +701,7 @@ impl Colet {
             }
             Kind::Folder => {
                 let path = c.path.clone();
-                let (cancelled, owner) = (self.listings.cancel_before(id), self.owner);
+                let (cancelled, owner) = (self.loading.cancel_before(id), self.owner);
                 cx.background_executor().spawn(async move { Ok(Listed::all(backend.list(&path, sort, &cancelled, owner)?)) })
             }
         };
@@ -844,7 +714,7 @@ impl Colet {
     }
 
     fn listed(&mut self, id: ColumnId, kind: Kind, request: u64, offset: usize, result: Listing, cx: &mut Context<Self>) {
-        let current = self.listings.answered(id, request);
+        let current = self.loading.answered(id, request);
         match result {
             Ok(Listed { entries, total, connection, whole }) => {
                 if let Some(whole) = whole {
@@ -856,14 +726,11 @@ impl Colet {
                 for (from, to) in std::mem::take(&mut self.state.respelled) {
                     self.follow_move(&from, &to, cx);
                 }
-                // One left behind still ends the wait for the connection.
-                if let Some(name) = connection.filter(|_| current || matches!(self.engine, Engine::Connecting)) {
-                    self.engine = Engine::Connected(name);
-                }
+                self.loading.search_answered(connection, current);
             }
             Err(error) => {
                 if kind == Kind::Search && current {
-                    self.engine = Engine::Failed(error.clone());
+                    self.loading.search_failed(error.clone());
                 }
                 self.state.error(id, request, error);
             }
@@ -874,11 +741,10 @@ impl Colet {
     /// The tab come to the front lists all its columns again: what it showed stays meanwhile, and what it
     /// never listed shows as loading. What the tab before it still had out is let go of.
     pub(crate) fn relist(&mut self, cx: &mut Context<Self>) {
-        self.listings.keep(&HashSet::new());
-        self.search_refresh.cancel();
+        self.loading.let_go();
         let columns: Vec<(ColumnId, bool)> = self.state.columns.iter().map(|c| (c.id, c.request != 0)).collect();
         for (id, listed) in columns {
-            self.listings.first(id);
+            self.loading.first(id);
             self.load(id, 0, listed, cx);
         }
     }
@@ -1019,7 +885,7 @@ impl Colet {
             .filter(|c| c.kind == Kind::Folder && c.error.is_none() && !colet_core::paths::is_server(&c.path))
             .map(|c| c.path.clone())
             .collect();
-        self.watching.set(paths).unwrap_or_else(|error| {
+        self.loading.watching_mut().set(paths).unwrap_or_else(|error| {
             self.notify(error, Tone::Error, cx);
             None
         })
@@ -1027,7 +893,7 @@ impl Colet {
 
     /// Says which folders the watcher could list but not watch, each once.
     fn take_missed(&mut self, cx: &mut Context<Self>) {
-        let fresh = self.watching.take_missed();
+        let fresh = self.loading.watching_mut().take_missed();
         if !fresh.is_empty() {
             let names: String = fresh.iter().map(|p| format!("「{}」", shown(colet_core::paths::folder_name(p)))).collect();
             self.notify(format!("{names}の変更を監視できません。F5で更新できます。"), Tone::Error, cx);
@@ -1037,7 +903,7 @@ impl Colet {
     /// Takes in what changed, every 200ms: folder changes reload the columns showing them, and what the
     /// watch on Everything heard of the results.
     fn poll(&mut self, cx: &mut Context<Self>) {
-        let changed = self.watching.changed.clone();
+        let changed = self.loading.watching().changed.clone();
         let backend = self.backend.clone();
         cx.spawn(async move |this, cx| {
             loop {
@@ -1056,7 +922,7 @@ impl Colet {
                         Ok(true) => this.search_changed(cx),
                         Ok(false) => {}
                         Err(error) => {
-                            this.engine = Engine::Failed(error.clone());
+                            this.loading.search_failed(error.clone());
                             this.notify(error, Tone::Error, cx);
                         }
                     })
@@ -1115,7 +981,7 @@ impl Colet {
     /// A busy disk reports changes each second: the first reloads at once, then at most one every couple
     /// of seconds. One met by a reload in flight waits for it, as it may have read the results before.
     fn search_changed(&mut self, cx: &mut Context<Self>) {
-        let Some(wait) = self.search_refresh.wait() else {
+        let Some(wait) = self.loading.refresh_wait() else {
             return;
         };
         cx.spawn(async move |this, cx| {
@@ -1124,13 +990,13 @@ impl Colet {
                 let busy = this
                     .update(cx, |this, cx| {
                         let Some(search) = this.state.columns.iter().find(|c| c.kind == Kind::Search).map(|c| c.id) else {
-                            this.search_refresh.cancel();
+                            this.loading.refresh_cancel();
                             return false;
                         };
-                        if this.listings.loading(search) {
+                        if this.loading.is_loading(search) {
                             return true;
                         }
-                        this.search_refresh.went();
+                        this.loading.refresh_went();
                         this.load(search, 0, true, cx);
                         false
                     })

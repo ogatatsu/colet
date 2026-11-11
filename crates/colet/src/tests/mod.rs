@@ -27,8 +27,9 @@ use gpui_kit::{
 };
 
 use crate::{
-    app::{Colet, Engine},
+    app::Colet,
     backend::{Backend, PathKind, Search},
+    loading::Engine,
     ops::ItemStatus,
     places::Dialog,
     settings::{LoadError, SavedSearch, SearchFilter, Settings, Theme},

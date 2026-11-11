@@ -9,6 +9,7 @@ mod dialogs;
 mod icons;
 mod instance;
 mod lane;
+mod loading;
 mod menus;
 mod metrics;
 mod ops;
