@@ -1,5 +1,5 @@
-//! Colet's colors by role, dark and light, as Windows is set or as the settings fix them. The dark ones
-//! are the old app's; the light ones keep the same roles, hues and contrasts on a light ground.
+//! Colet's colors by role, dark and light, as Windows is set or as the settings fix them. The light ones
+//! keep the dark ones' roles, hues and contrasts on a light ground.
 use std::rc::Rc;
 
 use gpui_kit::base::input::{InputEditorStyle, InputState};
@@ -114,7 +114,7 @@ impl Palette {
         }
     }
 
-    /// Gives a field Colet's colors: its selected text on the selection fill, as the old app's.
+    /// Gives a field Colet's colors: its selected text on the selection fill.
     pub fn style_input(self, input: &Entity<InputState>, cx: &mut App) {
         input.update(cx, |input, _| input.set_editor_style(self.input_style()));
     }

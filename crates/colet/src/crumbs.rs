@@ -1,4 +1,4 @@
-//! How many crumbs fold into the "…" menu, as the old app's: when the trail outgrows the bar, the crumbs
+//! How many crumbs fold into the "…" menu: when the trail outgrows the bar, the crumbs
 //! furthest from the deepest folder fold first so the nearest stay readable. Names are never shortened,
 //! but the last crumb's, which always stays, clipped to half the bar at most.
 use std::{

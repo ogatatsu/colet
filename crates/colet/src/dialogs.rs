@@ -30,7 +30,7 @@ use crate::{
     view::{RING_ROOM, RingAt},
 };
 
-/// The keys the preferences list, as the old app's did.
+/// The keys the preferences list.
 const SHORTCUTS: [(&str, &str); 29] = [
     ("↑ ↓", "項目を選択（Shift で範囲選択）"),
     ("← →", "カラムを移動"),
@@ -75,7 +75,7 @@ fn field(
     focused: bool,
     menu: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
-    // The ring, two pixels in the focus color a pixel off the field, as the old app's outline.
+    // The ring, two pixels in the focus color a pixel off the field.
     crate::view::frame(p, focused, metrics::FIELD_RADIUS).child(
         div()
             .h(px(metrics::CONTROL_HEIGHT))
@@ -496,7 +496,7 @@ impl Colet {
                 div()
                     .text_size(px(metrics::TEXT_BODY))
                     .text_color(p.text_muted)
-                    .child("検索に加えるEverythingの検索式を登録し、検索欄の右のボタン（Ctrl+Shift+F）で1つ選んで使います。"),
+                    .child("検索に加えるEverythingの検索式を登録し、検索欄の左のボタン（Ctrl+Shift+F）で1つ選んで使います。"),
             )
             .child(if rows.is_empty() {
                 div()

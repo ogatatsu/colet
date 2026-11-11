@@ -57,7 +57,7 @@ pub fn glyph(name: &str) -> gpui_kit::component::Icon {
     gpui_kit::component::Icon::empty().path(format!("icons/{name}.svg"))
 }
 
-/// A thin scrollbar laid over a list, as the old app's; its thumb is Colet's color.
+/// A thin scrollbar laid over a list; its thumb is Colet's color.
 pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette) -> gpui_kit::base::Scrollbar {
     bar.mode(gpui_kit::base::ScrollbarMode::Always).styles(|s| {
         s.track(|t| t.bg(transparent_black()).border_color(transparent_black()).width(px(SCROLLBAR_WIDTH)))
