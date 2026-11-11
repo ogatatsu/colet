@@ -1,7 +1,7 @@
 //! The tabs: each its own search, columns and way back and forth. The one in front lives in the window's
 //! own fields; the others are parked as they were, listed and watched no more until they come to the
 //! front again, when they are listed afresh.
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use colet_core::paths::{folder_name, path_key, shown};
 use gpui_kit::component::{
@@ -12,19 +12,18 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
-    app::{Colet, NarrowField},
+    app::Colet,
     menus::Popup,
     metrics,
-    scrolls::Scrolls,
     settings::{KeptTab, Settings},
     state::{ColumnId, HomeKey, Kind, State},
     view::TipExt,
 };
 
-pub type TabId = u64;
+mod list;
 
-/// How many closed tabs Ctrl+Shift+T can bring back.
-const CLOSED: usize = 10;
+pub use list::{Front, Keys, Parked, TabId, Tabs};
+
 /// A tab's width while the strip has room, and the least it narrows to before the strip scrolls.
 const TAB_WIDTH: f32 = 220.;
 const TAB_MIN: f32 = 100.;
@@ -34,77 +33,6 @@ const TAB_CURVE: f32 = 8.;
 /// What the strip leaves beside the tabs: its padding on the right, the gaps, the button for another
 /// and room to double-click, and the curves at the strip's ends.
 const BESIDE_TABS: f32 = 8. + 8. + 26. + 48. + TAB_CURVE * 2.;
-
-/// A tab out of sight, kept as it was.
-pub struct Parked {
-    pub state: State,
-    /// The filter its next search is narrowed by.
-    pub filter: Option<String>,
-    narrow_fields: HashMap<ColumnId, NarrowField>,
-    scrolls: Scrolls,
-    /// Where the keys were as it went, and go again as it comes back.
-    keys: Keys,
-}
-
-/// Where a tab's keys are.
-#[derive(Clone, PartialEq, Debug)]
-pub enum Keys {
-    Search,
-    Column,
-    /// The field narrowing the column.
-    NarrowField(ColumnId),
-    /// The address being typed, as it was left: what it holds and the text picked in it.
-    Address {
-        text: String,
-        picked: std::ops::Range<usize>,
-        reversed: bool,
-    },
-}
-
-impl Parked {
-    fn new(state: State, filter: Option<String>, keys: Keys) -> Self {
-        Self { state, filter, narrow_fields: HashMap::new(), scrolls: Scrolls::default(), keys }
-    }
-}
-
-pub struct Tab {
-    pub id: TabId,
-    /// None for the tab in front.
-    pub parked: Option<Parked>,
-}
-
-#[derive(Default)]
-pub struct Tabs {
-    pub list: Vec<Tab>,
-    /// The tab in front.
-    pub current: usize,
-    next_id: TabId,
-    /// The tabs closed, the latest last, each with where it stood.
-    closed: Vec<(usize, Tab)>,
-    pub scroll: ScrollHandle,
-    /// The tab in front is to be brought in sight on the strip.
-    reveal: bool,
-    pub drag: TabDrag,
-}
-
-/// A tab carried along the strip, and the gap between tabs it would land in.
-#[derive(Default)]
-pub struct TabDrag {
-    pub carried: Option<TabId>,
-    /// 0 before the first tab, up to the count after the last; none while the pointer is off the strip.
-    pub gap: Option<usize>,
-}
-
-impl Tabs {
-    fn tab(&mut self, parked: Option<Parked>) -> Tab {
-        self.next_id += 1;
-        Tab { id: self.next_id, parked }
-    }
-
-    fn position(&self, id: TabId) -> Option<usize> {
-        self.list.iter().position(|tab| tab.id == id)
-    }
-}
 
 /// What a tab is called, its icon, and what its tip says in full.
 pub struct Title {
@@ -266,7 +194,7 @@ fn tab_corner(path: &mut PathBuilder, from: Point<Pixels>, corner: Point<Pixels>
 
 impl Colet {
     pub fn current_tab(&self) -> TabId {
-        self.tabs.list[self.tabs.current].id
+        self.tabs.current_id()
     }
 
     /// A menu or a dialog open holds the tabs where they are.
@@ -283,20 +211,16 @@ impl Colet {
             if i == front {
                 self.state = state;
                 self.chosen_filter = filter;
-                let tab = self.tabs.tab(None);
-                self.tabs.list.push(tab);
+                self.tabs.push(None);
             } else {
-                let tab = self.tabs.tab(Some(Parked::new(state, filter, Keys::Column)));
-                self.tabs.list.push(tab);
+                self.tabs.push(Some(Parked::new(state, filter, Keys::Column)));
             }
         }
-        if self.tabs.list.is_empty() {
-            let tab = self.tabs.tab(None);
-            self.tabs.list.push(tab);
+        if self.tabs.is_empty() {
+            self.tabs.push(None);
         }
         self.state.set_showing(self.showing());
-        self.tabs.current = front;
-        self.tabs.reveal = true;
+        self.tabs.set_front(front);
         let query = self.state.query.clone();
         self.search.update(cx, |input, cx| input.set_value(query, window, cx));
         self.keep_tabs(cx);
@@ -304,19 +228,18 @@ impl Colet {
 
     /// Writes the tabs into the settings when they are not as kept there.
     pub(crate) fn keep_tabs(&mut self, cx: &mut Context<Self>) {
-        if self.tabs.list.is_empty() {
+        if self.tabs.is_empty() {
             return;
         }
         let tabs: Vec<KeptTab> = self
             .tabs
-            .list
             .iter()
-            .map(|tab| match &tab.parked {
-                Some(parked) => KeptTab { place: parked.state.kept(), filter: parked.filter.clone() },
+            .map(|tab| match tab.parked() {
+                Some(parked) => KeptTab { place: parked.state().kept(), filter: parked.filter().map(Into::into) },
                 None => KeptTab { place: self.state.kept(), filter: self.chosen_filter.clone() },
             })
             .collect();
-        let current = self.tabs.current;
+        let current = self.tabs.current();
         if tabs != self.stored.settings().tabs || current != self.stored.settings().tab {
             self.update_settings(
                 move |s| {
@@ -330,11 +253,10 @@ impl Colet {
 
     /// The state of the tab `id`, in front or parked; none once it is closed.
     pub fn state_in(&mut self, id: TabId) -> Option<&mut State> {
-        let at = self.tabs.position(id)?;
-        match &mut self.tabs.list[at].parked {
-            None => Some(&mut self.state),
-            Some(parked) => Some(&mut parked.state),
+        if self.tabs.is_front(id) {
+            return Some(&mut self.state);
         }
+        self.tabs.parked_mut(id).map(Parked::state_mut)
     }
 
     /// Where the keys are in the tab in front.
@@ -344,7 +266,7 @@ impl Colet {
         }
         // Open, the field has the keys, or had them until the press that switches tabs.
         if self.address.is_open() {
-            let field = self.address.field.read(cx);
+            let field = self.address.field().read(cx);
             let text = field.value().to_string();
             return Keys::Address { text, picked: field.selected_range(), reversed: field.is_selection_reversed() };
         }
@@ -354,33 +276,29 @@ impl Colet {
         }
     }
 
-    /// Puts `parked` in front, handing back the tab that was with the keys where they are in it.
-    fn swap_in(&mut self, parked: Parked, keys: Keys) -> Parked {
-        let Parked { mut state, filter, narrow_fields: filters, scrolls, keys: _ } = parked;
+    /// Puts `incoming` in front, handing back what was there.
+    fn swap_in(&mut self, mut incoming: Front) -> Front {
         // Shown or not while it was parked, the hidden items follow the setting now.
-        state.set_showing(self.showing());
-        Parked {
-            state: std::mem::replace(&mut self.state, state),
-            filter: std::mem::replace(&mut self.chosen_filter, filter),
-            narrow_fields: std::mem::replace(&mut self.narrow_fields, filters),
-            scrolls: std::mem::replace(&mut self.scrolls, scrolls),
-            keys,
+        incoming.state.set_showing(self.showing());
+        Front {
+            state: std::mem::replace(&mut self.state, incoming.state),
+            filter: std::mem::replace(&mut self.chosen_filter, incoming.filter),
+            narrow_fields: std::mem::replace(&mut self.narrow_fields, incoming.narrow_fields),
+            scrolls: std::mem::replace(&mut self.scrolls, incoming.scrolls),
         }
     }
 
     /// Brings the tab at `index` to the front, listed afresh and keeping what it picked and where it was
     /// scrolled; the keys go back to where they were in it.
     pub fn switch_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if index == self.tabs.current || self.tabs_held() {
+        if index == self.tabs.current() || self.tabs_held() {
             return;
         }
-        let Some(incoming) = self.tabs.list.get_mut(index).and_then(|tab| tab.parked.take()) else { return };
-        let keys = incoming.keys.clone();
-        let outgoing = self.swap_in(incoming, self.keys(window, cx));
-        let current = self.tabs.current;
-        self.tabs.list[current].parked = Some(outgoing);
-        self.tabs.current = index;
-        self.tabs.reveal = true;
+        let Some(incoming) = self.tabs.take_parked(index) else { return };
+        let left = self.keys(window, cx);
+        let (incoming, keys) = incoming.into_front();
+        let outgoing = self.swap_in(incoming);
+        self.tabs.bring_to_front(index, Parked::from_front(outgoing, left));
         let query = self.state.query.clone();
         self.search.update(cx, |input, cx| input.set_value(query, window, cx));
         self.relist(cx);
@@ -420,8 +338,8 @@ impl Colet {
 
     /// Ctrl+Tab and Ctrl+Shift+Tab: the next tab along the strip, or the one before, round from the end.
     pub fn step_tab(&mut self, by: isize, window: &mut Window, cx: &mut Context<Self>) {
-        let count = self.tabs.list.len() as isize;
-        let index = (self.tabs.current as isize + by).rem_euclid(count) as usize;
+        let count = self.tabs.len() as isize;
+        let index = (self.tabs.current() as isize + by).rem_euclid(count) as usize;
         self.switch_tab(index, window, cx);
     }
 
@@ -430,9 +348,8 @@ impl Colet {
         if self.tabs_held() {
             return;
         }
-        let tab = self.tabs.tab(Some(Parked::new(State::new(), None, Keys::Search)));
-        self.tabs.list.push(tab);
-        self.switch_tab(self.tabs.list.len() - 1, window, cx);
+        let at = self.tabs.insert(self.tabs.len(), Parked::new(State::new(), None, Keys::Search));
+        self.switch_tab(at, window, cx);
     }
 
     /// Opens the row `path` of the column at `index` in a tab of its own, right of this one and behind it:
@@ -458,8 +375,7 @@ impl Colet {
             state.set_active(state.columns.len() - 1);
         }
         let keys = opened.map_or(Keys::Column, Keys::NarrowField);
-        let tab = self.tabs.tab(Some(Parked::new(state, filter, keys)));
-        self.tabs.list.insert(self.tabs.current + 1, tab);
+        self.tabs.insert(self.tabs.current() + 1, Parked::new(state, filter, keys));
         self.keep_tabs(cx);
         cx.notify();
     }
@@ -474,56 +390,44 @@ impl Colet {
         if directory {
             state.set_active(state.columns.len() - 1);
         }
-        let tab = self.tabs.tab(Some(Parked::new(state, None, Keys::Column)));
-        self.tabs.list.insert(self.tabs.current + 1, tab);
-        self.switch_tab(self.tabs.current + 1, window, cx);
+        let at = self.tabs.insert(self.tabs.current() + 1, Parked::new(state, None, Keys::Column));
+        self.switch_tab(at, window, cx);
     }
 
     /// Closes the tab at `index`; the one right of it comes to the front in its place, or the one left of
     /// it at the end. The last one closes the window.
     pub fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if self.tabs_held() || index >= self.tabs.list.len() {
+        if self.tabs_held() || index >= self.tabs.len() {
             return;
         }
-        if self.tabs.list.len() == 1 {
+        if self.tabs.len() == 1 {
             if self.may_close(cx) {
                 window.remove_window();
             }
             return;
         }
-        if index == self.tabs.current {
-            let next = if index + 1 < self.tabs.list.len() { index + 1 } else { index - 1 };
+        if index == self.tabs.current() {
+            let next = if index + 1 < self.tabs.len() { index + 1 } else { index - 1 };
             self.switch_tab(next, window, cx);
         }
-        self.drop_tab(index);
+        self.tabs.close(index);
         self.keep_tabs(cx);
         cx.notify();
-    }
-
-    /// Takes the tab at `index`, out of sight, off the strip, to be brought back.
-    fn drop_tab(&mut self, index: usize) {
-        let tab = self.tabs.list.remove(index);
-        if index < self.tabs.current {
-            self.tabs.current -= 1;
-        }
-        self.tabs.closed.push((index, tab));
-        if self.tabs.closed.len() > CLOSED {
-            self.tabs.closed.remove(0);
-        }
     }
 
     /// Closes every tab but the one at `index`, or those right of it, bringing it to the front if one of
     /// them was.
     pub fn close_tabs_but(&mut self, index: usize, only_right: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.tabs_held() || index >= self.tabs.list.len() {
+        if self.tabs_held() || index >= self.tabs.len() {
             return;
         }
-        if self.tabs.current != index && (!only_right || self.tabs.current > index) {
+        let current = self.tabs.current();
+        if current != index && (!only_right || current > index) {
             self.switch_tab(index, window, cx);
         }
-        for at in (0..self.tabs.list.len()).rev() {
+        for at in (0..self.tabs.len()).rev() {
             if at > index || (!only_right && at < index) {
-                self.drop_tab(at);
+                self.tabs.close(at);
             }
         }
         self.keep_tabs(cx);
@@ -531,7 +435,7 @@ impl Colet {
     }
 
     pub fn can_reopen_tab(&self) -> bool {
-        !self.tabs.closed.is_empty()
+        self.tabs.can_reopen()
     }
 
     /// Ctrl+Shift+T: the tab closed last, where it stood and as it was, in front.
@@ -539,96 +443,61 @@ impl Colet {
         if self.tabs_held() {
             return;
         }
-        let Some((at, tab)) = self.tabs.closed.pop() else { return };
-        let at = at.min(self.tabs.list.len());
-        self.tabs.list.insert(at, tab);
-        if at <= self.tabs.current {
-            self.tabs.current += 1;
-        }
+        let Some(at) = self.tabs.reopen() else { return };
         self.switch_tab(at, window, cx);
     }
 
     /// A copy of the tab at `index` beside it, in front.
     pub fn duplicate_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(tab) = self.tabs.list.get(index) else { return };
-        let (state, filter) = match &tab.parked {
-            Some(parked) => (parked.state.clone(), parked.filter.clone()),
+        let Some(tab) = self.tabs.get(index) else { return };
+        let (state, filter) = match tab.parked() {
+            Some(parked) => (parked.state().clone(), parked.filter().map(Into::into)),
             None => (self.state.clone(), self.chosen_filter.clone()),
         };
-        let tab = self.tabs.tab(Some(Parked::new(state, filter, Keys::Column)));
-        self.tabs.list.insert(index + 1, tab);
-        if index < self.tabs.current {
-            self.tabs.current += 1;
-        }
-        self.switch_tab(index + 1, window, cx);
-    }
-
-    /// The tab `id` dropped in the gap `gap`: 0 before the first tab, up to the count after the last.
-    fn move_tab(&mut self, id: TabId, gap: usize, cx: &mut Context<Self>) {
-        let Some(from) = self.tabs.position(id) else { return };
-        // Taken out first, the tabs past it close up by one.
-        let to = if gap > from { gap - 1 } else { gap };
-        if from == to {
-            return;
-        }
-        let front = self.current_tab();
-        let tab = self.tabs.list.remove(from);
-        self.tabs.list.insert(to.min(self.tabs.list.len()), tab);
-        self.tabs.current = self.tabs.position(front).unwrap_or_default();
-        self.keep_tabs(cx);
-        cx.notify();
+        let at = self.tabs.insert(index + 1, Parked::new(state, filter, Keys::Column));
+        self.switch_tab(at, window, cx);
     }
 
     /// A tab is picked up: it fades where it was.
     fn start_tab_drag(&mut self, id: TabId, cx: &mut Context<Self>) {
-        self.tabs.drag = TabDrag { carried: Some(id), gap: None };
+        self.tabs.start_drag(id);
         cx.notify();
     }
 
     /// The pointer moved in a tab's drag, with the tab bar drawn at `bar` and its tabs `width` wide.
     fn aim_tab_drag(&mut self, at: Point<Pixels>, bar: Bounds<Pixels>, width: f32, cx: &mut Context<Self>) {
-        if self.tabs.drag.carried.is_none() {
-            return;
-        }
         let gap = bar.contains(&at).then(|| {
-            let strip = self.tabs.scroll.bounds();
-            let along = f32::from(at.x - strip.left() - self.tabs.scroll.offset().x) - TAB_CURVE;
+            let strip = self.tabs.scroll().bounds();
+            let along = f32::from(at.x - strip.left() - self.tabs.scroll().offset().x) - TAB_CURVE;
             // Over a tab's left half it goes before it, over its right half after; past the last, last.
-            ((along / width).round().max(0.) as usize).min(self.tabs.list.len())
+            ((along / width).round().max(0.) as usize).min(self.tabs.len())
         });
-        if self.tabs.drag.gap != gap {
-            self.tabs.drag.gap = gap;
+        if self.tabs.aim(gap) {
             cx.notify();
         }
     }
 
+    /// The tab carried is let go of over the strip: it goes where it would land, if anywhere.
     fn land_tab(&mut self, dragged: &DraggedTab, cx: &mut Context<Self>) {
-        let gap = self.tabs.drag.gap;
-        self.end_tab_drag();
-        if let Some(gap) = gap {
-            self.move_tab(dragged.id, gap, cx);
+        if let Some(gap) = self.tabs.end_drag()
+            && self.tabs.move_tab(dragged.id, gap)
+        {
+            self.keep_tabs(cx);
         }
         cx.notify();
     }
 
     pub fn end_tab_drag(&mut self) {
-        self.tabs.drag = TabDrag::default();
+        self.tabs.end_drag();
     }
 
     /// The search filter `from` is named `to` now, or is gone: every tab follows it, closed ones too.
     pub fn rename_filter_in_tabs(&mut self, from: &str, to: Option<&str>) {
-        let follow = |named: &mut Option<String>| {
-            if named.as_deref() == Some(from) {
-                *named = to.map(Into::into);
-            }
-        };
         self.state.rename_search_filter(from, to);
-        follow(&mut self.chosen_filter);
-        let closed = self.tabs.closed.iter_mut().map(|(_, tab)| tab);
-        for parked in self.tabs.list.iter_mut().chain(closed).filter_map(|tab| tab.parked.as_mut()) {
-            parked.state.rename_search_filter(from, to);
-            follow(&mut parked.filter);
+        if self.chosen_filter.as_deref() == Some(from) {
+            self.chosen_filter = to.map(Into::into);
         }
+        self.tabs.rename_filter(from, to);
     }
 
     pub fn open_tab_menu(&mut self, id: TabId, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
@@ -645,22 +514,15 @@ impl Colet {
     pub fn render_tabbar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         // The tabs share the room there is, down to their least; past that the strip scrolls.
-        let count = self.tabs.list.len() as f32;
+        let count = self.tabs.len() as f32;
         let room = f32::from(window.viewport_size().width) - BESIDE_TABS;
         let width = (room / count).clamp(TAB_MIN, TAB_WIDTH);
-        if self.tabs.reveal {
-            // Before the first prepaint the handle does not yet know that it scrolls horizontally;
-            // scroll_to_item would consume the request without moving it. Try on the next frame.
-            if self.tabs.scroll.bounds().size.width > px(0.) {
-                self.tabs.reveal = false;
-                self.tabs.scroll.scroll_to_item(self.tabs.current);
-            } else {
-                window.request_animation_frame();
-            }
+        if !self.tabs.bring_front_in_sight() {
+            window.request_animation_frame();
         }
-        let current = self.tabs.current;
-        let count = self.tabs.list.len();
-        let dragging = self.tabs.drag.carried.is_some();
+        let current = self.tabs.current();
+        let count = self.tabs.len();
+        let dragging = self.tabs.carried().is_some();
         let mut tabs = Vec::with_capacity(count * 2);
         for index in 0..count {
             // Keep one cell per tab, in order, so scroll_to_item includes both curves. The selected
@@ -683,7 +545,7 @@ impl Colet {
             // their shared separator without changing hitboxes or storing pointer state.
             tabs.push(
                 div()
-                    .id(("tab-separator", self.tabs.list[index].id as usize))
+                    .id(("tab-separator", self.tabs.get(index).map_or(0, |tab| tab.id()) as usize))
                     .absolute()
                     .left(px(index as f32 * width + TAB_CURVE))
                     .top(px(TAB_TOP))
@@ -703,7 +565,7 @@ impl Colet {
                 .test_support()
                 .into_any_element(),
         );
-        if let Some(gap) = self.tabs.drag.gap.filter(|_| dragging) {
+        if let Some(gap) = self.tabs.gap() {
             // Over every tab, at the edge between the bodies the carried one would land between.
             tabs.push(
                 div()
@@ -747,7 +609,7 @@ impl Colet {
                     .h_full()
                     .items_end()
                     .overflow_x_scroll()
-                    .track_scroll(&self.tabs.scroll)
+                    .track_scroll(self.tabs.scroll())
                     .children(tabs),
             )
             .child(
@@ -774,14 +636,14 @@ impl Colet {
 
     fn render_tab(&mut self, index: usize, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
         let p = self.palette;
-        let tab = &self.tabs.list[index];
-        let id = tab.id;
-        let current = index == self.tabs.current;
+        let tab = &self.tabs.get(index).expect("a tab drawn is on the strip");
+        let id = tab.id();
+        let current = index == self.tabs.current();
         let group = SharedString::from(format!("tab-{id}"));
-        let Title { glyph, name, tip } = title(tab.parked.as_ref().map_or(&self.state, |parked| &parked.state), self.stored.settings());
+        let Title { glyph, name, tip } = title(tab.parked().map_or(&self.state, Parked::state), self.stored.settings());
         let dragged = DraggedTab { id, name: name.clone(), glyph, width, palette: p };
-        let dragging = self.tabs.drag.carried.is_some();
-        let carried = self.tabs.drag.carried == Some(id);
+        let dragging = self.tabs.carried().is_some();
+        let carried = self.tabs.carried() == Some(id);
         let view = cx.entity().downgrade();
         div()
             .id(("tab", id as usize))
@@ -799,7 +661,7 @@ impl Colet {
             .aria_label(name.clone())
             .aria_selected(current)
             .aria_position_in_set(index + 1)
-            .aria_size_of_set(self.tabs.list.len())
+            .aria_size_of_set(self.tabs.len())
             .text_color(if current { p.text } else { p.text_muted })
             .when(current, |d| d.child(tab_shape(p.bg, Some(p.border))))
             .when(!current && !dragging, |d| {

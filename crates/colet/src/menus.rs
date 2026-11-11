@@ -264,7 +264,7 @@ impl Colet {
     /// The text fields there are: the search's, the address bar's, the columns' filters', and the open
     /// dialog's.
     fn text_fields(&self) -> Vec<Entity<InputState>> {
-        let mut fields = vec![self.search.clone(), self.address.field.clone()];
+        let mut fields = vec![self.search.clone(), self.address.field().clone()];
         fields.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         fields.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
         fields
@@ -330,8 +330,8 @@ impl Colet {
             return lines;
         }
         if let Some(&Popup::Tab { tab, .. }) = self.overlays.popup() {
-            let at = self.tabs.list.iter().position(|t| t.id == tab).unwrap_or_default();
-            let count = self.tabs.list.len();
+            let at = self.tabs.position(tab).unwrap_or_default();
+            let count = self.tabs.len();
             let reopen = self.can_reopen_tab();
             return vec![
                 line("tab-close", "x", "閉じる", Some("Ctrl+W"), None, Command::CloseTab(tab)),
@@ -492,7 +492,7 @@ impl Colet {
             _ => None,
         } {
             self.close_menus(true, window, cx);
-            let index = tab.and_then(|tab| self.tabs.list.iter().position(|t| t.id == tab));
+            let index = tab.and_then(|tab| self.tabs.position(tab));
             match (command, index) {
                 (Command::CloseTab(_), Some(index)) => self.close_tab(index, window, cx),
                 (Command::CloseOtherTabs(_), Some(index)) => self.close_tabs_but(index, false, window, cx),

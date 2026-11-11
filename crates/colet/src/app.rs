@@ -446,7 +446,7 @@ impl Colet {
             this.notify(problem, Tone::Error, cx);
         }
         this.palette.style_input(&this.search, cx);
-        this.palette.style_input(&this.address.field, cx);
+        this.palette.style_input(this.address.field(), cx);
         this.restore_tabs(window, cx);
         // The window's dialog, the columns' fields and their scrolls follow `dialog` and the columns as each
         // change to Colet settles, before it is drawn.
@@ -462,7 +462,7 @@ impl Colet {
         this._subscriptions.push(cx.on_focus(&home, window, |this, window, cx| this.follow_focus(window, cx)));
         this._subscriptions.push(cx.on_focus(&columns, window, |this, window, cx| this.follow_focus(window, cx)));
         // The keys leaving the open address field close it.
-        let address = this.address.field.read(cx).focus_handle(cx);
+        let address = this.address.field().read(cx).focus_handle(cx);
         this._subscriptions.push(cx.on_focus_out(&address, window, |this, _, window, cx| {
             if this.follow_address(window, cx) {
                 cx.notify();
@@ -524,7 +524,7 @@ impl Colet {
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
         self.palette = Palette::for_window(window, self.stored.settings().theme);
         crate::theme::apply(window, self.stored.settings().theme, cx);
-        let mut inputs = vec![self.search.clone(), self.address.field.clone()];
+        let mut inputs = vec![self.search.clone(), self.address.field().clone()];
         inputs.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         inputs.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
         for input in &inputs {

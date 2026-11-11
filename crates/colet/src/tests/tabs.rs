@@ -3,7 +3,7 @@ use super::*;
 
 impl Ui {
     fn tabs(&self, cx: &mut TestAppContext) -> (usize, usize) {
-        self.read(cx, |v| (v.tabs.list.len(), v.tabs.current))
+        self.read(cx, |v| (v.tabs.len(), v.tabs.current()))
     }
 
     fn paths(&self, cx: &mut TestAppContext) -> Vec<String> {
@@ -23,7 +23,7 @@ fn reveals_the_restored_tab_and_its_curves_at_either_end_of_the_strip(cx: &mut T
     let assert_revealed = |cx: &mut TestAppContext| {
         let id = ui.read(cx, |v| v.current_tab());
         let tab = ui.act(cx, |window, _| window.find(("tab", id as usize)).bounds());
-        let viewport = ui.read(cx, |v| v.tabs.scroll.bounds());
+        let viewport = ui.read(cx, |v| v.tabs.scroll().bounds());
         assert!(tab.left() - px(8.) >= viewport.left() - px(0.5), "{tab:?} in {viewport:?}");
         assert!(tab.right() + px(8.) <= viewport.right() + px(0.5), "{tab:?} in {viewport:?}");
     };
@@ -47,7 +47,7 @@ fn hover_decorations_leave_tab_switching_and_both_close_buttons_pressable(cx: &m
         settings.tab = 1;
     }
     let ui = open(cx, fake);
-    let ids = ui.read(cx, |v| v.tabs.list.iter().map(|tab| tab.id).collect::<Vec<_>>());
+    let ids = ui.read(cx, |v| v.tabs.iter().map(|tab| tab.id()).collect::<Vec<_>>());
     // The hovered tab shares a separator region with the one to its right, beside the selected tab.
     ui.act(cx, |window, cx| window.hover(("tab", ids[2] as usize), cx));
     ui.click(cx, ("tab-close", ids[2] as usize));
@@ -91,7 +91,7 @@ fn opens_the_row_the_keys_are_on_in_a_tab_behind_this_one_where_it_lives(cx: &mu
     ui.press(cx, "ctrl-enter");
     // Right of this one, which stays in front.
     assert_eq!(ui.tabs(cx), (3, 0));
-    let (first, opened) = ui.read(cx, |v| (v.tabs.list[0].id, v.tabs.list[1].id));
+    let (first, opened) = ui.read(cx, |v| (v.tabs.get(0).unwrap().id(), v.tabs.get(1).unwrap().id()));
     assert!(opened > first + 1);
     ui.press(cx, "ctrl-tab");
     assert_eq!(ui.paths(cx), [r"D:\", r"D:\work"]);
@@ -128,7 +128,7 @@ fn closes_the_others_from_a_tabs_menu(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-t");
     ui.press(cx, "ctrl-t");
-    let middle = ui.read(cx, |v| v.tabs.list[1].id);
+    let middle = ui.read(cx, |v| v.tabs.get(1).unwrap().id());
     ui.act(cx, |window, cx| window.right_click(("tab", middle as usize), cx));
     settle(cx);
     ui.click(cx, "tab-close-others");
@@ -232,7 +232,7 @@ fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mu
     settle(cx);
     // Named for the favorite it opened while still behind, not for home.
     let (glyph, name) = ui.read(cx, |v| {
-        let title = crate::tabs::title(&v.tabs.list[1].parked.as_ref().unwrap().state, v.stored.settings());
+        let title = crate::tabs::title(v.tabs.get(1).unwrap().parked().unwrap().state(), v.stored.settings());
         (title.glyph, title.name)
     });
     assert_eq!((glyph, name.as_str()), ("star", "work"));
@@ -310,7 +310,7 @@ fn names_a_tab_for_the_place_picked_in_home_while_home_is_worked_in(cx: &mut Tes
 
 impl Ui {
     fn tab_ids(&self, cx: &mut TestAppContext) -> Vec<crate::tabs::TabId> {
-        self.read(cx, |v| v.tabs.list.iter().map(|tab| tab.id).collect())
+        self.read(cx, |v| v.tabs.iter().map(|tab| tab.id()).collect())
     }
 
     fn tab_bounds(&self, cx: &mut TestAppContext, id: crate::tabs::TabId) -> Bounds<gpui_kit::Pixels> {
@@ -318,7 +318,7 @@ impl Ui {
     }
 
     fn tab_drag(&self, cx: &mut TestAppContext) -> (Option<crate::tabs::TabId>, Option<usize>) {
-        self.read(cx, |v| (v.tabs.drag.carried, v.tabs.drag.gap))
+        self.read(cx, |v| (v.tabs.carried(), v.tabs.gap()))
     }
 }
 

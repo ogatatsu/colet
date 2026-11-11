@@ -5,13 +5,13 @@ use super::*;
 impl Ui {
     /// What the address field holds while it is open.
     fn typed_address(&self, cx: &mut TestAppContext) -> Option<String> {
-        let (open, field) = self.view.read_with(cx, |v, _| (v.address.is_open(), v.address.field.clone()));
+        let (open, field) = self.view.read_with(cx, |v, _| (v.address.is_open(), v.address.field().clone()));
         open.then(|| field.read_with(cx, |input, _| input.value().to_string()))
     }
 
     fn address_focused(&self, cx: &mut TestAppContext) -> bool {
         let view = self.view.clone();
-        self.act(cx, |window, cx| view.read(cx).address.field.read(cx).focus_handle(cx).is_focused(window))
+        self.act(cx, |window, cx| view.read(cx).address.field().read(cx).focus_handle(cx).is_focused(window))
     }
 }
 

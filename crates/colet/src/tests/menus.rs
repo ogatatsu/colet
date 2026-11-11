@@ -91,7 +91,7 @@ fn copies_the_path_of_a_folder_column_and_opens_it_in_a_tab_from_its_empty_space
     });
     empty_space(cx);
     ui.click(cx, "menu-open-tab");
-    assert_eq!(ui.read(cx, |v| (v.tabs.list.len(), v.tabs.current)), (2, 0));
+    assert_eq!(ui.read(cx, |v| (v.tabs.len(), v.tabs.current())), (2, 0));
     ui.press(cx, "ctrl-tab");
     settle(cx);
     let last = ui.read(cx, |v| v.state.columns.last().map(|c| (text(&c.path), c.narrow.as_ref().map(|f| f.text.clone()))));

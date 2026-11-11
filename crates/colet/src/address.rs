@@ -16,44 +16,56 @@ use crate::{
 /// What the empty address says before and while editing.
 pub(crate) const PLACEHOLDER: &str = "パスを入力（Ctrl+L）";
 
-/// The address bar's field, shown in place of the trail while open, and how many times anything has
-/// happened to it: a path typed, the field opened or closed. An answer about a path is taken only while
-/// nothing has happened since it was asked.
-pub struct Address {
-    pub field: Entity<InputState>,
-    open: bool,
-    asked: u64,
-}
+pub use bar::Address;
 
-impl Address {
-    pub(crate) fn new(field: Entity<InputState>) -> Self {
-        Self { field, open: false, asked: 0 }
+/// Apart from what Colet does with it, so only its own methods reach its fields.
+mod bar {
+    use gpui_kit::Entity;
+    use gpui_kit::base::input::InputState;
+
+    /// The address bar's field, shown in place of the trail while open, and how many times anything has
+    /// happened to it: a path typed, the field opened or closed. An answer about a path is taken only while
+    /// nothing has happened since it was asked.
+    pub struct Address {
+        field: Entity<InputState>,
+        open: bool,
+        asked: u64,
     }
 
-    pub fn is_open(&self) -> bool {
-        self.open
-    }
+    impl Address {
+        pub(crate) fn new(field: Entity<InputState>) -> Self {
+            Self { field, open: false, asked: 0 }
+        }
 
-    /// Opens or closes the field; an answer still on its way is let go of.
-    fn set_open(&mut self, open: bool) {
-        self.open = open;
-        self.asked += 1;
-    }
+        pub fn field(&self) -> &Entity<InputState> {
+            &self.field
+        }
 
-    /// What the field holds changed: an answer still on its way is no longer about it.
-    fn typed(&mut self) {
-        self.asked += 1;
-    }
+        pub fn is_open(&self) -> bool {
+            self.open
+        }
 
-    /// Asks about what the field holds now: the number its answer is to come back with.
-    fn ask(&mut self) -> u64 {
-        self.asked += 1;
-        self.asked
-    }
+        /// Opens or closes the field; an answer still on its way is let go of.
+        pub(super) fn set_open(&mut self, open: bool) {
+            self.open = open;
+            self.asked += 1;
+        }
 
-    /// Nothing has happened to the field since `asked`.
-    fn still_asked(&self, asked: u64) -> bool {
-        asked == self.asked
+        /// What the field holds changed: an answer still on its way is no longer about it.
+        pub(super) fn typed(&mut self) {
+            self.asked += 1;
+        }
+
+        /// Asks about what the field holds now: the number its answer is to come back with.
+        pub(super) fn ask(&mut self) -> u64 {
+            self.asked += 1;
+            self.asked
+        }
+
+        /// Nothing has happened to the field since `asked`.
+        pub(super) fn still_asked(&self, asked: u64) -> bool {
+            asked == self.asked
+        }
     }
 }
 
@@ -85,7 +97,7 @@ impl Colet {
         }
         let text = self.deepest_folder().map(shown).unwrap_or_default();
         self.address.set_open(true);
-        self.address.field.update(cx, |input, cx| {
+        self.address.field().update(cx, |input, cx| {
             input.set_value(text, window, cx);
             input.focus(window, cx);
             input.select_all(window, cx);
@@ -103,7 +115,7 @@ impl Colet {
         cx: &mut Context<Self>,
     ) {
         self.address.set_open(true);
-        self.address.field.update(cx, |input, cx| {
+        self.address.field().update(cx, |input, cx| {
             input.set_value(text, window, cx);
             input.focus(window, cx);
             input.set_selected_range_with_direction(picked, reversed, cx);
@@ -128,8 +140,8 @@ impl Colet {
     /// to it as it closes, with what was typed and picked there. Tells whether it closed.
     pub(crate) fn follow_address(&mut self, window: &Window, cx: &App) -> bool {
         let gone = self.address.is_open()
-            && !self.has_keys(&self.address.field, window, cx)
-            && !self.keys_go_back_to(&self.address.field.read(cx).focus_handle(cx));
+            && !self.has_keys(self.address.field(), window, cx)
+            && !self.keys_go_back_to(&self.address.field().read(cx).focus_handle(cx));
         if gone {
             self.address.set_open(false);
         }
@@ -140,7 +152,7 @@ impl Colet {
     /// how its names are written on disk, is asked off the UI thread, as a share can keep it waiting. What
     /// cannot be gone to is said, and the field stays as it is to be put right.
     pub fn go_to_address(&mut self, in_new_tab: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.address.field.read(cx).value().to_string();
+        let text = self.address.field().read(cx).value().to_string();
         if text.trim().is_empty() {
             return;
         }

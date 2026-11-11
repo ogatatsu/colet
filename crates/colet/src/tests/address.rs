@@ -3,7 +3,7 @@ use super::*;
 
 impl Ui {
     fn address(&self, cx: &mut TestAppContext) -> Option<String> {
-        let (open, field) = self.view.read_with(cx, |v, _| (v.address.is_open(), v.address.field.clone()));
+        let (open, field) = self.view.read_with(cx, |v, _| (v.address.is_open(), v.address.field().clone()));
         open.then(|| field.read_with(cx, |input, _| input.value().to_string()))
     }
 
@@ -83,7 +83,7 @@ fn alt_enter_opens_the_path_in_a_new_tab_in_front(cx: &mut TestAppContext) {
     ui.input(cx, r"D:\other");
     ui.press(cx, "alt-enter");
     assert_eq!(ui.address(cx), None);
-    assert_eq!(ui.read(cx, |v| (v.tabs.list.len(), v.tabs.current)), (2, 1));
+    assert_eq!(ui.read(cx, |v| (v.tabs.len(), v.tabs.current())), (2, 1));
     assert_eq!(ui.last_folder(cx), r"D:\other");
     assert_eq!(ui.active(cx), ui.read(cx, |v| v.state.columns.len() - 1));
     // The tab it came from is as it was.

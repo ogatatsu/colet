@@ -272,7 +272,7 @@ impl Colet {
     /// lands, off the window too. Drawn first, so it hears the press let go of after every place the drag
     /// can land; a landing puts the drag down itself and keeps it from hearing it.
     fn drag_let_go(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.home_drag.carried.is_none() && self.tabs.drag.carried.is_none() {
+        if self.home_drag.carried.is_none() && self.tabs.carried().is_none() {
             return None;
         }
         let view = cx.entity().downgrade();
@@ -289,7 +289,7 @@ impl Colet {
 
     /// The drag in home or of a tab is let go of where it does not land: nothing has moved.
     fn let_go_of_drags(&mut self, cx: &mut Context<Self>) {
-        if self.home_drag.carried.is_some() || self.tabs.drag.carried.is_some() {
+        if self.home_drag.carried.is_some() || self.tabs.carried().is_some() {
             self.end_home_drag();
             self.end_tab_drag();
             cx.notify();
@@ -364,7 +364,7 @@ impl Render for Colet {
             }))
             .on_action(cx.listener(|this, _: &NewTab, window, cx| this.new_tab(window, cx)))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
-                let current = this.tabs.current;
+                let current = this.tabs.current();
                 this.close_tab(current, window, cx);
             }))
             .on_action(cx.listener(|this, _: &NextTab, window, cx| this.step_tab(1, window, cx)))

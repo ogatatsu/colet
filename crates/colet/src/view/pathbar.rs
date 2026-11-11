@@ -167,10 +167,10 @@ impl Colet {
             .min_w_0()
             .px(px(6.))
             .key_context(ADDRESS)
-            .capture_any_mouse_down(Self::right_press_menu(&self.address.field, cx))
+            .capture_any_mouse_down(Self::right_press_menu(self.address.field(), cx))
             .on_action(cx.listener(|this, _: &input::Escape, window, cx| this.leave_address(window, cx)))
             .on_action(cx.listener(|this, _: &GoToAddressInNewTab, window, cx| this.go_to_address(true, window, cx)))
-            .child(Input::new(&self.address.field));
+            .child(Input::new(self.address.field()));
         // Ringed as the search field is while it takes the keys; the ring lies over the gaps around. It gives
         // way first in a narrow window, folding its crumbs.
         frame(p, editing, 6.)
