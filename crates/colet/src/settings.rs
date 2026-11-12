@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn keeps_the_sort_order_chosen() {
-        let order = Order { by: Sort::Modified, descending: true };
+        let order = Order { by: Sort::Modified, descending: true, ..Order::default() };
         let written = serde_json::to_string(&Settings { sort: order, ..Settings::default() }).unwrap();
         assert!(written.contains(r#""sort":{"by":"modified","descending":true}"#), "{written}");
         assert_eq!(serde_json::from_str::<Settings>(&written).unwrap().sort, order);

@@ -153,17 +153,36 @@ impl Sort {
     }
 }
 
-/// A sort and the way it runs. Descending turns the whole listing round, as Explorer does, so folders
-/// come last; ties still go by name from A. Kept as `{"by": "size", "descending": true}`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// A sort, the way it runs, and whether folders come before files or mix in with them; ties still go by
+/// name from A. Kept as `{"by": "size", "descending": true}`, with `"folders_first": false` only when they
+/// mix, so a file written before they could reads as folders first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Order {
     pub by: Sort,
     pub descending: bool,
+    #[serde(default = "folders_first", skip_serializing_if = "is_folders_first")]
+    pub folders_first: bool,
+}
+
+fn folders_first() -> bool {
+    true
+}
+
+fn is_folders_first(folders_first: &bool) -> bool {
+    *folders_first
+}
+
+impl Default for Order {
+    fn default() -> Self {
+        Self { by: Sort::default(), descending: false, folders_first: true }
+    }
 }
 
 impl Order {
+    /// `名前・昇順`, with `・混在` when folders mix in with files.
     pub fn label(self) -> String {
-        format!("{}・{}", self.by.label(), direction_label(self.descending))
+        let mixed = if self.folders_first { "" } else { "・混在" };
+        format!("{}・{}{mixed}", self.by.label(), direction_label(self.descending))
     }
 }
 
@@ -211,7 +230,8 @@ impl Ord for Key {
         if self.order.descending {
             by = by.reverse();
         }
-        self.file.cmp(&other.file).then(by).then_with(|| self.name.cmp(&other.name)).then_with(|| self.path.cmp(&other.path))
+        let file = if self.order.folders_first { self.file.cmp(&other.file) } else { Ordering::Equal };
+        file.then(by).then_with(|| self.name.cmp(&other.name)).then_with(|| self.path.cmp(&other.path))
     }
 }
 
@@ -229,8 +249,9 @@ impl PartialEq for Key {
 
 impl Eq for Key {}
 
-/// Folders first either way, unlike Explorer's descending; within each, by the sort, turned round when
-/// descending; ties broken by name as Explorer orders it and then by path.
+/// Folders first either way, unlike Explorer's descending, unless the order mixes them in with the files;
+/// then by the sort, turned round when descending, a folder having no size and so coming below any file
+/// by size; ties broken by name as Explorer orders it and then by path.
 pub fn sort_entries(entries: &mut [Entry], order: Order) {
     // Keyed once per entry: converting names inside the comparison would allocate on every one of its
     // n log n calls.
@@ -274,11 +295,42 @@ mod tests {
         std::fs::create_dir(dir.path().join("z")).unwrap();
         let mut entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| Entry::from_path(&e.unwrap().path()).unwrap()).collect();
         for by in Sort::ALL {
-            sort_entries(&mut entries, Order { by, descending: false });
+            sort_entries(&mut entries, Order { by, descending: false, ..Order::default() });
             assert!(entries[0].directory);
-            sort_entries(&mut entries, Order { by, descending: true });
+            sort_entries(&mut entries, Order { by, descending: true, ..Order::default() });
             assert!(entries[0].directory);
         }
+    }
+
+    #[test]
+    fn mixes_folders_in_with_files_when_the_order_says_so_counting_a_folder_below_any_file_by_size() {
+        let entry = |name: &str, directory: bool, size: Option<u64>| Entry {
+            path: format!(r"C:\{name}").into(),
+            name: name.into(),
+            parent: String::new(),
+            directory,
+            size,
+            modified: None,
+            hidden: Hiding::Shown,
+            marks: Marks::default(),
+        };
+        let mut entries =
+            vec![entry("b", true, None), entry("a.txt", false, Some(0)), entry("d", true, None), entry("c.txt", false, Some(5))];
+        let sort = |entries: &mut Vec<Entry>, by, descending| {
+            sort_entries(entries, Order { by, descending, folders_first: false });
+            entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(sort(&mut entries, Sort::Name, false), ["a.txt", "b", "c.txt", "d"]);
+        assert_eq!(sort(&mut entries, Sort::Name, true), ["d", "c.txt", "b", "a.txt"]);
+        assert_eq!(sort(&mut entries, Sort::Size, false), ["b", "d", "a.txt", "c.txt"]);
+        assert_eq!(sort(&mut entries, Sort::Size, true), ["c.txt", "a.txt", "b", "d"]);
+    }
+
+    #[test]
+    fn says_when_folders_mix_in() {
+        let first = Order { by: Sort::Size, descending: true, ..Order::default() };
+        assert_eq!(first.label(), "サイズ・降順");
+        assert_eq!(Order { folders_first: false, ..first }.label(), "サイズ・降順・混在");
     }
 
     #[test]
@@ -301,7 +353,7 @@ mod tests {
         ];
         let order = |entries: &[Entry]| entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>();
         let sort = |entries: &mut Vec<Entry>, by, descending| {
-            sort_entries(entries, Order { by, descending });
+            sort_entries(entries, Order { by, descending, ..Order::default() });
             order(entries)
         };
         assert_eq!(sort(&mut entries, Sort::Name, false), ["A", "a2", "b", "c"]);
@@ -333,7 +385,7 @@ mod tests {
         // The sizes all tie, so they fall back to the same order either way.
         for descending in [false, true] {
             entries.reverse();
-            sort_entries(&mut entries, Order { by: Sort::Size, descending });
+            sort_entries(&mut entries, Order { by: Sort::Size, descending, ..Order::default() });
             assert_eq!(order(&entries), expected);
         }
     }

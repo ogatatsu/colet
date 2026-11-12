@@ -56,6 +56,8 @@ pub enum Command {
     /// A sort for the column, or for the default when `None`.
     Sort(Option<ColumnId>, Sort),
     Direction(Option<ColumnId>, bool),
+    /// Folders before files, or mixed in with them.
+    FoldersFirst(Option<ColumnId>, bool),
     /// The column goes back to the default order.
     Unsort(ColumnId),
     /// The search filter to search within, or none.
@@ -318,6 +320,8 @@ impl Colet {
                 choice(label, label, Command::Direction(target, descending), descending == sort.descending)
             }));
             lines[Sort::ALL.len()].group = true;
+            let first = sort.folders_first;
+            lines.push(choice("folders-first", "フォルダを先に表示", Command::FoldersFirst(target, !first), first).grouped());
             // A column given its own order goes back to the default from here.
             if let Some(c) = column {
                 let own = self.own_order(c).is_some();
@@ -556,6 +560,7 @@ impl Colet {
             }
             Command::Sort(target, by) => self.set_sort(target, by, cx),
             Command::Direction(target, descending) => self.set_direction(target, descending, cx),
+            Command::FoldersFirst(target, first) => self.set_folders_first(target, first, cx),
             Command::Unsort(id) => self.set_order(Some(id), self.stored.settings().sort, cx),
             Command::SearchFilter(name) => self.choose_filter(name, cx),
             Command::EditFilters => self.open_filters(window, cx),

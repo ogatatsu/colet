@@ -38,6 +38,7 @@ unsafe extern "system" {
     fn Everything3_AddSearchPropertyRequestHighlighted(state: Handle, property: u32) -> i32;
     fn Everything3_AddSearchSort(state: Handle, property: u32, ascending: i32) -> i32;
     fn Everything3_SetSearchFoldersFirst(state: Handle, mode: u32) -> i32;
+    fn Everything3_SetSearchSortMix(state: Handle, mix: i32) -> i32;
     fn Everything3_Search(client: Handle, state: Handle) -> Handle;
     fn Everything3_GetResults(client: Handle, state: Handle) -> Handle;
     fn Everything3_DestroyResultList(result: Handle) -> i32;
@@ -407,8 +408,14 @@ impl SearchSession {
             for property in [NAME, PATH] {
                 Everything3_AddSearchPropertyRequestHighlighted(self.state, property);
             }
-            // Folders first descending too, as the columns order them, unlike Explorer.
-            Everything3_SetSearchFoldersFirst(self.state, FOLDERS_FIRST_ALWAYS);
+            // Folders first descending too, as the columns order them, unlike Explorer; or mixed in with
+            // the files. Mixed by size, Everything orders a folder by the size it indexes for it, where the
+            // columns, which show none, put folders below every file.
+            if order.folders_first {
+                Everything3_SetSearchFoldersFirst(self.state, FOLDERS_FIRST_ALWAYS);
+            } else {
+                Everything3_SetSearchSortMix(self.state, 1);
+            }
             let property = match order.by {
                 Sort::Name => NAME,
                 Sort::Size => SIZE,
@@ -701,7 +708,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(15);
         for by in Sort::ALL {
             let entries = loop {
-                let page = session.search(&query, Order { by, descending: true }, 0, PAGE, true).unwrap();
+                let page = session.search(&query, Order { by, descending: true, ..Order::default() }, 0, PAGE, true).unwrap();
                 if page.entries.len() == 2 {
                     break page.entries;
                 }
@@ -743,6 +750,9 @@ mod tests {
             assert!(Instant::now() < deadline, "no change notification");
             std::thread::sleep(Duration::from_millis(100));
         }
-        assert_eq!(session.search(&query, Order { by: Sort::Modified, descending: true }, 0, 1000, true).unwrap().total, 512);
+        assert_eq!(
+            session.search(&query, Order { by: Sort::Modified, descending: true, ..Order::default() }, 0, 1000, true).unwrap().total,
+            512
+        );
     }
 }

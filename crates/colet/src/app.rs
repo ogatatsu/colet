@@ -852,12 +852,17 @@ impl Colet {
         self.set_order(target, Order { descending, ..self.order_for(target) }, cx);
     }
 
+    /// Puts folders before files in the column `target`, or by default, or mixes them in.
+    pub fn set_folders_first(&mut self, target: Option<ColumnId>, folders_first: bool, cx: &mut Context<Self>) {
+        self.set_order(target, Order { folders_first, ..self.order_for(target) }, cx);
+    }
+
     /// Sorts the column `id` by the heading `by` pressed: the way it runs turned round when it already
     /// goes by it, or else as that heading starts, names from A and sizes and times from the largest.
     pub fn sort_by_heading(&mut self, id: ColumnId, by: Sort, cx: &mut Context<Self>) {
         let order = self.order_for(Some(id));
         let descending = if order.by == by { !order.descending } else { by != Sort::Name };
-        self.set_order(Some(id), Order { by, descending }, cx);
+        self.set_order(Some(id), Order { by, descending, ..order }, cx);
     }
 
     /// Gives the column `target` the order, or makes it the default; a column given the default follows

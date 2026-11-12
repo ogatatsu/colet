@@ -101,9 +101,9 @@ mod tests {
     #[test]
     fn keeps_each_folders_order_whatever_its_case_and_the_search_results() {
         let mut sorts = Sorts::default();
-        let size = Order { by: Sort::Size, descending: true };
+        let size = Order { by: Sort::Size, descending: true, ..Order::default() };
         sorts.set_folder(Path::new(r"D:\Work"), Some(size));
-        sorts.search = Some(Order { by: Sort::Modified, descending: false });
+        sorts.search = Some(Order { by: Sort::Modified, descending: false, ..Order::default() });
         assert_eq!(sorts.folder(Path::new(r"d:\work")), Some(size));
         let json = serde_json::to_string(&sorts).unwrap();
         assert_eq!(
@@ -116,12 +116,26 @@ mod tests {
     }
 
     #[test]
+    fn writes_folders_first_only_when_they_mix_and_reads_an_order_written_before_as_folders_first() {
+        let first = Order { by: Sort::Size, descending: true, ..Order::default() };
+        let mut sorts = Sorts { search: Some(first), ..Sorts::default() };
+        sorts.set_folder(Path::new(r"D:\a"), Some(Order { folders_first: false, ..first }));
+        let json = serde_json::to_string(&sorts).unwrap();
+        assert_eq!(
+            json,
+            r#"{"search":{"by":"size","descending":true},"folders":[{"path":"D:\\a","order":{"by":"size","descending":true,"folders_first":false}}]}"#
+        );
+        assert_eq!(serde_json::from_str::<Sorts>(&json).unwrap(), sorts);
+        assert!(serde_json::from_str::<Sorts>(r#"{"search":{"by":"name","descending":false}}"#).unwrap().search.unwrap().folders_first);
+    }
+
+    #[test]
     fn keeps_the_first_of_a_folder_written_twice() {
         let sorts: Sorts = serde_json::from_str(
             r#"{"folders":[{"path":"","order":{"by":"name","descending":true}},{"path":"D:\\a","order":{"by":"size","descending":false}},{"path":"d:\\A","order":{"by":"modified","descending":false}}]}"#,
         )
         .unwrap();
-        assert_eq!(sorts.folder(Path::new(r"D:\a")), Some(Order { by: Sort::Size, descending: false }));
+        assert_eq!(sorts.folder(Path::new(r"D:\a")), Some(Order { by: Sort::Size, descending: false, ..Order::default() }));
         assert_eq!(sorts.folder(Path::new("")), None);
         assert_eq!(sorts.search, None);
     }
@@ -132,8 +146,8 @@ mod tests {
         let wide: Vec<u16> = r"D:\a".encode_utf16().chain([0xD800]).collect();
         let odd = PathBuf::from(OsString::from_wide(&wide));
         let mut sorts = Sorts::default();
-        sorts.set_folder(&odd, Some(Order { by: Sort::Size, descending: true }));
-        sorts.set_folder(Path::new(r"D:\b"), Some(Order { by: Sort::Size, descending: true }));
+        sorts.set_folder(&odd, Some(Order { by: Sort::Size, descending: true, ..Order::default() }));
+        sorts.set_folder(Path::new(r"D:\b"), Some(Order { by: Sort::Size, descending: true, ..Order::default() }));
         let read: Sorts = serde_json::from_str(&serde_json::to_string(&sorts).unwrap()).unwrap();
         assert_eq!(read.folder(&odd), None);
         assert_eq!(read.folder(Path::new(r"D:\b")), sorts.folder(Path::new(r"D:\b")));
@@ -149,7 +163,7 @@ mod tests {
         assert!(error.message.starts_with("カラムの並び順のファイルが壊れていたため、既定の並び順で始めました"), "{}", error.message);
         assert!(!path.exists());
         assert_eq!(settings::read::<Sorts>(&path, &SORTS), Ok(Sorts::default()));
-        let sorts = Sorts { search: Some(Order { by: Sort::Size, descending: true }), ..Default::default() };
+        let sorts = Sorts { search: Some(Order { by: Sort::Size, descending: true, ..Order::default() }), ..Default::default() };
         settings::write(&sorts, &path, &SORTS).unwrap();
         assert_eq!(settings::read::<Sorts>(&path, &SORTS), Ok(sorts));
     }
