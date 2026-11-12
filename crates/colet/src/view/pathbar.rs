@@ -219,7 +219,7 @@ impl Colet {
                     .justify_center()
                     .rounded(px(metrics::RADIUS))
                     .hover(|d| d.bg(p.hover))
-                    .tip("上の階層")
+                    .tip_while_shut(open, "上の階層")
                     .child(icon("ellipsis", 15., if current { p.text } else { p.text_muted }))
                     .map(|d| Self::opener(d, Self::crumbs_open, cx))
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {

@@ -431,7 +431,7 @@ impl Colet {
                     .role(Role::Button)
                     .aria_label(label.clone())
                     .aria_expanded(open)
-                    .tip(label)
+                    .tip_while_shut(open, label)
                     .size(px(metrics::ICON_BUTTON))
                     .flex()
                     .items_center()

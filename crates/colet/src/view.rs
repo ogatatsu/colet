@@ -43,12 +43,20 @@ use rows::{MODIFIED_WIDTH, SIZE_WIDTH};
 pub trait TipExt {
     /// A line of text shown while the pointer rests on it.
     fn tip(self, text: impl Into<SharedString>) -> Self;
+
+    /// The tip of a button that opens a menu or a panel, shown only while what it opens is shut: open, it
+    /// would lie over what the button opened.
+    fn tip_while_shut(self, open: bool, text: impl Into<SharedString>) -> Self;
 }
 
 impl<E: StatefulInteractiveElement> TipExt for E {
     fn tip(self, text: impl Into<SharedString>) -> Self {
         let text = text.into();
         self.tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(text.clone()).build(window, cx))
+    }
+
+    fn tip_while_shut(self, open: bool, text: impl Into<SharedString>) -> Self {
+        if open { self } else { self.tip(text) }
     }
 }
 

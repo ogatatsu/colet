@@ -816,7 +816,8 @@ impl Colet {
             .xsmall()
             .map(|b| if running { b.icon(Spinner::new()) } else { b.icon(crate::view::glyph("clock")) })
             .accessibility_label(label.clone())
-            .tooltip(label)
+            // Shown only while the history is shut: open, the tip would lie over it.
+            .when(!self.history_panel.open, |b| b.tooltip(label))
             .when(unseen > 0, |d| {
                 d.child(
                     div()
