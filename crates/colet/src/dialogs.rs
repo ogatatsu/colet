@@ -30,45 +30,73 @@ use crate::{
     view::{RING_ROOM, RingAt},
 };
 
-/// The keys the preferences list.
-const SHORTCUTS: [(&str, &str); 36] = [
-    ("↑ ↓", "項目を選択（Shift で範囲選択）"),
-    ("PageUp / PageDown", "1 画面ずつ移動"),
-    ("Home / End", "先頭 / 末尾へ移動"),
-    ("← →", "カラムを移動"),
-    ("Enter", "開く"),
-    ("Ctrl+Enter", "新しいタブで開く"),
-    ("Space", "QuickLook でプレビュー"),
-    ("Alt+← / Alt+→", "戻る / 進む"),
-    ("マウスの戻る / 進むボタン", "戻る / 進む"),
-    ("Ctrl+0", "ホームへ移動"),
-    ("Ctrl+H", "隠しファイルの表示を切り替え"),
-    ("Ctrl+U", "上の階層を表示"),
-    ("Shift+F10 / メニューキー", "メニューを開く"),
-    ("Ctrl+F", "検索"),
-    ("Ctrl+L", "パスを入力して移動（Alt+Enter で新しいタブに開く）"),
-    ("↓ / Enter", "検索欄から結果へ移動"),
-    ("Esc", "検索をクリア（空ならフィルターを解除）"),
-    ("Ctrl+Shift+F", "検索フィルターを選ぶ"),
-    ("Ctrl+クリック / Shift+クリック", "複数選択"),
-    ("Ctrl+↑↓ / Ctrl+Space", "離れた項目を選択"),
-    ("Ctrl+Shift+↑↓ / Ctrl+Shift+クリック", "範囲を選択に足す"),
-    ("Ctrl+A", "読み込み済み項目を全選択"),
-    ("Ctrl+C / X / V", "コピー / 切り取り / 貼り付け"),
-    ("Ctrl+Shift+C", "パスをコピー"),
-    ("Ctrl+Shift+N", "新規フォルダー"),
-    ("Ctrl+D", "検索を保存 / フォルダーをお気に入りに追加"),
-    ("F2", "名前を変更（保存した検索は編集）"),
-    ("Delete", "ごみ箱へ移動"),
-    ("Shift+Delete", "完全に削除"),
-    ("Alt+Enter", "プロパティ"),
-    ("F5", "更新"),
-    ("Ctrl+T", "新しいタブ"),
-    ("Ctrl+W", "タブを閉じる"),
-    ("Ctrl+Tab / Ctrl+Shift+Tab", "次 / 前のタブ"),
-    ("Ctrl+Shift+T", "閉じたタブを開き直す"),
-    ("文字キー", "カラムを名前で絞り込む（Backspace で 1 文字消す、Esc で解除）"),
+/// The keys the preferences list, under a heading for each kind of work.
+const SHORTCUTS: [(&str, &[(&str, &str)]); 6] = [
+    (
+        "移動",
+        &[
+            ("← →", "カラムを移動"),
+            ("PageUp / PageDown", "1 画面ずつ移動"),
+            ("Home / End", "先頭 / 末尾へ移動"),
+            ("Enter", "開く"),
+            ("Alt+← / Alt+→", "戻る / 進む"),
+            ("マウスの戻る / 進むボタン", "戻る / 進む"),
+            ("Ctrl+0", "ホームへ移動"),
+            ("Ctrl+L", "パスを入力して移動（Alt+Enter で新しいタブに開く）"),
+        ],
+    ),
+    (
+        "選択",
+        &[
+            ("↑ ↓", "項目を選択（Shift で範囲選択）"),
+            ("Ctrl+クリック / Shift+クリック", "複数選択"),
+            ("Ctrl+↑↓ / Ctrl+Space", "離れた項目を選択"),
+            ("Ctrl+Shift+↑↓ / Ctrl+Shift+クリック", "範囲を選択に足す"),
+            ("Ctrl+A", "読み込み済み項目を全選択"),
+        ],
+    ),
+    (
+        "検索と絞り込み",
+        &[
+            ("Ctrl+F", "検索"),
+            ("↓ / Enter", "検索欄から結果へ移動"),
+            ("Esc", "検索をクリア（空ならフィルターを解除）"),
+            ("Ctrl+Shift+F", "検索フィルターを選ぶ"),
+            ("Ctrl+D", "検索を保存 / フォルダーをお気に入りに追加"),
+            ("文字キー", "カラムを名前で絞り込む（Backspace で 1 文字消す、Esc で解除）"),
+        ],
+    ),
+    (
+        "タブ",
+        &[
+            ("Ctrl+T", "新しいタブ"),
+            ("Ctrl+Enter", "新しいタブで開く"),
+            ("Ctrl+W", "タブを閉じる"),
+            ("Ctrl+Tab / Ctrl+Shift+Tab", "次 / 前のタブ"),
+            ("Ctrl+Shift+T", "閉じたタブを開き直す"),
+        ],
+    ),
+    (
+        "ファイル操作",
+        &[
+            ("Ctrl+C / X / V", "コピー / 切り取り / 貼り付け"),
+            ("Ctrl+Shift+C", "パスをコピー"),
+            ("Ctrl+Shift+N", "新規フォルダー"),
+            ("F2", "名前を変更（保存した検索は編集）"),
+            ("Delete", "ごみ箱へ移動"),
+            ("Shift+Delete", "完全に削除"),
+            ("Alt+Enter", "プロパティ"),
+            ("Shift+F10 / メニューキー", "メニューを開く"),
+        ],
+    ),
+    (
+        "プレビューと表示",
+        &[("Space", "QuickLook でプレビュー"), ("Ctrl+H", "隠しファイルの表示を切り替え"), ("Ctrl+U", "上の階層を表示"), ("F5", "更新")],
+    ),
 ];
+
+/// How wide the keys' side of the list is: room for the longest, "Ctrl+Shift+↑↓ / Ctrl+Shift+クリック".
+const KEYS_WIDTH: f32 = 240.;
 
 /// `HH:MM`, local.
 fn clock(unix_ms: u64) -> String {
@@ -584,13 +612,16 @@ impl Colet {
             })
             .child(div().pt_1().text_size(px(metrics::TEXT_LARGE)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
             // One by one: an array of them all would lie whole on the stack, past what a debug build has.
-            .child(div().flex().flex_col().gap_1().text_size(px(metrics::TEXT_BODY)).children(SHORTCUTS.iter().map(|&(key, what)| {
-                div()
-                    .flex()
-                    .gap_3()
-                    .child(div().w(px(180.)).flex_none().text_color(p.text).child(key))
-                    // Wrapped in the room left, rather than cut at the dialog's edge.
-                    .child(div().flex_1().min_w_0().text_color(p.text_muted).child(what))
+            .child(div().flex().flex_col().gap_3().text_size(px(metrics::TEXT_BODY)).children(SHORTCUTS.iter().map(|&(heading, keys)| {
+                div().flex().flex_col().gap_1().child(label(p, heading)).children(keys.iter().map(|&(key, what)| {
+                    div()
+                        .flex()
+                        .gap_3()
+                        // As wide as the longest key, so none wraps.
+                        .child(div().w(px(KEYS_WIDTH)).flex_none().text_color(p.text).child(key))
+                        // Wrapped in the room left, rather than cut at the dialog's edge.
+                        .child(div().flex_1().min_w_0().text_color(p.text_muted).child(what))
+                }))
             })));
         let buttons = vec![(
             "close-preferences",
