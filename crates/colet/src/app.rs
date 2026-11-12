@@ -858,10 +858,11 @@ impl Colet {
     }
 
     /// Sorts the column `id` by the heading `by` pressed: the way it runs turned round when it already
-    /// goes by it, or else as that heading starts, names from A and sizes and times from the largest.
+    /// goes by it, or else as that heading starts, names and locations from A and sizes and times from
+    /// the largest.
     pub fn sort_by_heading(&mut self, id: ColumnId, by: Sort, cx: &mut Context<Self>) {
         let order = self.order_for(Some(id));
-        let descending = if order.by == by { !order.descending } else { by != Sort::Name };
+        let descending = if order.by == by { !order.descending } else { !matches!(by, Sort::Name | Sort::Location) };
         self.set_order(Some(id), Order { by, descending, ..order }, cx);
     }
 

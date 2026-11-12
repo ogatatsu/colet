@@ -416,8 +416,11 @@ impl SearchSession {
             } else {
                 Everything3_SetSearchSortMix(self.state, 1);
             }
+            // By path, Everything compares a folder at a time, as Explorer orders names, so a folder's
+            // subfolders follow it; alone, it would turn the names within a folder round too.
             let property = match order.by {
                 Sort::Name => NAME,
+                Sort::Location => PATH,
                 Sort::Size => SIZE,
                 Sort::Modified => DATE_MODIFIED,
             };
@@ -694,6 +697,47 @@ mod tests {
         assert_eq!(&entry.name[entry.marks.name[0].clone()], "rep");
         // Outside a search, nothing is marked.
         assert_eq!(Entry::folder(r"C:\", "C:").marks, Marks::default());
+    }
+
+    #[test]
+    #[ignore = "needs a running Everything 1.5 that indexes the temporary folder"]
+    fn sorts_by_location_a_folder_at_a_time_names_from_a_either_way_as_the_columns_would() {
+        let _alone = alone();
+        let fixture = tempfile::Builder::new().prefix("colet-sdk-location-").tempdir().unwrap();
+        let root = fixture.path();
+        for folder in ["a", "a b", r"a\sub", r"a\Sub2", r"a\sub\deep", "a10", "a2", "B"] {
+            std::fs::create_dir_all(root.join(folder)).unwrap();
+            for name in ["f.txt", "E.txt"] {
+                std::fs::write(root.join(folder).join(name), b"x").unwrap();
+            }
+        }
+        let query = format!("file: \"{}\\\"", root.display());
+        let mut session = SearchSession::default();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let shown = |entries: &[Entry]| -> Vec<String> {
+            entries.iter().map(|e| e.path.strip_prefix(root).unwrap().display().to_string()).collect()
+        };
+        for descending in [false, true] {
+            let order = Order { by: Sort::Location, descending, folders_first: false };
+            let mut entries = loop {
+                let page = session.search(&query, order, 0, PAGE, true).unwrap();
+                if page.entries.len() == 16 {
+                    break page.entries;
+                }
+                assert!(Instant::now() < deadline, "Everything did not index the fixture");
+                std::thread::sleep(Duration::from_millis(100));
+            };
+            let mut folders = ["a", r"a\sub", r"a\sub\deep", r"a\Sub2", "a b", "a2", "a10", "B"];
+            if descending {
+                folders.reverse();
+            }
+            let expected: Vec<_> = folders.iter().flat_map(|f| [format!(r"{f}\E.txt"), format!(r"{f}\f.txt")]).collect();
+            assert_eq!(shown(&entries), expected, "descending {descending}");
+            // The columns' own sort, which a listing goes by, agrees.
+            entries.reverse();
+            crate::entry::sort_entries(&mut entries, order);
+            assert_eq!(shown(&entries), expected, "descending {descending}, sorted here");
+        }
     }
 
     #[test]

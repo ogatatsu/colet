@@ -467,6 +467,7 @@ impl Colet {
         let id = c.id;
         let order = self.order_of(c);
         let check_all = (c.kind != Kind::Home).then(|| self.check_all(index, cx));
+        let search = c.kind == Kind::Search;
         let heading = |by: Sort, name: &'static str| {
             let chosen = order.by == by;
             let label = if chosen {
@@ -503,7 +504,23 @@ impl Colet {
             .border_color(p.border)
             .text_size(px(metrics::TEXT_SMALL))
             .children(check_all)
-            .child(heading(Sort::Name, "sort-by-name").flex_1().min_w_0())
+            // The search results' items are in all sorts of folders, shown under their names: they sort by
+            // those too, from a heading beside the name's, the rest of the room left bare.
+            .map(|d| {
+                if search {
+                    d.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .flex()
+                            .child(heading(Sort::Name, "sort-by-name").flex_none())
+                            .child(heading(Sort::Location, "sort-by-location").flex_none()),
+                    )
+                } else {
+                    d.child(heading(Sort::Name, "sort-by-name").flex_1().min_w_0())
+                }
+            })
             .child(heading(Sort::Size, "sort-by-size").w(px(SIZE_WIDTH + 8.)).flex_none())
             .child(heading(Sort::Modified, "sort-by-modified").w(px(MODIFIED_WIDTH + 8.)).flex_none())
             .child(div().w(px(13. + 8.)).flex_none())

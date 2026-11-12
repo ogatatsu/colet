@@ -137,19 +137,28 @@ impl Entry {
 pub enum Sort {
     #[default]
     Name,
+    /// By the folder an item is in, a level at a time, so a folder's subfolders follow it. Offered only
+    /// for the search results: a folder's items are all in the one folder.
+    Location,
     Size,
     Modified,
 }
 
 impl Sort {
-    pub const ALL: [Sort; 3] = [Sort::Name, Sort::Size, Sort::Modified];
+    pub const ALL: [Sort; 4] = [Sort::Name, Sort::Location, Sort::Size, Sort::Modified];
 
     pub fn label(self) -> &'static str {
         match self {
             Sort::Name => "名前",
+            Sort::Location => "場所",
             Sort::Size => "サイズ",
             Sort::Modified => "更新日時",
         }
+    }
+
+    /// Whether a column of a folder's items, or the default, can be sorted by it.
+    pub fn for_folders(self) -> bool {
+        self != Sort::Location
     }
 }
 
@@ -217,13 +226,15 @@ struct Key {
     order: Order,
     file: bool,
     rank: Option<u64>,
+    /// The folders the item is in, from the drive down; only when sorting by them.
+    location: Vec<ExplorerName>,
     name: ExplorerName,
     path: OsString,
 }
 
 impl Ord for Key {
     fn cmp(&self, other: &Self) -> Ordering {
-        let mut by = self.rank.cmp(&other.rank);
+        let mut by = self.rank.cmp(&other.rank).then_with(|| self.location.cmp(&other.location));
         if self.order.by == Sort::Name {
             by = by.then_with(|| self.name.cmp(&other.name));
         }
@@ -251,7 +262,8 @@ impl Eq for Key {}
 
 /// Folders first either way, unlike Explorer's descending, unless the order mixes them in with the files;
 /// then by the sort, turned round when descending, a folder having no size and so coming below any file
-/// by size; ties broken by name as Explorer orders it and then by path.
+/// by size, and a location compared a folder at a time as Explorer orders names; ties broken by name as
+/// Explorer orders it, from A even descending, and then by path.
 pub fn sort_entries(entries: &mut [Entry], order: Order) {
     // Keyed once per entry: converting names inside the comparison would allocate on every one of its
     // n log n calls.
@@ -259,9 +271,13 @@ pub fn sort_entries(entries: &mut [Entry], order: Order) {
         order,
         file: !e.directory,
         rank: match order.by {
-            Sort::Name => None,
+            Sort::Name | Sort::Location => None,
             Sort::Size => e.size,
             Sort::Modified => e.modified,
+        },
+        location: match (order.by, e.path.parent()) {
+            (Sort::Location, Some(parent)) => parent.components().map(|c| ExplorerName(Wide::new(c.as_os_str()))).collect(),
+            _ => Vec::new(),
         },
         name: ExplorerName(Wide::new(&e.name)),
         path: path_key(&e.path),
@@ -324,6 +340,35 @@ mod tests {
         assert_eq!(sort(&mut entries, Sort::Name, true), ["d", "c.txt", "b", "a.txt"]);
         assert_eq!(sort(&mut entries, Sort::Size, false), ["b", "d", "a.txt", "c.txt"]);
         assert_eq!(sort(&mut entries, Sort::Size, true), ["c.txt", "a.txt", "b", "d"]);
+    }
+
+    #[test]
+    fn sorts_by_location_a_folder_at_a_time_turning_only_the_folders_round() {
+        let entry = |path: &str| Entry {
+            path: path.into(),
+            name: path.rsplit('\\').next().unwrap().into(),
+            parent: String::new(),
+            directory: false,
+            size: None,
+            modified: None,
+            hidden: Hiding::Shown,
+            marks: Marks::default(),
+        };
+        let paths = [r"D:\a b\x", r"C:\z\y", r"D:\a\sub\x", r"D:\A\y", r"D:\a10\x", r"D:\a\x", r"D:\a2\x", r"D:\A\Sub\a"];
+        let mut entries: Vec<_> = paths.iter().map(|p| entry(p)).collect();
+        let sort = |entries: &mut Vec<Entry>, descending| {
+            sort_entries(entries, Order { by: Sort::Location, descending, ..Order::default() });
+            entries.iter().map(|e| e.path.display().to_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            sort(&mut entries, false),
+            [r"C:\z\y", r"D:\a\x", r"D:\A\y", r"D:\A\Sub\a", r"D:\a\sub\x", r"D:\a b\x", r"D:\a2\x", r"D:\a10\x"]
+        );
+        assert_eq!(
+            sort(&mut entries, true),
+            [r"D:\a10\x", r"D:\a2\x", r"D:\a b\x", r"D:\A\Sub\a", r"D:\a\sub\x", r"D:\a\x", r"D:\A\y", r"C:\z\y"]
+        );
+        assert_eq!(Order { by: Sort::Location, ..Order::default() }.label(), "場所・昇順");
     }
 
     #[test]

@@ -314,12 +314,19 @@ impl Colet {
         if self.sort_open() || column.is_some() {
             let target = column.map(|c| c.id);
             let sort = column.map_or(self.stored.settings().sort, |c| self.order_of(c));
-            let mut lines: Vec<Line> = Sort::ALL.map(|by| choice(by.label(), by.label(), Command::Sort(target, by), by == sort.by)).into();
+            // By location only the search results, whose items are in all sorts of folders.
+            let search = column.is_some_and(|c| c.kind == Kind::Search);
+            let mut lines: Vec<Line> = Sort::ALL
+                .into_iter()
+                .filter(|by| search || by.for_folders())
+                .map(|by| choice(by.label(), by.label(), Command::Sort(target, by), by == sort.by))
+                .collect();
+            let sorts = lines.len();
             lines.extend([false, true].map(|descending| {
                 let label = direction_label(descending);
                 choice(label, label, Command::Direction(target, descending), descending == sort.descending)
             }));
-            lines[Sort::ALL.len()].group = true;
+            lines[sorts].group = true;
             let first = sort.folders_first;
             lines.push(choice("folders-first", "フォルダを先に表示", Command::FoldersFirst(target, !first), first).grouped());
             // A column given its own order goes back to the default from here.

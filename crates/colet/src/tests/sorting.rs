@@ -241,6 +241,43 @@ fn gives_the_search_results_one_order_of_their_own_for_every_search(cx: &mut Tes
 }
 
 #[gpui_kit::test]
+fn sorts_only_the_search_results_by_location_from_a_first_then_turned_round(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "x");
+    let results = ui.read(cx, |v| v.state.columns[1].id);
+    let absent = |ui: &Ui, cx: &mut TestAppContext, id: &'static str| ui.act(cx, |window, _| window.try_find(id).is_none());
+    // A location starts from A, as a name does; the heading again turns it round.
+    ui.click(cx, ("sort-by-location", results));
+    let location = Order { by: Sort::Location, ..Order::default() };
+    assert_eq!(fake.orders.lock().unwrap().last(), Some(&location));
+    assert_eq!(fake.sorts.lock().unwrap().search, Some(location));
+    ui.click(cx, ("sort-by-location", results));
+    assert_eq!(fake.orders.lock().unwrap().last(), Some(&Order { descending: true, ..location }));
+    // The results' own menu offers it, the default's does not.
+    ui.click(cx, ("column-sort", results));
+    ui.click(cx, "名前");
+    assert_eq!(fake.orders.lock().unwrap().last(), Some(&Order { by: Sort::Name, descending: true, ..Order::default() }));
+    ui.click(cx, ("column-sort", results));
+    ui.click(cx, "場所");
+    assert_eq!(fake.orders.lock().unwrap().last(), Some(&Order { descending: true, ..location }));
+    ui.click(cx, "sort");
+    assert!(ui.read(cx, |v| v.sort_open()));
+    assert!(absent(&ui, cx, "場所"));
+    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order::default());
+}
+
+#[gpui_kit::test]
+fn leaves_location_out_of_a_folders_headings_and_menu(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    assert!(ui.act(cx, |window, _| window.try_find(("sort-by-location", work)).is_none()));
+    ui.click(cx, ("column-sort", work));
+    assert_eq!(ui.read(cx, |v| v.column_sort_open()), Some(work));
+    assert!(ui.act(cx, |window, _| window.try_find("場所").is_none()));
+}
+
+#[gpui_kit::test]
 fn opens_a_columns_order_from_its_button_by_keys(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     let work = ui.read(cx, |v| v.state.columns[2].id);
