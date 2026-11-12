@@ -109,10 +109,10 @@ impl Colet {
                     }
                     // A pinned search keeps its pin under the name.
                     for pin in &mut s.pinned {
-                        if let HomeKey::Search { query, filter: Some(filter), narrow } = HomeKey::of(pin)
+                        if let HomeKey::Search { query, filter: Some(filter), narrow, order } = HomeKey::of(pin)
                             && filter == from
                         {
-                            *pin = HomeKey::search(query, Some(&to), narrow).key();
+                            *pin = HomeKey::search(query, Some(&to), narrow, order).key();
                         }
                     }
                 }

@@ -1,5 +1,6 @@
 //! What opens over the window: the dialogs, the file menu, and the history of file operations.
 use colet_core::{
+    entry::{Order, Sort, direction_label},
     operations::{Kind as Operation, Request},
     paths::{ancestors, folder_name, shown},
 };
@@ -25,7 +26,7 @@ use crate::{
     search_filters::FilterEdit,
     settings::{Favorite, Theme},
     state::Kind,
-    stops::{FilterTool, Stop},
+    stops::{FilterTool, OrderChoice, Stop},
     theme::Palette,
     view::{RING_ROOM, RingAt},
 };
@@ -177,6 +178,39 @@ impl Colet {
             })
     }
 
+    /// The order a saved search lists its results in: what it sorts by, the way it runs, and whether folders
+    /// come first, each a row of choices as the sort order's menu has them.
+    fn order_field(&self, order: Order, window: &Window, cx: &mut Context<Self>) -> Div {
+        let p = self.palette;
+        let row = |id: &'static str, label: &'static str, choices: Vec<(OrderChoice, &'static str)>| {
+            div()
+                .id(id)
+                .flex()
+                .flex_wrap()
+                .gap(px(2.))
+                .role(Role::RadioGroup)
+                .aria_label(label)
+                // Ringed as the fields are; the rings' room makes up most of the gaps.
+                .children(choices.into_iter().map(|(choice, text)| {
+                    let id = ElementId::NamedChild(std::sync::Arc::new(id.into()), SharedString::from(text));
+                    let button = filter_choice(id, text, choice.is_in(order))
+                        .on_click(cx.listener(move |this, _, _, cx| this.change_edit_order(|order| choice.apply(order), cx)));
+                    self.ringed(button, Stop::EditSearchOrder(choice), RingAt::Round, window, cx)
+                }))
+        };
+        let by = Sort::ALL.into_iter().map(|by| (OrderChoice::By(by), by.label())).collect();
+        let direction = [false, true].into_iter().map(|d| (OrderChoice::Descending(d), direction_label(d))).collect();
+        let folders = vec![(OrderChoice::FoldersFirst(true), "フォルダを先に"), (OrderChoice::FoldersFirst(false), "混在")];
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(label(p, "並び順"))
+            .child(row("edit-search-sort", "並べ替え", by))
+            .child(row("edit-search-direction", "向き", direction))
+            .child(row("edit-search-folders", "フォルダ", folders))
+    }
+
     fn dialog_parts(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(&'static str, Div, Buttons)> {
         let title = match self.overlays.dialog()? {
             Dialog::Name { request: Request { kind: Operation::NewFolder, .. }, .. } => "新規フォルダー",
@@ -195,7 +229,9 @@ impl Colet {
         let (content, buttons) = match self.overlays.dialog()? {
             Dialog::Name { request, input, checking, .. } => self.name_dialog(request, input, checking.is_some(), window, cx),
             Dialog::EditFavorite { original, name, narrow } => self.favorite_dialog(original, name, narrow, window, cx),
-            Dialog::EditSearch { name, query, filter, narrow, .. } => self.search_dialog(name, query, filter, narrow, window, cx),
+            Dialog::EditSearch { name, query, filter, narrow, order, .. } => {
+                self.search_dialog(name, query, filter, narrow, *order, window, cx)
+            }
             Dialog::Filters { edit: Some(edit), .. } => self.filter_edit_dialog(edit, window, cx),
             Dialog::Filters { deleting: Some(name), .. } => self.filter_delete_dialog(name, cx),
             Dialog::Filters { .. } => self.filters_dialog(window, cx),
@@ -294,13 +330,15 @@ impl Colet {
         (content, buttons)
     }
 
-    /// A saved search's name, query, filter and narrowing.
+    /// A saved search's name, query, filter, narrowing and order.
+    #[allow(clippy::too_many_arguments)]
     fn search_dialog(
         &self,
         name: &Entity<InputState>,
         query: &Entity<InputState>,
         filter: &Option<String>,
         narrow: &Entity<InputState>,
+        order: Order,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> (Div, Buttons) {
@@ -359,7 +397,8 @@ impl Colet {
                         })),
                 ),
             )
-            .child(self.narrow_field(narrow, None, window, cx));
+            .child(self.narrow_field(narrow, None, window, cx))
+            .child(self.order_field(order, window, cx));
         let buttons = vec![
             (
                 "cancel",

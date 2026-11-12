@@ -428,7 +428,7 @@ fn enters_home_without_picking_and_results_picking_the_first() {
 #[test]
 fn runs_a_saved_search_picked_in_home_keeping_homes_pick() {
     let mut s = State::new();
-    let pdf = HomeKey::search("ext:pdf", None, None).key();
+    let pdf = HomeKey::search("ext:pdf", None, None, Order::default()).key();
     with_entries(&mut s, 0, vec![Entry::folder(&pdf, "PDF"), folder(r"D:\")]);
     s.select(0, one(&pdf));
     assert_eq!(s.query, "ext:pdf");
@@ -918,11 +918,11 @@ fn searches_with_a_filter_alone_and_steps_back_to_the_filter_before() {
 #[test]
 fn runs_a_saved_search_within_its_filter() {
     let mut s = State::new();
-    let images = HomeKey::search("cat", Some("画像"), None).key();
-    let plain = HomeKey::search("cat", None, None).key();
+    let images = HomeKey::search("cat", Some("画像"), None, Order::default()).key();
+    let plain = HomeKey::search("cat", None, None, Order::default()).key();
     assert_ne!(images, plain);
-    assert_eq!(HomeKey::of(&images), HomeKey::search("cat", Some("画像"), None));
-    assert_eq!(HomeKey::of(&plain), HomeKey::search("cat", None, None));
+    assert_eq!(HomeKey::of(&images), HomeKey::search("cat", Some("画像"), None, Order::default()));
+    assert_eq!(HomeKey::of(&plain), HomeKey::search("cat", None, None, Order::default()));
     with_entries(&mut s, 0, vec![Entry::folder(&images, "cat"), Entry::folder(&plain, "cat"), folder(r"D:\")]);
     s.select(0, one(&images));
     assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", Some("画像")));
@@ -943,9 +943,12 @@ fn keys_a_favorite_and_a_saved_search_by_what_they_are_narrowed_to() {
     assert_eq!(HomeKey::of(&narrowed), HomeKey::favorite(Path::new(r"D:\Work"), Some("a b")));
     assert_eq!(HomeKey::on_disk(&narrowed), Path::new(r"D:\Work"));
     assert_eq!(HomeKey::of(Path::new(r"D:\Work")), HomeKey::favorite(Path::new(r"D:\Work"), None));
-    let search = HomeKey::search("cat", None, Some("a")).key();
-    assert_eq!(HomeKey::of(&search), HomeKey::search("cat", None, Some("a")));
-    assert_eq!(HomeKey::of(&HomeKey::search("cat", Some("画像"), Some("a")).key()), HomeKey::search("cat", Some("画像"), Some("a")));
+    let search = HomeKey::search("cat", None, Some("a"), Order::default()).key();
+    assert_eq!(HomeKey::of(&search), HomeKey::search("cat", None, Some("a"), Order::default()));
+    assert_eq!(
+        HomeKey::of(&HomeKey::search("cat", Some("画像"), Some("a"), Order::default()).key()),
+        HomeKey::search("cat", Some("画像"), Some("a"), Order::default())
+    );
     assert_eq!(HomeKey::on_disk(&search), search.as_path());
 }
 
@@ -971,7 +974,7 @@ fn opens_a_favorite_from_home_narrowed_as_it_was_kept() {
     let last = s.columns.last().unwrap();
     assert_eq!((last.path.as_path(), last.narrow.is_none()), (Path::new(r"D:\a"), true));
     // A saved search runs narrowed as it was kept.
-    let search = HomeKey::search("cat", None, Some("y")).key();
+    let search = HomeKey::search("cat", None, Some("y"), Order::default()).key();
     with_entries(&mut s, 0, vec![Entry { directory: false, ..Entry::folder(&search, "cat") }]);
     s.select(0, one(&search));
     assert_eq!((s.query.as_str(), s.search_narrowing().as_deref()), ("cat", Some("y")));
@@ -1098,4 +1101,32 @@ fn going_into_a_hidden_folder_shows_the_way_there_and_not_what_else_is_hidden() 
     assert_eq!(names(&s, 1), [r"D:\a", r"D:\.git"]);
     assert_eq!(names(&s, 2), [r"D:\.git\HEAD", r"D:\.git\config"]);
     assert_eq!(s.columns[2].focused.as_deref(), Some(Path::new(r"D:\.git\HEAD")));
+}
+
+#[test]
+fn keys_a_saved_search_by_its_order_the_default_as_before() {
+    let size = Order { by: colet_core::entry::Sort::Size, descending: true, ..Order::default() };
+    assert_eq!(HomeKey::search("cat", None, None, Order::default()).key(), PathBuf::from("search:cat"));
+    for (filter, narrow) in [(None, None), (Some("画像"), None), (None, Some("a")), (Some("画像"), Some("a"))] {
+        let key = HomeKey::search("cat", filter, narrow, size).key();
+        assert_eq!(HomeKey::of(&key), HomeKey::search("cat", filter, narrow, size));
+        assert_ne!(key, HomeKey::search("cat", filter, narrow, Order::default()).key());
+    }
+}
+
+#[test]
+fn runs_a_saved_search_in_its_order_and_goes_back_to_the_order_before() {
+    let mut s = State::new();
+    let size = Order { by: colet_core::entry::Sort::Size, descending: true, ..Order::default() };
+    let sized = HomeKey::search("cat", None, None, size).key();
+    with_entries(&mut s, 0, vec![Entry::folder(&sized, "cat"), folder(r"D:\")]);
+    s.select(0, one(&sized));
+    assert_eq!((s.query.as_str(), s.search_order), ("cat", size));
+    // Searching again in the tab keeps it.
+    s.set_query("dog");
+    assert_eq!(s.search_order, size);
+    s.search_order = Order::default();
+    s.select(0, one(r"D:\"));
+    s.back();
+    assert_eq!(s.search_order, Order::default());
 }

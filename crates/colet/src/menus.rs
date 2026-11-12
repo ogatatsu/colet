@@ -552,8 +552,8 @@ impl Colet {
             }
             Command::EditSearch(key) => self.open_edit(&key, window, cx),
             Command::Unsave(key) => {
-                if let HomeKey::Search { query, filter, narrow } = HomeKey::of(&key) {
-                    self.toggle_saved(query, filter.map(str::to_owned), narrow.map(str::to_owned), cx);
+                if let HomeKey::Search { query, filter, narrow, order } = HomeKey::of(&key) {
+                    self.toggle_saved(query, filter.map(str::to_owned), narrow.map(str::to_owned), order, cx);
                 }
             }
             Command::Sort(target, by) => self.set_sort(target, by, cx),

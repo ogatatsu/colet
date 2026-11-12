@@ -8,7 +8,7 @@ use std::{
 };
 
 use colet_core::{
-    entry::Entry,
+    entry::{Entry, Order},
     paths::{folder_name, shown},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
@@ -35,13 +35,14 @@ pub enum Dialog {
         taken: Option<String>,
         checking: Option<String>,
     },
-    /// A saved search's name, query, filter and narrowing, found by those it had as the dialog opened.
+    /// A saved search's name, query, filter, narrowing and order, found by those it had as the dialog opened.
     EditSearch {
         original: SavedSearch,
         name: Entity<InputState>,
         query: Entity<InputState>,
         filter: Option<String>,
         narrow: Entity<InputState>,
+        order: Order,
     },
     /// A favorite's name and narrowing, found by those it had as the dialog opened; its folder stays.
     EditFavorite { original: Favorite, name: Entity<InputState>, narrow: Entity<InputState> },
@@ -464,18 +465,19 @@ impl Colet {
     }
 
     /// Saved with no name of its own, so home shows the query until one is given; with the filter it runs
-    /// within and what its results are narrowed to, a search apart from the same query with others.
-    pub fn toggle_saved(&mut self, query: &str, filter: Option<String>, narrow: Option<String>, cx: &mut Context<Self>) {
+    /// within, what its results are narrowed to and their order, a search apart from the same query with
+    /// others.
+    pub fn toggle_saved(&mut self, query: &str, filter: Option<String>, narrow: Option<String>, order: Order, cx: &mut Context<Self>) {
         if query.trim().is_empty() {
             self.notify("検索語を入力すると保存できます", Tone::Info, cx);
             return;
         }
-        let found = self.stored.settings().saved(query, filter.as_deref(), narrow.as_deref()).cloned();
+        let found = self.stored.settings().saved(query, filter.as_deref(), narrow.as_deref(), order).cloned();
         let query = query.to_owned();
         self.update_settings(
             |s| match &found {
                 Some(found) => s.saved_searches.retain(|saved| saved != found),
-                None => s.saved_searches.push(SavedSearch { name: String::new(), query, filter, narrow }),
+                None => s.saved_searches.push(SavedSearch { name: String::new(), query, filter, narrow, order }),
             },
             cx,
         );
@@ -485,11 +487,11 @@ impl Colet {
         }
     }
 
-    /// The search showing, as the results' star and Ctrl+D keep it: its query, its filter, and what its
-    /// results are narrowed to now.
+    /// The search showing, as the results' star and Ctrl+D keep it: its query, its filter, what its
+    /// results are narrowed to now, and their order.
     pub fn toggle_saved_current(&mut self, cx: &mut Context<Self>) {
         let (query, filter, narrow) = (self.state.query.clone(), self.state.search_filter.clone(), self.state.search_narrowing());
-        self.toggle_saved(&query, filter, narrow, cx);
+        self.toggle_saved(&query, filter, narrow, self.state.search_order, cx);
     }
 
     /// Ctrl+D saves what the active column shows: the search (from its field too), or the folder, each
@@ -526,16 +528,16 @@ impl Colet {
     }
 
     pub fn open_edit(&mut self, key: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        let HomeKey::Search { query, filter, narrow } = HomeKey::of(key) else { return };
-        let Some(found) = self.stored.settings().saved(query, filter, narrow).cloned() else { return };
+        let HomeKey::Search { query, filter, narrow, order } = HomeKey::of(key) else { return };
+        let Some(found) = self.stored.settings().saved(query, filter, narrow, order).cloned() else { return };
         self.take_menu();
         self.begin_dialog(window, cx);
         let name = self.edit_field(found.name.clone(), found.query.clone(), Self::submit_edit, window, cx);
         let query = self.edit_field(found.query.clone(), String::new(), Self::submit_edit, window, cx);
         let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), "なし".into(), Self::submit_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
-        let filter = found.filter.clone();
-        self.overlays.set_dialog(Dialog::EditSearch { original: found, name, query, filter, narrow });
+        let (filter, order) = (found.filter.clone(), found.order);
+        self.overlays.set_dialog(Dialog::EditSearch { original: found, name, query, filter, narrow, order });
         cx.notify();
     }
 
@@ -547,14 +549,23 @@ impl Colet {
         }
     }
 
+    /// The order the edited search's results are to be listed in, as `change` makes it.
+    pub fn change_edit_order(&mut self, change: impl FnOnce(&mut Order), cx: &mut Context<Self>) {
+        if let Some(Dialog::EditSearch { order, .. }) = self.overlays.dialog_mut() {
+            change(order);
+            cx.notify();
+        }
+    }
+
     /// The saved search as the dialog now has it, its name and narrowing as they are kept.
     fn edited_search(&self, cx: &App) -> Option<SavedSearch> {
-        let Some(Dialog::EditSearch { name, query, filter, narrow, .. }) = self.overlays.dialog() else { return None };
+        let Some(Dialog::EditSearch { name, query, filter, narrow, order, .. }) = self.overlays.dialog() else { return None };
         Some(SavedSearch {
             name: name.read(cx).value().trim().to_owned(),
             query: query.read(cx).value().to_string(),
             filter: filter.clone(),
             narrow: narrowing(&narrow.read(cx).value()),
+            order: *order,
         })
     }
 
@@ -565,7 +576,7 @@ impl Colet {
         if edited.query.trim().is_empty() {
             Some("")
         } else if edited.key() != original.key()
-            && self.stored.settings().saved(&edited.query, edited.filter.as_deref(), edited.narrow.as_deref()).is_some()
+            && self.stored.settings().saved(&edited.query, edited.filter.as_deref(), edited.narrow.as_deref(), edited.order).is_some()
         {
             Some("この検索は既に保存しています")
         } else {
@@ -701,7 +712,7 @@ impl Colet {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Placement, SavedSearch, Settings, Shelf, home_entries, home_groups, movable, move_before, restore_bounds};
+    use super::{Entry, Order, Placement, SavedSearch, Settings, Shelf, home_entries, home_groups, movable, move_before, restore_bounds};
     use gpui_kit::{Bounds, DisplayId, point, px, size};
     use std::path::Path;
 
@@ -738,8 +749,10 @@ mod tests {
         let settings = Settings {
             favorites: vec![r"D:\Work".into(), r"C:\".into()],
             saved_searches: vec![
-                SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None },
-                SavedSearch { name: "猫".into(), query: "cat".into(), filter: Some("画像".into()), narrow: None },
+                SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None, order: Order::default() },
+                SavedSearch {
+                    name: "猫".into(), query: "cat".into(), filter: Some("画像".into()), narrow: None, order: Order::default()
+                },
             ],
             ..Settings::default()
         };
@@ -751,7 +764,8 @@ mod tests {
 
     #[test]
     fn takes_a_place_in_another_case_as_the_same_but_not_a_query() {
-        let search = |query: &str| SavedSearch { name: String::new(), query: query.into(), filter: None, narrow: None };
+        let search =
+            |query: &str| SavedSearch { name: String::new(), query: query.into(), filter: None, narrow: None, order: Order::default() };
         let settings =
             Settings { favorites: vec![r"c:\".into()], saved_searches: vec![search("ext:PDF"), search("ext:pdf")], ..Settings::default() };
         assert!(settings.is_favorite(Path::new(r"C:\")) && settings.is_favorite(Path::new("C:")));
@@ -764,7 +778,13 @@ mod tests {
     fn lists_the_pinned_first_in_their_order_each_out_of_its_kind() {
         let settings = Settings {
             favorites: vec![r"D:\Work".into(), r"D:\Music".into()],
-            saved_searches: vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None }],
+            saved_searches: vec![SavedSearch {
+                name: "PDF".into(),
+                query: "ext:pdf".into(),
+                filter: None,
+                narrow: None,
+                order: Order::default(),
+            }],
             // A drive unplugged waits unseen; a place is pinned whatever its case.
             pinned: vec!["search:ext:pdf".into(), r"E:\".into(), r"c:\".into(), r"D:\Music".into()],
             ..Settings::default()

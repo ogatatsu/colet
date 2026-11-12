@@ -8,7 +8,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use colet_core::paths::{folder_name, path_key, shown};
+use colet_core::{
+    entry::Order,
+    paths::{folder_name, path_key, shown},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -29,6 +32,14 @@ pub struct SavedSearch {
     /// What its results were narrowed to as it was saved.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub narrow: Option<String>,
+    /// The order its results were listed in as it was saved; the default is left out, so one saved before
+    /// orders were reads as listed by it.
+    #[serde(skip_serializing_if = "is_default_order")]
+    pub order: Order,
+}
+
+fn is_default_order(order: &Order) -> bool {
+    *order == Order::default()
 }
 
 impl SavedSearch {
@@ -38,7 +49,7 @@ impl SavedSearch {
 
     /// Its row's key in home.
     pub fn key(&self) -> PathBuf {
-        HomeKey::search(&self.query, self.filter.as_deref(), self.narrow.as_deref()).key()
+        HomeKey::search(&self.query, self.filter.as_deref(), self.narrow.as_deref(), self.order).key()
     }
 }
 
@@ -247,7 +258,7 @@ impl Settings {
             }
         }
         let mut seen = std::collections::HashSet::new();
-        self.saved_searches.retain(|s| !s.query.trim().is_empty() && seen.insert((s.query.clone(), s.filter.clone(), s.narrow.clone())));
+        self.saved_searches.retain(|s| !s.query.trim().is_empty() && seen.insert(s.key()));
         for favorite in &mut self.favorites {
             let was = favorite.home_key().pin();
             favorite.narrow = favorite.narrow.as_deref().and_then(narrowing);
@@ -281,8 +292,10 @@ impl Settings {
         }
     }
 
-    pub fn saved(&self, query: &str, filter: Option<&str>, narrow: Option<&str>) -> Option<&SavedSearch> {
-        self.saved_searches.iter().find(|s| s.query == query && s.filter.as_deref() == filter && s.narrow.as_deref() == narrow)
+    pub fn saved(&self, query: &str, filter: Option<&str>, narrow: Option<&str>, order: Order) -> Option<&SavedSearch> {
+        self.saved_searches
+            .iter()
+            .find(|s| s.query == query && s.filter.as_deref() == filter && s.narrow.as_deref() == narrow && s.order == order)
     }
 
     /// The favorite of `path` narrowed to `narrow`, if there is one.
@@ -326,9 +339,9 @@ impl Settings {
     }
 }
 
-/// A tab as the file holds it: `{"query": ..., "search_filter": ..., "filter": ..., "folders": [{"path": ...,
-/// "highlight": ...}], "picks": [...], "active": ..., "fold": {"anchor": ..., "open": ...}}`, what it lacks
-/// left out.
+/// A tab as the file holds it: `{"query": ..., "search_filter": ..., "search_order": {"by": ..., "descending":
+/// ...}, "filter": ..., "folders": [{"path": ..., "highlight": ...}], "picks": [...], "active": ..., "fold":
+/// {"anchor": ..., "open": ...}}`, what it lacks, and the default order, left out.
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
 struct TabFile {
@@ -336,6 +349,8 @@ struct TabFile {
     query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     search_filter: Option<String>,
+    #[serde(skip_serializing_if = "is_default_order")]
+    search_order: Order,
     #[serde(skip_serializing_if = "Option::is_none")]
     filter: Option<String>,
     folders: Vec<FolderFile>,
@@ -358,6 +373,7 @@ impl From<TabFile> for KeptTab {
         let place = Kept {
             query: file.query,
             search_filter: file.search_filter,
+            search_order: file.search_order,
             fold: file.fold.filter(|fold| fold.anchor < folders.len()),
             folders,
             picks: file.picks,
@@ -373,6 +389,7 @@ impl From<KeptTab> for TabFile {
         TabFile {
             query: place.query,
             search_filter: place.search_filter,
+            search_order: place.search_order,
             filter: tab.filter,
             folders: place.folders.into_iter().map(|(path, highlight)| FolderFile { path, highlight }).collect(),
             picks: place.picks,
@@ -561,6 +578,7 @@ pub fn write<T: Serialize>(kept: &T, path: &Path, file: &File) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
+    use colet_core::entry::Sort;
 
     use super::*;
 
@@ -646,6 +664,7 @@ mod tests {
             place: Kept {
                 query: "cat".into(),
                 search_filter: None,
+                search_order: Order { by: Sort::Size, descending: true, ..Order::default() },
                 folders: vec![(r"D:\a".into(), Some(r"D:\a\b".into())), (r"D:\a\b".into(), None)],
                 picks: vec![None, Some(r"D:\a".into())],
                 active: 2,
@@ -656,7 +675,7 @@ mod tests {
         let json = serde_json::to_string(&tab).unwrap();
         assert_eq!(
             json,
-            r#"{"query":"cat","filter":"画像","folders":[{"path":"D:\\a","highlight":"D:\\a\\b"},{"path":"D:\\a\\b"}],"picks":[null,"D:\\a"],"active":2,"fold":{"anchor":0,"open":true}}"#
+            r#"{"query":"cat","search_order":{"by":"size","descending":true},"filter":"画像","folders":[{"path":"D:\\a","highlight":"D:\\a\\b"},{"path":"D:\\a\\b"}],"picks":[null,"D:\\a"],"active":2,"fold":{"anchor":0,"open":true}}"#
         );
         assert_eq!(serde_json::from_str::<KeptTab>(&json).unwrap(), tab);
         // A fold whose anchor is not among the folders goes.
@@ -667,8 +686,13 @@ mod tests {
     #[test]
     fn keeps_one_favorite_and_saved_search_of_each_narrowing_as_it_would_be_typed_again() {
         let favorite = |path: &str, narrow: Option<&str>| Favorite { narrow: narrow.map(Into::into), ..Favorite::new(path) };
-        let search =
-            |narrow: Option<&str>| SavedSearch { name: String::new(), query: "cat".into(), filter: None, narrow: narrow.map(Into::into) };
+        let search = |narrow: Option<&str>| SavedSearch {
+            name: String::new(),
+            query: "cat".into(),
+            filter: None,
+            narrow: narrow.map(Into::into),
+            order: Order::default(),
+        };
         let mut settings = Settings {
             favorites: vec![
                 favorite(r"D:\Work", None),
@@ -682,7 +706,7 @@ mod tests {
             pinned: vec![
                 HomeKey::favorite(Path::new(r"D:\Work"), Some("  a   b ")).key(),
                 HomeKey::favorite(Path::new(r"D:\Work"), Some("gone")).key(),
-                HomeKey::search("cat", None, Some(" a")).key(),
+                HomeKey::search("cat", None, Some(" a"), Order::default()).key(),
             ],
             ..Settings::default()
         };
@@ -693,7 +717,7 @@ mod tests {
         // A pin follows its row's narrowing as it is kept, and goes with a narrowed favorite gone.
         assert_eq!(
             settings.pinned,
-            [HomeKey::favorite(Path::new(r"D:\Work"), Some("a b")).key(), HomeKey::search("cat", None, Some("a")).key()]
+            [HomeKey::favorite(Path::new(r"D:\Work"), Some("a b")).key(), HomeKey::search("cat", None, Some("a"), Order::default()).key()]
         );
         assert!(settings.is_favorite(&HomeKey::favorite(Path::new(r"d:\WORK"), Some("a b")).key()));
         assert!(!settings.is_favorite(&HomeKey::favorite(Path::new(r"D:\Work"), Some("a")).key()));
@@ -735,7 +759,13 @@ mod tests {
 
     #[test]
     fn keeps_one_of_each_saved_search_and_favorite_and_none_empty() {
-        let search = |name: &str, query: &str| SavedSearch { name: name.into(), query: query.into(), filter: None, narrow: None };
+        let search = |name: &str, query: &str| SavedSearch {
+            name: name.into(),
+            query: query.into(),
+            filter: None,
+            narrow: None,
+            order: Order::default(),
+        };
         let mut settings = Settings {
             saved_searches: vec![search("PDF", "ext:pdf"), search("", "  "), search("again", "ext:pdf"), search("", "dm:today")],
             favorites: vec![r"D:\Work".into(), r"d:\work".into(), Favorite::default()],
@@ -754,6 +784,7 @@ mod tests {
             query: query.into(),
             filter: filter.map(Into::into),
             narrow: None,
+            order: Order::default(),
         };
         let mut settings = Settings {
             filters: vec![SearchFilter { name: "画像".into(), query: "ext:jpg".into() }],
@@ -761,12 +792,12 @@ mod tests {
             pinned: vec![
                 r"D:\Work".into(),
                 r"d:\work".into(),
-                HomeKey::search("gone", None, None).key(),
-                HomeKey::search("cat", None, None).key(),
-                HomeKey::search("CAT", None, None).key(),
+                HomeKey::search("gone", None, None, Order::default()).key(),
+                HomeKey::search("cat", None, None, Order::default()).key(),
+                HomeKey::search("CAT", None, None, Order::default()).key(),
                 // Its filter gone, the search it is now keeps the pin.
-                HomeKey::search("dog", Some("動画"), None).key(),
-                HomeKey::search("cow", Some("画像"), None).key(),
+                HomeKey::search("dog", Some("動画"), None, Order::default()).key(),
+                HomeKey::search("cow", Some("画像"), None, Order::default()).key(),
                 PathBuf::new(),
             ],
             ..Settings::default()
@@ -776,12 +807,14 @@ mod tests {
             settings.pinned,
             [
                 PathBuf::from(r"D:\Work"),
-                HomeKey::search("cat", None, None).key(),
-                HomeKey::search("dog", None, None).key(),
-                HomeKey::search("cow", Some("画像"), None).key()
+                HomeKey::search("cat", None, None, Order::default()).key(),
+                HomeKey::search("dog", None, None, Order::default()).key(),
+                HomeKey::search("cow", Some("画像"), None, Order::default()).key()
             ]
         );
-        assert!(settings.is_pinned(Path::new(r"d:\WORK")) && !settings.is_pinned(&HomeKey::search("Cat", None, None).key()));
+        assert!(
+            settings.is_pinned(Path::new(r"d:\WORK")) && !settings.is_pinned(&HomeKey::search("Cat", None, None, Order::default()).key())
+        );
         let written = serde_json::to_string(&settings).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&written).unwrap().pinned, settings.pinned);
     }
@@ -794,6 +827,7 @@ mod tests {
             query: query.into(),
             filter: filter.map(Into::into),
             narrow: None,
+            order: Order::default(),
         };
         let mut settings = Settings {
             filters: vec![filter("画像", "ext:jpg;png"), filter("", "ext:mp3"), filter("動画", " "), filter("画像", "ext:gif")],
@@ -811,7 +845,7 @@ mod tests {
         assert_eq!(settings.tabs[0].filter, None);
         // The one saved with a filter gone is the one saved with none, already there.
         assert_eq!(settings.saved_searches, [search("cat", Some("画像")), search("cat", None)]);
-        assert!(settings.saved("cat", Some("画像"), None).is_some());
+        assert!(settings.saved("cat", Some("画像"), None, Order::default()).is_some());
         assert_eq!(settings.filter_query("画像"), Some("ext:jpg;png"));
     }
 
@@ -820,7 +854,13 @@ mod tests {
         let settings = Settings {
             filters: vec![SearchFilter { name: "画像".into(), query: "ext:jpg".into() }],
             tabs: vec![KeptTab { filter: Some("画像".into()), ..KeptTab::default() }],
-            saved_searches: vec![SavedSearch { name: String::new(), query: "cat".into(), filter: None, narrow: None }],
+            saved_searches: vec![SavedSearch {
+                name: String::new(),
+                query: "cat".into(),
+                filter: None,
+                narrow: None,
+                order: Order::default(),
+            }],
             ..Settings::default()
         };
         let written = serde_json::to_string(&settings).unwrap();

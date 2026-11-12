@@ -11,7 +11,7 @@ fn sorts_the_results_from_their_menu_reloading_them(cx: &mut TestAppContext) {
     ui.click(cx, ("column-sort", results));
     ui.click(cx, "サイズ");
     let size = Order { by: Sort::Size, descending: false, ..Order::default() };
-    assert_eq!(fake.sorts.lock().unwrap().search, Some(size));
+    assert_eq!(ui.read(cx, |v| v.state.search_order), size);
     assert_eq!(fake.queries().len(), before + 1);
     assert_eq!(ui.read(cx, |v| v.column_sort_open()), None);
 }
@@ -25,11 +25,11 @@ fn turns_the_results_round_from_their_menu_and_keeps_it_for_another_sort(cx: &mu
     let before = fake.queries().len();
     ui.click(cx, ("column-sort", results));
     ui.click(cx, "降順");
-    assert_eq!(fake.sorts.lock().unwrap().search, Some(Order { by: Sort::Name, descending: true, ..Order::default() }));
+    assert_eq!(ui.read(cx, |v| v.state.search_order), Order { by: Sort::Name, descending: true, ..Order::default() });
     assert_eq!(fake.queries().len(), before + 1);
     ui.click(cx, ("column-sort", results));
     ui.click(cx, "更新日時");
-    assert_eq!(fake.sorts.lock().unwrap().search, Some(Order { by: Sort::Modified, descending: true, ..Order::default() }));
+    assert_eq!(ui.read(cx, |v| v.state.search_order), Order { by: Sort::Modified, descending: true, ..Order::default() });
     // Picking the way it already runs loads nothing again.
     ui.click(cx, ("column-sort", results));
     ui.click(cx, "降順");
@@ -135,7 +135,7 @@ fn opens_a_folder_in_the_order_kept_for_it_whatever_its_case(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
-fn gives_the_search_results_one_order_of_their_own_for_every_search(cx: &mut TestAppContext) {
+fn keeps_the_search_results_order_for_the_next_search_in_the_tab(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
@@ -145,7 +145,7 @@ fn gives_the_search_results_one_order_of_their_own_for_every_search(cx: &mut Tes
     let modified = Order { by: Sort::Modified, descending: true, ..Order::default() };
     assert_eq!(fake.queries().len(), before + 1);
     assert_eq!(fake.orders.lock().unwrap().last(), Some(&modified));
-    assert_eq!(fake.sorts.lock().unwrap().search, Some(modified));
+    assert_eq!(ui.read(cx, |v| v.state.search_order), modified);
     // Another search goes the same way.
     ui.input(cx, "y");
     assert_eq!(fake.orders.lock().unwrap().last(), Some(&modified));
@@ -161,7 +161,7 @@ fn sorts_only_the_search_results_by_location_from_a_first_then_turned_round(cx: 
     ui.click(cx, ("sort-by-location", results));
     let location = Order { by: Sort::Location, ..Order::default() };
     assert_eq!(fake.orders.lock().unwrap().last(), Some(&location));
-    assert_eq!(fake.sorts.lock().unwrap().search, Some(location));
+    assert_eq!(ui.read(cx, |v| v.state.search_order), location);
     ui.click(cx, ("sort-by-location", results));
     assert_eq!(fake.orders.lock().unwrap().last(), Some(&Order { descending: true, ..location }));
     // Their menu offers it.
@@ -216,4 +216,65 @@ fn never_writes_over_column_orders_it_could_not_read(cx: &mut TestAppContext) {
     settle(cx);
     assert_eq!(listed_in(&fake, r"D:\"), Some(Order { by: Sort::Size, descending: true, ..Order::default() }));
     assert_eq!(fake.sort_saves.load(Ordering::Relaxed), 0);
+}
+
+#[gpui_kit::test]
+fn keeps_each_tabs_search_results_order_its_own_and_with_the_way_back(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "x");
+    let results = ui.read(cx, |v| v.state.columns[1].id);
+    ui.click(cx, ("sort-by-modified", results));
+    let modified = Order { by: Sort::Modified, descending: true, ..Order::default() };
+    // A new tab searches in the default order, leaving the first tab's be.
+    ui.press(cx, "ctrl-t");
+    ui.input(cx, "y");
+    assert_eq!(fake.orders.lock().unwrap().last(), Some(&Order::default()));
+    assert_eq!(ui.read(cx, |v| v.state.search_order), Order::default());
+    ui.press(cx, "ctrl-tab");
+    assert_eq!(ui.read(cx, |v| (v.state.query.clone(), v.state.search_order)), ("x".into(), modified));
+    // Kept with the tab between starts.
+    settle(cx);
+    let kept = fake.settings.lock().unwrap().tabs.iter().map(|t| t.place.search_order).collect::<Vec<_>>();
+    assert_eq!(kept, [modified, Order::default()]);
+}
+
+#[gpui_kit::test]
+fn saves_a_search_with_its_order_and_runs_it_in_that_order(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "x");
+    let results = ui.read(cx, |v| v.state.columns[1].id);
+    ui.click(cx, ("sort-by-size", results));
+    let size = Order { by: Sort::Size, descending: true, ..Order::default() };
+    ui.click(cx, ("star", results));
+    assert_eq!(fake.settings.lock().unwrap().saved_searches.iter().map(|s| s.order).collect::<Vec<_>>(), [size]);
+    // Sorted another way, it is a search not saved.
+    ui.click(cx, ("sort-by-size", results));
+    let kept = ui.read(cx, |v| v.stored.settings().saved("x", None, None, v.state.search_order).is_some());
+    assert!(!kept);
+    // Run from home, it lists in its own order again.
+    ui.press(cx, "escape");
+    ui.click(cx, row(HomeKey::search("x", None, None, size).key()));
+    assert_eq!(ui.read(cx, |v| v.state.search_order), size);
+    assert_eq!(fake.orders.lock().unwrap().last(), Some(&size));
+}
+
+#[gpui_kit::test]
+fn changes_a_saved_searchs_order_in_its_dialog(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    fake.settings.lock().unwrap().saved_searches =
+        vec![SavedSearch { name: String::new(), query: "x".into(), filter: None, narrow: None, order: Order::default() }];
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(HomeKey::search("x", None, None, Order::default()).key()));
+    ui.press(cx, "f2");
+    let choice = |row: &'static str, text: &'static str| ElementId::NamedChild(std::sync::Arc::new(row.into()), SharedString::from(text));
+    ui.click(cx, choice("edit-search-sort", "更新日時"));
+    ui.click(cx, choice("edit-search-direction", "降順"));
+    ui.click(cx, choice("edit-search-folders", "混在"));
+    ui.click(cx, "save-search");
+    let order = Order { by: Sort::Modified, descending: true, folders_first: false };
+    assert_eq!(fake.settings.lock().unwrap().saved_searches.iter().map(|s| s.order).collect::<Vec<_>>(), [order]);
+    // The results showing stay as they were.
+    assert_eq!(ui.read(cx, |v| v.state.search_order), Order::default());
 }

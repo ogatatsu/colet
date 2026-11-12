@@ -281,7 +281,9 @@ fn names_a_tab_for_the_favorite_it_opened_however_deep_it_goes(cx: &mut TestAppC
 fn names_a_tab_for_its_search_or_the_saved_one_it_runs_however_deep_it_goes(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![folder(r"D:\work")]).with_folders(&[(r"D:\work", vec![file(r"D:\work\a.txt")])]));
     fake.settings.lock().unwrap().saved_searches =
-        vec![crate::settings::SavedSearch { name: "仕事".into(), query: "wo".into(), filter: None, narrow: None }];
+        vec![crate::settings::SavedSearch {
+            name: "仕事".into(), query: "wo".into(), filter: None, narrow: None, order: Order::default()
+        }];
     let ui = open(cx, fake);
     ui.input(cx, "wo");
     assert_eq!(ui.title(cx), ("search", "仕事".into(), "wo".into()));

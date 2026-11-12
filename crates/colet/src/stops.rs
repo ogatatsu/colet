@@ -6,6 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
+use colet_core::entry::{Order, Sort};
 use gpui_kit::{App, FocusHandle, Window};
 
 use crate::{settings::Theme, state::ColumnId};
@@ -31,6 +32,8 @@ pub enum Stop {
     Filter(FilterTool, String),
     /// A choice of filter for a saved search being edited, by the filter's name; none for no filter.
     EditSearchFilter(Option<String>),
+    /// A choice of the order a saved search being edited lists its results in.
+    EditSearchOrder(OrderChoice),
     /// A hint to search for a query.
     Hint(String),
     /// A step in the history.
@@ -43,6 +46,34 @@ pub enum Stop {
 impl From<&'static str> for Stop {
     fn from(name: &'static str) -> Self {
         Stop::Named(name)
+    }
+}
+
+/// A part of an order to choose: what it sorts by, the way it runs, or whether folders come first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OrderChoice {
+    By(Sort),
+    Descending(bool),
+    FoldersFirst(bool),
+}
+
+impl OrderChoice {
+    /// Whether `order` has it.
+    pub fn is_in(self, order: Order) -> bool {
+        match self {
+            OrderChoice::By(by) => order.by == by,
+            OrderChoice::Descending(descending) => order.descending == descending,
+            OrderChoice::FoldersFirst(first) => order.folders_first == first,
+        }
+    }
+
+    /// `order` with it.
+    pub fn apply(self, order: &mut Order) {
+        match self {
+            OrderChoice::By(by) => order.by = by,
+            OrderChoice::Descending(descending) => order.descending = descending,
+            OrderChoice::FoldersFirst(first) => order.folders_first = first,
+        }
     }
 }
 

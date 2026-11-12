@@ -102,10 +102,13 @@ fn saves_a_search_narrowed_apart_and_runs_it_narrowed(cx: &mut TestAppContext) {
     ui.input(cx, "a");
     ui.click(cx, ("star", results));
     let saved = fake.settings.lock().unwrap().saved_searches.clone();
-    assert_eq!(saved, [SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: Some("a".into()) }]);
+    assert_eq!(
+        saved,
+        [SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: Some("a".into()), order: Order::default() }]
+    );
     // Run from home, the results are narrowed as they were kept.
     ui.press(cx, "escape");
-    ui.click_in(cx, "home", row(HomeKey::search("ext:pdf", None, Some("a")).key()));
+    ui.click_in(cx, "home", row(HomeKey::search("ext:pdf", None, Some("a"), Order::default()).key()));
     let (narrowing, id) = ui.read(cx, |v| (v.state.search_narrowing(), v.state.columns[1].id));
     assert_eq!(narrowing.as_deref(), Some("a"));
     assert_eq!(ui.view.read_with(cx, |v, cx| v.narrow_fields[&id].input.read(cx).value().to_string()), "a");
@@ -120,12 +123,12 @@ fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppC
     ui.click(cx, ("star", results));
     assert_eq!(
         fake.settings.lock().unwrap().saved_searches,
-        [SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: None }]
+        [SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: None, order: Order::default() }]
     );
     ui.press(cx, "ctrl-f");
     ui.press(cx, "escape");
     assert_eq!(ui.field(cx), "");
-    ui.click(cx, row(HomeKey::search("ext:pdf", None, None).key()));
+    ui.click(cx, row(HomeKey::search("ext:pdf", None, None, Order::default()).key()));
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(ui.home_focused(cx));
@@ -140,7 +143,7 @@ fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppC
 fn unsaves_a_search_with_ctrl_d_and_says_so(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
     fake.settings.lock().unwrap().saved_searches =
-        vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None }];
+        vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None, order: Order::default() }];
     let ui = open(cx, fake.clone());
     ui.input(cx, "ext:pdf");
     ui.press(cx, "ctrl-d");
@@ -156,11 +159,11 @@ fn unsaves_a_search_with_ctrl_d_and_says_so(cx: &mut TestAppContext) {
 fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
     fake.settings.lock().unwrap().saved_searches = vec![
-        SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: None },
-        SavedSearch { name: String::new(), query: "dm:today".into(), filter: None, narrow: None },
+        SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: None, order: Order::default() },
+        SavedSearch { name: String::new(), query: "dm:today".into(), filter: None, narrow: None, order: Order::default() },
     ];
     let ui = open(cx, fake.clone());
-    ui.click(cx, row(HomeKey::search("ext:pdf", None, None).key()));
+    ui.click(cx, row(HomeKey::search("ext:pdf", None, None, Order::default()).key()));
     ui.press(cx, "f2");
     let (name, query) = ui.read(cx, |v| match v.overlays.dialog() {
         Some(crate::places::Dialog::EditSearch { name, query, .. }) => (name.clone(), query.clone()),
@@ -178,14 +181,14 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert_eq!(
         fake.settings.lock().unwrap().saved_searches[0],
-        SavedSearch { name: "PDF".into(), query: "ext:pdf dm:thisweek".into(), filter: None, narrow: None }
+        SavedSearch { name: "PDF".into(), query: "ext:pdf dm:thisweek".into(), filter: None, narrow: None, order: Order::default() }
     );
     // The search showing stays as it was, and home picks nothing, the row it picked gone.
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(ui.read(cx, |v| v.state.columns[0].selected.is_empty()));
     // Escape closes the dialog without a change.
-    ui.click(cx, row(HomeKey::search("ext:pdf dm:thisweek", None, None).key()));
+    ui.click(cx, row(HomeKey::search("ext:pdf dm:thisweek", None, None, Order::default()).key()));
     ui.press(cx, "f2");
     ui.press(cx, "escape");
     assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
@@ -195,7 +198,7 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
 fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_shell(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
     fake.settings.lock().unwrap().saved_searches =
-        vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None }];
+        vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None, order: Order::default() }];
     let ui = open(cx, fake.clone());
     // ↓ from the field picks it in home, which runs it.
     ui.press(cx, "down");
@@ -214,7 +217,7 @@ fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_she
     assert!(fake.opened.lock().unwrap().is_empty());
     ui.press(cx, "ctrl-f");
     ui.press(cx, "escape");
-    ui.act(cx, |window, cx| window.double_click(row(HomeKey::search("ext:pdf", None, None).key()), cx));
+    ui.act(cx, |window, cx| window.double_click(row(HomeKey::search("ext:pdf", None, None, Order::default()).key()), cx));
     settle(cx);
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(fake.opened.lock().unwrap().is_empty());
@@ -227,8 +230,9 @@ fn brings_homes_focused_row_into_view_across_all_three_headings(cx: &mut TestApp
     {
         let mut settings = fake.settings.lock().unwrap();
         settings.favorites = vec![r"D:\favorite".into()];
-        settings.saved_searches =
-            (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None, narrow: None }).collect();
+        settings.saved_searches = (0..50)
+            .map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None, narrow: None, order: Default::default() })
+            .collect();
     }
     let ui = open(cx, fake);
     ui.press(cx, "down");
@@ -446,8 +450,9 @@ fn puts_down_a_drag_in_home_with_escape(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn scrolls_home_while_a_drag_is_held_at_its_bottom_edge(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake { roots: vec![folder(r"D:\")], ..Fake::default().with_folders(&[(r"D:\", vec![])]) });
-    fake.settings.lock().unwrap().saved_searches =
-        (0..50).map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None, narrow: None }).collect();
+    fake.settings.lock().unwrap().saved_searches = (0..50)
+        .map(|i| SavedSearch { name: String::new(), query: format!("query{i}"), filter: None, narrow: None, order: Default::default() })
+        .collect();
     let ui = open(cx, fake.clone());
     let list = ui.act(cx, |window, _| window.find("home-rows").bounds());
     let first = ui.home_row(cx, "search:query0");
@@ -470,8 +475,13 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     ui.press(cx, "ctrl-f");
     ui.input(cx, "cat");
     ui.press(cx, "ctrl-d");
-    let saved =
-        |filter: Option<&str>| SavedSearch { name: String::new(), query: "cat".into(), filter: filter.map(Into::into), narrow: None };
+    let saved = |filter: Option<&str>| SavedSearch {
+        name: String::new(),
+        query: "cat".into(),
+        filter: filter.map(Into::into),
+        narrow: None,
+        order: Order::default(),
+    };
     assert_eq!(fake.settings.lock().unwrap().saved_searches, [saved(Some("画像"))]);
     // The same query with no filter is another search, saved apart.
     ui.click(cx, "search-filter");
@@ -481,7 +491,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     ui.press(cx, "ctrl-d");
     assert_eq!(fake.settings.lock().unwrap().saved_searches, [saved(Some("画像")), saved(None)]);
     // Run from home, it chooses its filter again.
-    ui.click(cx, row(HomeKey::search("cat", Some("画像"), None).key()));
+    ui.click(cx, row(HomeKey::search("cat", Some("画像"), None, Order::default()).key()));
     assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
     assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
     // Back, the filter of the search before comes back with it.
@@ -489,7 +499,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     assert_eq!(ui.read(cx, |v| v.state.search_filter.clone()), None);
     assert_eq!(fake.settings.lock().unwrap().tabs[0].filter, None);
     // Its query alone is copied.
-    ui.click(cx, row(HomeKey::search("cat", Some("画像"), None).key()));
+    ui.click(cx, row(HomeKey::search("cat", Some("画像"), None, Order::default()).key()));
     ui.press(cx, "ctrl-shift-c");
     assert_eq!(*fake.text.lock().unwrap(), "cat");
 }
@@ -498,9 +508,11 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
 fn changes_the_filter_a_saved_search_runs_within_from_its_edit(cx: &mut TestAppContext) {
     let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\cat.jpg")])));
     fake.settings.lock().unwrap().saved_searches =
-        vec![SavedSearch { name: String::new(), query: "cat".into(), filter: Some("画像".into()), narrow: None }];
+        vec![SavedSearch {
+            name: String::new(), query: "cat".into(), filter: Some("画像".into()), narrow: None, order: Order::default()
+        }];
     let ui = open(cx, fake.clone());
-    ui.click(cx, row(HomeKey::search("cat", Some("画像"), None).key()));
+    ui.click(cx, row(HomeKey::search("cat", Some("画像"), None, Order::default()).key()));
     ui.press(cx, "f2");
     ui.click(cx, crate::dialogs::filter_tool_id("edit-search-filter", "動画"));
     ui.click(cx, "save-search");

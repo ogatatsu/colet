@@ -713,8 +713,9 @@ fn ordered_home(cx: &mut TestAppContext) -> (Arc<Fake>, Ui) {
     {
         let mut settings = fake.settings.lock().unwrap();
         settings.favorites = vec![r"D:\a".into(), r"D:\b".into(), r"D:\c".into()];
-        settings.saved_searches =
-            ["one", "two"].map(|q| SavedSearch { name: String::new(), query: q.into(), filter: None, narrow: None }).to_vec();
+        settings.saved_searches = ["one", "two"]
+            .map(|q| SavedSearch { name: String::new(), query: q.into(), filter: None, narrow: None, order: Order::default() })
+            .to_vec();
     }
     let ui = open(cx, fake.clone());
     (fake, ui)

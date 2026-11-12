@@ -82,13 +82,14 @@ impl Colet {
         let kind = c.kind;
         let selected = c.selected.contains(&entry.path);
         let key = HomeKey::of(&entry.path);
-        // Home lights the saved search that is running, narrowed as it was kept.
+        // Home lights the saved search that is running, narrowed and ordered as it was kept.
         let highlighted = c.highlight.as_ref() == Some(&entry.path)
-            || matches!(key, HomeKey::Search { query, filter, narrow }
+            || matches!(key, HomeKey::Search { query, filter, narrow, order }
                 if self.state.pinned()
                     && query == self.state.query
                     && filter == self.state.search_filter.as_deref()
-                    && narrow == self.state.search_narrowing().as_deref());
+                    && narrow == self.state.search_narrowing().as_deref()
+                    && order == self.state.search_order);
         // On the clipboard, cut or copied, whoever put it there.
         let clipboard = self.operations.read(cx).clipboard();
         let held = clipboard.holds(&entry.path);

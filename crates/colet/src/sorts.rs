@@ -1,5 +1,6 @@
-//! The orders the columns are given apart from the default: one for each folder so given, and one
-//! for the search results, kept in `%APPDATA%\Colet\sort.json` apart from the settings.
+//! The orders the folder columns are given apart from the default, one for each folder so given, kept in
+//! `%APPDATA%\Colet\sort.json` apart from the settings. The search results' order is each tab's own, kept
+//! with the tab; one kept here for them all before it was is left unread, and goes with the next save.
 use std::{
     collections::BTreeMap,
     ffi::OsString,
@@ -19,7 +20,6 @@ pub const SORTS: File =
 pub struct Sorts {
     /// By the folder's path key, with the path as it was given.
     folders: BTreeMap<OsString, (PathBuf, Order)>,
-    pub search: Option<Order>,
 }
 
 impl Sorts {
@@ -41,14 +41,12 @@ impl Sorts {
     }
 }
 
-/// The orders as the file holds them: `{"search": {"by": "size", "descending": true}, "folders": [{"path":
-/// "D:\a", "order": {...}}]}`. A folder whose path is not text (an unpaired surrogate, which Windows allows
-/// in a name) is left out, as the file holds a path only as text.
+/// The orders as the file holds them: `{"folders": [{"path": "D:\a", "order": {"by": "size", "descending":
+/// true}}]}`. A folder whose path is not text (an unpaired surrogate, which Windows allows in a name) is
+/// left out, as the file holds a path only as text.
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
 struct SortsFile {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    search: Option<Order>,
     folders: Vec<FolderSort>,
 }
 
@@ -63,7 +61,7 @@ impl From<SortsFile> for Sorts {
         // An order the same as the default is no order of its own: one kept while the default could be
         // changed goes.
         let own = |order: &Order| *order != Order::default();
-        let mut sorts = Sorts { search: file.search.filter(own), ..Sorts::default() };
+        let mut sorts = Sorts::default();
         for FolderSort { path, order } in file.folders.into_iter().filter(|f| !f.path.as_os_str().is_empty() && own(&f.order)) {
             // The first of a folder written twice by hand stands.
             sorts.folders.entry(path_key(&path)).or_insert((path, order));
@@ -75,7 +73,7 @@ impl From<SortsFile> for Sorts {
 impl From<Sorts> for SortsFile {
     fn from(sorts: Sorts) -> Self {
         let folders = sorts.folders.into_values().filter(|(path, _)| path.to_str().is_some());
-        SortsFile { search: sorts.search, folders: folders.map(|(path, order)| FolderSort { path, order }).collect() }
+        SortsFile { folders: folders.map(|(path, order)| FolderSort { path, order }).collect() }
     }
 }
 
@@ -102,17 +100,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keeps_each_folders_order_whatever_its_case_and_the_search_results() {
+    fn keeps_each_folders_order_whatever_its_case() {
         let mut sorts = Sorts::default();
         let size = Order { by: Sort::Size, descending: true, ..Order::default() };
         sorts.set_folder(Path::new(r"D:\Work"), Some(size));
-        sorts.search = Some(Order { by: Sort::Modified, descending: false, ..Order::default() });
         assert_eq!(sorts.folder(Path::new(r"d:\work")), Some(size));
         let json = serde_json::to_string(&sorts).unwrap();
-        assert_eq!(
-            json,
-            r#"{"search":{"by":"modified","descending":false},"folders":[{"path":"D:\\Work","order":{"by":"size","descending":true}}]}"#
-        );
+        assert_eq!(json, r#"{"folders":[{"path":"D:\\Work","order":{"by":"size","descending":true}}]}"#);
         assert_eq!(serde_json::from_str::<Sorts>(&json).unwrap(), sorts);
         sorts.set_folder(Path::new(r"D:\WORK"), None);
         assert_eq!(sorts.folder(Path::new(r"D:\Work")), None);
@@ -121,15 +115,17 @@ mod tests {
     #[test]
     fn writes_folders_first_only_when_they_mix_and_reads_an_order_written_before_as_folders_first() {
         let first = Order { by: Sort::Size, descending: true, ..Order::default() };
-        let mut sorts = Sorts { search: Some(first), ..Sorts::default() };
+        let mut sorts = Sorts::default();
         sorts.set_folder(Path::new(r"D:\a"), Some(Order { folders_first: false, ..first }));
+        sorts.set_folder(Path::new(r"D:\b"), Some(first));
         let json = serde_json::to_string(&sorts).unwrap();
         assert_eq!(
             json,
-            r#"{"search":{"by":"size","descending":true},"folders":[{"path":"D:\\a","order":{"by":"size","descending":true,"folders_first":false}}]}"#
+            r#"{"folders":[{"path":"D:\\a","order":{"by":"size","descending":true,"folders_first":false}},{"path":"D:\\b","order":{"by":"size","descending":true}}]}"#
         );
         assert_eq!(serde_json::from_str::<Sorts>(&json).unwrap(), sorts);
-        assert!(serde_json::from_str::<Sorts>(r#"{"search":{"by":"size","descending":false}}"#).unwrap().search.unwrap().folders_first);
+        let before: Sorts = serde_json::from_str(r#"{"folders":[{"path":"D:\\a","order":{"by":"size","descending":false}}]}"#).unwrap();
+        assert!(before.folder(Path::new(r"D:\a")).unwrap().folders_first);
     }
 
     #[test]
@@ -140,16 +136,23 @@ mod tests {
         .unwrap();
         assert_eq!(sorts.folder(Path::new(r"D:\a")), Some(Order { by: Sort::Size, descending: false, ..Order::default() }));
         assert_eq!(sorts.folder(Path::new("")), None);
-        assert_eq!(sorts.search, None);
+    }
+
+    #[test]
+    fn leaves_the_search_results_order_kept_for_every_tab_before_unread_and_writes_it_no_more() {
+        let sorts: Sorts = serde_json::from_str(
+            r#"{"search":{"by":"size","descending":true},"folders":[{"path":"D:\\a","order":{"by":"size","descending":true}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_string(&sorts).unwrap(), r#"{"folders":[{"path":"D:\\a","order":{"by":"size","descending":true}}]}"#);
     }
 
     #[test]
     fn drops_an_order_the_same_as_the_default() {
         let sorts: Sorts = serde_json::from_str(
-            r#"{"search":{"by":"name","descending":false},"folders":[{"path":"D:\\a","order":{"by":"name","descending":false}},{"path":"D:\\b","order":{"by":"name","descending":false,"folders_first":false}}]}"#,
+            r#"{"folders":[{"path":"D:\\a","order":{"by":"name","descending":false}},{"path":"D:\\b","order":{"by":"name","descending":false,"folders_first":false}}]}"#,
         )
         .unwrap();
-        assert_eq!(sorts.search, None);
         assert_eq!(sorts.folder(Path::new(r"D:\a")), None);
         assert_eq!(sorts.folder(Path::new(r"D:\b")), Some(Order { folders_first: false, ..Order::default() }));
     }
@@ -177,7 +180,8 @@ mod tests {
         assert!(error.message.starts_with("カラムの並び順のファイルが壊れていたため、既定の並び順で始めました"), "{}", error.message);
         assert!(!path.exists());
         assert_eq!(settings::read::<Sorts>(&path, &SORTS), Ok(Sorts::default()));
-        let sorts = Sorts { search: Some(Order { by: Sort::Size, descending: true, ..Order::default() }), ..Default::default() };
+        let mut sorts = Sorts::default();
+        sorts.set_folder(Path::new(r"D:\a"), Some(Order { by: Sort::Size, descending: true, ..Order::default() }));
         settings::write(&sorts, &path, &SORTS).unwrap();
         assert_eq!(settings::read::<Sorts>(&path, &SORTS), Ok(sorts));
     }

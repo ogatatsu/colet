@@ -380,12 +380,14 @@ impl Colet {
         let p = self.palette;
         let c = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
-        // What it is narrowed to now is part of what is kept.
+        // What it is narrowed to now is part of what is kept, and so for the results is their order.
         let narrowing = c.narrowing();
         let kept = match kind {
-            Kind::Search => {
-                self.stored.settings().saved(&self.state.query, self.state.search_filter.as_deref(), narrowing.as_deref()).is_some()
-            }
+            Kind::Search => self
+                .stored
+                .settings()
+                .saved(&self.state.query, self.state.search_filter.as_deref(), narrowing.as_deref(), self.state.search_order)
+                .is_some(),
             _ => self.stored.settings().favorite(&c.path, narrowing.as_deref()).is_some(),
         };
         let label = match (kind, kept) {

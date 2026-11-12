@@ -9,7 +9,7 @@ use std::{
 };
 
 use colet_core::{
-    entry::{Entry, Hiding, Marks},
+    entry::{Entry, Hiding, Marks, Order},
     paths::{self, ancestors, folder_name, parent_folder, path_key, shown},
 };
 
@@ -287,6 +287,7 @@ pub struct Fold<A> {
 struct Location {
     query: String,
     search_filter: Option<String>,
+    search_order: Order,
     folders: Vec<(PathBuf, Option<PathBuf>)>,
     selections: Vec<Vec<PathBuf>>,
     active: usize,
@@ -301,6 +302,8 @@ struct Location {
 pub struct Kept {
     pub query: String,
     pub search_filter: Option<String>,
+    /// The order its search results are listed in.
+    pub search_order: Order,
     /// Each folder column's folder, and the item it points at.
     pub folders: Vec<(PathBuf, Option<PathBuf>)>,
     /// What each column picked where it leads on, home's first.
@@ -337,14 +340,16 @@ pub struct Folded {
 /// What a row of home stands for, read from the path it is keyed by. Home's rows go through the columns
 /// as any other's, by path, so a narrowed favorite and a saved search are keyed by paths no folder has:
 /// a favorite narrowed to some names by its folder's path, a NUL and the narrowing, which no path can hold;
-/// a saved search by [`SEARCH_KEY`] and its query, its filter's name after a NUL, and what its results are
-/// narrowed to after another, none of which can hold one.
+/// a saved search by [`SEARCH_KEY`] and its query, its filter's name after a NUL, what its results are
+/// narrowed to after another, and their order, unless the default, after a third, none of which can hold
+/// one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HomeKey<'a> {
     /// A place, or a favorite: its folder, and what a favorite opens narrowed to.
     Folder { path: Cow<'a, Path>, narrow: Option<Cow<'a, str>> },
-    /// A saved search: its query, the filter it runs within, and what its results are narrowed to.
-    Search { query: &'a str, filter: Option<&'a str>, narrow: Option<&'a str> },
+    /// A saved search: its query, the filter it runs within, what its results are narrowed to, and the
+    /// order they are listed in.
+    Search { query: &'a str, filter: Option<&'a str>, narrow: Option<&'a str>, order: Order },
 }
 
 /// What a saved search's key starts with; no path starts this way, a drive letter being one character.
@@ -355,19 +360,22 @@ impl<'a> HomeKey<'a> {
         HomeKey::Folder { path: Cow::Borrowed(path), narrow: narrow.map(Cow::Borrowed) }
     }
 
-    pub fn search(query: &'a str, filter: Option<&'a str>, narrow: Option<&'a str>) -> Self {
-        HomeKey::Search { query, filter, narrow }
+    pub fn search(query: &'a str, filter: Option<&'a str>, narrow: Option<&'a str>, order: Order) -> Self {
+        HomeKey::Search { query, filter, narrow, order }
     }
 
     /// What `key` stands for.
     pub fn of(key: &'a Path) -> Self {
         use std::os::windows::ffi::{OsStrExt, OsStringExt};
         if let Some(search) = key.to_str().and_then(|key| key.strip_prefix(SEARCH_KEY)) {
-            let mut parts = search.splitn(3, '\0');
+            let mut parts = search.splitn(4, '\0');
             let query = parts.next().unwrap_or_default();
-            // A filter's name is never empty: an empty one stands for none, before a narrowing.
+            // A filter's name and a narrowing are never empty: an empty one stands for none, before what
+            // follows it.
             let filter = parts.next().filter(|filter| !filter.is_empty());
-            return HomeKey::Search { query, filter, narrow: parts.next() };
+            let narrow = parts.next().filter(|narrow| !narrow.is_empty());
+            let order = parts.next().and_then(|order| serde_json::from_str(order).ok()).unwrap_or_default();
+            return HomeKey::Search { query, filter, narrow, order };
         }
         let wide: Vec<u16> = key.as_os_str().encode_wide().collect();
         match wide.iter().position(|&unit| unit == 0) {
@@ -389,15 +397,21 @@ impl<'a> HomeKey<'a> {
                 key.push(narrow.as_ref());
                 key.into()
             }
-            HomeKey::Search { query, filter, narrow } => {
+            HomeKey::Search { query, filter, narrow, order } => {
+                // The default order is no order of its own, so a search saved before orders were is the same.
+                let order = (*order != Order::default()).then(|| serde_json::to_string(order).unwrap_or_default());
                 let mut key = format!("{SEARCH_KEY}{query}");
-                if filter.is_some() || narrow.is_some() {
+                if filter.is_some() || narrow.is_some() || order.is_some() {
                     key.push('\0');
                     key.push_str(filter.unwrap_or_default());
                 }
-                if let Some(narrow) = narrow {
+                if narrow.is_some() || order.is_some() {
                     key.push('\0');
-                    key.push_str(narrow);
+                    key.push_str(narrow.unwrap_or_default());
+                }
+                if let Some(order) = order {
+                    key.push('\0');
+                    key.push_str(&order);
                 }
                 key.into()
             }
@@ -408,8 +422,8 @@ impl<'a> HomeKey<'a> {
         matches!(self, HomeKey::Search { .. })
     }
 
-    /// What tells home's rows apart: a place whatever its case, a saved search by its query, filter and
-    /// narrowing exactly, and a narrowed favorite by its folder whatever its case and its narrowing exactly.
+    /// What tells home's rows apart: a place whatever its case, a saved search by its query, filter,
+    /// narrowing and order exactly, and a narrowed favorite by its folder whatever its case and its narrowing exactly.
     pub fn pin(&self) -> OsString {
         match self {
             HomeKey::Folder { path, narrow } => {
@@ -441,6 +455,8 @@ pub struct State {
     pub query: String,
     /// The search filter the results are narrowed by, by name; with one, they show with no query too.
     pub search_filter: Option<String>,
+    /// The order the search results are listed in: this tab's own, kept as it searches again.
+    pub search_order: Order,
     pub columns: Vec<Column>,
     /// The column being worked in.
     pub active: usize,
@@ -536,6 +552,7 @@ impl State {
         let mut state = Self {
             query: String::new(),
             search_filter: None,
+            search_order: Order::default(),
             columns: Vec::new(),
             active: 0,
             past: Vec::new(),
@@ -594,6 +611,7 @@ impl State {
         Location {
             query: self.query.clone(),
             search_filter: self.search_filter.clone(),
+            search_order: self.search_order,
             folders: folders.iter().map(|c| (c.path.clone(), c.highlight.clone())).collect(),
             selections: self.columns.iter().map(|c| c.selected.clone()).collect(),
             active: self.active,
@@ -633,6 +651,7 @@ impl State {
         });
         self.query = location.query;
         self.search_filter = location.search_filter;
+        self.search_order = location.search_order;
         self.active = location.active.min(columns.len() - 1);
         self.columns = columns;
         self.fold = anchor;
@@ -640,7 +659,7 @@ impl State {
 
     /// What a tab keeps between starts: each column's pick only where it leads on to the next.
     pub fn kept(&self) -> Kept {
-        let Location { query, search_filter, folders, active, fold, .. } = self.snapshot();
+        let Location { query, search_filter, search_order, folders, active, fold, .. } = self.snapshot();
         let last = self.columns.len() - 1;
         let picks = self
             .columns
@@ -651,15 +670,15 @@ impl State {
                 _ => None,
             })
             .collect();
-        Kept { query, search_filter, folders, picks, active, fold }
+        Kept { query, search_filter, search_order, folders, picks, active, fold }
     }
 
     /// A tab as it was kept, its columns yet to be listed.
     pub fn from_kept(kept: Kept) -> Self {
         let mut state = Self::new();
-        let Kept { query, search_filter, folders, picks, active, fold } = kept;
+        let Kept { query, search_filter, search_order, folders, picks, active, fold } = kept;
         let selections = picks.into_iter().map(|pick| pick.into_iter().collect()).collect();
-        state.restore(Location { query, search_filter, folders, selections, active, fold });
+        state.restore(Location { query, search_filter, search_order, folders, selections, active, fold });
         state.note_folder();
         state
     }
@@ -847,8 +866,11 @@ impl State {
     /// A saved search in home runs its query beside it, narrowed as it was kept. Home keeps the pick and
     /// the focus, so the next one is a keystroke away.
     fn run_saved_search(&mut self, index: usize, path: PathBuf, here: Location) {
-        let HomeKey::Search { query, filter, narrow } = HomeKey::of(&path) else { return };
-        let same = self.query == query && self.search_filter.as_deref() == filter && self.search_narrowing().as_deref() == narrow;
+        let HomeKey::Search { query, filter, narrow, order } = HomeKey::of(&path) else { return };
+        let same = self.query == query
+            && self.search_filter.as_deref() == filter
+            && self.search_narrowing().as_deref() == narrow
+            && self.search_order == order;
         if same && self.columns.len() == 2 && self.columns[index].selected == [path.clone()] {
             self.active = index;
             return;
@@ -862,6 +884,7 @@ impl State {
         self.set_narrowing(1, narrow.as_deref());
         self.query = query;
         self.search_filter = filter;
+        self.search_order = order;
         self.active = index;
         self.fold = None;
         self.remember(here);

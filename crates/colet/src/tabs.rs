@@ -50,7 +50,7 @@ pub fn title(state: &State, settings: &Settings) -> Title {
     let (name, tip) = column_title(state, active);
     if state.pinned() {
         let tip = if active == 0 { column_title(state, 1).1 } else { tip };
-        let saved = settings.saved(&state.query, state.search_filter.as_deref(), state.search_narrowing().as_deref());
+        let saved = settings.saved(&state.query, state.search_filter.as_deref(), state.search_narrowing().as_deref(), state.search_order);
         let name = saved.map_or_else(|| column_title(state, 1).0, |s| s.label().to_owned());
         return Title { glyph: "search", name, tip };
     }

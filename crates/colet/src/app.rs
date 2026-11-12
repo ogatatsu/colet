@@ -823,11 +823,12 @@ impl Colet {
         self.own_order(c).unwrap_or_default()
     }
 
-    /// The order the column `c` is given apart from the default: its folder's, or the search results'.
+    /// The order the column `c` is given apart from the default: its folder's, kept for every tab, or the
+    /// search results', this tab's own.
     pub fn own_order(&self, c: &Column) -> Option<Order> {
         match c.kind {
             Kind::Home => None,
-            Kind::Search => self.stored.sorts().search,
+            Kind::Search => (self.state.search_order != Order::default()).then_some(self.state.search_order),
             Kind::Folder => self.stored.sorts().folder(&c.path),
         }
     }
@@ -873,15 +874,13 @@ impl Colet {
         if let Some(index) = self.state.index_of(id) {
             let c = &self.state.columns[index];
             let own = (order != Order::default()).then_some(order);
-            if own != self.own_order(c) {
-                let (kind, path) = (c.kind, c.path.clone());
-                self.update_sorts(
-                    |sorts| match kind {
-                        Kind::Search => sorts.search = own,
-                        _ => sorts.set_folder(&path, own),
-                    },
-                    cx,
-                );
+            if c.kind == Kind::Search {
+                self.state.search_order = order;
+                // The tab keeps it between starts.
+                self.keep_tabs(cx);
+            } else if own != self.own_order(c) {
+                let path = c.path.clone();
+                self.update_sorts(|sorts| sorts.set_folder(&path, own), cx);
             }
         }
         for ((id, was), (_, is)) in before.into_iter().zip(orders(self)) {
