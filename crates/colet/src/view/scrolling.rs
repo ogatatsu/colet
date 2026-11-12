@@ -73,12 +73,19 @@ impl Colet {
                     .test_support(),
             )
             .child(
+                // Written down the strip, as Japanese is set upright: the count across, as in upright text,
+                // then "階層", so it reads as what it counts and not as a bare number.
                 div()
                     .id("unfold-count")
                     .pt_2()
+                    .flex()
+                    .flex_col()
+                    .items_center()
                     .text_size(px(metrics::TEXT_BODY))
                     .text_color(p.text_muted)
                     .child(away.to_string())
+                    .child("階")
+                    .child("層")
                     .test_support(),
             )
             // The button laid over the whole strip: its ring's room would push the heading's line off the
