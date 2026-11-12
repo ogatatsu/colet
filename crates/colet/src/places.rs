@@ -580,7 +580,6 @@ impl Colet {
         let (Some(Dialog::EditSearch { original, .. }), Some(edited)) = (self.overlays.dialog(), self.edited_search(cx)) else { return };
         let original = original.clone();
         let (was, is) = (original.key(), edited.key());
-        let query_filter = (edited.query.clone(), edited.filter.clone());
         self.update_settings(
             |s| {
                 if let Some(saved) = s.saved_searches.iter_mut().find(|saved| saved.key() == was) {
@@ -594,13 +593,6 @@ impl Colet {
             cx,
         );
         self.close_dialog(window, cx);
-        // The search showing follows its new query and filter.
-        let (query, filter) = query_filter;
-        let showing = self.state.pinned() && (&self.state.query, &self.state.search_filter) == (&original.query, &original.filter);
-        if showing && (&query, &filter) != (&original.query, &original.filter) {
-            self.search_for(&query, filter, window, cx);
-            self.focus_active(window, cx);
-        }
     }
 
     /// The favorite `key` names, its name and narrowing to edit.

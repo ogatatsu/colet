@@ -180,9 +180,10 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
         fake.settings.lock().unwrap().saved_searches[0],
         SavedSearch { name: "PDF".into(), query: "ext:pdf dm:thisweek".into(), filter: None, narrow: None }
     );
-    // The search showing follows its new query.
-    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf dm:thisweek");
-    assert_eq!(ui.field(cx), "ext:pdf dm:thisweek");
+    // The search showing stays as it was, and home picks nothing, the row it picked gone.
+    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
+    assert_eq!(ui.field(cx), "ext:pdf");
+    assert!(ui.read(cx, |v| v.state.columns[0].selected.is_empty()));
     // Escape closes the dialog without a change.
     ui.click(cx, row(HomeKey::search("ext:pdf dm:thisweek", None, None).key()));
     ui.press(cx, "f2");
@@ -504,7 +505,7 @@ fn changes_the_filter_a_saved_search_runs_within_from_its_edit(cx: &mut TestAppC
     ui.click(cx, crate::dialogs::filter_tool_id("edit-search-filter", "動画"));
     ui.click(cx, "save-search");
     assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter.as_deref(), Some("動画"));
-    // The search showing follows it.
-    assert_eq!(last_query(&fake), "<ext:mp4> <cat>");
-    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("動画"));
+    // The search showing stays within the filter it ran within.
+    assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
 }
