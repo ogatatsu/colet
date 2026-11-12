@@ -1,9 +1,9 @@
-//! The menus, the file menu, a text field's, the sort order's and the search filters', as lines that the
+//! The menus, the file menu, a text field's, a column's sort order's and the search filters', as lines that the
 //! mouse and the keys pick alike: ↑↓ move, Enter picks, Esc closes, and the keys go back to where they were.
 use std::path::PathBuf;
 
 use colet_core::{
-    entry::{Sort, direction_label},
+    entry::{Order, Sort, direction_label},
     shell::IconSource,
 };
 use gpui_kit::base::input::{self, InputState};
@@ -53,11 +53,11 @@ pub enum Command {
     /// A saved search, by its row's key.
     EditSearch(std::path::PathBuf),
     Unsave(std::path::PathBuf),
-    /// A sort for the column, or for the default when `None`.
-    Sort(Option<ColumnId>, Sort),
-    Direction(Option<ColumnId>, bool),
+    /// A sort for the column.
+    Sort(ColumnId, Sort),
+    Direction(ColumnId, bool),
     /// Folders before files, or mixed in with them.
-    FoldersFirst(Option<ColumnId>, bool),
+    FoldersFirst(ColumnId, bool),
     /// The column goes back to the default order.
     Unsort(ColumnId),
     /// The search filter to search within, or none.
@@ -176,8 +176,6 @@ impl Line {
 pub enum Popup {
     /// The file menu, opened by a right-click or the menu key.
     File(Menu),
-    /// The default order's, from the toolbar.
-    Sort,
     /// A column's own order's, from its heading.
     ColumnSort(ColumnId),
     /// The search filters'; `from_search` when the search field had the keys as it opened, to have them
@@ -277,10 +275,6 @@ impl Colet {
         fields
     }
 
-    pub fn sort_open(&self) -> bool {
-        matches!(self.overlays.popup(), Some(Popup::Sort))
-    }
-
     /// The column whose own order's menu is open, if one is.
     pub fn column_sort_open(&self) -> Option<ColumnId> {
         match self.overlays.popup() {
@@ -310,12 +304,11 @@ impl Colet {
                 plain("text-select-all", "すべて選択", "Ctrl+A", !menu.empty, Command::Edit(Edit::SelectAll)).grouped(),
             ];
         }
-        let column = self.column_sort_open().and_then(|id| self.state.index_of(id)).map(|i| &self.state.columns[i]);
-        if self.sort_open() || column.is_some() {
-            let target = column.map(|c| c.id);
-            let sort = column.map_or(self.stored.settings().sort, |c| self.order_of(c));
+        if let Some(column) = self.column_sort_open().and_then(|id| self.state.index_of(id)).map(|i| &self.state.columns[i]) {
+            let target = column.id;
+            let sort = self.order_of(column);
             // By location only the search results, whose items are in all sorts of folders.
-            let search = column.is_some_and(|c| c.kind == Kind::Search);
+            let search = column.kind == Kind::Search;
             let mut lines: Vec<Line> = Sort::ALL
                 .into_iter()
                 .filter(|by| search || by.for_folders())
@@ -330,10 +323,8 @@ impl Colet {
             let first = sort.folders_first;
             lines.push(choice("folders-first", "フォルダを先に表示", Command::FoldersFirst(target, !first), first).grouped());
             // A column given its own order goes back to the default from here.
-            if let Some(c) = column {
-                let own = self.own_order(c).is_some();
-                lines.push(Line { off: (!own).then_some(""), ..choice("unsort", "既定に戻す", Command::Unsort(c.id), false) }.grouped());
-            }
+            let own = self.own_order(column).is_some();
+            lines.push(Line { off: (!own).then_some(""), ..choice("unsort", "既定に戻す", Command::Unsort(target), false) }.grouped());
             return lines;
         }
         if self.filter_open() {
@@ -568,7 +559,7 @@ impl Colet {
             Command::Sort(target, by) => self.set_sort(target, by, cx),
             Command::Direction(target, descending) => self.set_direction(target, descending, cx),
             Command::FoldersFirst(target, first) => self.set_folders_first(target, first, cx),
-            Command::Unsort(id) => self.set_order(Some(id), self.stored.settings().sort, cx),
+            Command::Unsort(id) => self.set_order(id, Order::default(), cx),
             Command::SearchFilter(name) => self.choose_filter(name, cx),
             Command::EditFilters => self.open_filters(window, cx),
             Command::Edit(_) => unreachable!("a field's edit is done above"),
@@ -638,12 +629,6 @@ impl Colet {
             self.stop("crumb-fold", cx).focus(window, cx);
         }
         cx.notify();
-    }
-
-    /// Opens the default order's menu.
-    pub fn open_sort(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.overlays.set_popup(Popup::Sort);
-        self.show_menu(window, cx);
     }
 
     /// Opens the menu of the column `id`'s own order.

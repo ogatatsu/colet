@@ -2,58 +2,38 @@
 use super::*;
 
 #[gpui_kit::test]
-fn sorts_from_the_menu_reloading_what_is_open(cx: &mut TestAppContext) {
+fn sorts_the_results_from_their_menu_reloading_them(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
+    let results = ui.read(cx, |v| v.state.columns[1].id);
     let before = fake.queries().len();
-    ui.click(cx, "sort");
+    ui.click(cx, ("column-sort", results));
     ui.click(cx, "サイズ");
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order { by: Sort::Size, descending: false, ..Order::default() });
+    let size = Order { by: Sort::Size, descending: false, ..Order::default() };
+    assert_eq!(fake.sorts.lock().unwrap().search, Some(size));
     assert_eq!(fake.queries().len(), before + 1);
-    assert!(!ui.read(cx, |v| v.sort_open()));
+    assert_eq!(ui.read(cx, |v| v.column_sort_open()), None);
 }
 
 #[gpui_kit::test]
-fn turns_the_sort_round_from_the_menu_and_keeps_it_for_another_sort(cx: &mut TestAppContext) {
+fn turns_the_results_round_from_their_menu_and_keeps_it_for_another_sort(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
+    let results = ui.read(cx, |v| v.state.columns[1].id);
     let before = fake.queries().len();
-    ui.click(cx, "sort");
+    ui.click(cx, ("column-sort", results));
     ui.click(cx, "降順");
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order { by: Sort::Name, descending: true, ..Order::default() });
+    assert_eq!(fake.sorts.lock().unwrap().search, Some(Order { by: Sort::Name, descending: true, ..Order::default() }));
     assert_eq!(fake.queries().len(), before + 1);
-    assert!(!ui.read(cx, |v| v.sort_open()));
-    ui.click(cx, "sort");
+    ui.click(cx, ("column-sort", results));
     ui.click(cx, "更新日時");
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order { by: Sort::Modified, descending: true, ..Order::default() });
+    assert_eq!(fake.sorts.lock().unwrap().search, Some(Order { by: Sort::Modified, descending: true, ..Order::default() }));
     // Picking the way it already runs loads nothing again.
-    ui.click(cx, "sort");
+    ui.click(cx, ("column-sort", results));
     ui.click(cx, "降順");
     assert_eq!(fake.queries().len(), before + 2);
-}
-
-#[gpui_kit::test]
-fn mixes_folders_in_with_files_from_the_menu_and_puts_them_first_again(cx: &mut TestAppContext) {
-    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
-    let ui = open(cx, fake.clone());
-    ui.input(cx, "x");
-    let before = fake.queries().len();
-    ui.click(cx, "sort");
-    ui.click(cx, "folders-first");
-    let mixed = Order { folders_first: false, ..Order::default() };
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), mixed);
-    assert_eq!(fake.orders.lock().unwrap().last(), Some(&mixed));
-    assert_eq!(fake.queries().len(), before + 1);
-    assert!(!ui.read(cx, |v| v.sort_open()));
-    // Another sort keeps them mixed.
-    ui.click(cx, "sort");
-    ui.click(cx, "サイズ");
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order { by: Sort::Size, ..mixed });
-    ui.click(cx, "sort");
-    ui.click(cx, "folders-first");
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order { by: Sort::Size, ..Order::default() });
 }
 
 #[gpui_kit::test]
@@ -65,7 +45,6 @@ fn mixes_one_folders_items_apart_from_the_default_and_keeps_it_by_its_headings(c
     let mixed = Order { folders_first: false, ..Order::default() };
     assert_eq!(listed_in(&fake, r"D:\work"), Some(mixed));
     assert_eq!(listed_in(&fake, r"D:\"), Some(Order::default()));
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order::default());
     ui.click(cx, ("sort-by-size", work));
     let size = Order { by: Sort::Size, descending: true, folders_first: false };
     assert_eq!(listed_in(&fake, r"D:\work"), Some(size));
@@ -78,59 +57,16 @@ fn mixes_one_folders_items_apart_from_the_default_and_keeps_it_by_its_headings(c
 }
 
 #[gpui_kit::test]
-fn keeps_the_sort_order_for_the_next_start(cx: &mut TestAppContext) {
-    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
-    let ui = open(cx, fake.clone());
-    let saves = fake.saves.load(Ordering::Relaxed);
-    ui.click(cx, "sort");
-    ui.click(cx, "サイズ");
-    settle(cx);
-    assert_eq!(fake.settings.lock().unwrap().sort, Order { by: Sort::Size, descending: false, ..Order::default() });
-    ui.click(cx, "sort");
-    ui.click(cx, "降順");
-    settle(cx);
-    assert_eq!(fake.settings.lock().unwrap().sort, Order { by: Sort::Size, descending: true, ..Order::default() });
-    assert_eq!(fake.saves.load(Ordering::Relaxed), saves + 2);
-    // Picking the order already in use writes nothing.
-    ui.click(cx, "sort");
-    ui.click(cx, "サイズ");
-    settle(cx);
-    assert_eq!(fake.saves.load(Ordering::Relaxed), saves + 2);
-}
-
-#[gpui_kit::test]
-fn opens_in_the_sort_order_kept(cx: &mut TestAppContext) {
-    let kept = Order { by: Sort::Modified, descending: true, ..Order::default() };
-    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
-    fake.settings.lock().unwrap().sort = kept;
-    let ui = open(cx, fake.clone());
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), kept);
-    ui.input(cx, "x");
-    let orders = fake.orders.lock().unwrap().clone();
-    assert!(!orders.is_empty());
-    assert!(orders.iter().all(|o| *o == kept), "{orders:?}");
-}
-
-#[gpui_kit::test]
-fn picks_the_sort_order_by_keys(cx: &mut TestAppContext) {
-    let (_, ui) = in_work(cx);
-    ui.click(cx, "sort");
+fn picks_a_columns_order_by_keys(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.click(cx, ("column-sort", work));
     ui.press(cx, "down");
     ui.press(cx, "down");
     ui.press(cx, "enter");
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order { by: Sort::Size, descending: false, ..Order::default() });
-    assert!(!ui.read(cx, |v| v.sort_open()));
+    assert_eq!(listed_in(&fake, r"D:\work"), Some(Order { by: Sort::Size, descending: false, ..Order::default() }));
+    assert_eq!(ui.read(cx, |v| v.column_sort_open()), None);
     assert!(ui.columns_focused(cx));
-    // From the button itself, Enter opens it.
-    let sort = ui.read(cx, |v| v.sort_focus.clone());
-    ui.act(cx, |window, cx| sort.focus(window, cx));
-    ui.press(cx, "enter");
-    assert!(ui.read(cx, |v| v.sort_open()));
-    ui.press(cx, "escape");
-    assert!(!ui.read(cx, |v| v.sort_open()));
-    ui.press(cx, "enter");
-    ui.press(cx, "menu");
-    assert!(!ui.read(cx, |v| v.sort_open()));
 }
 
 #[gpui_kit::test]
@@ -143,7 +79,6 @@ fn sorts_one_folder_by_its_headings_apart_from_the_default(cx: &mut TestAppConte
     let size = Order { by: Sort::Size, descending: true, ..Order::default() };
     assert_eq!(listed_in(&fake, r"D:\work"), Some(size));
     assert_eq!(fake.sorts.lock().unwrap().folder(Path::new(r"D:\work")), Some(size));
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order::default());
     assert_eq!(fake.sort_saves.load(Ordering::Relaxed), before + 1);
     ui.click(cx, ("sort-by-size", work));
     assert_eq!(listed_in(&fake, r"D:\work"), Some(Order { by: Sort::Size, descending: false, ..Order::default() }));
@@ -184,29 +119,6 @@ fn gives_a_folder_its_own_order_from_its_button_and_takes_it_back(cx: &mut TestA
 }
 
 #[gpui_kit::test]
-fn keeps_a_folders_own_order_when_the_default_changes(cx: &mut TestAppContext) {
-    let (fake, ui) = in_work(cx);
-    let work = ui.read(cx, |v| v.state.columns[2].id);
-    ui.click(cx, ("sort-by-modified", work));
-    let (own, listings) = (Order { by: Sort::Modified, descending: true, ..Order::default() }, listings_of(&fake, r"D:\work"));
-    ui.click(cx, "sort");
-    ui.click(cx, "サイズ");
-    let size = Order { by: Sort::Size, descending: false, ..Order::default() };
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), size);
-    // Only what follows the default is listed again.
-    assert_eq!(listed_in(&fake, r"D:\"), Some(size));
-    assert_eq!(listings_of(&fake, r"D:\work"), listings);
-    assert_eq!(fake.sorts.lock().unwrap().folder(Path::new(r"D:\work")), Some(own));
-    // The default the folder is given now is its own no longer.
-    ui.click(cx, ("column-sort", work));
-    ui.click(cx, "サイズ");
-    ui.click(cx, ("column-sort", work));
-    ui.click(cx, "昇順");
-    assert_eq!(listed_in(&fake, r"D:\work"), Some(size));
-    assert_eq!(fake.sorts.lock().unwrap().folder(Path::new(r"D:\work")), None);
-}
-
-#[gpui_kit::test]
 fn opens_a_folder_in_the_order_kept_for_it_whatever_its_case(cx: &mut TestAppContext) {
     let own = Order { by: Sort::Size, descending: true, ..Order::default() };
     let fake = Arc::new(Fake {
@@ -237,7 +149,6 @@ fn gives_the_search_results_one_order_of_their_own_for_every_search(cx: &mut Tes
     // Another search goes the same way.
     ui.input(cx, "y");
     assert_eq!(fake.orders.lock().unwrap().last(), Some(&modified));
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order::default());
 }
 
 #[gpui_kit::test]
@@ -246,7 +157,6 @@ fn sorts_only_the_search_results_by_location_from_a_first_then_turned_round(cx: 
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
     let results = ui.read(cx, |v| v.state.columns[1].id);
-    let absent = |ui: &Ui, cx: &mut TestAppContext, id: &'static str| ui.act(cx, |window, _| window.try_find(id).is_none());
     // A location starts from A, as a name does; the heading again turns it round.
     ui.click(cx, ("sort-by-location", results));
     let location = Order { by: Sort::Location, ..Order::default() };
@@ -254,17 +164,13 @@ fn sorts_only_the_search_results_by_location_from_a_first_then_turned_round(cx: 
     assert_eq!(fake.sorts.lock().unwrap().search, Some(location));
     ui.click(cx, ("sort-by-location", results));
     assert_eq!(fake.orders.lock().unwrap().last(), Some(&Order { descending: true, ..location }));
-    // The results' own menu offers it, the default's does not.
+    // Their menu offers it.
     ui.click(cx, ("column-sort", results));
     ui.click(cx, "名前");
     assert_eq!(fake.orders.lock().unwrap().last(), Some(&Order { by: Sort::Name, descending: true, ..Order::default() }));
     ui.click(cx, ("column-sort", results));
     ui.click(cx, "場所");
     assert_eq!(fake.orders.lock().unwrap().last(), Some(&Order { descending: true, ..location }));
-    ui.click(cx, "sort");
-    assert!(ui.read(cx, |v| v.sort_open()));
-    assert!(absent(&ui, cx, "場所"));
-    assert_eq!(ui.read(cx, |v| v.stored.settings().sort), Order::default());
 }
 
 #[gpui_kit::test]

@@ -111,7 +111,7 @@ actions!(
 
 /// Where an open menu takes the keys.
 pub const MENU: &str = "Menu";
-/// The sort order's button, which opens its menu from the keys.
+/// A button that opens its menu from the keys: a column's sort order's, the search filters'.
 pub const SORT: &str = "Sort";
 
 /// Where a text field takes the keys: GPUI Base's own context for its fields.
@@ -368,8 +368,6 @@ pub struct Colet {
     pub(crate) stops: Stops,
     /// The dialog and the menu open, and where the keys go back to as they close.
     pub overlays: Overlays,
-    /// The sort order's button, a stop for Tab.
-    pub sort_focus: FocusHandle,
     pub crumbs: Trail,
     /// Where the focused row of the active column was drawn, for the menu key.
     pub focused_row: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -441,7 +439,6 @@ impl Colet {
             stored: Stored::new(settings, settings_saves, sorts, sorts_saves),
             home_drag: HomeDragging::default(),
             stops: Stops::default(),
-            sort_focus: cx.focus_handle().tab_stop(true),
             crumbs: Trail::default(),
             overlays: Overlays::new(cx),
             focused_row: Default::default(),
@@ -823,7 +820,7 @@ impl Colet {
 
     /// The order the column `c` is listed in: its own, or the default.
     pub fn order_of(&self, c: &Column) -> Order {
-        self.own_order(c).unwrap_or(self.stored.settings().sort)
+        self.own_order(c).unwrap_or_default()
     }
 
     /// The order the column `c` is given apart from the default: its folder's, or the search results'.
@@ -835,64 +832,57 @@ impl Colet {
         }
     }
 
-    /// The order of the column `id`, or the default when `None`.
-    fn order_for(&self, target: Option<ColumnId>) -> Order {
-        match target.and_then(|id| self.state.index_of(id)) {
-            Some(index) => self.order_of(&self.state.columns[index]),
-            None => self.stored.settings().sort,
-        }
+    /// The order of the column `id`, or the default when it is gone.
+    fn order_for(&self, id: ColumnId) -> Order {
+        self.state.index_of(id).map(|index| self.order_of(&self.state.columns[index])).unwrap_or_default()
     }
 
-    /// Sorts the column `target`, or by default, by `by`, keeping the way it runs.
-    pub fn set_sort(&mut self, target: Option<ColumnId>, by: Sort, cx: &mut Context<Self>) {
-        self.set_order(target, Order { by, ..self.order_for(target) }, cx);
+    /// Sorts the column `id` by `by`, keeping the way it runs.
+    pub fn set_sort(&mut self, id: ColumnId, by: Sort, cx: &mut Context<Self>) {
+        self.set_order(id, Order { by, ..self.order_for(id) }, cx);
     }
 
-    pub fn set_direction(&mut self, target: Option<ColumnId>, descending: bool, cx: &mut Context<Self>) {
-        self.set_order(target, Order { descending, ..self.order_for(target) }, cx);
+    pub fn set_direction(&mut self, id: ColumnId, descending: bool, cx: &mut Context<Self>) {
+        self.set_order(id, Order { descending, ..self.order_for(id) }, cx);
     }
 
-    /// Puts folders before files in the column `target`, or by default, or mixes them in.
-    pub fn set_folders_first(&mut self, target: Option<ColumnId>, folders_first: bool, cx: &mut Context<Self>) {
-        self.set_order(target, Order { folders_first, ..self.order_for(target) }, cx);
+    /// Puts folders before files in the column `id`, or mixes them in.
+    pub fn set_folders_first(&mut self, id: ColumnId, folders_first: bool, cx: &mut Context<Self>) {
+        self.set_order(id, Order { folders_first, ..self.order_for(id) }, cx);
     }
 
     /// Sorts the column `id` by the heading `by` pressed: the way it runs turned round when it already
     /// goes by it, or else as that heading starts, names and locations from A and sizes and times from
     /// the largest.
     pub fn sort_by_heading(&mut self, id: ColumnId, by: Sort, cx: &mut Context<Self>) {
-        let order = self.order_for(Some(id));
+        let order = self.order_for(id);
         let descending = if order.by == by { !order.descending } else { !matches!(by, Sort::Name | Sort::Location) };
-        self.set_order(Some(id), Order { by, descending, ..order }, cx);
+        self.set_order(id, Order { by, descending, ..order }, cx);
     }
 
-    /// Gives the column `target` the order, or makes it the default; a column given the default follows
-    /// it from then on. The columns whose order this changes are listed again.
-    pub fn set_order(&mut self, target: Option<ColumnId>, order: Order, cx: &mut Context<Self>) {
-        if matches!(self.overlays.popup(), Some(Popup::Sort | Popup::ColumnSort(_))) {
+    /// Gives the column `id` the order; a column given the default keeps no order of its own. The columns
+    /// whose order this changes are listed again.
+    pub fn set_order(&mut self, id: ColumnId, order: Order, cx: &mut Context<Self>) {
+        if matches!(self.overlays.popup(), Some(Popup::ColumnSort(_))) {
             self.overlays.forget_popup();
         }
         let orders = |this: &Self| -> Vec<(ColumnId, Order)> {
             this.state.columns.iter().filter(|c| c.kind != Kind::Home).map(|c| (c.id, this.order_of(c))).collect()
         };
         let before = orders(self);
-        match target.and_then(|id| self.state.index_of(id)) {
-            None if target.is_none() && order != self.stored.settings().sort => self.update_settings(|s| s.sort = order, cx),
-            Some(index) => {
-                let c = &self.state.columns[index];
-                let own = (order != self.stored.settings().sort).then_some(order);
-                if own != self.own_order(c) {
-                    let (kind, path) = (c.kind, c.path.clone());
-                    self.update_sorts(
-                        |sorts| match kind {
-                            Kind::Search => sorts.search = own,
-                            _ => sorts.set_folder(&path, own),
-                        },
-                        cx,
-                    );
-                }
+        if let Some(index) = self.state.index_of(id) {
+            let c = &self.state.columns[index];
+            let own = (order != Order::default()).then_some(order);
+            if own != self.own_order(c) {
+                let (kind, path) = (c.kind, c.path.clone());
+                self.update_sorts(
+                    |sorts| match kind {
+                        Kind::Search => sorts.search = own,
+                        _ => sorts.set_folder(&path, own),
+                    },
+                    cx,
+                );
             }
-            None => {}
         }
         for ((id, was), (_, is)) in before.into_iter().zip(orders(self)) {
             if was != is {

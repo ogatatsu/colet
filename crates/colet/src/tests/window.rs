@@ -55,15 +55,12 @@ fn keeps_room_to_type_a_search_in_the_narrowest_window(cx: &mut TestAppContext) 
     // The filter, the search and the address in a row, the address keeping room to press to type.
     assert!(filter.right() <= field.left() && field.right() < address.left(), "{filter:?} {field:?} {address:?}");
     assert!(address.size.width >= px(crate::app::ADDRESS_MIN - 6.), "{address:?}");
-    // The sort order and the hidden items' button end the file actions' row, under the toolbar.
-    let (recycle, sort, hidden) = ui.act(cx, |window, _| {
+    // The hidden items' button ends the file actions' row, under the toolbar.
+    let (recycle, hidden) = ui.act(cx, |window, _| {
         let find = |id: &str| window.find(SharedString::from(id.to_owned())).bounds();
-        (find("recycle"), find("sort"), find("show-hidden"))
+        (find("recycle"), find("show-hidden"))
     });
-    assert!(
-        sort.top() > field.bottom() && recycle.right() < sort.left() && sort.right() <= hidden.left(),
-        "{recycle:?} {sort:?} {hidden:?}"
-    );
+    assert!(hidden.top() > field.bottom() && recycle.right() < hidden.left(), "{recycle:?} {hidden:?}");
     assert!(hidden.right() <= px(width), "{hidden:?}");
     // Home's pane gave way to its usual width, keeping the width it was dragged to.
     assert_eq!(sidebar.size.width, px(width - crate::app::MAIN_MIN));

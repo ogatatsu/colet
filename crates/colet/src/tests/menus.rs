@@ -494,15 +494,11 @@ fn keeps_the_keys_in_the_menu_from_a_row_or_the_folder_s_empty_space(cx: &mut Te
 fn closes_the_menus_from_the_buttons_that_opened_them(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     let work = ui.read(cx, |v| v.state.columns[2].id);
-    ui.press_and_release(cx, "sort");
-    assert!(ui.read(cx, |v| v.sort_open()));
-    ui.press_and_release(cx, "sort");
-    assert!(!ui.read(cx, |v| v.sort_open()));
-    assert!(ui.columns_focused(cx));
     ui.press_and_release(cx, ("column-sort", work));
     assert_eq!(ui.read(cx, |v| v.column_sort_open()), Some(work));
     ui.press_and_release(cx, ("column-sort", work));
     assert_eq!(ui.read(cx, |v| v.column_sort_open()), None);
+    assert!(ui.columns_focused(cx));
     ui.press_and_release(cx, "search-filter");
     assert!(ui.read(cx, |v| v.filter_open()));
     ui.press_and_release(cx, "search-filter");
@@ -513,8 +509,8 @@ fn closes_the_menus_from_the_buttons_that_opened_them(cx: &mut TestAppContext) {
     assert!(ui.read(cx, |v| !v.history_panel.open));
     assert!(ui.columns_focused(cx));
     // Pressed once more, each opens again.
-    ui.press_and_release(cx, "sort");
-    assert!(ui.read(cx, |v| v.sort_open()));
+    ui.press_and_release(cx, ("column-sort", work));
+    assert_eq!(ui.read(cx, |v| v.column_sort_open()), Some(work));
 }
 
 /// Each menu dropped from a button stands just under it, lined up with the side it drops on, whatever the
@@ -532,9 +528,6 @@ fn drops_each_menu_just_under_its_button(cx: &mut TestAppContext) {
     };
     let (_, ui) = in_work(cx);
     let work = ui.read(cx, |v| v.state.columns[2].id);
-    ui.press_and_release(cx, "sort");
-    under(&ui, cx, "sort".into(), "sort-menu", false);
-    ui.press(cx, "escape");
     ui.press_and_release(cx, ("column-sort", work));
     under(&ui, cx, ("column-sort", work).into(), "column-sort-menu", false);
     ui.press(cx, "escape");

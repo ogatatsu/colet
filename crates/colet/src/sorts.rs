@@ -1,4 +1,4 @@
-//! The orders the columns are given apart from the one they share: one for each folder so given, and one
+//! The orders the columns are given apart from the default: one for each folder so given, and one
 //! for the search results, kept in `%APPDATA%\Colet\sort.json` apart from the settings.
 use std::{
     collections::BTreeMap,
@@ -60,8 +60,11 @@ struct FolderSort {
 
 impl From<SortsFile> for Sorts {
     fn from(file: SortsFile) -> Self {
-        let mut sorts = Sorts { search: file.search, ..Sorts::default() };
-        for FolderSort { path, order } in file.folders.into_iter().filter(|f| !f.path.as_os_str().is_empty()) {
+        // An order the same as the default is no order of its own: one kept while the default could be
+        // changed goes.
+        let own = |order: &Order| *order != Order::default();
+        let mut sorts = Sorts { search: file.search.filter(own), ..Sorts::default() };
+        for FolderSort { path, order } in file.folders.into_iter().filter(|f| !f.path.as_os_str().is_empty() && own(&f.order)) {
             // The first of a folder written twice by hand stands.
             sorts.folders.entry(path_key(&path)).or_insert((path, order));
         }
@@ -126,7 +129,7 @@ mod tests {
             r#"{"search":{"by":"size","descending":true},"folders":[{"path":"D:\\a","order":{"by":"size","descending":true,"folders_first":false}}]}"#
         );
         assert_eq!(serde_json::from_str::<Sorts>(&json).unwrap(), sorts);
-        assert!(serde_json::from_str::<Sorts>(r#"{"search":{"by":"name","descending":false}}"#).unwrap().search.unwrap().folders_first);
+        assert!(serde_json::from_str::<Sorts>(r#"{"search":{"by":"size","descending":false}}"#).unwrap().search.unwrap().folders_first);
     }
 
     #[test]
@@ -138,6 +141,17 @@ mod tests {
         assert_eq!(sorts.folder(Path::new(r"D:\a")), Some(Order { by: Sort::Size, descending: false, ..Order::default() }));
         assert_eq!(sorts.folder(Path::new("")), None);
         assert_eq!(sorts.search, None);
+    }
+
+    #[test]
+    fn drops_an_order_the_same_as_the_default() {
+        let sorts: Sorts = serde_json::from_str(
+            r#"{"search":{"by":"name","descending":false},"folders":[{"path":"D:\\a","order":{"by":"name","descending":false}},{"path":"D:\\b","order":{"by":"name","descending":false,"folders_first":false}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(sorts.search, None);
+        assert_eq!(sorts.folder(Path::new(r"D:\a")), None);
+        assert_eq!(sorts.folder(Path::new(r"D:\b")), Some(Order { folders_first: false, ..Order::default() }));
     }
 
     #[test]

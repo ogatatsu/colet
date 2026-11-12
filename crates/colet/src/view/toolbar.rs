@@ -144,12 +144,8 @@ impl Colet {
             .into_any_element()
     }
 
-    /// How the columns show their items, at the file actions' row's end: the default sort order, plain as
-    /// the actions are, and whether the hidden items show.
+    /// How the columns show their items, at the file actions' row's end: whether the hidden items show.
     pub(super) fn view_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
-        let sort = self.stored.settings().sort;
-        let sort_focused = self.sort_focus.is_focused(window);
         // Pressed while the hidden items show.
         let show = self.stored.settings().show_hidden;
         let hidden = Self::icon_button(
@@ -162,57 +158,7 @@ impl Colet {
         .selected(show)
         .toggled(show)
         .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx)));
-        let hidden = self.ringed(hidden, "show-hidden", RingAt::Edge, window, cx);
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(2.))
-            .child(
-                div()
-                    .relative()
-                    .child(
-                        ring(
-                            crate::view::keep_focus(div().id("sort"))
-                                .track_focus(&self.sort_focus)
-                                .key_context(SORT)
-                                .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_sort(window, cx)))
-                                .role(Role::Button)
-                                .aria_label(format!("既定の並び順: {}", sort.label()))
-                                .aria_expanded(self.sort_open())
-                                .tip_while_shut(self.sort_open(), "既定の並び順")
-                                .h(px(metrics::SMALL_CONTROL_HEIGHT))
-                                .px_2()
-                                .flex()
-                                .items_center()
-                                .gap(px(6.))
-                                .text_size(px(metrics::TEXT_BODY))
-                                .text_color(p.text)
-                                .rounded(px(metrics::FIELD_RADIUS))
-                                .hover(|d| d.bg(p.hover))
-                                .child(icon("arrow-up-down", metrics::GLYPH, p.text_muted))
-                                .child(sort.label())
-                                .child(icon("chevron-down", metrics::GLYPH, p.text_faint))
-                                .map(|d| Self::opener(d, Self::sort_open, cx))
-                                .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                                    if this.sort_open() {
-                                        this.close_menus(true, window, cx);
-                                    } else if !this.pressed_shut(event) {
-                                        this.open_sort(window, cx);
-                                    }
-                                })),
-                            p,
-                            sort_focused,
-                            6.,
-                        )
-                        .test_support(),
-                    )
-                    .when_some(self.menu_element("sort-menu", "既定の並び順", cx).filter(|_| self.sort_open()), |d, menu| {
-                        d.child(drop_down(menu, MenuSide::Right, 160., Some(160.)))
-                    }),
-            )
-            .child(hidden)
-            .into_any_element()
+        div().flex().flex_none().items_center().child(self.ringed(hidden, "show-hidden", RingAt::Edge, window, cx)).into_any_element()
     }
 
     /// The search filters' button beside the field, naming the one chosen in the accent color, and its menu.

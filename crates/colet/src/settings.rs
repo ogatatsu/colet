@@ -1,5 +1,5 @@
 //! What Colet keeps between runs: the widths, the favorites, the saved searches, what is pinned in home,
-//! the search filters, the tabs with what each searched and the folders open, the sort order, the theme, whether
+//! the search filters, the tabs with what each searched and the folders open, the theme, whether
 //! the hidden items show, and where the window was. The way back and forth and what is picked besides are not kept.
 use std::{
     io::Write as _,
@@ -8,10 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use colet_core::{
-    entry::Order,
-    paths::{folder_name, path_key, shown},
-};
+use colet_core::paths::{folder_name, path_key, shown};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -184,8 +181,6 @@ pub struct Settings {
     /// The tabs, in their order, and the one in front.
     pub tabs: Vec<KeptTab>,
     pub tab: usize,
-    /// The one order the folders and the search results share.
-    pub sort: Order,
     pub theme: Theme,
     /// Whether the folders list their hidden and system items, as Explorer leaves them out by default.
     pub show_hidden: bool,
@@ -208,7 +203,6 @@ impl Default for Settings {
             filters: Vec::new(),
             tabs: Vec::new(),
             tab: 0,
-            sort: Order::default(),
             theme: Theme::System,
             show_hidden: false,
             show_protected: false,
@@ -567,7 +561,6 @@ pub fn write<T: Serialize>(kept: &T, path: &Path, file: &File) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
-    use colet_core::entry::Sort;
 
     use super::*;
 
@@ -723,18 +716,12 @@ mod tests {
     }
 
     #[test]
-    fn keeps_the_sort_order_chosen() {
-        let order = Order { by: Sort::Modified, descending: true, ..Order::default() };
-        let written = serde_json::to_string(&Settings { sort: order, ..Settings::default() }).unwrap();
-        assert!(written.contains(r#""sort":{"by":"modified","descending":true}"#), "{written}");
-        assert_eq!(serde_json::from_str::<Settings>(&written).unwrap().sort, order);
-    }
-
-    #[test]
-    fn sorts_by_name_from_a_to_z_when_the_file_keeps_no_order() {
-        let settings: Settings = serde_json::from_str(r#"{"favorites":[{"path":"D:\\"}]}"#).unwrap();
-        assert_eq!(settings.sort, Order::default());
+    fn drops_the_default_order_a_file_still_keeps() {
+        let settings: Settings =
+            serde_json::from_str(r#"{"sort":{"by":"modified","descending":true},"favorites":[{"path":"D:\\"}]}"#).unwrap();
         assert_eq!(settings.favorites, [Favorite::new(r"D:\")]);
+        let written = serde_json::to_string(&settings).unwrap();
+        assert!(!written.contains(r#""sort""#), "{written}");
     }
 
     #[test]

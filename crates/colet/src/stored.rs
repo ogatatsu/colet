@@ -9,7 +9,7 @@ use crate::{
 pub struct Stored {
     settings: Settings,
     settings_saves: Saves<Settings>,
-    /// The orders the columns are given apart from `settings.sort`, written as the settings are.
+    /// The orders the columns are given apart from the default, written as the settings are.
     sorts: Sorts,
     sorts_saves: Saves<Sorts>,
     /// The settings could not be written as the window closed: the next close goes without them.
