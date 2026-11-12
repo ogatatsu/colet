@@ -31,17 +31,20 @@ use crate::{
 };
 
 /// The keys the preferences list.
-const SHORTCUTS: [(&str, &str); 29] = [
+const SHORTCUTS: [(&str, &str); 36] = [
     ("↑ ↓", "項目を選択（Shift で範囲選択）"),
+    ("PageUp / PageDown", "1 画面ずつ移動"),
+    ("Home / End", "先頭 / 末尾へ移動"),
     ("← →", "カラムを移動"),
     ("Enter", "開く"),
+    ("Ctrl+Enter", "新しいタブで開く"),
     ("Space", "QuickLook でプレビュー"),
     ("Alt+← / Alt+→", "戻る / 進む"),
     ("マウスの戻る / 進むボタン", "戻る / 進む"),
     ("Ctrl+0", "ホームへ移動"),
     ("Ctrl+H", "隠しファイルの表示を切り替え"),
     ("Ctrl+U", "上の階層を表示"),
-    ("Shift+F10", "メニューを開く"),
+    ("Shift+F10 / メニューキー", "メニューを開く"),
     ("Ctrl+F", "検索"),
     ("Ctrl+L", "パスを入力して移動（Alt+Enter で新しいタブに開く）"),
     ("↓ / Enter", "検索欄から結果へ移動"),
@@ -60,6 +63,10 @@ const SHORTCUTS: [(&str, &str); 29] = [
     ("Shift+Delete", "完全に削除"),
     ("Alt+Enter", "プロパティ"),
     ("F5", "更新"),
+    ("Ctrl+T", "新しいタブ"),
+    ("Ctrl+W", "タブを閉じる"),
+    ("Ctrl+Tab / Ctrl+Shift+Tab", "次 / 前のタブ"),
+    ("Ctrl+Shift+T", "閉じたタブを開き直す"),
     ("文字キー", "カラムを名前で絞り込む（Backspace で 1 文字消す、Esc で解除）"),
 ];
 
