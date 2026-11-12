@@ -1,6 +1,7 @@
 //! Where the scrolling columns should rest so the one being worked in, and what it opened, are on screen.
 //! When they must move, the last column ends flush with the right edge, so no room is left empty past it,
-//! unless that would hide the column worked in. Picking along a column, which opens and closes the one
+//! unless that would hide the column worked in, or, worked in outside them, cut the last one on the left.
+//! Picking along a column, which opens and closes the one
 //! beside it, leaves them where they are.
 use std::time::Instant;
 
@@ -106,7 +107,9 @@ pub fn reveal_target(from: f32, view: f32, cells: &[Cell], active: Option<usize>
         return from;
     }
     if end - start > view + 1. {
-        return if active.is_none() { flush } else { start };
+        // Worked in outside them, the last is shown whole, or from its left edge when it is wider than the
+        // view.
+        return if active.is_none() { flush.min(cells[last].start) } else { start };
     }
     // From the active one to the last fit: brought in from either side, the last ends at the right edge.
     flush
@@ -122,14 +125,14 @@ pub fn uncover_target(view: f32, cells: &[Cell], keep: usize) -> f32 {
 /// Where columns resting at `from` go once the view or their width changes under them, as the window is
 /// resized or a width dragged: `was` and `was_end` are the view and the columns' end they rested over.
 /// The last column in sight before stays flush with the right edge, unless that would push the active
-/// one off on the left; brought there by hand short of it, the left edge stays, with no room left past
+/// one off on the left, or, worked in outside them, the last one; brought there by hand short of it, the left edge stays, with no room left past
 /// the last column.
 pub fn refit(from: f32, was: f32, was_end: f32, view: f32, cells: &[Cell], active: Option<usize>) -> f32 {
     let Some(last) = cells.len().checked_sub(1) else { return 0. };
     let end = cells[last].start + cells[last].width;
     let flush = (end - view).max(0.);
     // A pixel either way, for widths rounded under display scaling.
-    if from + was >= was_end - 1. { active.map_or(flush, |active| flush.min(cells[active.min(last)].start)) } else { from.min(flush) }
+    if from + was >= was_end - 1. { flush.min(cells[active.unwrap_or(last).min(last)].start) } else { from.min(flush) }
 }
 
 /// What is on screen, in columns: 1.5 is halfway across the second. Above 0, some are hidden on the
@@ -206,6 +209,12 @@ mod tests {
     }
 
     #[test]
+    fn shows_the_last_opened_from_its_left_edge_when_it_is_wider_than_the_view() {
+        assert_eq!(reveal_target(0., 200., &cells(3), None), 480.);
+        assert_eq!(reveal_target(0., 200., &cells(1), None), 0.);
+    }
+
+    #[test]
     fn goes_back_to_the_start_once_nothing_scrolls() {
         assert_eq!(reveal_target(480., 480., &[], None), 0.);
     }
@@ -246,6 +255,12 @@ mod tests {
     fn stops_at_the_active_column_rather_than_push_it_off_the_left() {
         assert_eq!(refit(480., 480., 960., 300., &cells(4), Some(2)), 480.);
         assert_eq!(refit(480., 480., 960., 200., &cells(4), Some(2)), 480.);
+    }
+
+    #[test]
+    fn keeps_the_last_column_from_its_left_edge_once_it_is_wider_than_the_view_worked_in_outside() {
+        assert_eq!(refit(480., 480., 960., 300., &cells(4), None), 660.);
+        assert_eq!(refit(480., 480., 960., 200., &cells(4), None), 720.);
     }
 
     #[test]
