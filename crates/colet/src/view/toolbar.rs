@@ -103,8 +103,9 @@ impl Colet {
             .into_any_element()
     }
 
-    /// The chevron from what is searched to where it is, and the edge a drag widens the search field from:
-    /// over the gaps on either side, lit while pointed at or dragged.
+    /// The edge a drag widens the search field from, drawn as a splitter's grip: a short upright bar, not a
+    /// chevron, which beside the address would read as a step of the path. It takes the gaps on either
+    /// side, and is lit while pointed at or dragged.
     fn field_resizer(&self, cx: &mut Context<Self>) -> AnyElement {
         const ID: &str = "search-field-resizer";
         let p = self.palette;
@@ -120,9 +121,16 @@ impl Colet {
             .flex()
             .items_center()
             .cursor_col_resize()
+            // As wide as the chevron was, so the toolbar keeps its widths.
             .child(
-                icon("chevron-right", metrics::GLYPH, if dragging { p.accent } else { p.text_faint })
-                    .group_hover(ID, |s| s.text_color(p.accent)),
+                div().w(px(metrics::GLYPH)).flex().justify_center().child(
+                    div()
+                        .w(px(2.))
+                        .h(px(16.))
+                        .rounded_full()
+                        .bg(if dragging { p.accent } else { p.border_strong })
+                        .group_hover(ID, |s| s.bg(p.accent)),
+                ),
             )
             .on_mouse_down(
                 MouseButton::Left,
