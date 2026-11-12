@@ -68,7 +68,7 @@ pub fn title(state: &State, settings: &Settings) -> Title {
     let (place, place_tip) = column_title(state, at);
     let tip = if active == 0 { place_tip } else { tip };
     match settings.favorite(&opened.path, opened.narrowing().as_deref()) {
-        Some(favorite) => Title { glyph: "star", name: favorite.label(), tip },
+        Some(favorite) => Title { glyph: "star-fill", name: favorite.label(), tip },
         None if active == 0 => Title { glyph: "folder", name: place, tip },
         None => Title { glyph: "folder", name, tip },
     }

@@ -235,7 +235,7 @@ fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mu
         let title = crate::tabs::title(v.tabs.get(1).unwrap().parked().unwrap().state(), v.stored.settings());
         (title.glyph, title.name)
     });
-    assert_eq!((glyph, name.as_str()), ("star", "work"));
+    assert_eq!((glyph, name.as_str()), ("star-fill", "work"));
     ui.press(cx, "ctrl-tab");
     let last = ui.read(cx, |v| v.state.columns.len() - 1);
     assert!(ui.filter_focused(cx, last));
@@ -266,10 +266,10 @@ fn names_a_tab_for_the_favorite_it_opened_however_deep_it_goes(cx: &mut TestAppC
     let ui = open(cx, fake);
     ui.click(cx, row(r"D:\"));
     // Picked in home, it is named so already.
-    assert_eq!(ui.title(cx), ("star", "データ".into(), r"D:\".into()));
+    assert_eq!(ui.title(cx), ("star-fill", "データ".into(), r"D:\".into()));
     ui.press(cx, "right");
     ui.press(cx, "right");
-    assert_eq!(ui.title(cx), ("star", "データ".into(), r"D:\work".into()));
+    assert_eq!(ui.title(cx), ("star-fill", "データ".into(), r"D:\work".into()));
     // Renamed, it follows; kept no more, the column worked in names it.
     ui.view.update(cx, |v, cx| v.update_settings(|s| s.favorites[0].name = "倉庫".into(), cx));
     assert_eq!(ui.title(cx).1, "倉庫");
