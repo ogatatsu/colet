@@ -16,6 +16,27 @@ fn widens_home_by_its_edge_within_its_bounds(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn ends_a_widening_let_go_of_off_the_window_once_the_pointer_comes_back(cx: &mut TestAppContext) {
+    use gpui_kit::{InputEvent as _, MouseMoveEvent};
+    let fake = Arc::new(Fake::default());
+    let ui = open(cx, fake.clone());
+    let edge = ui.act(cx, |window, _| window.find("sidebar-resizer").bounds().center());
+    ui.hold_drag(cx, edge, point(edge.x + px(100.), edge.y));
+    assert!(ui.read(cx, |v| v.widths.resizing().is_some()));
+    // The button came up off the window, unheard; the pointer comes back with it up.
+    ui.act(cx, |window, cx| {
+        let modifiers = window.modifiers();
+        let back = point(edge.x + px(200.), edge.y);
+        window.dispatch_event(MouseMoveEvent { position: back, pressed_button: None, modifiers }.to_platform_input(), cx);
+        window.render_frame(cx);
+    });
+    settle(cx);
+    assert!(ui.read(cx, |v| v.widths.resizing().is_none()));
+    assert_eq!(ui.read(cx, |v| v.widths.sidebar), 340.);
+    assert_eq!(fake.settings.lock().unwrap().sidebar_width, 340.);
+}
+
+#[gpui_kit::test]
 fn widens_the_search_field_by_the_chevron_beside_it_within_its_bounds_and_keeps_it(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default());
     fake.settings.lock().unwrap().search_field_width = 300.;

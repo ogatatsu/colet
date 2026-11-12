@@ -397,7 +397,12 @@ impl Render for Colet {
             .when(self.widths.resizing().is_some(), |d| {
                 d.cursor_col_resize()
                     .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                        if this.widths.drag_to(event.position.x) {
+                        // Let go of off the window, where the window hears no button come up: the drag
+                        // ends at the width it last left, as if let go of there.
+                        if event.pressed_button != Some(MouseButton::Left) {
+                            this.end_resize(cx);
+                            cx.notify();
+                        } else if this.widths.drag_to(event.position.x) {
                             cx.notify();
                         }
                     }))
