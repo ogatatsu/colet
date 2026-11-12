@@ -131,7 +131,7 @@ impl Engine {
     /// What the status bar shows, and what it says in full.
     pub fn describe(&self) -> (String, String) {
         match self {
-            Engine::Unknown => ("Everything".into(), "検索エンジン: Everything（検索すると接続します）".into()),
+            Engine::Unknown => ("Everything · 検索時に接続".into(), "検索エンジン: Everything（検索すると接続します）".into()),
             Engine::Connecting => ("Everything · 接続中…".into(), "検索エンジン: Everythingに接続しています".into()),
             Engine::Connected(name) => (name.clone(), format!("検索エンジン: {name}（接続済み）")),
             Engine::Failed(error) => ("Everything · 要確認".into(), error.clone()),
