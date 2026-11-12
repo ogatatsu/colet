@@ -364,6 +364,8 @@ pub struct Colet {
     /// The settings and the columns' own orders, as kept between starts.
     pub stored: Stored,
     pub home_drag: HomeDragging,
+    /// The row the left button is down on, until it is let go of or a drag out starts.
+    pub(crate) press: Option<crate::drag_out::Press>,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
     pub(crate) stops: Stops,
     /// The dialog and the menu open, and where the keys go back to as they close.
@@ -414,6 +416,7 @@ impl Colet {
             Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
             _ => 0,
         };
+        shell::refuse_drops(owner);
         let operations = cx.new(|cx| Operations::new(backend.clone(), owner, cx));
         // The history's button, the rows' clipboard marks and the menu's Send To are drawn from it.
         subscriptions.push(cx.observe(&operations, |_, _, cx| cx.notify()));
@@ -438,6 +441,7 @@ impl Colet {
             loading: Loading::default(),
             stored: Stored::new(settings, settings_saves, sorts, sorts_saves),
             home_drag: HomeDragging::default(),
+            press: None,
             stops: Stops::default(),
             crumbs: Trail::default(),
             overlays: Overlays::new(cx),

@@ -152,7 +152,7 @@ fn sent(shift: bool) -> (DROPEFFECT, MODIFIERKEYS_FLAGS) {
 /// by their paths as any app's drag gives them. Their IDs are taken from the deepest folder they all lie
 /// in, so they need not share one; not from the desktop where it can be helped, which the desktop's
 /// shortcut maker fails on.
-fn items(paths: &[PathBuf]) -> Result<IDataObject> {
+pub(super) fn items(paths: &[PathBuf]) -> Result<IDataObject> {
     let pidls = Pidls::parse_all(paths)?;
     let folder = Pidls(vec![unsafe { ILClone(pidls.0[0]) }]);
     unsafe {

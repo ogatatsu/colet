@@ -91,6 +91,10 @@ pub trait Backend: Send + Sync + 'static {
     /// Drops `paths`, from any folders, on `target`, one of [`Backend::send_targets`]: copied, or with
     /// `shift` moved where it allows it. Blocks until the drop returns.
     fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> Result<Dropped, String>;
+    /// Drags `paths`, from any folders, out of the window `owner` into another app, which copies, moves
+    /// or links them. Call it on the window's own thread, out of any update: it runs the window's
+    /// messages until the drag ends.
+    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> Result<(), String>;
     /// Asks QuickLook to show `path`, in the order asked; what it returns tells how that went.
     fn quick_look(&self, message: quick_look::Message, path: PathBuf) -> mpsc::Receiver<Result<(), quick_look::Error>>;
 }
@@ -246,6 +250,10 @@ impl Backend for Live {
 
     fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> Result<Dropped, String> {
         shell::send_to(target, paths, shift, owner).map_err(said)
+    }
+
+    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> Result<(), String> {
+        shell::drag_out(paths, owner).map_err(said)
     }
 
     fn quick_look(&self, message: quick_look::Message, path: PathBuf) -> mpsc::Receiver<Result<(), quick_look::Error>> {

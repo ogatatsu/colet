@@ -6,6 +6,7 @@ mod backend;
 mod clipboard;
 mod crumbs;
 mod dialogs;
+mod drag_out;
 mod icons;
 mod instance;
 mod lane;

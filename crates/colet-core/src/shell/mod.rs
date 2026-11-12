@@ -1,6 +1,7 @@
 //! The Windows shell: icons, the Explorer context menu, Send To, the properties dialog, and file operations with the
 //! shell's own dialogs.
 pub mod clipboard;
+mod drag;
 mod drop;
 mod icon;
 mod menu;
@@ -9,6 +10,7 @@ mod operation;
 mod properties;
 mod send_to;
 
+pub use drag::{drag_distance, drag_out, refuse_drops};
 pub use drop::{Dropped, drop_clipboard, send_to};
 pub use icon::{Icon, IconSource, icon};
 pub use menu::{BUSY_ERROR as MENU_BUSY, MenuThread, ShowMenu};

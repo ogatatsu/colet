@@ -159,6 +159,7 @@ impl Colet {
         };
         let menu_path = entry.path.clone();
         let tab_path = entry.path.clone();
+        let press_path = entry.path.clone();
         let focused_row = (marked && c.focused.as_ref() == Some(&entry.path)).then(|| self.focused_row.clone());
         div()
             .id(SharedString::from(id_text(&entry.path)))
@@ -181,6 +182,13 @@ impl Colet {
                     this.open_in_tab(index, &tab_path, cx);
                 }),
             )
+            // Moved far enough, held down, it is dragged out to another app; home's rows are put in order.
+            .when(kind != Kind::Home, |r| {
+                r.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, _, cx| this.press_row(index, press_path.clone(), event.position, cx)),
+                )
+            })
             .relative()
             .when_some(focused_row, |r, cell| {
                 r.child(canvas(move |bounds, _, _| cell.set(Some(bounds)), |_, _, _, _| {}).absolute().size_full())

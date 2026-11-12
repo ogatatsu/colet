@@ -410,6 +410,7 @@ impl Render for Colet {
                     )
             })
             .children(self.drag_let_go(cx))
+            .children(self.press_listener(cx))
             .child(tabbar)
             .child(toolbar)
             .child(pathbar)
