@@ -96,9 +96,9 @@ impl Palette {
             border_strong: hsl(210., 12., 76.),
             text: hsl(210., 20., 13.),
             text_muted: hsl(210., 9., 38.),
-            text_faint: hsl(210., 8., 45.),
-            accent: hsl(184., 60., 30.),
-            accent_fill: hsl(184., 50., 33.),
+            text_faint: hsl(210., 8., 42.),
+            accent: hsl(184., 60., 27.),
+            accent_fill: hsl(184., 50., 30.),
             selected_inactive: hsl(210., 14., 88.),
             highlight: hsl(184., 40., 89.),
             danger: hsl(0., 65., 45.),
@@ -266,6 +266,25 @@ mod tests {
             let paths = contrast(palette.text_muted, palette.bg);
             assert!(paths >= 4.5, "paths {paths}, dark: {dark}");
             assert!(palette.bg != palette.raised, "the paths' ground stands off the dialog, dark: {dark}");
+        }
+    }
+
+    #[test]
+    fn text_on_each_ground_it_is_drawn_on_reads_at_4_5_to_1_or_more() {
+        for (palette, dark) in [(Palette::light(), false), (Palette::dark(), true)] {
+            for (what, ink, ground) in [
+                ("a row on the selection", palette.on_accent, palette.accent_fill),
+                ("a match in a row on the selection", palette.on_accent_match, palette.accent_fill),
+                ("a match in a row", palette.accent, palette.surface),
+                ("a match in a row selected aside", palette.accent, palette.selected_inactive),
+                ("a path in a row selected aside", palette.text_muted, palette.selected_inactive),
+                ("a column's count", palette.text_faint, palette.surface),
+                ("the engine in the status bar", palette.text_faint, palette.bg),
+                ("faint text in home", palette.text_faint, palette.sidebar),
+            ] {
+                let ratio = contrast(ink, ground);
+                assert!(ratio >= 4.5, "{what}: {ratio}, dark: {dark}");
+            }
         }
     }
 
