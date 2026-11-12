@@ -28,6 +28,51 @@ impl Colet {
         self.widths.sidebar.min(room.max(SIDEBAR_WIDTHS.0))
     }
 
+    /// How wide the search results are to be: their own width, or all the window leaves past the room of
+    /// the folders on screen beside them and of the fold strip, if that is more. The folders' room is
+    /// never less than one column's, so moving between a folder, which opens beside them, and a file,
+    /// which opens nothing, leaves the results as wide as they were. They narrow back to their own width
+    /// only as more folders open than the window holds beside them.
+    pub fn results_width(&self) -> f32 {
+        let beside = self.on_screen().count.max(1) as f32 * self.widths.column + FOLD_WIDTH;
+        self.widths.search.max((self.scrolls.sideways.main - beside).floor())
+    }
+
+    /// The results are drawn wider than their own width.
+    pub(super) fn results_stretched(&self) -> bool {
+        self.scrolls.sideways.results > self.widths.search
+    }
+
+    /// Takes the results a frame's step toward [`Colet::results_width`], sliding as the columns do, and
+    /// tells how far they narrowed (widened, below naught) from as they were drawn. They take their width
+    /// at once as they first show and while the window or home's pane changes width; then they have not
+    /// moved under the columns (see [`Colet::fit`]), and the step is naught.
+    fn step_results(&mut self, window: &mut Window) -> f32 {
+        let target = if self.state.pinned() { self.results_width() } else { 0. };
+        let sideways = &mut self.scrolls.sideways;
+        let drawn = sideways.results;
+        let resized = (sideways.main - sideways.results_main).abs() >= 0.5;
+        sideways.results_main = sideways.main;
+        if target <= 0. || drawn <= 0. || resized {
+            sideways.results = target;
+            sideways.results_slide = None;
+            return 0.;
+        }
+        if (target - drawn).abs() < 0.5 && sideways.results_slide.is_none() {
+            return 0.;
+        }
+        let slide = sideways.results_slide.get_or_insert_with(|| Slide::new(drawn, drawn, target, None));
+        slide.target = target;
+        let (width, done) = slide.step(Instant::now());
+        if done {
+            sideways.results_slide = None;
+        } else {
+            window.request_animation_frame();
+        }
+        sideways.results = width;
+        drawn - width
+    }
+
     pub fn on_screen(&self) -> OnScreen {
         let first = if self.state.pinned() { 2 } else { 1 } + self.state.folded_away();
         let count = self.state.columns.len().saturating_sub(first);
@@ -199,8 +244,22 @@ impl Colet {
 
     /// Slides the columns toward where they should rest, a frame at a time.
     pub(super) fn reveal(&mut self, window: &mut Window) {
-        let view = f32::from(self.scrolls.sideways.scroll.bounds().size.width);
+        let mut view = f32::from(self.scrolls.sideways.scroll.bounds().size.width);
         let mut from = self.scrolls.sideways.offset();
+        // The results beside the columns narrow or widen, as folders open or close: the view's left edge
+        // moves by as much, and its width with it. The columns on screen stay where they are drawn, so the
+        // folders come out from under the results' edge, and are brought on screen in the view as it is
+        // about to be laid out.
+        let narrowed = self.step_results(window);
+        if narrowed.abs() > 0. && view > 0. {
+            view += narrowed;
+            from -= narrowed;
+            self.scrolls.sideways.set_offset(from.max(0.));
+            self.scrolls.sideways.hold = self.scrolls.sideways.hold.max(from);
+            if let Some(slide) = &mut self.scrolls.sideways.slide {
+                slide.shift(-narrowed);
+            }
+        }
         let fold = self.state.fold.map(|f| (f.anchor, self.state.folded_away()));
         let came_out = match (self.scrolls.sideways.drawn_fold, fold) {
             (Some((was, away)), Some((anchor, 0))) if was == anchor && away > 0 => Some(away),

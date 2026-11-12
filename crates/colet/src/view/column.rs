@@ -273,7 +273,7 @@ impl Colet {
         let c: &Column = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
         let (width, of) = match kind {
-            Kind::Search => (self.widths.search, WidthOf::Search),
+            Kind::Search => (self.scrolls.sideways.results, WidthOf::Search),
             _ => (self.widths.column, WidthOf::Column),
         };
         let title = c.title().into_owned();
@@ -364,7 +364,10 @@ impl Colet {
             })
             .child(headings)
             .child(body)
-            .child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
+            // None while the results stretch: the window, not a drag, sets how wide they are then.
+            .when(kind != Kind::Search || !self.results_stretched(), |d| {
+                d.child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
+            })
             // The scrolling columns' frame is drawn over their scroll, which would cut this one's edges.
             .when(marked && kind == Kind::Search, |d| d.child(on_top(active_frame(p).left(px(-1.)).bottom(px(-1.)))))
             .test_support()

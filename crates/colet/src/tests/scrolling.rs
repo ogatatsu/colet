@@ -412,3 +412,41 @@ fn scrolls_a_column_s_last_row_clear_of_the_columns_scrollbar(cx: &mut TestAppCo
     assert!(ui.read(cx, |v| v.scrolls.sideways.scroll.max_offset().x) > px(0.));
     assert!(bottom <= view.bottom() - px(crate::view::SCROLLBAR_WIDTH), "{bottom:?} against {view:?}");
 }
+
+#[gpui_kit::test]
+fn stretches_the_results_into_what_one_folder_beside_them_leaves_alike_for_a_folder_and_a_file(cx: &mut TestAppContext) {
+    let work = folder(r"D:\work");
+    let note = file(r"D:\note.txt");
+    let fake = Arc::new(Fake::default().with_results(vec![work.clone(), note.clone()]).with_folders(&[
+        (r"D:\work", vec![folder(r"D:\work\inner")]),
+        (r"D:\work\inner", vec![folder(r"D:\work\inner\deep")]),
+        (r"D:\work\inner\deep", vec![]),
+    ]));
+    let ui = open(cx, fake);
+    ui.input(cx, "w");
+    rest(&ui, cx);
+    let results = ui.read(cx, |v| v.state.columns[1].id);
+    let width = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, _| f32::from(window.find(("column", results)).bounds().size.width));
+    let resizer = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, _| window.try_find("search-resizer").is_some());
+    let (main, column, own) = ui.read(cx, |v| (v.scrolls.sideways.main, v.widths.column, v.widths.search));
+    // Room for one folder and the fold strip is kept beside them; the results take the rest.
+    let stretched = (main - column - crate::app::FOLD_WIDTH).floor();
+    assert!(stretched > own, "{stretched} {own}");
+    assert_eq!(width(&ui, cx), stretched);
+    // The window sets their width, not a drag.
+    assert!(!resizer(&ui, cx));
+    // A folder opening beside them and a file opening nothing leave them as they are.
+    for picked in [&work, &note, &work] {
+        ui.click(cx, row(&picked.path));
+        rest(&ui, cx);
+        assert_eq!(width(&ui, cx), stretched, "{}", picked.name);
+    }
+    // More folders open than the window holds beside them: they narrow back to their own width, which a
+    // drag sets again.
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    rest(&ui, cx);
+    assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().path.clone()), std::path::PathBuf::from(r"D:\work\inner\deep"));
+    assert_eq!(width(&ui, cx), own);
+    assert!(resizer(&ui, cx));
+}
