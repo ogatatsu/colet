@@ -487,6 +487,30 @@ fn marks_under_the_crumbs_what_is_on_screen_while_some_are_folded(cx: &mut TestA
     assert_eq!(ui.act(cx, |window, _| window.try_find("crumb-bar").is_some()), hidden);
 }
 
+/// A folder just opened has its crumb marked in the first frame that draws it, with nothing more pressed.
+#[gpui_kit::test]
+fn marks_the_crumb_of_a_folder_just_opened_in_its_first_frame(cx: &mut TestAppContext) {
+    let deep = file(r"D:\a\b\zeta.txt");
+    let fake = Arc::new(Fake::default().with_results(vec![deep.clone()]).with_folders(&[
+        (r"D:\", vec![folder(r"D:\a")]),
+        (r"D:\a", vec![folder(r"D:\a\b")]),
+        (r"D:\a\b", vec![deep.clone()]),
+    ]));
+    let ui = open(cx, fake);
+    ui.input(cx, "zeta");
+    ui.click(cx, row(&deep.path));
+    // As if no frame had drawn the crumbs yet, as when a folder has just opened: the one frame that draws
+    // them marks them too, with no other to follow it.
+    ui.view.update(cx, |v, _| v.crumbs.bounds.borrow_mut().clear());
+    ui.act(cx, |_, _| ());
+    let (bar, last) = ui.read(cx, |v| {
+        let last = v.state.columns.iter().rev().find(|c| c.kind == Kind::Folder).map(|c| c.id).unwrap();
+        (v.crumbs.bar.get(), v.crumbs.bounds.borrow().get(&last).map(|b| f32::from(b.right())))
+    });
+    let (Some((_, end)), Some(right)) = (bar, last) else { panic!("no bar: {bar:?} under {last:?}") };
+    assert!((end - right).abs() < 0.5, "the bar ends at {end}, the crumb at {right}");
+}
+
 /// Pressed again while its menu is open, the button closes it and leaves it closed.
 #[gpui_kit::test]
 fn closes_the_folders_folded_off_the_trail_from_their_button(cx: &mut TestAppContext) {

@@ -29,6 +29,9 @@ pub struct Trail {
     /// the columns on screen.
     pub bounds: Rc<RefCell<HashMap<ColumnId, Bounds<Pixels>>>>,
     pub row: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Where the bar under the crumbs was last painted, `(start, end)` across the window; `None` while
+    /// none was.
+    pub bar: Rc<Cell<Option<(f32, f32)>>>,
     /// The width the crumbs were last folded for.
     pub room: Rc<Cell<f32>>,
 }

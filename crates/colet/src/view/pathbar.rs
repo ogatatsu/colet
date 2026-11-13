@@ -3,30 +3,43 @@ use super::*;
 
 impl Colet {
     /// The bar under the crumbs of the columns on screen, cut where the edges cut the columns; only while
-    /// some are out of sight, folded away too. Placed from where the crumbs were last drawn.
+    /// some are out of sight, folded away too. Painted from where the crumbs stand in the same frame: their
+    /// places are all known once the frame is laid out, so a crumb just added has its bar at once.
     fn crumb_bar(&self) -> Option<AnyElement> {
         let screen = self.on_screen();
-        let (s0, s1) = screen.span?;
-        if !(screen.hidden_left() || screen.hidden_right() || self.state.folded_away() > 0) {
+        let out = screen.hidden_left() || screen.hidden_right() || self.state.folded_away() > 0;
+        let Some(span) = screen.span.filter(|_| out) else {
+            self.crumbs.bar.set(None);
             return None;
-        }
-        let row = self.crumbs.row.get()?;
-        let bounds = self.crumbs.bounds.borrow();
-        let drawn = |k: usize| {
-            let c = self.state.columns.get(screen.first + k)?;
-            bounds.get(&c.id).map(|b| (f32::from(b.left()), f32::from(b.right())))
         };
-        let (start, end) = crate::crumbs::bar((s0, s1), drawn)?;
+        // The crumbs' ids by the columns' places on screen, read against their places once painted.
+        let ids: Vec<ColumnId> = self.state.columns.iter().skip(screen.first).map(|c| c.id).collect();
+        let (bounds, bar) = (self.crumbs.bounds.clone(), self.crumbs.bar.clone());
+        let color = self.palette.border_strong;
         Some(
             div()
                 .id("crumb-bar")
                 .absolute()
-                .left(px(start - f32::from(row.left())))
-                .bottom_0()
-                .w(px((end - start).max(0.)))
-                .h(px(2.))
-                .rounded(px(1.))
-                .bg(self.palette.border_strong)
+                .size_full()
+                .child(
+                    canvas(
+                        |_, _, _| {},
+                        move |row, _, window, _| {
+                            let bounds = bounds.borrow();
+                            let drawn = |k: usize| {
+                                let b = bounds.get(ids.get(k)?)?;
+                                Some((f32::from(b.left()), f32::from(b.right())))
+                            };
+                            let placed = crate::crumbs::bar(span, drawn);
+                            bar.set(placed);
+                            if let Some((start, end)) = placed {
+                                let at = Bounds::new(point(px(start), row.bottom() - px(2.)), size(px((end - start).max(0.)), px(2.)));
+                                window.paint_quad(fill(at, color).corner_radii(px(1.)));
+                            }
+                        },
+                    )
+                    .size_full(),
+                )
                 .test_support()
                 .into_any_element(),
         )
