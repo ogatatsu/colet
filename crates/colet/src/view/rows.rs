@@ -575,7 +575,20 @@ impl Colet {
 }
 
 /// How near the end of what a search's list has its last row in sight brings the next page.
-const PAGE_AHEAD: usize = 50;
+pub(crate) const PAGE_AHEAD: usize = 50;
+
+/// How many of the `count` rows the list laid out last are in sight or above them; `None` before it is
+/// laid out.
+pub(crate) fn rows_in_sight(handle: &UniformListScrollHandle, count: usize) -> Option<usize> {
+    let state = handle.0.borrow();
+    let size = state.last_item_size?;
+    // A row's height as laid out, not as set: it follows the text's size.
+    let row = size.contents.height / count.max(1) as f32;
+    if row <= px(0.) {
+        return None;
+    }
+    Some(((-state.base_handle.offset().y + size.item.height) / row).ceil().max(0.) as usize)
+}
 
 /// Asks for the next page of the results `id` once the rows in sight come within [`PAGE_AHEAD`] of the
 /// `count` it has. Placed after the list, it reads the list's scroll as the list has just laid it out, a
@@ -585,14 +598,7 @@ fn next_page_at_end(id: ColumnId, count: usize, handle: &UniformListScrollHandle
     let (handle, view) = (handle.clone(), cx.entity().downgrade());
     canvas(
         move |_, _, cx| {
-            let state = handle.0.borrow();
-            let Some(size) = state.last_item_size else { return };
-            // A row's height as laid out, not as set: it follows the text's size.
-            let row = size.contents.height / count.max(1) as f32;
-            if row <= px(0.) {
-                return;
-            }
-            let in_sight = ((-state.base_handle.offset().y + size.item.height) / row).ceil().max(0.) as usize;
+            let Some(in_sight) = rows_in_sight(&handle, count) else { return };
             if in_sight + PAGE_AHEAD >= count {
                 cx.defer(move |cx| {
                     view.update(cx, |this, cx| this.more(id, cx)).ok();

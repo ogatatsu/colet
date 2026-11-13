@@ -713,8 +713,16 @@ impl Colet {
                     Some(filter) => (narrowed_query(&whole, &filter.text), (offset == 0).then_some(whole)),
                     None => (whole, None),
                 };
-                // A refresh reloads all it has loaded, so later selections stay.
-                let count = if offset > 0 { PAGE } else { PAGE.max(c.entries.len()) };
+                // A refresh reloads the pages in sight and those the picked rows and the keys are on, so
+                // they stay; the rest load again as the list nears its end.
+                let count = if offset > 0 {
+                    PAGE
+                } else {
+                    let in_sight = crate::view::rows_in_sight(self.scrolls.rows.handle(id), c.entries.len()).unwrap_or(0);
+                    let keep: HashSet<&Path> = c.selected.iter().chain(&c.focused).chain(&c.highlight).map(PathBuf::as_path).collect();
+                    let last_kept = c.entries.iter().rposition(|e| keep.contains(e.path.as_path()));
+                    crate::loading::reread_count(c.entries.len(), last_kept, in_sight)
+                };
                 self.loading.searching();
                 let search = Search { query, sort, offset, count, refresh: offset == 0, request };
                 cx.background_executor().spawn(async move {

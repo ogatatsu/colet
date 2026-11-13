@@ -11,7 +11,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{state::ColumnId, watching::Watching};
+use colet_core::everything::PAGE;
+
+use crate::{state::ColumnId, view::PAGE_AHEAD, watching::Watching};
 
 #[derive(Default)]
 pub struct Loading {
@@ -232,5 +234,34 @@ impl SearchRefresh {
     /// The reload waiting is no longer to go.
     fn cancel(&mut self) {
         self.waiting = false;
+    }
+}
+
+/// How many of the `loaded` results a search reads again from the first: the `in_sight` rows and a little
+/// past them, and up to `last_kept`, the last row picked or holding the keys, in whole pages. What it had
+/// loaded below them is let go of and read again as the list nears its end, so a change Everything reports
+/// does not read thousands over.
+pub fn reread_count(loaded: usize, last_kept: Option<usize>, in_sight: usize) -> usize {
+    // Room for results that come in above the last kept row, so it is not pushed past the end.
+    let needed = in_sight.max(last_kept.map_or(0, |at| at + 1)) + PAGE_AHEAD;
+    needed.div_ceil(PAGE).max(1).saturating_mul(PAGE).min(PAGE.max(loaded))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rereads_only_the_pages_in_sight_or_picked() {
+        let loaded = PAGE * 20;
+        // At the top: one page, however many were loaded.
+        assert_eq!(reread_count(loaded, None, 30), PAGE);
+        // Scrolled near a page's end: the next is read too, for what comes in above.
+        assert_eq!(reread_count(loaded, None, PAGE * 3 - 10), PAGE * 4);
+        // A row picked far down keeps every page up to it.
+        assert_eq!(reread_count(loaded, Some(PAGE * 12), 30), PAGE * 13);
+        // Never more than was loaded, and never less than a page.
+        assert_eq!(reread_count(loaded, None, PAGE * 40), loaded);
+        assert_eq!(reread_count(10, None, 0), PAGE);
     }
 }
