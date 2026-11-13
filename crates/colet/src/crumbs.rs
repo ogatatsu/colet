@@ -91,7 +91,7 @@ mod tests {
 
     /// Crumbs 80px wide with 20px between them, from 0: column `i`'s spans `100 i` to `100 i + 80`.
     fn spaced(i: usize) -> Option<(f32, f32)> {
-        (i < 4).then(|| (i as f32 * 100., i as f32 * 100. + 80.))
+        (i < 4).then_some((i as f32 * 100., i as f32 * 100. + 80.))
     }
 
     #[test]

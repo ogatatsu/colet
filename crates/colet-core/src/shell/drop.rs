@@ -9,7 +9,7 @@ use std::thread;
 
 use std::mem::ManuallyDrop;
 
-use windows::Win32::Foundation::{GlobalFree, HWND, LPARAM, POINTL, WPARAM};
+use windows::Win32::Foundation::{E_INVALIDARG, E_OUTOFMEMORY, GlobalFree, HWND, LPARAM, POINTL, WPARAM};
 use windows::Win32::System::Com::{DVASPECT_CONTENT, FORMATETC, IDataObject, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL};
 use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
@@ -153,8 +153,15 @@ fn sent(shift: bool) -> (DROPEFFECT, MODIFIERKEYS_FLAGS) {
 /// in, so they need not share one; not from the desktop where it can be helped, which the desktop's
 /// shortcut maker fails on.
 pub(super) fn items(paths: &[PathBuf]) -> Result<IDataObject> {
+    if paths.is_empty() {
+        return Err(Error::from_hresult(E_INVALIDARG));
+    }
     let pidls = Pidls::parse_all(paths)?;
-    let folder = Pidls(vec![unsafe { ILClone(pidls.0[0]) }]);
+    let clone = unsafe { ILClone(pidls.0[0]) };
+    if clone.is_null() {
+        return Err(Error::from_hresult(E_OUTOFMEMORY));
+    }
+    let folder = Pidls(vec![clone]);
     unsafe {
         let _ = ILRemoveLastID(Some(folder.0[0]));
         while !pidls.0.iter().all(|pidl| ILIsParent(folder.0[0], *pidl, false).as_bool()) && ILRemoveLastID(Some(folder.0[0])).as_bool() {}

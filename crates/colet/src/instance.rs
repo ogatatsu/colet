@@ -1,7 +1,7 @@
 //! One Colet per logon session. A second start asks the running one to come to the front and quits.
 //! Debug builds are counted apart from release ones, so one of each can run side by side.
 
-use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND};
+use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{
     CreateEventW, CreateMutexW, EVENT_MODIFY_STATE, INFINITE, OpenEventW, SetEvent, WaitForSingleObject,
 };
@@ -54,8 +54,8 @@ impl Instance {
         let event = self.event.0 as isize;
         std::thread::spawn(move || {
             let (event, hwnd) = (HANDLE(event as *mut _), HWND(hwnd as *mut _));
-            loop {
-                unsafe { WaitForSingleObject(event, INFINITE) };
+            // Only a signal brings it to the front: a failed wait would return at once, over and over.
+            while unsafe { WaitForSingleObject(event, INFINITE) } == WAIT_OBJECT_0 {
                 unsafe {
                     if IsIconic(hwnd).as_bool() {
                         let _ = ShowWindow(hwnd, SW_RESTORE);

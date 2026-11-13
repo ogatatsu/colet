@@ -933,7 +933,7 @@ impl Colet {
                 if this.update(cx, |this, cx| this.take_changes(cx)).is_err() {
                     return;
                 }
-                let batch = changed.lock().unwrap().take();
+                let batch = changed.lock().unwrap_or_else(|e| e.into_inner()).take();
                 if batch != Changes::Nothing && this.update(cx, |this, cx| this.files_changed(batch, cx)).is_err() {
                     return;
                 }

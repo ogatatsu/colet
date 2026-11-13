@@ -113,9 +113,17 @@ pub fn write_files(paths: &[PathBuf], cut: bool, owner: Owner) -> Result<()> {
             let _ = GlobalFree(Some(files));
             return Err(error);
         }
-        let preferred = global(&effect.to_le_bytes())?;
+        // Without the effect, a cut would paste as a copy: what is half put there is taken back.
+        let preferred = match global(&effect.to_le_bytes()) {
+            Ok(preferred) => preferred,
+            Err(error) => {
+                let _ = EmptyClipboard();
+                return Err(error);
+            }
+        };
         if let Err(error) = SetClipboardData(preferred_effect(), Some(HANDLE(preferred.0))) {
             let _ = GlobalFree(Some(preferred));
+            let _ = EmptyClipboard();
             return Err(error);
         }
     }
@@ -145,7 +153,7 @@ pub fn read_files() -> Result<ClipboardFiles> {
         if let Ok(effect) = GetClipboardData(preferred_effect()) {
             let value = GlobalLock(HGLOBAL(effect.0)).cast::<u32>();
             if !value.is_null() {
-                cut = *value & DROPEFFECT_MOVE.0 != 0;
+                cut = GlobalSize(HGLOBAL(effect.0)) >= mem::size_of::<u32>() && value.read_unaligned() & DROPEFFECT_MOVE.0 != 0;
                 let _ = GlobalUnlock(HGLOBAL(effect.0));
             }
         }

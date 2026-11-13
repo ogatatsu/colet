@@ -41,7 +41,8 @@ impl Watching {
             Some(watcher) => watcher,
             None => {
                 let missed = self.missed.clone();
-                let watcher = FolderWatcher::new(self.changed.clone(), move |paths| missed.lock().unwrap().extend(paths))?;
+                let watcher =
+                    FolderWatcher::new(self.changed.clone(), move |paths| missed.lock().unwrap_or_else(|e| e.into_inner()).extend(paths))?;
                 self.watcher.insert(watcher)
             }
         };
@@ -50,7 +51,7 @@ impl Watching {
 
     /// The folders the watcher could list but not watch that were not taken before.
     pub fn take_missed(&mut self) -> Vec<PathBuf> {
-        let missed = std::mem::take(&mut *self.missed.lock().unwrap());
+        let missed = std::mem::take(&mut *self.missed.lock().unwrap_or_else(|e| e.into_inner()));
         missed.into_iter().filter(|p| self.unwatched.insert(path_key(p))).collect()
     }
 }

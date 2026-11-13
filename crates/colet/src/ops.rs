@@ -298,7 +298,7 @@ impl Operations {
     /// Takes in how the items of the running operation ended so far; tells whether any did.
     fn take_events(&mut self) -> bool {
         let Some(running) = &mut self.running else { return false };
-        let events = std::mem::take(&mut *running.events.lock().unwrap());
+        let events = std::mem::take(&mut *running.events.lock().unwrap_or_else(|e| e.into_inner()));
         if events.is_empty() {
             return false;
         }
@@ -1106,7 +1106,12 @@ impl Colet {
                     if let Some(released) = released {
                         let _ = released.recv();
                     }
-                    backend.operate(asked, clipboard, owner, Box::new(move |event| events.lock().unwrap().push(event)))
+                    backend.operate(
+                        asked,
+                        clipboard,
+                        owner,
+                        Box::new(move |event| events.lock().unwrap_or_else(|e| e.into_inner()).push(event)),
+                    )
                 })
                 .await;
             this.update(cx, |this, cx| this.finished(request, result, cx)).ok();
