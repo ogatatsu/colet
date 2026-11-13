@@ -25,7 +25,7 @@ mod list;
 pub use list::{Front, Keys, Parked, TabId, Tabs};
 
 /// A tab's width while the strip has room, and the least it narrows to before the strip scrolls.
-const TAB_WIDTH: f32 = 220.;
+const TAB_WIDTH: f32 = 260.;
 const TAB_MIN: f32 = 100.;
 const TAB_HEIGHT: f32 = 32.;
 const TAB_TOP: f32 = 4.;
