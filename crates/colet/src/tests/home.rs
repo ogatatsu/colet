@@ -386,7 +386,7 @@ fn offers_in_home_only_what_its_rows_can_do(cx: &mut TestAppContext) {
         [
             "開く",
             "新しいタブで開く",
-            "Explorerで表示",
+            "エクスプローラーで表示",
             "| パスをコピー",
             "| 編集",
             "ピン留め",
@@ -401,7 +401,7 @@ fn offers_in_home_only_what_its_rows_can_do(cx: &mut TestAppContext) {
         [
             "開く",
             "新しいタブで開く",
-            "Explorerで表示",
+            "エクスプローラーで表示",
             "| パスをコピー",
             "| ピン留め",
             "お気に入りに追加",

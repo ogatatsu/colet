@@ -411,7 +411,7 @@ impl Colet {
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), open_off, Command::Open),
             in_tab,
-            line("menu-explorer", "folder-open", "Explorerで表示", None, reasons.explorer, Command::Explorer),
+            line("menu-explorer", "folder-open", "エクスプローラーで表示", None, reasons.explorer, Command::Explorer),
             send_to,
             line("menu-copy", "copy", "コピー", Some("Ctrl+C"), quiet(reasons.copy), Command::Copy).grouped(),
             line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), Command::Cut),
@@ -468,7 +468,7 @@ impl Colet {
         let mut lines = vec![
             line("menu-open", "external-link", "開く", Some("Enter"), None, Command::Open),
             in_tab,
-            line("menu-explorer", "folder-open", "Explorerで表示", None, reasons.explorer, Command::Explorer),
+            line("menu-explorer", "folder-open", "エクスプローラーで表示", None, reasons.explorer, Command::Explorer),
             line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, Command::CopyPath).grouped(),
         ];
         // F2 on a favorite edits it: a place has nothing to edit, and its folder is not renamed from here.
