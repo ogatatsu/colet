@@ -330,8 +330,10 @@ impl Colet {
         if self.filter_open() {
             let chosen = self.chosen_filter.as_deref();
             let mut lines = vec![choice("filter-none", "なし", Command::SearchFilter(None), chosen.is_none())];
-            lines.extend(self.stored.settings().filters.iter().map(|f| {
-                choice(
+            let default = self.stored.settings().default_filter.as_deref();
+            lines.extend(self.stored.settings().filters.iter().map(|f| Line {
+                hint: (default == Some(f.name.as_str())).then_some("既定"),
+                ..choice(
                     crate::dialogs::filter_tool_id("filter", &f.name),
                     f.name.clone(),
                     Command::SearchFilter(Some(f.name.clone())),

@@ -80,6 +80,7 @@ impl OrderChoice {
 /// What a tool on a search filter does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FilterTool {
+    Default,
     Up,
     Down,
     Edit,

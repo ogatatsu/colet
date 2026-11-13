@@ -488,13 +488,20 @@ impl Colet {
     fn filters_dialog(&self, window: &Window, cx: &mut Context<Self>) -> (Div, Buttons) {
         let p = self.palette;
         let filters = self.stored.settings().filters.clone();
+        let default = self.default_filter();
         let last = filters.len().saturating_sub(1);
         let rows: Vec<AnyElement> = filters
             .into_iter()
             .enumerate()
             .map(|(i, f)| {
                 let name = f.name.clone();
-                let (up_name, down_name, edit_name) = (name.clone(), name.clone(), name.clone());
+                let (up_name, down_name, edit_name, default_name) = (name.clone(), name.clone(), name.clone(), name.clone());
+                let is_default = default.as_deref() == Some(f.name.as_str());
+                let (default_glyph, default_label) = if is_default {
+                    ("circle-check", format!("「{}」を既定から外す", f.name))
+                } else {
+                    ("circle", format!("「{}」を既定にする", f.name))
+                };
                 div()
                     .flex()
                     .items_center()
@@ -508,7 +515,17 @@ impl Colet {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().truncate().text_size(px(metrics::TEXT_LARGE)).child(f.name.clone()))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_baseline()
+                                    .gap_2()
+                                    .min_w_0()
+                                    .child(div().truncate().text_size(px(metrics::TEXT_LARGE)).child(f.name.clone()))
+                                    .when(is_default, |d| {
+                                        d.child(div().flex_none().text_size(px(metrics::TEXT_BODY)).text_color(p.text_muted).child("既定"))
+                                    }),
+                            )
                             .child(
                                 div()
                                     .truncate()
@@ -519,6 +536,16 @@ impl Colet {
                             ),
                     )
                     // Their stops named after the filter, to go with it.
+                    .child(
+                        self.ringed(
+                            tool(filter_tool_id("filter-default", &f.name), default_glyph, default_label, true)
+                                .on_click(cx.listener(move |this, _, _, cx| this.toggle_default_filter(&default_name, cx))),
+                            Stop::Filter(FilterTool::Default, f.name.clone()),
+                            RingAt::Edge,
+                            window,
+                            cx,
+                        ),
+                    )
                     .child(
                         self.ringed(
                             tool(filter_tool_id("filter-up", &f.name), "arrow-up", format!("「{}」を上へ", f.name), i > 0)

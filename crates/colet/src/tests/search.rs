@@ -185,6 +185,50 @@ fn chooses_a_filter_from_the_keys_and_hands_them_back_to_the_field(cx: &mut Test
 }
 
 #[gpui_kit::test]
+fn opens_a_tab_afresh_within_the_default_filter_leaving_those_open_as_they_are(cx: &mut TestAppContext) {
+    let fake = Arc::new(with_filters(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[(r"D:\", vec![folder(r"D:\work")]), (r"D:\work", vec![])])
+    }));
+    fake.settings.lock().unwrap().default_filter = Some("動画".into());
+    let default = |fake: &Fake| fake.settings.lock().unwrap().default_filter.clone();
+    let chosen = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.chosen_filter.clone());
+    // With no tab kept, the first opens within it.
+    let ui = open(cx, fake.clone());
+    assert_eq!(chosen(&ui, cx).as_deref(), Some("動画"));
+    // Another made the default, then pressed again, none is; the tab open keeps its own.
+    ui.click(cx, "search-filter");
+    ui.click(cx, "edit-filters");
+    ui.click(cx, filter_tool_id("filter-default", "画像"));
+    assert_eq!(default(&fake).as_deref(), Some("画像"));
+    ui.click(cx, filter_tool_id("filter-default", "画像"));
+    assert_eq!(default(&fake), None);
+    ui.click(cx, filter_tool_id("filter-default", "画像"));
+    ui.click(cx, "close-filters");
+    assert_eq!(chosen(&ui, cx).as_deref(), Some("動画"));
+    // A folder opened in a tab, and a tab of home alone, open within the default.
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "ctrl-enter");
+    ui.press(cx, "ctrl-tab");
+    assert_eq!(chosen(&ui, cx).as_deref(), Some("画像"));
+    ui.press(cx, "ctrl-t");
+    assert_eq!(chosen(&ui, cx).as_deref(), Some("画像"));
+    // Renamed, the default follows; deleted, none is the default.
+    ui.click(cx, "search-filter");
+    ui.click(cx, "edit-filters");
+    ui.click(cx, filter_tool_id("filter-edit", "画像"));
+    ui.type_filter(cx, "写真", "ext:jpg");
+    ui.click(cx, "save-filter");
+    assert_eq!(default(&fake).as_deref(), Some("写真"));
+    ui.click(cx, filter_tool_id("filter-delete", "写真"));
+    ui.click(cx, "delete-filter");
+    assert_eq!(default(&fake), None);
+    ui.click(cx, "close-filters");
+    ui.press(cx, "ctrl-t");
+    assert_eq!(chosen(&ui, cx), None);
+}
+
+#[gpui_kit::test]
 fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\cat.jpg")]));
     let ui = open(cx, fake.clone());

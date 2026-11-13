@@ -189,6 +189,8 @@ pub struct Settings {
     /// narrowed favorite's or a saved search's key.
     pub pinned: Vec<PathBuf>,
     pub filters: Vec<SearchFilter>,
+    /// The filter, by name, a tab opened afresh is to search within; with none, none.
+    pub default_filter: Option<String>,
     /// The tabs, in their order, and the one in front.
     pub tabs: Vec<KeptTab>,
     pub tab: usize,
@@ -212,6 +214,7 @@ impl Default for Settings {
             saved_searches: Vec::new(),
             pinned: Vec::new(),
             filters: Vec::new(),
+            default_filter: None,
             tabs: Vec::new(),
             tab: 0,
             theme: Theme::System,
@@ -236,6 +239,9 @@ impl Settings {
         let mut names = std::collections::HashSet::new();
         self.filters.retain(|f| !f.name.trim().is_empty() && !f.query.trim().is_empty() && names.insert(f.name.clone()));
         let known = |name: &Option<String>| name.as_ref().is_none_or(|name| names.contains(name));
+        if !known(&self.default_filter) {
+            self.default_filter = None;
+        }
         for tab in &mut self.tabs {
             tab.place.without_filter_alone();
             if !known(&tab.filter) {
@@ -841,6 +847,7 @@ mod tests {
         };
         let mut settings = Settings {
             filters: vec![filter("画像", "ext:jpg;png"), filter("", "ext:mp3"), filter("動画", " "), filter("画像", "ext:gif")],
+            default_filter: Some("動画".into()),
             tabs: vec![KeptTab { filter: Some("動画".into()), ..KeptTab::default() }],
             saved_searches: vec![
                 search("cat", Some("画像")),
@@ -852,6 +859,7 @@ mod tests {
         };
         settings.normalize();
         assert_eq!(settings.filters, [filter("画像", "ext:jpg;png")]);
+        assert_eq!(settings.default_filter, None);
         assert_eq!(settings.tabs[0].filter, None);
         // The one saved with a filter gone is the one saved with none, already there.
         assert_eq!(settings.saved_searches, [search("cat", Some("画像")), search("cat", None)]);

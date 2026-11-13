@@ -22,6 +22,19 @@ impl Colet {
         self.changed(cx);
     }
 
+    /// The filter a tab opened afresh starts with.
+    pub fn default_filter(&self) -> Option<String> {
+        self.stored.settings().default_filter.clone()
+    }
+
+    /// Makes the filter named `name` the default, or, the default already, leaves none the default. The
+    /// tabs open keep the filter each has.
+    pub fn toggle_default_filter(&mut self, name: &str, cx: &mut Context<Self>) {
+        let to = (self.stored.settings().default_filter.as_deref() != Some(name)).then(|| name.to_owned());
+        self.update_settings(|s| s.default_filter = to, cx);
+        cx.notify();
+    }
+
     pub fn open_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.take_menu();
         self.back_to_filters(window, cx);
@@ -107,6 +120,7 @@ impl Colet {
                     for saved in &mut s.saved_searches {
                         follow(&mut saved.filter);
                     }
+                    follow(&mut s.default_filter);
                     // A pinned search keeps its pin under the name.
                     for pin in &mut s.pinned {
                         if let HomeKey::Search { query, filter: Some(filter), narrow, order } = HomeKey::of(pin)
@@ -148,7 +162,15 @@ impl Colet {
     pub fn delete_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(Dialog::Filters { deleting: Some(name), .. }) = self.overlays.dialog() else { return };
         let name = name.clone();
-        self.update_settings(|s| s.filters.retain(|f| f.name != name), cx);
+        self.update_settings(
+            |s| {
+                s.filters.retain(|f| f.name != name);
+                if s.default_filter.as_ref() == Some(&name) {
+                    s.default_filter = None;
+                }
+            },
+            cx,
+        );
         self.rename_filter_in_tabs(&name, None);
         self.changed(cx);
         self.back_to_filters(window, cx);

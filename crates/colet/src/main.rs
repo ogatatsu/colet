@@ -42,6 +42,8 @@ gpui_kit::assets::icon_assets!(
         X,
         ChevronsLeft,
         Check,
+        Circle,
+        CircleCheck,
         SlidersHorizontal,
         StarFill,
         Pin,

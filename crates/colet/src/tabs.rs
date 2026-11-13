@@ -216,6 +216,7 @@ impl Colet {
             }
         }
         if self.tabs.is_empty() {
+            self.chosen_filter = self.default_filter();
             self.tabs.push(None);
         }
         self.state.set_showing(self.showing());
@@ -347,7 +348,7 @@ impl Colet {
         if self.tabs_held() {
             return;
         }
-        let at = self.tabs.insert(self.tabs.len(), Parked::new(State::new(), None, Keys::Search));
+        let at = self.tabs.insert(self.tabs.len(), Parked::new(State::new(), self.default_filter(), Keys::Search));
         self.switch_tab(at, window, cx);
     }
 
@@ -368,7 +369,8 @@ impl Colet {
                 if c.kind == Kind::Home { State::opening_home(c, &entry.path) } else { State::opening(&entry.path, entry.directory) };
             (state, entry.directory)
         };
-        let filter = if state.pinned() { state.search_filter.clone() } else { None };
+        // A saved search keeps the filter it was saved with, none too; anything else starts with the default.
+        let filter = if state.pinned() { state.search_filter.clone() } else { self.default_filter() };
         let opened = state.columns.last().filter(|last| last.kind != Kind::Home && (directory || state.pinned())).map(|last| last.id);
         if opened.is_some() {
             state.set_active(state.columns.len() - 1);
@@ -389,7 +391,7 @@ impl Colet {
         if directory {
             state.set_active(state.columns.len() - 1);
         }
-        let at = self.tabs.insert(self.tabs.current() + 1, Parked::new(state, None, Keys::Column));
+        let at = self.tabs.insert(self.tabs.current() + 1, Parked::new(state, self.default_filter(), Keys::Column));
         self.switch_tab(at, window, cx);
     }
 
