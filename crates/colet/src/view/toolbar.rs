@@ -85,12 +85,10 @@ impl Colet {
                                 cx.stop_propagation();
                                 this.leave_search(window, cx);
                             }))
-                            // Esc empties the field, then lets go of the filter, and home shows alone.
+                            // Esc empties the field; the filter chosen stays, let go of only from its menu.
                             .on_action(cx.listener(|this, _: &input::Escape, window, cx| {
                                 if !this.state.query.is_empty() {
                                     this.clear_search(window, cx);
-                                } else if this.chosen_filter.is_some() {
-                                    this.choose_filter(None, cx);
                                 }
                             }))
                             .children(clear)

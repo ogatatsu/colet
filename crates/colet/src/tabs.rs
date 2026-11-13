@@ -80,11 +80,10 @@ fn column_title(state: &State, index: usize) -> (String, String) {
     match c.kind {
         Kind::Home => ("ホーム".into(), "ホーム".into()),
         Kind::Search => {
-            let filter = state.search_filter.as_deref();
-            let name = if state.query.is_empty() { filter.unwrap_or_default().to_owned() } else { state.query.clone() };
-            let tip = match filter {
-                Some(filter) if !state.query.is_empty() => format!("{filter} {}", state.query),
-                _ => name.clone(),
+            let name = state.query.clone();
+            let tip = match state.search_filter.as_deref() {
+                Some(filter) => format!("{filter} {name}"),
+                None => name.clone(),
             };
             (name, tip)
         }

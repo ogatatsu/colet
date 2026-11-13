@@ -13,8 +13,8 @@ pub struct FilterEdit {
 }
 
 impl Colet {
-    /// Searches within `name`, or none, from now on: what is typed, or with nothing typed all the filter
-    /// lets through; with neither, home shows alone.
+    /// Searches within `name`, or none, from now on: what is typed is searched again within it; with
+    /// nothing typed home stays as it is, the filter waiting for the first key.
     pub fn choose_filter(&mut self, name: Option<String>, cx: &mut Context<Self>) {
         self.chosen_filter = name.clone();
         let query = self.state.query.clone();

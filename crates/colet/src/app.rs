@@ -486,8 +486,8 @@ impl Colet {
         this
     }
 
-    /// The search field, and what it tells: what is typed is searched within the filter chosen, as is an
-    /// empty field while one is; Enter leaves it for the results.
+    /// The search field, and what it tells: what is typed is searched within the filter chosen; an empty
+    /// field searches for nothing. Enter leaves it for the results.
     fn search_field(window: &mut Window, cx: &mut Context<Self>) -> (Entity<InputState>, Subscription) {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Everythingで検索（Ctrl+F）"));
         let typed = cx.subscribe_in(&search, window, |this: &mut Self, input, event, window, cx| match event {
@@ -1091,7 +1091,7 @@ impl Colet {
         }
     }
 
-    /// Empties the field; the filter chosen, if any, still shows all it lets through.
+    /// Empties the field, and home shows alone; the filter chosen stays for the next search.
     pub fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.update(cx, |input, cx| input.set_value("", window, cx));
         self.state.set_search("", self.chosen_filter.clone());

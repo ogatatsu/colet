@@ -109,7 +109,7 @@ pub struct SearchFilter {
 }
 
 /// What Everything is asked: the query narrowed by the filter's, each in `< >` so an `|` in one does not
-/// reach into the other. A filter alone asks for all it lets through.
+/// reach into the other. With only spaces typed, the filter asks for all it lets through.
 pub fn everything_query(query: &str, filter: Option<&str>) -> String {
     match filter {
         None => query.to_owned(),
@@ -237,6 +237,7 @@ impl Settings {
         self.filters.retain(|f| !f.name.trim().is_empty() && !f.query.trim().is_empty() && names.insert(f.name.clone()));
         let known = |name: &Option<String>| name.as_ref().is_none_or(|name| names.contains(name));
         for tab in &mut self.tabs {
+            tab.place.without_filter_alone();
             if !known(&tab.filter) {
                 tab.filter = None;
             }
@@ -678,6 +679,15 @@ mod tests {
             r#"{"query":"cat","search_order":{"by":"size","descending":true},"filter":"画像","folders":[{"path":"D:\\a","highlight":"D:\\a\\b"},{"path":"D:\\a\\b"}],"picks":[null,"D:\\a"],"active":2,"fold":{"anchor":0,"open":true}}"#
         );
         assert_eq!(serde_json::from_str::<KeptTab>(&json).unwrap(), tab);
+        // A tab an older Colet kept searching with a filter alone opens on home, the filter still chosen.
+        let mut settings = Settings {
+            filters: vec![SearchFilter { name: "画像".into(), query: "ext:jpg".into() }],
+            tabs: vec![serde_json::from_str(r#"{"search_filter":"画像","filter":"画像","picks":[null,"D:\\a"],"active":1}"#).unwrap()],
+            ..Settings::default()
+        };
+        settings.normalize();
+        assert_eq!((settings.tabs[0].place.search_filter.as_deref(), settings.tabs[0].filter.as_deref()), (None, Some("画像")));
+        assert_eq!((settings.tabs[0].place.picks.as_slice(), settings.tabs[0].place.active), ([None].as_slice(), 0));
         // A fold whose anchor is not among the folders goes.
         let read: KeptTab = serde_json::from_str(r#"{"folders":[{"path":"D:\\a"}],"fold":{"anchor":1,"open":false}}"#).unwrap();
         assert_eq!(read.place.fold, None);

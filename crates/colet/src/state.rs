@@ -316,16 +316,21 @@ pub struct Kept {
 impl Kept {
     /// The search filter `from` is named `to` now, or is gone, as [`State::rename_search_filter`] has it.
     pub fn rename_search_filter(&mut self, from: &str, to: Option<&str>) {
-        if self.search_filter.as_deref() != Some(from) {
+        if self.search_filter.as_deref() == Some(from) {
+            self.search_filter = to.map(Into::into);
+        }
+    }
+
+    /// A tab kept by an older Colet, which searched with a filter alone, shows home in its place: a filter
+    /// searches only with something typed. The results column goes, and what was picked there with it.
+    pub fn without_filter_alone(&mut self) {
+        if !self.query.is_empty() || self.search_filter.take().is_none() {
             return;
         }
-        self.search_filter = to.map(Into::into);
-        if to.is_none() && self.query.is_empty() {
-            if self.picks.len() > 1 {
-                self.picks.remove(1);
-            }
-            self.active = self.active.saturating_sub(1);
+        if self.picks.len() > 1 {
+            self.picks.remove(1);
         }
+        self.active = self.active.saturating_sub(1);
     }
 }
 
@@ -635,7 +640,7 @@ impl State {
     fn restore(&mut self, location: Location) {
         let home = self.columns.swap_remove(0);
         let mut columns = vec![home];
-        if !location.query.is_empty() || location.search_filter.is_some() {
+        if !location.query.is_empty() {
             columns.push(self.column(Kind::Search, Path::new(""), None));
         }
         for (path, highlight) in &location.folders {
@@ -713,13 +718,16 @@ impl State {
         self.set_search(query, filter);
     }
 
-    /// Home stays beside the results; its pick has nothing to do with them, so it lets go. A filter alone
-    /// searches too. Another filter is a step back and forth, as leaving the results is; a key typed is not.
+    /// Home stays beside the results; its pick has nothing to do with them, so it lets go. Only what is
+    /// typed searches: a filter with nothing typed is no search, and is not kept. Another filter for what
+    /// is typed is a step back and forth, as leaving the results is; a key typed is not.
     pub fn set_search(&mut self, query: &str, filter: Option<String>) {
+        let searching = !query.is_empty();
+        let filter = filter.filter(|_| searching);
         if query == self.query && filter == self.search_filter {
             return;
         }
-        let (was, searching) = (self.pinned(), !query.is_empty() || filter.is_some());
+        let was = self.pinned();
         let leaving = self.columns.len() > if was { 2 } else { 1 } || (was && (!searching || filter != self.search_filter));
         if leaving {
             let location = self.snapshot();
@@ -742,32 +750,18 @@ impl State {
     }
 
     /// The search filter `from` is named `to` now, or is gone: the way back and forth follows it. Gone
-    /// from the results, they show without it, or go with it when nothing was typed.
+    /// from the results, they show without it.
     pub fn rename_search_filter(&mut self, from: &str, to: Option<&str>) {
         for location in self.past.iter_mut().chain(self.future.iter_mut()) {
             if location.search_filter.as_deref() == Some(from) {
                 location.search_filter = to.map(Into::into);
-                // With nothing typed, the results column goes from it, and what was picked there with it.
-                if to.is_none() && location.query.is_empty() {
-                    if location.selections.len() > 1 {
-                        location.selections.remove(1);
-                    }
-                    location.active = location.active.saturating_sub(1);
-                }
             }
         }
         if self.search_filter.as_deref() != Some(from) {
             return;
         }
         self.search_filter = to.map(Into::into);
-        if to.is_some() {
-            return;
-        }
-        if self.query.is_empty() {
-            self.columns.truncate(1);
-            self.active = 0;
-            self.fold = None;
-        } else {
+        if to.is_none() {
             self.reset_search();
         }
     }

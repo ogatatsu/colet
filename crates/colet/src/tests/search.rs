@@ -127,29 +127,35 @@ fn narrows_the_results_by_name_through_everything_keeping_the_one_picked(cx: &mu
 }
 
 #[gpui_kit::test]
-fn searches_within_the_filter_chosen_with_nothing_typed_too(cx: &mut TestAppContext) {
+fn searches_within_the_filter_chosen_only_once_something_is_typed(cx: &mut TestAppContext) {
     let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\a.jpg")])));
     let ui = open(cx, fake.clone());
+    let asked = fake.queries().len();
     ui.click(cx, "search-filter");
     assert!(ui.read(cx, |v| v.filter_open()));
     ui.click(cx, crate::dialogs::filter_tool_id("filter", "画像"));
     assert!(!ui.read(cx, |v| v.filter_open()));
     assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
-    assert_eq!(last_query(&fake), "<ext:jpg;png>");
-    assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 1);
+    // Chosen with nothing typed, it asks nothing, and home stays alone.
+    assert_eq!(fake.queries().len(), asked);
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 1);
+    assert!(!ui.read(cx, |v| v.state.can_go_back()));
     // What is typed is searched within it.
     ui.press(cx, "ctrl-f");
     ui.input(cx, "cat");
     assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
-    // Esc empties the field, the filter still showing all it lets through; again, it lets go of it.
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 1);
+    // Esc empties the field and home shows alone; again, the filter still stays chosen.
     ui.press(cx, "escape");
     assert_eq!(ui.field(cx), "");
-    assert_eq!(last_query(&fake), "<ext:jpg;png>");
-    assert_eq!(ui.read(cx, |v| v.state.columns.len()), 2);
-    ui.press(cx, "escape");
-    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter, None);
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 1);
+    ui.press(cx, "escape");
+    assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
+    ui.input(cx, "dog");
+    assert_eq!(last_query(&fake), "<ext:jpg;png> <dog>");
     // Without one, what is typed is searched as it stands.
+    ui.press(cx, "escape");
+    ui.act(cx, |_, cx| ui.view.update(cx, |v, cx| v.choose_filter(None, cx)));
     ui.input(cx, "cat");
     assert_eq!(last_query(&fake), "cat");
 }

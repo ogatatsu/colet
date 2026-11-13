@@ -891,13 +891,16 @@ fn kinds(s: &State) -> Vec<Kind> {
 }
 
 #[test]
-fn searches_with_a_filter_alone_and_steps_back_to_the_filter_before() {
+fn searches_within_a_filter_only_what_is_typed_and_steps_back_to_the_filter_before() {
     let mut s = State::new();
+    // A filter with nothing typed is no search, and no step.
     s.set_search("", Some("画像".into()));
+    assert_eq!(kinds(&s), [Kind::Home]);
+    assert_eq!(s.search_filter, None);
+    assert!(!s.can_go_back());
+    // Typing searches within it, and is no step of its own.
+    s.set_search("cat", Some("画像".into()));
     assert_eq!(kinds(&s), [Kind::Home, Kind::Search]);
-    assert_eq!(s.active, 1);
-    // Typing keeps the filter, and is no step of its own.
-    s.set_query("cat");
     assert_eq!(s.search_filter.as_deref(), Some("画像"));
     assert!(!s.can_go_back());
     s.set_search("cat", Some("動画".into()));
@@ -908,11 +911,13 @@ fn searches_with_a_filter_alone_and_steps_back_to_the_filter_before() {
     assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", Some("画像")));
     s.forward();
     assert_eq!(s.search_filter.as_deref(), Some("動画"));
-    // Nothing typed and no filter, the results go.
-    s.set_search("", None);
+    // Nothing typed, the results go, though a filter is still chosen.
+    s.set_search("", Some("動画".into()));
     assert_eq!(kinds(&s), [Kind::Home]);
+    assert_eq!(s.search_filter, None);
     s.back();
     assert_eq!(kinds(&s), [Kind::Home, Kind::Search]);
+    assert_eq!((s.query.as_str(), s.search_filter.as_deref()), ("cat", Some("動画")));
 }
 
 #[test]
@@ -983,7 +988,7 @@ fn opens_a_favorite_from_home_narrowed_as_it_was_kept() {
 #[test]
 fn follows_a_filter_renamed_or_gone_back_and_forth() {
     let mut s = State::new();
-    s.set_search("", Some("画像".into()));
+    s.set_search("cat", Some("画像".into()));
     s.set_search("cat", Some("動画".into()));
     s.rename_search_filter("画像", Some("写真"));
     s.rename_search_filter("動画", None);
@@ -992,26 +997,24 @@ fn follows_a_filter_renamed_or_gone_back_and_forth() {
     assert_eq!(kinds(&s), [Kind::Home, Kind::Search]);
     s.back();
     assert_eq!(s.search_filter.as_deref(), Some("写真"));
-    // With nothing typed, the results go with it.
-    s.rename_search_filter("写真", None);
-    assert_eq!(kinds(&s), [Kind::Home]);
-    assert_eq!(s.active, 0);
 }
 
 #[test]
-fn a_filter_gone_takes_its_results_pick_from_the_way_back() {
-    let mut s = State::new();
-    s.set_search("", Some("画像".into()));
-    with_entries(&mut s, 1, vec![folder(r"D:\a")]);
-    s.select(1, one(r"D:\a"));
-    s.set_search("cat", None);
-    s.rename_search_filter("画像", None);
-    s.back();
-    assert_eq!(kinds(&s), [Kind::Home, Kind::Folder, Kind::Folder]);
-    // Each folder takes back its own pick, not the one of the column before it: the result's.
-    assert_eq!(s.columns[1].selected, one(r"D:\a"));
-    assert!(s.columns[2].selected.is_empty());
-    assert_eq!(s.active, 0);
+fn opens_a_tab_kept_searching_with_a_filter_alone_on_home() {
+    let mut kept = Kept {
+        search_filter: Some("画像".into()),
+        folders: vec![(r"D:\a".into(), None)],
+        picks: vec![None, Some(r"D:\a".into()), None],
+        active: 2,
+        ..Kept::default()
+    };
+    kept.without_filter_alone();
+    assert_eq!(kept.search_filter, None);
+    let s = State::from_kept(kept);
+    assert_eq!(kinds(&s), [Kind::Home, Kind::Folder]);
+    // The results' pick goes with them, and the folder takes back its own, none.
+    assert!(s.columns[1].selected.is_empty());
+    assert_eq!(s.active, 1);
 }
 
 fn hidden(entry: Entry) -> Entry {
