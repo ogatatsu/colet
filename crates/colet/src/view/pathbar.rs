@@ -12,16 +12,11 @@ impl Colet {
         }
         let row = self.crumbs.row.get()?;
         let bounds = self.crumbs.bounds.borrow();
-        let head = screen.first + s0.floor() as usize;
-        let tail = screen.first + (s1.ceil() as usize).saturating_sub(1);
-        // Crumbs folded into the menu have no place to mark: start at the first one shown.
-        let drawn = |index: usize| self.state.columns.get(index).and_then(|c| bounds.get(&c.id));
-        let from = (head..=tail).find(|&i| drawn(i).is_some())?;
-        let (first, last) = (drawn(from)?, drawn(tail)?);
-        let into = if from == head { s0 - s0.floor() } else { 0. };
-        let start = f32::from(first.left()) + f32::from(first.size.width) * into;
-        let reach = s1 - (tail - screen.first) as f32;
-        let end = f32::from(last.left()) + f32::from(last.size.width) * reach.clamp(0., 1.);
+        let drawn = |k: usize| {
+            let c = self.state.columns.get(screen.first + k)?;
+            bounds.get(&c.id).map(|b| (f32::from(b.left()), f32::from(b.right())))
+        };
+        let (start, end) = crate::crumbs::bar((s0, s1), drawn)?;
         Some(
             div()
                 .id("crumb-bar")

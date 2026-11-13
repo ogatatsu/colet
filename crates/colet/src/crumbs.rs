@@ -58,9 +58,66 @@ pub fn folded(widths: &[f32], room: f32) -> usize {
     next
 }
 
+/// Where the bar under the crumbs starts and ends, given the columns on screen as [`crate::reveal::on_screen`]
+/// measures them and where each column's crumb was drawn, `(left, right)`, by the column's place on
+/// screen; `None` for one folded into the menu. Resting on a column's edge, the bar ends on its crumb's
+/// edge; scrolled part way, its start runs over the crumb and the gap and chevron after it, its end over
+/// the gap and chevron before the crumb and the crumb, so it never jumps across them.
+pub fn bar(span: (f32, f32), drawn: impl Fn(usize) -> Option<(f32, f32)>) -> Option<(f32, f32)> {
+    let (s0, s1) = span;
+    let head = s0.floor() as usize;
+    let tail = (s1.ceil() as usize).saturating_sub(1);
+    // Crumbs folded into the menu have no place to mark: start at the first one shown.
+    let from = (head..=tail).find(|&i| drawn(i).is_some())?;
+    let start = if from == head {
+        let (left, right) = drawn(head)?;
+        let next = drawn(head + 1).map_or(right, |n| n.0);
+        left + (next - left) * (s0 - s0.floor())
+    } else {
+        drawn(from)?.0
+    };
+    let (left, right) = drawn(tail)?;
+    let before = if tail > from { drawn(tail - 1).map_or(left, |p| p.1) } else { left };
+    let end = before + (right - before) * (s1 - tail as f32).clamp(0., 1.);
+    Some((start, end))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Crumbs 80px wide with 20px between them, from 0: column `i`'s spans `100 i` to `100 i + 80`.
+    fn spaced(i: usize) -> Option<(f32, f32)> {
+        (i < 4).then(|| (i as f32 * 100., i as f32 * 100. + 80.))
+    }
+
+    #[test]
+    fn the_bar_rests_on_the_crumbs_edges() {
+        assert_eq!(bar((1., 3.), spaced), Some((100., 280.)));
+        assert_eq!(bar((0., 4.), spaced), Some((0., 380.)));
+    }
+
+    #[test]
+    fn the_bar_runs_over_the_gaps_without_a_jump() {
+        // Halfway into a column, the start is halfway from its crumb to the next.
+        assert_eq!(bar((1.5, 3.5), spaced), Some((150., 330.)));
+        // Either side of a column's edge, both ends land where they would on it.
+        let (a, b) = bar((0.999, 2.999), spaced).unwrap();
+        let (c, d) = bar((1.001, 3.001), spaced).unwrap();
+        assert!((a - 100.).abs() < 0.2 && (c - 100.).abs() < 0.2, "{a} {c}");
+        assert!((b - 280.).abs() < 0.2 && (d - 280.).abs() < 0.2, "{b} {d}");
+    }
+
+    #[test]
+    fn the_bar_keeps_to_the_first_and_last_crumbs() {
+        // Past the last crumb there is no gap to run over: the start goes along the crumb alone.
+        assert_eq!(bar((3.5, 4.), spaced), Some((340., 380.)));
+        // Folded into the menu, the first two have no place: the bar starts at the first shown.
+        let shown = |i: usize| if i < 2 { None } else { spaced(i) };
+        assert_eq!(bar((0.5, 3.5), shown), Some((200., 330.)));
+        // With no crumb shown before the last on screen, its end goes along it alone.
+        assert_eq!(bar((1.5, 2.5), shown), Some((200., 240.)));
+    }
 
     #[test]
     fn folds_nothing_while_the_trail_fits() {
