@@ -33,7 +33,7 @@ use crate::{
     loading::Engine,
     ops::ItemStatus,
     places::Dialog,
-    settings::{LoadError, SavedSearch, SearchFilter, Settings, Theme},
+    settings::{LoadError, Loaded, SavedSearch, SearchFilter, Settings, Theme},
     sorts::Sorts,
     state::{ColumnId, HomeKey, Kind},
     stops::Stop,
@@ -184,10 +184,10 @@ impl Backend for Fake {
         Ok(self.changed.load(Ordering::Relaxed))
     }
 
-    fn load_settings(&self) -> Result<Settings, LoadError> {
+    fn load_settings(&self) -> Loaded<Settings> {
         match self.unreadable.lock().unwrap().clone() {
-            Some(error) => Err(error),
-            None => Ok(self.settings.lock().unwrap().clone()),
+            Some(error) => Loaded::failed(error),
+            None => Loaded::read(self.settings.lock().unwrap().clone()),
         }
     }
 
@@ -197,10 +197,10 @@ impl Backend for Fake {
         Ok(())
     }
 
-    fn load_sorts(&self) -> Result<Sorts, LoadError> {
+    fn load_sorts(&self) -> Loaded<Sorts> {
         match self.unreadable_sorts.lock().unwrap().clone() {
-            Some(error) => Err(error),
-            None => Ok(self.sorts.lock().unwrap().clone()),
+            Some(error) => Loaded::failed(error),
+            None => Loaded::read(self.sorts.lock().unwrap().clone()),
         }
     }
 

@@ -40,7 +40,7 @@ use crate::{
     overlays::Overlays,
     places::{Dialog, HomeDragging, home_entries, home_groups},
     scrolls::Scrolls,
-    settings::{self, File, LoadError, Saver, Saves, Settings, everything_query, narrowed_query},
+    settings::{self, File, Loaded, Saver, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
     stops::{Stop, Stops},
@@ -295,18 +295,15 @@ pub enum Tone {
     Error,
 }
 
-/// A file kept between starts as it was `read`, or the defaults with what to say of it, and its saves
-/// through `write`: none while the file could not be read and is still there, so it is never written over.
+/// A file kept between starts as it was `read`, what to say of what of it could not be, and its saves
+/// through `write`: none while the file was not all read and is still there, so it is never written over.
 fn kept<T: Default + Clone + Send + 'static>(
-    read: Result<T, LoadError>,
+    read: Loaded<T>,
     file: &File,
     write: impl Fn(&T) -> Result<(), String> + Send + Sync + 'static,
 ) -> (T, Saves<T>, Option<String>) {
-    let (value, problem, still_there) = match read {
-        Ok(value) => (value, None, false),
-        Err(error) => (T::default(), Some(error.message), error.kept),
-    };
-    (value, Saves::new((!still_there).then(|| Saver::new(file, write))), problem)
+    let still_there = read.problem.as_ref().is_some_and(|problem| problem.kept);
+    (read.value, Saves::new((!still_there).then(|| Saver::new(file, write))), read.problem.map(|problem| problem.message))
 }
 
 /// What a listing came back with.
@@ -388,8 +385,8 @@ impl Colet {
     /// used. A file still there unread is never written over.
     pub fn new(
         backend: backend::Shared,
-        settings: Result<Settings, LoadError>,
-        sorts: Result<Sorts, LoadError>,
+        settings: Loaded<Settings>,
+        sorts: Loaded<Sorts>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {

@@ -9,7 +9,7 @@ use std::sync::{
 };
 
 use crate::{
-    settings::{self, LoadError, Settings},
+    settings::{self, Loaded, Settings},
     sorts::{self, Sorts},
 };
 use colet_core::{
@@ -53,9 +53,9 @@ pub trait Backend: Send + Sync + 'static {
     fn count(&self, query: &str) -> Result<usize, String>;
     /// Whether the last search's results changed; so until it is searched afresh.
     fn search_changed(&self) -> Result<bool, String>;
-    fn load_settings(&self) -> Result<Settings, LoadError>;
+    fn load_settings(&self) -> Loaded<Settings>;
     fn save_settings(&self, settings: &Settings) -> Result<(), String>;
-    fn load_sorts(&self) -> Result<Sorts, LoadError>;
+    fn load_sorts(&self) -> Loaded<Sorts>;
     fn save_sorts(&self, sorts: &Sorts) -> Result<(), String>;
     /// Carries out a file operation, telling `report` how each item ends; a paste pastes `clipboard`, the
     /// files read from it, or when `None` reads them itself. Blocks until it is done.
@@ -159,7 +159,7 @@ impl Backend for Live {
         }
     }
 
-    fn load_settings(&self) -> Result<Settings, LoadError> {
+    fn load_settings(&self) -> Loaded<Settings> {
         settings::load()
     }
 
@@ -167,7 +167,7 @@ impl Backend for Live {
         settings::save(settings)
     }
 
-    fn load_sorts(&self) -> Result<Sorts, LoadError> {
+    fn load_sorts(&self) -> Loaded<Sorts> {
         sorts::load()
     }
 

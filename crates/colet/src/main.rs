@@ -9,6 +9,7 @@ mod dialogs;
 mod drag_out;
 mod icons;
 mod instance;
+mod kept_path;
 mod lane;
 mod loading;
 mod menus;
@@ -94,7 +95,7 @@ fn main() {
         let settings = live.load_settings();
         let sorts = live.load_sorts();
         // Where it was left, or centered on the screen the first time.
-        let (display_id, window_bounds) = match settings.as_ref().ok().and_then(|s| s.window) {
+        let (display_id, window_bounds) = match settings.value.window {
             Some(w) => {
                 let displays: Vec<_> = cx.displays().iter().map(|d| (d.id(), d.bounds())).collect();
                 let primary = cx.primary_display().map(|d| d.id());

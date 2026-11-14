@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::{COLUMN_WIDTHS, SEARCH_FIELD_WIDTH, SEARCH_FIELD_WIDTHS, SIDEBAR_WIDTHS},
+    kept_path::KeptPath,
     lane::Lane,
     state::{Fold, HomeKey, Kept, narrow_words, narrowing},
 };
@@ -57,6 +58,7 @@ impl SavedSearch {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Favorite {
+    #[serde(with = "crate::kept_path")]
     pub path: PathBuf,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -172,8 +174,8 @@ pub struct Placement {
     pub maximized: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+/// Read as [`Lenient::from_json`] reads it, one field and one item at a time.
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Settings {
     /// The folders' shared width.
     pub column_width: f32,
@@ -187,6 +189,7 @@ pub struct Settings {
     pub saved_searches: Vec<SavedSearch>,
     /// Home's rows pinned above the rest, in their order, by the path each row has: a folder's, or a
     /// narrowed favorite's or a saved search's key.
+    #[serde(serialize_with = "crate::kept_path::serialize_each")]
     pub pinned: Vec<PathBuf>,
     pub filters: Vec<SearchFilter>,
     /// The filter, by name, a tab opened afresh is to search within; with none, none.
@@ -327,22 +330,93 @@ impl Settings {
             HomeKey::Search { .. } => false,
         }
     }
+}
 
-    /// The settings as they can be written: the file holds a path only as text, so a favorite, pin or tab
-    /// with a path that is not (an unpaired surrogate, which Windows allows in a name) is left out.
-    fn writable(&self) -> Settings {
-        let text = |path: &Path| path.to_str().is_some();
-        let tab_text = |tab: &KeptTab| {
-            tab.place.folders.iter().all(|(path, highlight)| text(path) && highlight.as_deref().is_none_or(text))
-                && tab.place.picks.iter().flatten().all(|pick| text(pick))
-        };
-        let mut settings = self.clone();
-        settings.favorites.retain(|f| text(&f.path));
-        settings.pinned.retain(|pin| text(pin));
-        settings.tab -= self.tabs.iter().take(self.tab).filter(|tab| !tab_text(tab)).count();
-        settings.tabs.retain(tab_text);
-        settings.tab = settings.tab.min(settings.tabs.len().saturating_sub(1));
-        settings
+impl Lenient for Settings {
+    fn from_json(fields: &mut Fields) -> Self {
+        let d = Settings::default();
+        let tabs = fields.each::<KeptTab>("tabs");
+        // The tab in front stays in front of those that are left.
+        let tab = fields.one("tab").unwrap_or(d.tab);
+        let tab = tab - tabs.iter().take(tab).filter(|tab| tab.is_none()).count();
+        Settings {
+            column_width: fields.one("column_width").unwrap_or(d.column_width),
+            search_width: fields.one("search_width").unwrap_or(d.search_width),
+            sidebar_width: fields.one("sidebar_width").unwrap_or(d.sidebar_width),
+            search_field_width: fields.one("search_field_width").unwrap_or(d.search_field_width),
+            favorites: fields.many("favorites"),
+            saved_searches: fields.many("saved_searches"),
+            pinned: fields.many::<KeptPath>("pinned").into_iter().map(|pin| pin.0).collect(),
+            filters: fields.many("filters"),
+            default_filter: fields.one("default_filter").unwrap_or(d.default_filter),
+            tabs: tabs.into_iter().flatten().collect(),
+            tab,
+            theme: fields.one("theme").unwrap_or(d.theme),
+            show_hidden: fields.one("show_hidden").unwrap_or(d.show_hidden),
+            show_protected: fields.one("show_protected").unwrap_or(d.show_protected),
+            window: fields.one("window").unwrap_or(d.window),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Settings {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        lenient(deserializer)
+    }
+}
+
+/// A file Colet keeps, read a field and an item at a time: one that cannot be read is left out, the
+/// rest kept, as a file edited by hand, or by another Colet, may hold one it does not know.
+pub trait Lenient: Sized {
+    fn from_json(fields: &mut Fields) -> Self;
+}
+
+/// `T` read as [`Lenient`] reads it, what it cannot read let go of unsaid.
+pub fn lenient<'de, T: Lenient, D: serde::Deserializer<'de>>(deserializer: D) -> Result<T, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let mut fields = Fields::of(value).map_err(serde::de::Error::custom)?;
+    Ok(T::from_json(&mut fields))
+}
+
+/// The fields of a file's object, as they are taken, with how many of them, or of their items, could
+/// not be read.
+pub struct Fields {
+    map: serde_json::Map<String, serde_json::Value>,
+    pub skipped: usize,
+}
+
+impl Fields {
+    pub fn of(value: serde_json::Value) -> Result<Self, String> {
+        match value {
+            serde_json::Value::Object(map) => Ok(Self { map, skipped: 0 }),
+            _ => Err("オブジェクトではありません".into()),
+        }
+    }
+
+    /// The field `key`; none when it is not there, or cannot be read, which is counted.
+    pub fn one<T: serde::de::DeserializeOwned>(&mut self, key: &str) -> Option<T> {
+        let value = self.map.remove(key)?;
+        serde_json::from_value(value).inspect_err(|_| self.skipped += 1).ok()
+    }
+
+    /// The list `key`, an item at a time: none where one cannot be read, which is counted. One that is
+    /// not a list counts as one.
+    pub fn each<T: serde::de::DeserializeOwned>(&mut self, key: &str) -> Vec<Option<T>> {
+        match self.map.remove(key) {
+            None => Vec::new(),
+            Some(serde_json::Value::Array(items)) => {
+                items.into_iter().map(|item| serde_json::from_value(item).inspect_err(|_| self.skipped += 1).ok()).collect()
+            }
+            Some(_) => {
+                self.skipped += 1;
+                Vec::new()
+            }
+        }
+    }
+
+    /// The items of the list `key` that can be read.
+    pub fn many<T: serde::de::DeserializeOwned>(&mut self, key: &str) -> Vec<T> {
+        self.each(key).into_iter().flatten().collect()
     }
 }
 
@@ -361,7 +435,7 @@ struct TabFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     filter: Option<String>,
     folders: Vec<FolderFile>,
-    picks: Vec<Option<PathBuf>>,
+    picks: Vec<Option<KeptPath>>,
     active: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     fold: Option<Fold<usize>>,
@@ -369,21 +443,21 @@ struct TabFile {
 
 #[derive(Serialize, Deserialize)]
 struct FolderFile {
-    path: PathBuf,
+    path: KeptPath,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    highlight: Option<PathBuf>,
+    highlight: Option<KeptPath>,
 }
 
 impl From<TabFile> for KeptTab {
     fn from(file: TabFile) -> Self {
-        let folders: Vec<_> = file.folders.into_iter().map(|f| (f.path, f.highlight)).collect();
+        let folders: Vec<_> = file.folders.into_iter().map(|f| (f.path.0, f.highlight.map(|h| h.0))).collect();
         let place = Kept {
             query: file.query,
             search_filter: file.search_filter,
             search_order: file.search_order,
             fold: file.fold.filter(|fold| fold.anchor < folders.len()),
             folders,
-            picks: file.picks,
+            picks: file.picks.into_iter().map(|pick| pick.map(|p| p.0)).collect(),
             active: file.active,
         };
         KeptTab { place, filter: file.filter }
@@ -398,8 +472,12 @@ impl From<KeptTab> for TabFile {
             search_filter: place.search_filter,
             search_order: place.search_order,
             filter: tab.filter,
-            folders: place.folders.into_iter().map(|(path, highlight)| FolderFile { path, highlight }).collect(),
-            picks: place.picks,
+            folders: place
+                .folders
+                .into_iter()
+                .map(|(path, highlight)| FolderFile { path: KeptPath(path), highlight: highlight.map(KeptPath) })
+                .collect(),
+            picks: place.picks.into_iter().map(|pick| pick.map(KeptPath)).collect(),
             active: place.active,
             fold: place.fold,
         }
@@ -411,13 +489,47 @@ pub fn kept_path(name: &str) -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("APPDATA")?).join("Colet").join(name))
 }
 
-/// Why a file kept could not be used; Colet starts on the defaults either way.
+/// Why a file kept could not be used, or not all of it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadError {
     pub message: String,
-    /// The file is still where it was, unread: writing the defaults over it would lose it, so nothing is
-    /// saved until Colet is started again.
+    /// The file is still where it was, not all read: writing over it would lose what was not, so nothing
+    /// is saved until Colet is started again.
     pub kept: bool,
+}
+
+/// A file kept as it was read: what of it could be used, the defaults for the rest, and what to say of
+/// what could not.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Loaded<T> {
+    pub value: T,
+    pub problem: Option<LoadError>,
+}
+
+impl<T: Default> Loaded<T> {
+    pub fn read(value: T) -> Self {
+        Self { value, problem: None }
+    }
+
+    /// None of it: the defaults.
+    pub fn failed(problem: LoadError) -> Self {
+        Self { value: T::default(), problem: Some(problem) }
+    }
+}
+
+#[cfg(test)]
+impl<T> Loaded<T> {
+    /// All of it, read with nothing to say.
+    pub fn unwrap(self) -> T {
+        if let Some(problem) = self.problem {
+            panic!("{problem:?}");
+        }
+        self.value
+    }
+
+    pub fn unwrap_err(self) -> LoadError {
+        self.problem.expect("read with nothing to say")
+    }
 }
 
 /// A file Colet keeps, as its words name it.
@@ -514,37 +626,38 @@ pub fn path() -> Option<PathBuf> {
 }
 
 /// The settings kept, or the defaults when there are none yet.
-pub fn load() -> Result<Settings, LoadError> {
-    let Some(path) = path() else { return Ok(Settings::default()) };
+pub fn load() -> Loaded<Settings> {
+    let Some(path) = path() else { return Loaded::read(Settings::default()) };
     load_from(&path)
 }
 
-fn load_from(path: &Path) -> Result<Settings, LoadError> {
-    read(path, &SETTINGS).map(|mut settings: Settings| {
-        settings.normalize();
-        settings
-    })
+fn load_from(path: &Path) -> Loaded<Settings> {
+    let mut loaded = read::<Settings>(path, &SETTINGS);
+    loaded.value.normalize();
+    loaded
 }
 
-/// What `path` holds, or the defaults when it is not there yet. A file that does not parse is put aside,
-/// so the defaults written next do not take its place unseen.
-pub fn read<T: serde::de::DeserializeOwned + Default>(path: &Path, file: &File) -> Result<T, LoadError> {
+/// What `path` holds, or the defaults when it is not there yet. A file that is not JSON is put aside, so
+/// the defaults written next do not take its place unseen; one with fields or items that cannot be read
+/// is read without them, and copied aside, as the next save leaves them out.
+pub fn read<T: Lenient + Default>(path: &Path, file: &File) -> Loaded<T> {
     let kept = |e: &dyn std::fmt::Display| LoadError {
         message: format!("{}を読み込めません: {e}。元の{}を残すため、変更は保存しません。", file.what, file.file),
         kept: true,
     };
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
-        Err(e) => return Err(kept(&e)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Loaded::read(T::default()),
+        Err(e) => return Loaded::failed(kept(&e)),
     };
-    match serde_json::from_slice::<T>(&bytes) {
-        Ok(read) => Ok(read),
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let aside = path.with_file_name(format!("{}.broken-{stamp}.json", file.stem));
+    let fields = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| e.to_string()).and_then(Fields::of);
+    let mut fields = match fields {
+        Ok(fields) => fields,
         Err(e) => {
-            let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-            let aside = path.with_file_name(format!("{}.broken-{stamp}.json", file.stem));
-            match std::fs::rename(path, &aside) {
-                Ok(()) => Err(LoadError {
+            return Loaded::failed(match std::fs::rename(path, &aside) {
+                Ok(()) => LoadError {
                     message: format!(
                         "{}が壊れていたため、{}で始めました（{e}）。元のファイルは{}に残しています。",
                         file.file,
@@ -552,11 +665,25 @@ pub fn read<T: serde::de::DeserializeOwned + Default>(path: &Path, file: &File) 
                         aside.display()
                     ),
                     kept: false,
-                }),
-                Err(_) => Err(kept(&e)),
-            }
+                },
+                Err(_) => kept(&e),
+            });
         }
+    };
+    let value = T::from_json(&mut fields);
+    if fields.skipped == 0 {
+        return Loaded::read(value);
     }
+    let skipped = format!("{}の読めない項目を{}件飛ばしました", file.file, fields.skipped);
+    let problem = match std::fs::copy(path, &aside) {
+        Ok(_) => {
+            LoadError { message: format!("{skipped}。元のファイルは{}に残しています。", aside.display()), kept: false }
+        }
+        Err(_) => {
+            LoadError { message: format!("{skipped}。元の{}を残すため、変更は保存しません。", file.file), kept: true }
+        }
+    };
+    Loaded { value, problem: Some(problem) }
 }
 
 /// Writes beside the file and then over it, so a failed write leaves the old one whole.
@@ -566,7 +693,7 @@ pub fn save(settings: &Settings) -> Result<(), String> {
 }
 
 fn save_to(settings: &Settings, path: &Path) -> Result<(), String> {
-    write(&settings.writable(), path, &SETTINGS)
+    write(settings, path, &SETTINGS)
 }
 
 /// Writes `kept` beside `path` and then over it, so a failed write leaves the old one whole.
@@ -631,27 +758,78 @@ mod tests {
     }
 
     #[test]
-    fn leaves_out_what_names_a_path_that_is_not_text_as_it_is_written() {
+    fn keeps_what_names_a_path_that_is_not_text_by_its_units() {
         use std::os::windows::ffi::OsStringExt;
         let wide: Vec<u16> = r"D:\a".encode_utf16().chain([0xD800]).collect();
         let odd = PathBuf::from(std::ffi::OsString::from_wide(&wide));
-        let tab = |path: &Path| KeptTab { place: Kept { folders: vec![(path.into(), None)], ..Kept::default() }, filter: None };
+        let narrowed = HomeKey::favorite(&odd, Some("x")).key();
+        let place = Kept {
+            folders: vec![(r"D:\".into(), Some(odd.clone())), (odd.clone(), None)],
+            picks: vec![Some(odd.clone()), None],
+            ..Kept::default()
+        };
         let settings = Settings {
-            favorites: vec![Favorite::new(r"D:\b"), odd.clone().into()],
-            pinned: vec![odd.clone(), r"D:\b".into()],
-            tabs: vec![tab(&odd), tab(Path::new(r"D:\b")), tab(Path::new(r"D:\c"))],
-            tab: 2,
+            favorites: vec![Favorite::new(r"D:\b"), odd.clone().into(), Favorite { narrow: Some("x".into()), ..odd.clone().into() }],
+            pinned: vec![odd.clone(), r"D:\b".into(), narrowed],
+            tabs: vec![KeptTab { place, filter: None }, KeptTab::default()],
+            tab: 1,
             ..Settings::default()
         };
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         save_to(&settings, &path).unwrap();
-        let read = load_from(&path).unwrap();
-        assert_eq!(read.favorites, [Favorite::new(r"D:\b")]);
-        assert_eq!(read.pinned, [PathBuf::from(r"D:\b")]);
-        // The tab in front stays in front.
-        assert_eq!(read.tabs, [tab(Path::new(r"D:\b")), tab(Path::new(r"D:\c"))]);
+        let written = std::fs::read_to_string(&path).unwrap();
+        // What is text is written as before.
+        assert!(written.contains(r#""path": "D:\\b""#), "{written}");
+        assert_eq!(load_from(&path).unwrap(), settings);
+    }
+
+    #[test]
+    fn reads_a_file_without_what_of_it_cannot_be_read_and_copies_it_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let file = r#"{
+            "column_width": "wide", "theme": "purple", "sidebar_width": 300,
+            "favorites": ["D:\\old", {"path": "D:\\a"}, {"path": 123}, {"path": {"utf16": "x"}}],
+            "pinned": ["D:\\a", {"utf16": [70000]}],
+            "saved_searches": [{"query": "cat"}, {"query": 5}],
+            "filters": {"name": "画像"},
+            "tabs": [{"folders": [{"path": 5}]}, {"query": "dog"}, {"query": "cow"}],
+            "tab": 2
+        }"#;
+        std::fs::write(&path, file).unwrap();
+        let loaded = load_from(&path);
+        let problem = loaded.problem.clone().unwrap();
+        assert!(!problem.kept, "{problem:?}");
+        assert!(problem.message.starts_with("設定ファイルの読めない項目を9件飛ばしました"), "{}", problem.message);
+        let read = loaded.value;
+        // A field that cannot be read takes its default, alone.
+        assert_eq!((read.column_width, read.sidebar_width, read.theme), (320., 300., Theme::System));
+        // The favorite an older Colet wrote as a path alone is one that cannot be read.
+        assert_eq!(read.favorites, [Favorite::new(r"D:\a")]);
+        assert_eq!(read.pinned, [PathBuf::from(r"D:\a")]);
+        assert_eq!(read.saved_searches.iter().map(|s| s.query.as_str()).collect::<Vec<_>>(), ["cat"]);
+        assert!(read.filters.is_empty());
+        // The tab in front stays in front of those left.
+        assert_eq!(read.tabs.iter().map(|t| t.place.query.as_str()).collect::<Vec<_>>(), ["dog", "cow"]);
         assert_eq!(read.tab, 1);
+        // The file is left as it was, and a copy kept aside, which the message names.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), file);
+        let aside: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().path()).filter(|p| *p != path).collect();
+        assert_eq!(aside.len(), 1);
+        assert_eq!(std::fs::read_to_string(&aside[0]).unwrap(), file);
+        assert!(problem.message.contains(&aside[0].display().to_string()), "{}", problem.message);
+    }
+
+    #[test]
+    fn puts_aside_a_file_that_is_not_an_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, "[]").unwrap();
+        let loaded = load_from(&path);
+        assert_eq!(loaded.value, Settings::default());
+        assert!(!loaded.problem.unwrap().kept);
+        assert!(!path.exists());
     }
 
     #[test]
@@ -915,7 +1093,7 @@ mod tests {
     fn puts_a_broken_file_aside_rather_than_have_it_written_over() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        assert_eq!(load_from(&path), Ok(Settings::default()));
+        assert_eq!(load_from(&path).unwrap(), Settings::default());
         std::fs::write(&path, r#"{"favorites":["D:\\Work"],"#).unwrap();
         let error = load_from(&path).unwrap_err();
         assert!(!error.kept, "{error:?}");
