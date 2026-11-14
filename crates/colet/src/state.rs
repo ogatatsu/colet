@@ -353,38 +353,38 @@ pub struct Fold<A> {
     pub open: bool,
 }
 
-/// A place to go back or forward to.
-#[derive(Clone, Debug)]
-struct Location {
-    query: String,
-    search_filter: Option<String>,
-    search_order: Order,
-    folders: Vec<(PathBuf, Option<PathBuf>)>,
-    selections: Vec<Vec<PathBuf>>,
-    active: usize,
-    /// Its anchor counted among the folders.
-    fold: Option<Fold<usize>>,
-}
-
-/// A tab as it is kept between starts: what it searched, the folders open, what each column picked where
-/// it leads on, the column worked in, and the fold. What is picked besides, the narrowings and the way back
-/// and forth are not kept.
+/// Where a tab stands: what it searched, the folders open, what each column picked as `P`, the column
+/// worked in, and the fold.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Kept {
+pub struct Place<P> {
     pub query: String,
     pub search_filter: Option<String>,
     /// The order its search results are listed in.
     pub search_order: Order,
     /// Each folder column's folder, and the item it points at.
     pub folders: Vec<(PathBuf, Option<PathBuf>)>,
-    /// What each column picked where it leads on, home's first.
-    pub picks: Vec<Option<PathBuf>>,
+    /// What each column picked, home's first.
+    pub picks: Vec<P>,
     pub active: usize,
     /// The anchor counted among the folders, and whether the folders above it are out.
     pub fold: Option<Fold<usize>>,
 }
 
-impl Kept {
+/// A place to go back or forward to, with each column's whole selection.
+type Location = Place<Vec<PathBuf>>;
+
+/// A tab as it is kept between starts, with each column's pick only where it leads on. What is picked
+/// besides, the narrowings and the way back and forth are not kept.
+pub type Kept = Place<Option<PathBuf>>;
+
+impl<P> Place<P> {
+    /// The same place with each column's pick, by its index, made into a `Q`.
+    fn map_picks<Q>(self, mut pick: impl FnMut(usize, P) -> Q) -> Place<Q> {
+        let Place { query, search_filter, search_order, folders, picks, active, fold } = self;
+        let picks = picks.into_iter().enumerate().map(|(i, p)| pick(i, p)).collect();
+        Place { query, search_filter, search_order, folders, picks, active, fold }
+    }
+
     /// The search filter `from` is named `to` now, or is gone, as [`State::rename_search_filter`] has it.
     pub fn rename_search_filter(&mut self, from: &str, to: Option<&str>) {
         if self.search_filter.as_deref() == Some(from) {
@@ -689,7 +689,7 @@ impl State {
             search_filter: self.search_filter.clone(),
             search_order: self.search_order,
             folders: folders.iter().map(|c| (c.path.clone(), c.highlight.clone())).collect(),
-            selections: self.columns.iter().map(|c| c.selected.clone()).collect(),
+            picks: self.columns.iter().map(|c| c.selected.clone()).collect(),
             active: self.active,
             fold: self.fold.and_then(|fold| {
                 let anchor = folders.iter().position(|c| c.id == fold.anchor)?;
@@ -718,7 +718,7 @@ impl State {
             columns.push(self.column(Kind::Folder, path, highlight.clone()));
         }
         for (i, c) in columns.iter_mut().enumerate() {
-            c.selected = location.selections.get(i).cloned().unwrap_or_default();
+            c.selected = location.picks.get(i).cloned().unwrap_or_default();
             c.focused = c.selected.last().cloned();
         }
         let anchor = location.fold.and_then(|fold| {
@@ -735,26 +735,17 @@ impl State {
 
     /// What a tab keeps between starts: each column's pick only where it leads on to the next.
     pub fn kept(&self) -> Kept {
-        let Location { query, search_filter, search_order, folders, active, fold, .. } = self.snapshot();
         let last = self.columns.len() - 1;
-        let picks = self
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(i, c)| match c.selected.as_slice() {
-                [one] if i < last => Some(one.clone()),
-                _ => None,
-            })
-            .collect();
-        Kept { query, search_filter, search_order, folders, picks, active, fold }
+        self.snapshot().map_picks(|i, selected| match selected.as_slice() {
+            [one] if i < last => Some(one.clone()),
+            _ => None,
+        })
     }
 
     /// A tab as it was kept, its columns yet to be listed.
     pub fn from_kept(kept: Kept) -> Self {
         let mut state = Self::new();
-        let Kept { query, search_filter, search_order, folders, picks, active, fold } = kept;
-        let selections = picks.into_iter().map(|pick| pick.into_iter().collect()).collect();
-        state.restore(Location { query, search_filter, search_order, folders, selections, active, fold });
+        state.restore(kept.map_picks(|_, pick| pick.into_iter().collect()));
         state.note_folder();
         state
     }
@@ -824,9 +815,7 @@ impl State {
     /// from the results, they show without it.
     pub fn rename_search_filter(&mut self, from: &str, to: Option<&str>) {
         for location in self.past.iter_mut().chain(self.future.iter_mut()) {
-            if location.search_filter.as_deref() == Some(from) {
-                location.search_filter = to.map(Into::into);
-            }
+            location.rename_search_filter(from, to);
         }
         if self.search_filter.as_deref() != Some(from) {
             return;
@@ -1371,7 +1360,7 @@ impl State {
                     *h = moved(h);
                 }
             }
-            for selection in &mut location.selections {
+            for selection in &mut location.picks {
                 for p in selection {
                     *p = moved(p);
                 }
