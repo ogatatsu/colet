@@ -43,12 +43,20 @@ pub struct Search {
     pub request: u64,
 }
 
+/// What a search came back with.
+pub struct Found {
+    pub page: Page,
+    /// The Everything that answered it.
+    pub connection: String,
+    /// What to warn of that Everything, once for each connection to it.
+    pub warning: Option<String>,
+}
+
 pub trait Backend: Send + Sync + 'static {
     fn roots(&self) -> Vec<Entry>;
     /// A server that will not let the user in as they are asks them to sign in, in a dialog over `owner`.
     fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String>;
-    /// The results and the name of what they came from.
-    fn search(&self, search: Search) -> Result<(Page, String), String>;
+    fn search(&self, search: Search) -> Result<Found, String>;
     /// How many results `query` finds, leaving the last search and its watch be.
     fn count(&self, query: &str) -> Result<usize, String>;
     /// Whether the last search's results changed; so until it is searched afresh.
@@ -134,14 +142,15 @@ impl Backend for Live {
         folders::list(path, sort, cancelled, owner)
     }
 
-    fn search(&self, search: Search) -> Result<(Page, String), String> {
+    fn search(&self, search: Search) -> Result<Found, String> {
         self.latest.fetch_max(search.request, Ordering::Relaxed);
         let mut session = self.session.lock().map_err(|e| e.to_string())?;
         if self.latest.load(Ordering::Relaxed) != search.request {
             return Err("古い検索要求です".into());
         }
+        // A search that fails after connecting keeps the warning for the next.
         let page = session.search(&search.query, search.sort, search.offset, search.count, search.refresh)?;
-        Ok((page, session.connection.clone()))
+        Ok(Found { page, connection: session.connection.clone(), warning: session.warning.take() })
     }
 
     fn count(&self, query: &str) -> Result<usize, String> {
@@ -281,7 +290,7 @@ mod tests {
         let base = format!("\"{}\\\"", fixture.path().display());
         let names = |query: String| {
             let search = Search { query, sort: Order::default(), offset: 0, count: 100, refresh: true, request: 0 };
-            let mut names: Vec<String> = live.search(search).unwrap().0.entries.into_iter().map(|e| e.name).collect();
+            let mut names: Vec<String> = live.search(search).unwrap().page.entries.into_iter().map(|e| e.name).collect();
             names.sort();
             names
         };

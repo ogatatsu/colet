@@ -28,7 +28,7 @@ use gpui_kit::{
 
 use crate::{
     app::Colet,
-    backend::{Backend, PathKind, Search},
+    backend::{Backend, Found, PathKind, Search},
     dialogs::filter_tool_id,
     loading::Engine,
     ops::ItemStatus,
@@ -73,6 +73,8 @@ struct Fake {
     /// Each folder listed, with the order it was asked in.
     listed: Mutex<Vec<(String, Order)>>,
     failing: Mutex<Option<String>>,
+    /// What the next search that answers warns of Everything, as a fresh connection does once.
+    warning: Mutex<Option<String>>,
     changed: AtomicBool,
     /// The settings as last written, starting from those it is made with.
     settings: Mutex<Settings>,
@@ -151,7 +153,7 @@ impl Backend for Fake {
         Ok(entries.iter().map(under).collect())
     }
 
-    fn search(&self, search: Search) -> Result<(Page, String), String> {
+    fn search(&self, search: Search) -> Result<Found, String> {
         self.searches.lock().unwrap().push((search.query.clone(), search.offset));
         self.orders.lock().unwrap().push(search.sort);
         // As Everything's watch, it says the results changed until they are searched afresh.
@@ -173,7 +175,11 @@ impl Backend for Fake {
             .collect();
         let end = (search.offset + search.count).min(results.len());
         let entries = results[search.offset.min(end)..end].to_vec();
-        Ok((Page { entries, total: results.len(), offset: search.offset }, "Everything 1.5".into()))
+        Ok(Found {
+            page: Page { entries, total: results.len(), offset: search.offset },
+            connection: "Everything 1.5".into(),
+            warning: self.warning.lock().unwrap().take(),
+        })
     }
 
     fn count(&self, _: &str) -> Result<usize, String> {

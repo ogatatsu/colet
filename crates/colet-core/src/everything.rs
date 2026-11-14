@@ -29,6 +29,8 @@ unsafe extern "system" {
     fn Everything3_GetRevision(client: Handle) -> u32;
     fn Everything3_GetBuildNumber(client: Handle) -> u32;
     fn Everything3_GetLastError() -> u32;
+    fn Everything3_IsPropertyIndexed(client: Handle, property: u32) -> i32;
+    fn Everything3_IsPropertyFastSort(client: Handle, property: u32) -> i32;
     fn Everything3_CreateSearchState() -> Handle;
     fn Everything3_DestroySearchState(state: Handle) -> i32;
     fn Everything3_SetSearchTextW(state: Handle, text: *const u16) -> i32;
@@ -210,6 +212,9 @@ pub struct SearchSession {
     watch_retry_at: Option<Instant>,
     /// What it is connected to, as the status bar names it.
     pub connection: String,
+    /// What to warn of the Everything it last connected to, until taken: the size and date modified it
+    /// does not index or fast sort, which every search asks for.
+    pub warning: Option<String>,
 }
 
 // Used from one thread at a time, behind the app's lock.
@@ -225,6 +230,7 @@ impl Default for SearchSession {
             version: String::new(),
             watch_retry_at: None,
             connection: String::new(),
+            warning: None,
             #[cfg(test)]
             watch_instance: None,
         }
@@ -349,6 +355,18 @@ impl SearchSession {
         }
         self.client = client;
         self.version = dotted(version);
+        // Asked again on each connection, so a setting changed while Everything restarted is heard.
+        let ask = |check: unsafe extern "system" fn(Handle, u32) -> i32, property| unsafe {
+            match check(client, property) {
+                0 if Everything3_GetLastError() != 0 => None,
+                answer => Some(answer != 0),
+            }
+        };
+        let facts = |property| Indexing {
+            indexed: ask(Everything3_IsPropertyIndexed, property),
+            fast_sort: ask(Everything3_IsPropertyFastSort, property),
+        };
+        self.warning = slow_properties(facts(SIZE), facts(DATE_MODIFIED));
         Ok(())
     }
 
@@ -433,6 +451,37 @@ impl SearchSession {
     }
 }
 
+/// What Everything says of a property: whether it indexes it, and fast sorts it; none where it could not
+/// be asked.
+#[derive(Clone, Copy, Debug, Default)]
+struct Indexing {
+    indexed: Option<bool>,
+    fast_sort: Option<bool>,
+}
+
+/// The warning of what of the size and date modified Everything leaves unindexed or not fast sorted;
+/// none when it does both, or could not be asked. One unindexed is not named again as not fast sorted.
+fn slow_properties(size: Indexing, modified: Indexing) -> Option<String> {
+    let named = [("サイズ", size), ("更新日時", modified)];
+    let unindexed: Vec<&str> = named.iter().filter(|(_, i)| i.indexed == Some(false)).map(|(name, _)| *name).collect();
+    let unsorted: Vec<&str> =
+        named.iter().filter(|(_, i)| i.indexed != Some(false) && i.fast_sort == Some(false)).map(|(name, _)| *name).collect();
+    if unindexed.is_empty() && unsorted.is_empty() {
+        return None;
+    }
+    let mut warning = String::new();
+    if !unindexed.is_empty() {
+        warning += &format!("Everything が{}を索引していないため、検索が遅くなることがあります。", unindexed.join("と"));
+    }
+    if !unsorted.is_empty() {
+        let by: Vec<String> = unsorted.iter().map(|name| format!("{name}順")).collect();
+        let lead = if unindexed.is_empty() { "Everything で" } else { "" };
+        warning += &format!("{lead}{}の高速ソートが無効なため、{}の並べ替えが遅くなることがあります。", unsorted.join("と"), by.join("と"));
+    }
+    warning += "Everything のオプションの「インデックス」で有効にしてください。";
+    Some(warning)
+}
+
 /// A result's text as UTF-16, which the SDK writes into a buffer it first says the length of, up to its
 /// NUL.
 unsafe fn wide(write: impl Fn(*mut u16, usize) -> usize) -> Vec<u16> {
@@ -500,6 +549,29 @@ mod tests {
 
     fn alone() -> std::sync::MutexGuard<'static, ()> {
         EVERYTHING.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn warns_of_what_it_does_not_index_or_fast_sort_naming_each_once() {
+        let fine = Indexing { indexed: Some(true), fast_sort: Some(true) };
+        let unindexed = Indexing { indexed: Some(false), fast_sort: Some(false) };
+        let unsorted = Indexing { indexed: Some(true), fast_sort: Some(false) };
+        let unknown = Indexing::default();
+        assert_eq!(slow_properties(fine, fine), None);
+        // What could not be asked is not warned of.
+        assert_eq!(slow_properties(unknown, unknown), None);
+        assert_eq!(
+            slow_properties(unindexed, unsorted).unwrap(),
+            "Everything がサイズを索引していないため、検索が遅くなることがあります。更新日時の高速ソートが無効なため、更新日時順の並べ替えが遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。"
+        );
+        assert_eq!(
+            slow_properties(unindexed, unindexed).unwrap(),
+            "Everything がサイズと更新日時を索引していないため、検索が遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。"
+        );
+        assert_eq!(
+            slow_properties(unsorted, unsorted).unwrap(),
+            "Everything でサイズと更新日時の高速ソートが無効なため、サイズ順と更新日時順の並べ替えが遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。"
+        );
     }
 
     /// The error `changed` reports once the watch thread hears its client fail.

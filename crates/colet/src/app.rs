@@ -292,6 +292,8 @@ struct Resize {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     Info,
+    /// Something to set right outside Colet: it stays until closed, as an error does.
+    Warning,
     Error,
 }
 
@@ -313,6 +315,8 @@ struct Listed {
     total: usize,
     /// For a search, the Everything that answered it.
     connection: Option<String>,
+    /// For a search, what to warn of that Everything, once for each connection to it.
+    warning: Option<String>,
     /// For a narrowed search's first page, how many it finds without the filter.
     whole: Option<usize>,
 }
@@ -320,7 +324,7 @@ struct Listed {
 impl Listed {
     /// A listing loaded whole at once, as home's and a folder's are.
     fn all(entries: Vec<Entry>) -> Self {
-        Listed { total: entries.len(), entries, connection: None, whole: None }
+        Listed { total: entries.len(), entries, connection: None, warning: None, whole: None }
     }
 }
 
@@ -618,12 +622,12 @@ impl Colet {
         self.push_notice(text.into(), tone, None, cx);
     }
 
-    /// Puts a notice up in the window, the newest few at a time: errors stay until closed; the rest go on
-    /// their own.
+    /// Puts a notice up in the window, the newest few at a time: errors and warnings stay until closed;
+    /// the rest go on their own.
     fn push_notice(&mut self, text: SharedString, tone: Tone, entry: Option<u64>, cx: &mut Context<Self>) {
         self.next_toast += 1;
         let id = self.next_toast;
-        let error = tone == Tone::Error;
+        let stays = tone != Tone::Info;
         let colet = cx.weak_entity();
         let mut note = Notification::new()
             .id1::<Self>(("toast", id))
@@ -631,15 +635,17 @@ impl Colet {
                 div()
                     .id(("toast", id))
                     .test_support()
-                    .role(if error { Role::Alert } else { Role::Status })
+                    .role(if stays { Role::Alert } else { Role::Status })
                     .aria_label(text.clone())
                     .text_sm()
                     .child(text.clone())
                     .into_any_element()
             })
-            .autohide(!error);
-        if error {
-            note = note.with_type(NotificationType::Error);
+            .autohide(!stays);
+        match tone {
+            Tone::Error => note = note.with_type(NotificationType::Error),
+            Tone::Warning => note = note.with_type(NotificationType::Warning),
+            Tone::Info => {}
         }
         if let Some(entry) = entry {
             note = note.action(move |_, _, _| {
@@ -723,9 +729,15 @@ impl Colet {
                 self.loading.searching();
                 let search = Search { query, sort, offset, count, refresh: offset == 0, request };
                 cx.background_executor().spawn(async move {
-                    let (page, connection) = backend.search(search)?;
+                    let found = backend.search(search)?;
                     let whole = whole.and_then(|query| backend.count(&query).ok());
-                    Ok(Listed { entries: page.entries, total: page.total, connection: Some(connection), whole })
+                    Ok(Listed {
+                        entries: found.page.entries,
+                        total: found.page.total,
+                        connection: Some(found.connection),
+                        warning: found.warning,
+                        whole,
+                    })
                 })
             }
             Kind::Folder => {
@@ -745,7 +757,11 @@ impl Colet {
     fn listed(&mut self, id: ColumnId, kind: Kind, request: u64, offset: usize, result: Listing, cx: &mut Context<Self>) {
         let current = self.loading.answered(id, request);
         match result {
-            Ok(Listed { entries, total, connection, whole }) => {
+            Ok(Listed { entries, total, connection, warning, whole }) => {
+                // Told even of a search gone stale: it is the connection's, said once.
+                if let Some(warning) = warning {
+                    self.notify(warning, Tone::Warning, cx);
+                }
                 if let Some(whole) = whole {
                     self.state.counted(id, request, whole);
                 }

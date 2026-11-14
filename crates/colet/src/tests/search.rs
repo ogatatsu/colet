@@ -62,6 +62,23 @@ fn reports_a_failed_search_as_one_and_retries(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn warns_once_a_connection_of_what_everything_does_not_index_and_keeps_the_warning_up(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt"), file(r"D:\y.txt")]));
+    *fake.warning.lock().unwrap() = Some("Everything がサイズを索引していないため、検索が遅くなることがあります。".into());
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "x");
+    // The results come all the same, the size and date asked for as ever.
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 2);
+    let warned = ["Everything がサイズを索引していないため、検索が遅くなることがあります。"];
+    assert_eq!(ui.toasts(cx), warned);
+    // Said once for the connection, and up until closed.
+    ui.input(cx, "y");
+    cx.executor().advance_clock(Duration::from_secs(10));
+    settle(cx);
+    assert_eq!(ui.toasts(cx), warned);
+}
+
+#[gpui_kit::test]
 fn loads_the_next_page_of_results_as_the_list_nears_its_end(cx: &mut TestAppContext) {
     let results: Vec<Entry> = (0..1200).map(|i| file(&format!(r"D:\file{i:04}.txt"))).collect();
     let fake = Arc::new(Fake::default().with_results(results));
