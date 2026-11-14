@@ -537,6 +537,30 @@ fn adds_a_range_drawn_back_from_the_anchor_to_what_was_picked() {
 }
 
 #[test]
+fn drops_the_search_marks_of_a_renamed_name_and_of_a_moved_parent() {
+    let mut s = drive(vec![file(r"D:\a.txt"), file(r"D:\work\a.txt"), file(r"D:\b.txt")]);
+    let rows = &mut s.columns[1].entries;
+    for e in rows.iter_mut() {
+        let e = Arc::make_mut(e);
+        e.marks.name = vec![0..1];
+        e.marks.parent = vec![0..1];
+    }
+    // A name of letters wider than the old: its old marks would split one.
+    s.renamed(Path::new(r"D:\a.txt"), Path::new(r"D:\あ.txt"));
+    s.renamed(Path::new(r"D:\work"), Path::new(r"D:\仕事"));
+    let marks = |row: usize| s.columns[1].entries[row].marks.clone();
+    assert_eq!(s.columns[1].entries[0].name, "あ.txt");
+    assert!(marks(0).name.is_empty());
+    assert_eq!(marks(0).parent, [0..1]);
+    assert_eq!(s.columns[1].entries[1].parent, Arc::<str>::from(r"D:\仕事"));
+    assert_eq!(marks(1).name, [0..1]);
+    assert!(marks(1).parent.is_empty());
+    // What the rename leaves be keeps its marks.
+    assert_eq!(marks(2).name, [0..1]);
+    assert_eq!(marks(2).parent, [0..1]);
+}
+
+#[test]
 fn carries_a_renamed_folders_selection_and_open_columns_to_its_new_name() {
     let mut s = drive(vec![folder(r"D:\work"), file(r"D:\notes.txt")]);
     s.select(1, one(r"D:\work"));

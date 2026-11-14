@@ -1342,11 +1342,18 @@ impl State {
                 }
                 // Shared with the filter's list, where it is changed alike.
                 let e = Arc::make_mut(e);
+                // The search's marks are byte ranges of the old text: they would fall on the wrong
+                // letters, or mid-letter, of the new, so it shows unmarked till the search comes back.
                 if renamed {
                     e.name = name.clone();
+                    e.marks.name.clear();
                 }
                 if let Some(path) = path {
-                    e.parent = colet_core::entry::parent_shown(&path);
+                    let parent = colet_core::entry::parent_shown(&path);
+                    if parent != e.parent {
+                        e.marks.parent.clear();
+                    }
+                    e.parent = parent;
                     e.path = path;
                 }
             }
