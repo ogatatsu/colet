@@ -14,7 +14,7 @@ use gpui_kit::*;
 use crate::{
     app::Colet,
     menus::Popup,
-    metrics,
+    metrics::{self, Scale, scaled},
     settings::{KeptTab, Settings},
     state::{ColumnId, HomeKey, Kind, State},
     view::TipExt,
@@ -109,28 +109,35 @@ impl Render for DraggedTab {
         // enough that the landing line it passes over still shows through.
         div()
             .relative()
-            .w(px(self.width))
-            .h(px(TAB_HEIGHT))
-            .pl(px(10.))
-            .pr(px(4.))
+            .w(scaled(self.width))
+            .h(scaled(TAB_HEIGHT))
+            .pl(scaled(10.))
+            .pr(scaled(4.))
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(scaled(6.))
             .child(tab_shape(p.bg, Some(p.border)))
-            .child(svg().path(format!("icons/{}.svg", self.glyph)).size(px(metrics::GLYPH)).flex_none().text_color(p.text))
+            .child(svg().path(format!("icons/{}.svg", self.glyph)).size(scaled(metrics::GLYPH)).flex_none().text_color(p.text))
             .child(div().min_w_0().truncate().child(self.name.clone()))
             .opacity(0.5)
             .font_family(metrics::FONT_UI)
-            .text_size(px(metrics::TEXT_LARGE))
+            .text_size(scaled(metrics::TEXT_LARGE))
             .text_color(p.text)
     }
 }
 
 /// A small button with a glyph on the tab bar, which the mouse alone presses: Tab passes it by.
-fn tab_button(p: crate::theme::Palette, id: impl Into<ElementId>, glyph: &str, label: &'static str, tip: &'static str) -> Button {
+fn tab_button(
+    p: crate::theme::Palette,
+    scale: Scale,
+    id: impl Into<ElementId>,
+    glyph: &str,
+    label: &'static str,
+    tip: &'static str,
+) -> Button {
     Button::new(id)
         .ghost()
-        .rounded(px(metrics::RADIUS))
+        .rounded(scale.px(metrics::RADIUS))
         .icon(crate::view::glyph(glyph))
         .accessibility_label(label)
         .tooltip(tip)
@@ -144,15 +151,16 @@ fn tab_shape(background: Hsla, border: Option<Hsla>) -> impl IntoElement {
     canvas(
         |_, _, _| {},
         move |bounds, _, window, _| {
+            let curve = Scale::of(window).px(TAB_CURVE);
             let mut fill = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::tolerance(0.02)));
-            trace_tab(&mut fill, bounds);
+            trace_tab(&mut fill, bounds, curve);
             fill.close();
             if let Ok(path) = fill.build() {
                 window.paint_path(path, background);
             }
             if let Some(border) = border {
                 let mut outline = PathBuilder::stroke(px(1.));
-                trace_tab(&mut outline, bounds);
+                trace_tab(&mut outline, bounds, curve);
                 // Leave the bottom open to the toolbar.
                 if let Ok(path) = outline.build() {
                     window.paint_path(path, border);
@@ -163,12 +171,11 @@ fn tab_shape(background: Hsla, border: Option<Hsla>) -> impl IntoElement {
     .absolute()
     .top_0()
     .bottom_0()
-    .left(px(-TAB_CURVE))
-    .right(px(-TAB_CURVE))
+    .left(scaled(-TAB_CURVE))
+    .right(scaled(-TAB_CURVE))
 }
 
-fn trace_tab(path: &mut PathBuilder, bounds: Bounds<Pixels>) {
-    let curve = px(TAB_CURVE);
+fn trace_tab(path: &mut PathBuilder, bounds: Bounds<Pixels>, curve: Pixels) {
     // Keep the one-pixel outline inside the canvas, including at the scroll viewport's ends.
     let left = bounds.left() + px(0.5);
     let right = bounds.right() - px(0.5);
@@ -468,7 +475,7 @@ impl Colet {
     fn aim_tab_drag(&mut self, at: Point<Pixels>, bar: Bounds<Pixels>, width: f32, cx: &mut Context<Self>) {
         let gap = bar.contains(&at).then(|| {
             let strip = self.tabs.scroll().bounds();
-            let along = f32::from(at.x - strip.left() - self.tabs.scroll().offset().x) - TAB_CURVE;
+            let along = self.scale().down(f32::from(at.x - strip.left() - self.tabs.scroll().offset().x)) - TAB_CURVE;
             // Over a tab's left half it goes before it, over its right half after; past the last, last.
             ((along / width).round().max(0.) as usize).min(self.tabs.len())
         });
@@ -515,7 +522,7 @@ impl Colet {
         let p = self.palette;
         // The tabs share the room there is, down to their least; past that the strip scrolls.
         let count = self.tabs.len() as f32;
-        let room = f32::from(window.viewport_size().width) - BESIDE_TABS;
+        let room = Scale::of(window).down(f32::from(window.viewport_size().width)) - BESIDE_TABS;
         let width = (room / count).clamp(TAB_MIN, TAB_WIDTH);
         if !self.tabs.bring_front_in_sight() {
             window.request_animation_frame();
@@ -529,11 +536,11 @@ impl Colet {
             // tab is painted last, over its neighbors' hover fills, within this same scroll clip.
             let cell = div()
                 .flex_none()
-                .w(px(width + TAB_CURVE * 2.))
+                .w(scaled(width + TAB_CURVE * 2.))
                 .h_full()
-                .pt(px(TAB_TOP))
-                .px(px(TAB_CURVE))
-                .when(index + 1 < count, |d| d.mr(px(-TAB_CURVE * 2.)))
+                .pt(scaled(TAB_TOP))
+                .px(scaled(TAB_CURVE))
+                .when(index + 1 < count, |d| d.mr(scaled(-TAB_CURVE * 2.)))
                 .when(index != current, |d| d.child(self.render_tab(index, width, cx).test_support()));
             tabs.push(cell.into_any_element());
         }
@@ -547,21 +554,21 @@ impl Colet {
                 div()
                     .id(("tab-separator", self.tabs.get(index).map_or(0, |tab| tab.id()) as usize))
                     .absolute()
-                    .left(px(index as f32 * width + TAB_CURVE))
-                    .top(px(TAB_TOP))
-                    .w(px(width * 2.))
-                    .h(px(TAB_HEIGHT))
+                    .left(scaled(index as f32 * width + TAB_CURVE))
+                    .top(scaled(TAB_TOP))
+                    .w(scaled(width * 2.))
+                    .h(scaled(TAB_HEIGHT))
                     // While a tab is carried, only the line tells where it goes.
                     .when(!dragging, |d| d.hover(|s| s.opacity(0.)))
-                    .child(div().absolute().left(px(width - 1.)).top(px(8.)).w(px(1.)).h(px(16.)).bg(p.border))
+                    .child(div().absolute().left(scaled(width)).ml(px(-1.)).top(scaled(8.)).w(px(1.)).h(scaled(16.)).bg(p.border))
                     .into_any_element(),
             );
         }
         tabs.push(
             self.render_tab(current, width, cx)
                 .absolute()
-                .left(px(current as f32 * width + TAB_CURVE))
-                .top(px(TAB_TOP))
+                .left(scaled(current as f32 * width + TAB_CURVE))
+                .top(scaled(TAB_TOP))
                 .test_support()
                 .into_any_element(),
         );
@@ -571,11 +578,11 @@ impl Colet {
                 div()
                     .id("tab-landing")
                     .absolute()
-                    .left(px(TAB_CURVE + gap as f32 * width - 1.))
-                    .top(px(TAB_TOP))
-                    .w(px(2.))
-                    .h(px(TAB_HEIGHT))
-                    .rounded(px(1.))
+                    .left(scaled(TAB_CURVE + gap as f32 * width - 1.))
+                    .top(scaled(TAB_TOP))
+                    .w(scaled(2.))
+                    .h(scaled(TAB_HEIGHT))
+                    .rounded(scaled(1.))
                     .bg(p.accent)
                     .test_support()
                     .into_any_element(),
@@ -587,7 +594,7 @@ impl Colet {
                 this.aim_tab_drag(event.event.position, event.bounds, width, cx)
             }))
             .on_drop(cx.listener(|this, dragged: &DraggedTab, _, cx| this.land_tab(dragged, cx)))
-            .h(px(TAB_HEIGHT + TAB_TOP))
+            .h(scaled(TAB_HEIGHT + TAB_TOP))
             .flex_none()
             .w_full()
             .relative()
@@ -613,9 +620,9 @@ impl Colet {
                     .children(tabs),
             )
             .child(
-                tab_button(p, "new-tab", "plus", "新しいタブ", "新しいタブ（Ctrl+T）")
+                tab_button(p, self.scale(), "new-tab", "plus", "新しいタブ", "新しいタブ（Ctrl+T）")
                     .small()
-                    .size(px(26.))
+                    .size(scaled(26.))
                     .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx))),
             )
             // A double-click in the room left opens another, as in a browser.
@@ -648,15 +655,15 @@ impl Colet {
         div()
             .id(("tab", id as usize))
             .group(group.clone())
-            .h(px(TAB_HEIGHT))
+            .h(scaled(TAB_HEIGHT))
             .flex_none()
-            .w(px(width))
+            .w(scaled(width))
             .relative()
-            .pl(px(10.))
-            .pr(px(4.))
+            .pl(scaled(10.))
+            .pr(scaled(4.))
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(scaled(6.))
             .role(Role::Tab)
             .aria_label(name.clone())
             .aria_selected(current)
@@ -669,7 +676,7 @@ impl Colet {
                     div()
                         .absolute()
                         .top_0()
-                        .bottom(px(2.))
+                        .bottom(scaled(2.))
                         .left_0()
                         .right_0()
                         .invisible()
@@ -679,20 +686,22 @@ impl Colet {
             })
             .when(carried, |d| d.opacity(0.4))
             .tip(tip)
-            .child(svg().path(format!("icons/{glyph}.svg")).size(px(metrics::GLYPH)).flex_none().text_color(if current {
+            .child(svg().path(format!("icons/{glyph}.svg")).size(scaled(metrics::GLYPH)).flex_none().text_color(if current {
                 p.text
             } else {
                 p.text_muted
             }))
             .child(div().flex_1().min_w_0().truncate().child(name))
-            .child(tab_button(p, ("tab-close", id as usize), "x", "タブを閉じる", "タブを閉じる（Ctrl+W）").xsmall().on_click(cx.listener(
-                move |this, _, window, cx| {
-                    cx.stop_propagation();
-                    if let Some(index) = this.tabs.position(id) {
-                        this.close_tab(index, window, cx);
-                    }
-                },
-            )))
+            .child(
+                tab_button(p, self.scale(), ("tab-close", id as usize), "x", "タブを閉じる", "タブを閉じる（Ctrl+W）").xsmall().on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        if let Some(index) = this.tabs.position(id) {
+                            this.close_tab(index, window, cx);
+                        }
+                    }),
+                ),
+            )
             .on_click(cx.listener(move |this, _, window, cx| {
                 if let Some(index) = this.tabs.position(id) {
                     this.switch_tab(index, window, cx);

@@ -17,6 +17,7 @@ use gpui_kit::*;
 
 use crate::{
     app::{Colet, Tone, Widths},
+    metrics::Scale,
     search_filters::FilterEdit,
     settings::{Favorite, Placement, Queued, SavedSearch, Settings, Theme},
     sorts::Sorts,
@@ -175,9 +176,9 @@ impl HomeDragging {
         moved
     }
 
-    /// The way home's list scrolls while the drag is held at its edge.
-    fn edge(&self) -> Option<f32> {
-        self.carried.as_ref().and(self.pointer).and_then(|(at, list)| drag_edge(at, list))
+    /// The way home's list scrolls while the drag is held at its edge, at the zoom `scale` gives.
+    fn edge(&self, scale: Scale) -> Option<f32> {
+        self.carried.as_ref().and(self.pointer).and_then(|(at, list)| drag_edge(at, list, scale))
     }
 
     /// Over, dropped or not: nothing has moved.
@@ -214,13 +215,14 @@ fn move_before<T>(items: &mut Vec<T>, is: impl Fn(&T, &Path) -> bool, path: &Pat
 /// How near the top or bottom of home's list a drag scrolls it.
 const DRAG_EDGE: f32 = 24.;
 
-/// Which way home's list scrolls with a drag held at `at`: up at its top edge, down at its bottom.
-fn drag_edge(at: Point<Pixels>, list: Bounds<Pixels>) -> Option<f32> {
+/// Which way home's list scrolls with a drag held at `at`: up at its top edge, down at its bottom, the
+/// edges as deep as `scale` draws them.
+fn drag_edge(at: Point<Pixels>, list: Bounds<Pixels>, scale: Scale) -> Option<f32> {
     if at.x < list.left() || at.x >= list.right() {
         None
-    } else if at.y < list.top() + px(DRAG_EDGE) {
+    } else if at.y < list.top() + scale.px(DRAG_EDGE) {
         Some(-1.)
-    } else if at.y >= list.bottom() - px(DRAG_EDGE) {
+    } else if at.y >= list.bottom() - scale.px(DRAG_EDGE) {
         Some(1.)
     } else {
         None
@@ -395,7 +397,7 @@ impl Colet {
         }
         self.home_drag.pointer = Some((at, list));
         self.aim_home_drag(cx);
-        if drag_edge(at, list).is_some() {
+        if drag_edge(at, list, self.scale()).is_some() {
             self.keep_home_scrolling(cx);
         }
     }
@@ -427,10 +429,10 @@ impl Colet {
     /// One step toward the edge the drag is held at; false once it is let go of, moved off the edge, or
     /// the list is as far as it goes.
     fn scroll_home_drag(&mut self, cx: &mut Context<Self>) -> bool {
-        let way = self.home_drag.edge();
+        let (way, scale) = (self.home_drag.edge(self.scale()), self.scale());
         let offset = self.scrolls.home.offset();
         let max = f32::from(self.scrolls.home.max_offset().y);
-        let to = way.map(|way| (f32::from(offset.y) - way * 8.).clamp(-max, 0.));
+        let to = way.map(|way| (f32::from(offset.y) - way * scale.up(8.)).clamp(-max, 0.));
         match to {
             Some(y) if y != f32::from(offset.y) => {
                 self.scrolls.home.set_offset(point(offset.x, px(y)));
@@ -676,6 +678,14 @@ impl Colet {
     pub fn set_theme(&mut self, theme: Theme, window: &mut Window, cx: &mut Context<Self>) {
         self.update_settings(|s| s.theme = theme, cx);
         self.apply_theme(window, cx);
+    }
+
+    /// Draws everything at `zoom` percent at once, and keeps it. The columns are brought to rest again
+    /// at their new widths as the window is next laid out.
+    pub fn set_zoom(&mut self, zoom: u16, cx: &mut Context<Self>) {
+        self.update_settings(|s| s.zoom = zoom, cx);
+        crate::theme::set_zoom(zoom, cx);
+        cx.notify();
     }
 
     /// Lets go of what the dialog before listened to. Called first by whatever opens one, before it makes

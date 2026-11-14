@@ -28,6 +28,8 @@ pub enum Stop {
     Crumb(ColumnId),
     /// A theme among the preferences.
     Theme(Theme),
+    /// A size to draw everything at among the preferences, in percent.
+    Zoom(u16),
     /// A tool on a search filter in the filters' dialog, by the filter's name.
     Filter(FilterTool, String),
     /// A choice of filter for a saved search being edited, by the filter's name; none for no filter.

@@ -108,8 +108,8 @@ impl Colet {
             .on_action(cx.listener(|this, _: &OpenMenu, window, cx| {
                 // Under the focused row, as from the keyboard; or the column's top.
                 let at = match this.focused_row.get() {
-                    Some(row) => point(row.left() + px(16.), row.bottom()),
-                    None => point(px(this.sidebar_width(window)) + px(24.), px(140.)),
+                    Some(row) => point(row.left() + this.scale().px(16.), row.bottom()),
+                    None => point(this.scale().px(this.sidebar_width(window) + 24.), this.scale().px(140.)),
                 };
                 this.open_menu(this.state.active, None, at, window, cx);
             }))
@@ -169,7 +169,7 @@ impl Colet {
             .gap_3()
             .px_4()
             .py_8()
-            .text_size(px(metrics::TEXT_BODY))
+            .text_size(scaled(metrics::TEXT_BODY))
             .text_color(p.text_muted)
             .child(icon(icon_name, 28., p.text_faint))
             .child(div().text_center().child(text))
@@ -183,9 +183,9 @@ impl Colet {
             .gap_2()
             .px_4()
             .py_3()
-            .text_size(px(metrics::TEXT_BODY))
+            .text_size(scaled(metrics::TEXT_BODY))
             .text_color(p.text_muted)
-            .child(Spinner::new().icon(glyph("loader-circle")).color(p.text_muted).with_size(px(15.)))
+            .child(Spinner::new().icon(glyph("loader-circle")).color(p.text_muted).with_size(self.scale().px(15.)))
             .child("読み込み中…")
     }
 
@@ -231,7 +231,7 @@ impl Colet {
                 this.load(id, 0, false, cx);
             },
         ));
-        let retry = self.ringed(retry, Stop::Retry(id), RingAt::Round, window, cx).m(px(-RING_ROOM));
+        let retry = self.ringed(retry, Stop::Retry(id), RingAt::Round, window, cx).m(scaled(-RING_ROOM));
         self.message("circle-alert", error).child(retry).into_any_element()
     }
 
@@ -248,14 +248,14 @@ impl Colet {
             .absolute()
             .top_0()
             // Off the columns' scrollbar along the bottom, which it would take the presses of.
-            .bottom(px(SCROLLBAR_WIDTH))
-            .right(px(-RESIZER_WIDTH / 2.))
-            .w(px(RESIZER_WIDTH))
+            .bottom(scaled(SCROLLBAR_WIDTH))
+            .right(scaled(-RESIZER_WIDTH / 2.))
+            .w(scaled(RESIZER_WIDTH))
             .flex()
             .justify_center()
             .cursor_col_resize()
             // A line on the border, not a band over the rows.
-            .child(div().w(px(2.)).h_full().group_hover(id, |d| d.bg(p.accent)))
+            .child(div().w(scaled(2.)).h_full().group_hover(id, |d| d.bg(p.accent)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -313,7 +313,7 @@ impl Colet {
                     }
                 }),
             )
-            .w(px(width))
+            .w(scaled(width))
             .flex_none()
             .h_full()
             .relative()
@@ -325,7 +325,7 @@ impl Colet {
             .child(
                 div()
                     .id(("head", id))
-                    .h(px(metrics::HEADING_HEIGHT))
+                    .h(scaled(metrics::HEADING_HEIGHT))
                     .flex_none()
                     .pl_3()
                     .pr_2()
@@ -340,13 +340,13 @@ impl Colet {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(metrics::TEXT_BODY))
+                            .text_size(scaled(metrics::TEXT_BODY))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
                             .when(!path.is_empty(), |d| d.tip(path))
                             .child(header_title),
                     )
-                    .child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.text_faint).child(count))
+                    .child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child(count))
                     .child(sort_button)
                     .child(star)
                     .test_support(),
@@ -356,7 +356,7 @@ impl Colet {
                     div()
                         .flex_none()
                         .px_2()
-                        .py(px(6.))
+                        .py(scaled(6.))
                         .border_b_1()
                         .border_color(p.border)
                         .child(self.column_narrow_field(id, narrowed, &input, window, cx)),
@@ -447,7 +447,7 @@ impl Colet {
             .flex_none()
             .child(Self::opener(div().flex(), move |this| this.column_sort_open() == Some(id), cx).child(button))
             .when_some(self.menu_element("column-sort-menu", "並び順", cx).filter(|_| open), |d, menu| {
-                d.child(drop_down(menu, MenuSide::Right, 160., Some(160.)))
+                d.child(drop_down(menu, MenuSide::Right, 160., Some(160.), self.scale()))
             })
             .into_any_element()
     }
@@ -473,11 +473,11 @@ impl Colet {
                 .role(Role::Button)
                 .aria_label(label)
                 .h_full()
-                .px(px(4.))
+                .px(scaled(4.))
                 .flex()
                 .items_center()
-                .gap(px(2.))
-                .rounded(px(metrics::RADIUS))
+                .gap(scaled(2.))
+                .rounded(scaled(metrics::RADIUS))
                 .hover(|d| d.bg(p.hover))
                 .text_color(if chosen { p.text } else { p.text_muted })
                 .child(by.label())
@@ -489,13 +489,13 @@ impl Colet {
         // Each heading reaches 4px past its cells, over the gap, so its text stands where theirs does.
         div()
             .flex_none()
-            .h(px(24.))
-            .px(px(10.))
+            .h(scaled(24.))
+            .px(scaled(10.))
             .flex()
             .items_center()
             .border_b_1()
             .border_color(p.border)
-            .text_size(px(metrics::TEXT_SMALL))
+            .text_size(scaled(metrics::TEXT_SMALL))
             .children(check_all)
             // The search results' items are in all sorts of folders, shown under their names: they sort by
             // those too, from a heading beside the name's, the rest of the room left bare.
@@ -514,9 +514,9 @@ impl Colet {
                     d.child(heading(Sort::Name, "sort-by-name").flex_1().min_w_0())
                 }
             })
-            .child(heading(Sort::Size, "sort-by-size").w(px(SIZE_WIDTH + 8.)).flex_none())
-            .child(heading(Sort::Modified, "sort-by-modified").w(px(MODIFIED_WIDTH + 8.)).flex_none())
-            .child(div().w(px(13. + 8.)).flex_none())
+            .child(heading(Sort::Size, "sort-by-size").w(scaled(SIZE_WIDTH + 8.)).flex_none())
+            .child(heading(Sort::Modified, "sort-by-modified").w(scaled(MODIFIED_WIDTH + 8.)).flex_none())
+            .child(div().w(scaled(13. + 8.)).flex_none())
             .into_any_element()
     }
 
@@ -530,9 +530,9 @@ impl Colet {
             .flex_none()
             .h_full()
             // Where the rows' checkboxes stand, then the gap to their names less the heading's own 4px.
-            .ml(px(4.))
-            .mr(px(4.))
-            .w(px(16.))
+            .ml(scaled(4.))
+            .mr(scaled(4.))
+            .w(scaled(16.))
             .flex()
             .items_center()
             .justify_center()
@@ -578,20 +578,20 @@ impl Colet {
             self.ringed(clear, Stop::ClearFilter(id), RingAt::Edge, window, cx)
         });
         // Ringed as the search field is; the ring lies over the gaps around.
-        frame(p, focused, metrics::FIELD_RADIUS).m(px(-RING_ROOM)).child(
+        frame(p, focused, metrics::FIELD_RADIUS).m(scaled(-RING_ROOM)).child(
             div()
                 .id(("filter", id))
                 .w_full()
-                .h(px(metrics::SMALL_CONTROL_HEIGHT))
-                .pl(px(8.))
-                .pr(px(2.))
+                .h(scaled(metrics::SMALL_CONTROL_HEIGHT))
+                .pl(scaled(8.))
+                .pr(scaled(2.))
                 .flex()
                 .items_center()
                 .gap_2()
                 .bg(p.surface)
                 .border_1()
                 .border_color(p.border_strong)
-                .rounded(px(metrics::FIELD_RADIUS))
+                .rounded(scaled(metrics::FIELD_RADIUS))
                 // Accented while it has the keys, or narrows the rows from out of them.
                 .child(icon("funnel", 13., if focused || narrowed { p.accent } else { p.text_muted }))
                 .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(input, cx)).child(Input::new(input)))

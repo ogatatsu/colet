@@ -7,12 +7,16 @@ use std::time::Instant;
 
 use gpui_kit::ScrollHandle;
 
-use crate::state::ColumnId;
+use crate::{metrics::Scale, state::ColumnId};
 
-/// Where the scrolling columns sit sideways, and how they get where they should rest.
+/// Where the scrolling columns sit sideways, and how they get where they should rest. Every length here is
+/// in pixels at 100% (see [`crate::metrics`]); the scroll handle's, read and set through
+/// [`Sideways::offset`] and the rest, are as drawn.
 #[derive(Default)]
 pub struct Sideways {
     pub scroll: ScrollHandle,
+    /// The zoom the window was last drawn at, which turns the scroll handle's lengths into these.
+    pub scale: Scale,
     pub slide: Option<Slide>,
     /// Asks the next frame to bring the active column on screen, sliding there when true.
     pub pending: Option<bool>,
@@ -45,11 +49,31 @@ impl Sideways {
 
     /// The scroll offset, as a distance from the left.
     pub fn offset(&self) -> f32 {
-        -f32::from(self.scroll.offset().x)
+        self.scale.down(-f32::from(self.scroll.offset().x))
     }
 
     pub fn set_offset(&self, at: f32) {
-        self.scroll.set_offset(gpui_kit::point(gpui_kit::px(-at), gpui_kit::px(0.)));
+        self.scroll.set_offset(gpui_kit::point(-self.scale.px(at), gpui_kit::px(0.)));
+    }
+
+    /// The window is drawn at `scale` now: the columns stay scrolled as far at 100%, so the same of them
+    /// is on screen as the zoom changes, rather than as many pixels.
+    pub fn rescale(&mut self, scale: Scale) {
+        if scale != self.scale {
+            let at = self.offset();
+            self.scale = scale;
+            self.set_offset(at);
+        }
+    }
+
+    /// How far the scroll goes at most.
+    pub fn max_offset(&self) -> f32 {
+        self.scale.down(f32::from(self.scroll.max_offset().x))
+    }
+
+    /// How wide the columns' view was laid out.
+    pub fn view_width(&self) -> f32 {
+        self.scale.down(f32::from(self.scroll.bounds().size.width))
     }
 }
 

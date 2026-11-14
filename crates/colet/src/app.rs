@@ -36,6 +36,7 @@ use crate::{
     icons::Icons,
     loading::Loading,
     menus::Popup,
+    metrics::Scale,
     ops::{HistoryPanel, Operations},
     overlays::Overlays,
     places::{Dialog, HomeDragging, home_entries, home_groups},
@@ -219,16 +220,17 @@ impl Widths {
         self.resizing.as_ref().map(|resize| resize.of)
     }
 
-    /// The drag under way reached `x`: its width follows, within its bounds. False with none under way.
-    pub fn drag_to(&mut self, x: Pixels) -> bool {
+    /// The drag under way reached `x`, the window drawn at `scale`: its width follows, within its bounds.
+    /// False with none under way.
+    pub fn drag_to(&mut self, x: Pixels, scale: Scale) -> bool {
         let Some(resize) = &self.resizing else { return false };
         let (min, max) = match resize.of {
             WidthOf::Sidebar => SIDEBAR_WIDTHS,
             WidthOf::Field => SEARCH_FIELD_WIDTHS,
             WidthOf::Search | WidthOf::Column => COLUMN_WIDTHS,
         };
-        // Display scaling makes the deltas fractional; widths stay whole pixels.
-        let width = (resize.start_width + f32::from(x - resize.start_x)).clamp(min, max).round();
+        // Display scaling and the zoom make the deltas fractional; widths stay whole pixels at 100%.
+        let width = (resize.start_width + scale.down(f32::from(x - resize.start_x))).clamp(min, max).round();
         match resize.of {
             WidthOf::Sidebar => self.sidebar = width,
             WidthOf::Search => self.search = width,
@@ -471,6 +473,7 @@ impl Colet {
         this.sync_narrow_fields(window, cx);
         this.scroll_rows();
         crate::theme::apply(window, this.stored.settings().theme, cx);
+        crate::theme::set_zoom(this.stored.settings().zoom, cx);
         this.search.update(cx, |input, cx| input.focus(window, cx));
         this.sync(cx);
         this.poll(cx);

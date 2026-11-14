@@ -156,6 +156,14 @@ impl Theme {
     }
 }
 
+/// The sizes the settings offer to draw everything at, in percent, in the order they offer them.
+pub const ZOOMS: [u16; 7] = [90, 100, 110, 125, 150, 175, 200];
+
+/// The offered size nearest `zoom`, the smaller of two as near, for one written by hand.
+pub fn nearest_zoom(zoom: u16) -> u16 {
+    ZOOMS.into_iter().min_by_key(|offered| offered.abs_diff(zoom)).unwrap_or(100)
+}
+
 /// A tab kept between starts: where it was, and the filter its next search is narrowed by, by name.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(from = "TabFile", into = "TabFile")]
@@ -198,6 +206,8 @@ pub struct Settings {
     pub tabs: Vec<KeptTab>,
     pub tab: usize,
     pub theme: Theme,
+    /// How large everything is drawn, in percent: one of [`ZOOMS`].
+    pub zoom: u16,
     /// Whether the folders list their hidden and system items, as Explorer leaves them out by default.
     pub show_hidden: bool,
     /// Whether the protected operating system files show along with them, as Explorer leaves them out
@@ -221,6 +231,7 @@ impl Default for Settings {
             tabs: Vec::new(),
             tab: 0,
             theme: Theme::System,
+            zoom: 100,
             show_hidden: false,
             show_protected: false,
             window: None,
@@ -236,6 +247,7 @@ impl Settings {
         self.search_width = clamp(self.search_width, COLUMN_WIDTHS);
         self.sidebar_width = clamp(self.sidebar_width, SIDEBAR_WIDTHS);
         self.search_field_width = clamp(self.search_field_width, SEARCH_FIELD_WIDTHS);
+        self.zoom = nearest_zoom(self.zoom);
         // A filter is found by its name, a search by its query, filter and narrowing, and a favorite by its
         // path and narrowing: one of each, none empty. What names a filter gone goes without it. A
         // narrowing is kept as one is typed again, with no word none.
@@ -352,6 +364,7 @@ impl Lenient for Settings {
             tabs: tabs.into_iter().flatten().collect(),
             tab,
             theme: fields.one("theme").unwrap_or(d.theme),
+            zoom: fields.one("zoom").unwrap_or(d.zoom),
             show_hidden: fields.one("show_hidden").unwrap_or(d.show_hidden),
             show_protected: fields.one("show_protected").unwrap_or(d.show_protected),
             window: fields.one("window").unwrap_or(d.window),
@@ -946,6 +959,23 @@ mod tests {
         settings.normalize();
         assert_eq!((settings.column_width, settings.search_width, settings.sidebar_width), (640., 260., 201.));
         assert_eq!(settings.search_field_width, 640.);
+    }
+
+    #[test]
+    fn keeps_the_size_chosen_and_takes_the_nearest_offered_for_one_written_by_hand() {
+        // One written before the size could be chosen is drawn at 100%.
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.zoom, 100);
+        let settings: Settings = serde_json::from_str(r#"{"zoom":150}"#).unwrap();
+        assert_eq!(settings.zoom, 150);
+        // Not a number: the rest of the file is still read.
+        let settings: Settings = serde_json::from_str(r#"{"zoom":"big","sidebar_width":300}"#).unwrap();
+        assert_eq!((settings.zoom, settings.sidebar_width), (100, 300.));
+        for (written, kept) in [(0, 90), (95, 90), (130, 125), (138, 150), (1000, 200), (175, 175)] {
+            let mut settings = Settings { zoom: written, ..Settings::default() };
+            settings.normalize();
+            assert_eq!(settings.zoom, kept, "{written}");
+        }
     }
 
     #[test]

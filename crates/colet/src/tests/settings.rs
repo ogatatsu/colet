@@ -136,3 +136,35 @@ fn the_final_settings_save_supersedes_debounced_saves(cx: &mut TestAppContext) {
     assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), ["latest"]);
     assert_eq!(fake.saves.load(Ordering::Relaxed), before + 1);
 }
+
+#[gpui_kit::test]
+fn draws_everything_at_the_size_chosen_at_once_and_keeps_it(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    let ui = open(cx, fake.clone());
+    let drawn = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.act(cx, |window, _| (window.rem_size(), f32::from(window.find("sidebar").bounds().size.width)))
+    };
+    assert_eq!(drawn(&ui, cx), (px(16.), 240.));
+    ui.click(cx, "preferences");
+    ui.click(cx, ("zoom", 150usize));
+    // The text and home's pane grow together; the width kept stays as given at 100%.
+    assert_eq!(drawn(&ui, cx), (px(24.), 360.));
+    assert_eq!(ui.read(cx, |v| v.widths.sidebar), 240.);
+    assert_eq!(fake.settings.lock().unwrap().zoom, 150);
+    // From the keys, as a stop for Tab.
+    let back = ui.read(cx, |v| v.stops.get(&Stop::Zoom(100)).unwrap());
+    ui.act(cx, |window, cx| back.focus(window, cx));
+    ui.press(cx, "space");
+    assert_eq!(drawn(&ui, cx), (px(16.), 240.));
+    assert_eq!(fake.settings.lock().unwrap().zoom, 100);
+}
+
+#[gpui_kit::test]
+fn opens_at_the_size_kept(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    fake.settings.lock().unwrap().zoom = 125;
+    let ui = open(cx, fake);
+    assert_eq!(ui.act(cx, |window, _| window.rem_size()), px(20.));
+    // The notices keep clear of the status bar as it grows.
+    assert_eq!(cx.read(|cx| gpui_kit::component::Theme::global(cx).notification.margins.bottom), px(45.));
+}

@@ -21,7 +21,7 @@ use gpui_kit::*;
 use crate::{
     app::*,
     crumbs::Crumb,
-    metrics,
+    metrics::{self, Scale, scaled},
     places::{HomeDrag, movable},
     reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
     state::HomeKey,
@@ -69,11 +69,11 @@ pub fn glyph(name: &str) -> gpui_kit::component::Icon {
     gpui_kit::component::Icon::empty().path(format!("icons/{name}.svg"))
 }
 
-/// A thin scrollbar laid over a list; its thumb is Colet's color.
-pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette) -> gpui_kit::base::Scrollbar {
+/// A thin scrollbar laid over a list, at the zoom `scale` gives; its thumb is Colet's color.
+pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette, scale: Scale) -> gpui_kit::base::Scrollbar {
     bar.mode(gpui_kit::base::ScrollbarMode::Always).styles(|s| {
-        s.track(|t| t.bg(transparent_black()).border_color(transparent_black()).width(px(SCROLLBAR_WIDTH)))
-            .thumb(|t| t.bg(p.scrollbar).width(px(6.)).inset(px(1.)).radius(px(3.)))
+        s.track(|t| t.bg(transparent_black()).border_color(transparent_black()).width(scale.px(SCROLLBAR_WIDTH)))
+            .thumb(|t| t.bg(p.scrollbar).width(scale.px(6.)).inset(scale.px(1.)).radius(scale.px(3.)))
             .thumb_hover(|t| t.bg(p.text_muted))
             .thumb_active(|t| t.bg(p.text_muted))
     })
@@ -94,11 +94,11 @@ fn ring_line(p: crate::theme::Palette, inset: f32, radius: f32) -> impl IntoElem
         .id("focus-ring")
         .test_support()
         .absolute()
-        .top(px(inset))
-        .left(px(inset))
-        .right(px(inset))
-        .bottom(px(inset))
-        .rounded(px(radius))
+        .top(scaled(inset))
+        .left(scaled(inset))
+        .right(scaled(inset))
+        .bottom(scaled(inset))
+        .rounded(scaled(radius))
         .border_2()
         .border_color(p.focus)
 }
@@ -114,7 +114,7 @@ pub fn ring<E: ParentElement + FluentBuilder>(el: E, p: crate::theme::Palette, s
 /// keys (`shown`). Its room, [`RING_ROOM`] all round, is kept clear until then; `radius` is the corners'
 /// of what it holds.
 pub fn frame(p: crate::theme::Palette, shown: bool, radius: f32) -> Div {
-    div().relative().p(px(RING_ROOM)).when(shown, |d| d.child(ring_line(p, 0., radius + RING_ROOM)))
+    div().relative().p(scaled(RING_ROOM)).when(shown, |d| d.child(ring_line(p, 0., radius + RING_ROOM)))
 }
 
 /// The frame round the column worked in, laid over it on the lines round it: from the path bar's line
@@ -137,19 +137,19 @@ pub enum MenuSide {
 
 /// `menu` dropped from the button its parent holds, the parent `relative` and as tall as the button: just
 /// under it whatever its height, lined up with its `side`, `min` to `max` wide, and moved in to keep
-/// [`MENU_MARGIN`] from the window's edges rather than run off them. Every menu dropped from a button
+/// [`MENU_MARGIN`] at the zoom `scale` gives from the window's edges rather than run off them. Every menu dropped from a button
 /// goes through here, so all of them keep to the same edges.
-pub fn drop_down(menu: impl IntoElement, side: MenuSide, min: f32, max: Option<f32>) -> impl IntoElement {
+pub fn drop_down(menu: impl IntoElement, side: MenuSide, min: f32, max: Option<f32>, scale: Scale) -> impl IntoElement {
     let (corner, at) = match side {
         MenuSide::Left => (Anchor::TopLeft, div().left_0()),
         MenuSide::Right => (Anchor::TopRight, div().right_0()),
     };
     deferred(
-        at.absolute().top_full().mt(px(MENU_GAP)).child(
+        at.absolute().top_full().mt(scaled(MENU_GAP)).child(
             anchored()
                 .anchor(corner)
-                .snap_to_window_with_margin(px(MENU_MARGIN))
-                .child(div().min_w(px(min)).when_some(max, |d, max| d.max_w(px(max))).child(menu)),
+                .snap_to_window_with_margin(scale.px(MENU_MARGIN))
+                .child(div().min_w(scaled(min)).when_some(max, |d, max| d.max_w(scaled(max))).child(menu)),
         ),
     )
     .with_priority(gpui_kit::base::POPUP_PRIORITY)
@@ -161,7 +161,7 @@ pub fn keep_focus<E: InteractiveElement>(el: E) -> E {
 }
 
 fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
-    svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
+    svg().path(format!("icons/{name}.svg")).size(scaled(size)).flex_none().text_color(color)
 }
 
 /// `text` with what a search matched in it in `color`.
@@ -185,7 +185,8 @@ impl Colet {
         let p = self.palette;
         let focus = self.stop(key, cx);
         let shown = focus.is_focused(window);
-        let radius = f32::from(cx.theme().radius);
+        // The library's corners stay as many pixels at any zoom: the ring's are given at 100%.
+        let radius = Scale::of(window).down(f32::from(cx.theme().radius));
         let button = button.track_focus(&focus).focus_ring(false);
         match at {
             RingAt::Edge => ring(div().flex().flex_none().relative().child(button), p, shown, radius),
@@ -205,6 +206,11 @@ impl Colet {
     /// the next press, the only one a click can end.
     pub(crate) fn pressed_shut(&mut self, event: &ClickEvent) -> bool {
         self.overlays.take_pressed_open() && !event.is_keyboard()
+    }
+
+    /// The zoom this frame is drawn at, as [`Render::render`] reads it before anything is drawn.
+    pub(crate) fn scale(&self) -> Scale {
+        self.scrolls.sideways.scale
     }
 
     /// The keys are in home's pane.
@@ -237,7 +243,7 @@ impl Colet {
                     move |bounds, _, cx| {
                         measure
                             .update(cx, |this, cx| {
-                                let width = f32::from(bounds.size.width);
+                                let width = this.scale().down(f32::from(bounds.size.width));
                                 if (width - this.scrolls.sideways.main).abs() >= 0.5 {
                                     this.scrolls.sideways.main = width;
                                     cx.notify();
@@ -270,21 +276,21 @@ impl Colet {
             .justify_center()
             .gap_3()
             .p_6()
-            .text_size(px(metrics::TEXT_BODY))
+            .text_size(scaled(metrics::TEXT_BODY))
             .text_color(p.text_muted)
             .child(icon("search", 28., p.text_faint))
             .child("名前やEverythingの検索式で探せます")
             // Ringed as a field is; the rings' room makes up most of the gaps. In a narrow window they go on
             // to a second line rather than past the edges.
-            .child(div().flex().flex_wrap().justify_center().gap(px(2.)).children(
+            .child(div().flex().flex_wrap().justify_center().gap(scaled(2.)).children(
                 [("ext:pdf", "PDFファイル"), ("dm:today", "今日更新した項目"), ("size:>1gb", "1 GBを超えるファイル")].map(
                     |(query, label)| {
                         let button = Button::new(query)
                             .outline()
                             .accessibility_label(format!("{query} {label}"))
-                            .h(px(metrics::SMALL_CONTROL_HEIGHT))
-                            .px(px(10.))
-                            .gap(px(6.))
+                            .h(scaled(metrics::SMALL_CONTROL_HEIGHT))
+                            .px(scaled(10.))
+                            .gap(scaled(6.))
                             .child(div().text_color(p.accent).font_family(metrics::FONT_CODE).child(query))
                             .child(label)
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -333,6 +339,9 @@ impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Only the stops asked for over the last frame stay: those of buttons gone go with them.
         self.stops.begin_frame(window);
+        // The zoom this frame is drawn at: the widths and the scrolling are reckoned at 100% (see
+        // `metrics`), and what layout measures is read through it. Read before anything below reckons.
+        self.scrolls.sideways.rescale(Scale::of(window));
         // The columns slide a frame at a time toward where the last frame's layout says they rest.
         // Stepped here, not in prepaint or a next-frame callback, on purpose: the trail of folders and the
         // edges' shades are built below from the offset this sets, so they move with the columns in the
@@ -354,7 +363,7 @@ impl Render for Colet {
             .bg(p.bg)
             .text_color(p.text)
             .font_family(metrics::FONT_UI)
-            .text_size(px(metrics::TEXT_LARGE))
+            .text_size(scaled(metrics::TEXT_LARGE))
             // The window's keys. None of them needs to check for a dialog: the window draws its dialog
             // outside Colet's elements, and the dialog keeps the keys in itself, so while one is open these
             // are never on the way of a key (see `tests::window::leaves_the_window_keys_alone_in_a_dialog`).
@@ -400,13 +409,13 @@ impl Render for Colet {
             .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, _, window, cx| this.forward(window, cx)))
             .when(self.widths.resizing().is_some(), |d| {
                 d.cursor_col_resize()
-                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                         // Let go of off the window, where the window hears no button come up: the drag
                         // ends at the width it last left, as if let go of there.
                         if event.pressed_button != Some(MouseButton::Left) {
                             this.end_resize(cx);
                             cx.notify();
-                        } else if this.widths.drag_to(event.position.x) {
+                        } else if this.widths.drag_to(event.position.x, Scale::of(window)) {
                             cx.notify();
                         }
                     }))

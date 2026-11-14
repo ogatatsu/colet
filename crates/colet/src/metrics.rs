@@ -1,5 +1,50 @@
-//! Colet's sizes by role, in pixels, as [`crate::theme::Palette`] gives its colors by role. Only the sizes
-//! that recur, or that several parts must share to line up, are named here.
+//! Colet's sizes by role, as [`crate::theme::Palette`] gives its colors by role. Only the sizes that recur,
+//! or that several parts must share to line up, are named here.
+//!
+//! Every size in Colet, these and the widths the user drags, is given in pixels as drawn at 100%: the
+//! theme's base font at [`BASE`]. Drawn, it goes through [`scaled`], a length in rems, so it follows the
+//! zoom the settings choose along with the text; reckoned against what layout measured, it goes through
+//! [`Scale`], which knows how many pixels it is drawn as.
+use gpui_kit::{Pixels, Rems, Window, px, rems};
+
+/// The theme's base font at 100%: the rem the sizes here are given against.
+pub const BASE: f32 = 16.;
+
+/// A size given in pixels at 100%, as a length that follows the zoom.
+pub fn scaled(size: f32) -> Rems {
+    rems(size / BASE)
+}
+
+/// How many pixels a pixel at 100% is drawn as: the zoom, as the window's rem has it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Scale(f32);
+
+impl Default for Scale {
+    fn default() -> Self {
+        Self(1.)
+    }
+}
+
+impl Scale {
+    pub fn of(window: &Window) -> Self {
+        Self(f32::from(window.rem_size()) / BASE)
+    }
+
+    /// `size`, given at 100%, in pixels as drawn.
+    pub fn px(self, size: f32) -> Pixels {
+        px(size * self.0)
+    }
+
+    /// `size`, given at 100%, as the number of pixels it is drawn as.
+    pub fn up(self, size: f32) -> f32 {
+        size * self.0
+    }
+
+    /// A length as drawn, as given at 100%.
+    pub fn down(self, drawn: f32) -> f32 {
+        drawn / self.0
+    }
+}
 
 /// A dialog's title.
 pub const TEXT_TITLE: f32 = 15.;

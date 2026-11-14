@@ -15,24 +15,24 @@ impl Render for HomeGhost {
         let p = self.palette;
         let picture = match (self.search, self.image.clone()) {
             (true, _) => icon("search", 16., p.text_muted).into_any_element(),
-            (false, Some(image)) => img(image).size(px(metrics::ICON)).flex_none().into_any_element(),
-            (false, None) => div().size(px(metrics::ICON)).flex_none().into_any_element(),
+            (false, Some(image)) => img(image).size(scaled(metrics::ICON)).flex_none().into_any_element(),
+            (false, None) => div().size(scaled(metrics::ICON)).flex_none().into_any_element(),
         };
         div()
             .w(self.width)
-            .h(px(row_height(Kind::Home)))
+            .h(scaled(row_height(Kind::Home)))
             .px_2()
             .flex()
             .items_center()
             .gap_2()
-            .rounded(px(metrics::RADIUS))
+            .rounded(scaled(metrics::RADIUS))
             .border_1()
             .border_color(p.border_strong)
             .bg(p.raised)
             // Faint enough that the landing line it passes over still shows through.
             .opacity(0.5)
             .font_family(metrics::FONT_UI)
-            .text_size(px(metrics::TEXT_LARGE))
+            .text_size(scaled(metrics::TEXT_LARGE))
             .text_color(p.text)
             .child(picture)
             .child(div().min_w_0().truncate().child(self.name.clone()))
@@ -172,8 +172,8 @@ impl Colet {
         let name = entry.name.clone();
         let picture = match (saved, image) {
             (true, _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
-            (false, Some(image)) => img(image).size(px(metrics::ICON)).flex_none().into_any_element(),
-            (false, None) => div().size(px(metrics::ICON)).flex_none().into_any_element(),
+            (false, Some(image)) => img(image).size(scaled(metrics::ICON)).flex_none().into_any_element(),
+            (false, None) => div().size(scaled(metrics::ICON)).flex_none().into_any_element(),
         };
         let menu_path = entry.path.clone();
         let tab_path = entry.path.clone();
@@ -218,21 +218,25 @@ impl Colet {
                 let drawn = rows.clone();
                 let path = drag.path.clone();
                 r.child(canvas(move |bounds, _, _| drawn.borrow_mut().push((path.clone(), bounds)), |_, _, _, _| {}).absolute().size_full())
-                    .on_drag(drag, move |drag, _, _, cx| {
+                    .on_drag(drag, move |drag, _, window, cx| {
                         view.update(cx, |this, cx| this.start_home_drag(drag, cx)).ok();
-                        let width = rows.borrow().iter().find(|(path, _)| *path == drag.path).map_or(px(200.), |(_, b)| b.size.width);
+                        let width = rows
+                            .borrow()
+                            .iter()
+                            .find(|(path, _)| *path == drag.path)
+                            .map_or(Scale::of(window).px(200.), |(_, b)| b.size.width);
                         let (name, search, image) = (name.clone(), HomeKey::of(&drag.path).is_search(), image.clone());
                         cx.new(|_| HomeGhost { name, search, image, width, palette: p })
                     })
             })
             .when(dragged, |r| r.opacity(0.4))
-            .h(px(row_height(kind)))
+            .h(scaled(row_height(kind)))
             .w_full()
             .px_2()
             .flex()
             .items_center()
             .gap_2()
-            .rounded(px(metrics::RADIUS))
+            .rounded(scaled(metrics::RADIUS))
             .role(Role::ListBoxOption)
             .aria_label(entry.name.clone())
             .aria_selected(selected)
@@ -240,7 +244,7 @@ impl Colet {
             .border_color(transparent_black())
             .when(focused, |r| r.border_color(if lit { p.focus_on_fill } else { p.focus }))
             .when(target, |r| r.border_color(p.accent).bg(p.highlight))
-            .when(barred, |r| r.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).rounded_l(px(4.)).bg(p.accent)))
+            .when(barred, |r| r.child(div().absolute().left_0().top_0().bottom_0().w(scaled(3.)).rounded_l(scaled(4.)).bg(p.accent)))
             .when(selected, |r| r.bg(if marked && !aside { p.accent_fill } else { p.selected_inactive }))
             .when(lit, |r| r.text_color(p.on_accent))
             .when(barred, |r| r.bg(p.highlight))
@@ -296,8 +300,8 @@ impl Colet {
         // Ringed on the row's own fill, filled on any other.
         let (fill, mark) = if lit { (p.on_accent, p.accent_fill) } else { (p.accent_fill, p.on_accent) };
         let check = div()
-            .size(px(14.))
-            .rounded(px(3.))
+            .size(scaled(14.))
+            .rounded(scaled(3.))
             .flex()
             .items_center()
             .justify_center()
@@ -311,10 +315,10 @@ impl Colet {
             .flex()
             .items_center()
             // Out over the row's padding and ring, and the gap to the name.
-            .ml(px(-10.))
-            .pl(px(10.))
-            .mr(px(-8.))
-            .pr(px(8.))
+            .ml(scaled(-10.))
+            .pl(scaled(10.))
+            .mr(scaled(-8.))
+            .pr(scaled(8.))
             .role(Role::CheckBox)
             .aria_label("選択")
             .aria_toggled(if selected { Toggled::True } else { Toggled::False })
@@ -324,8 +328,8 @@ impl Colet {
                     .absolute()
                     .top_0()
                     .bottom_0()
-                    .left(px(10.))
-                    .w(px(16.))
+                    .left(scaled(10.))
+                    .w(scaled(16.))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -386,15 +390,15 @@ impl Colet {
                         d.child(
                             div()
                                 .flex_shrink_0()
-                                .max_w(px(96.))
-                                .px(px(6.))
-                                .rounded(px(metrics::RADIUS))
+                                .max_w(scaled(96.))
+                                .px(scaled(6.))
+                                .rounded(scaled(metrics::RADIUS))
                                 .border_1()
                                 .border_color(ink.opacity(0.3))
                                 .bg(ink.opacity(0.1))
                                 .truncate()
-                                .text_size(px(metrics::TEXT_SMALL))
-                                .line_height(px(16.))
+                                .text_size(scaled(metrics::TEXT_SMALL))
+                                .line_height(scaled(16.))
                                 .text_color(ink)
                                 .child(filter),
                         )
@@ -403,14 +407,14 @@ impl Colet {
                         d.child(
                             div()
                                 .id(row_part_id(row.id, "narrow"))
-                                .min_w(px(24.))
+                                .min_w(scaled(24.))
                                 .flex_shrink_1()
                                 .flex()
                                 .items_center()
-                                .gap(px(2.))
+                                .gap(scaled(2.))
                                 .tip(format!("絞り込み：{narrow}"))
                                 .child(icon("funnel", 11., muted))
-                                .child(div().min_w_0().truncate().text_size(px(metrics::TEXT_SMALL)).text_color(muted).child(narrow)),
+                                .child(div().min_w_0().truncate().text_size(scaled(metrics::TEXT_SMALL)).text_color(muted).child(narrow)),
                         )
                     }),
             )
@@ -421,7 +425,7 @@ impl Colet {
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis_start()
-                        .text_size(px(metrics::TEXT_BODY))
+                        .text_size(scaled(metrics::TEXT_BODY))
                         .text_color(muted)
                         .child(with_marks(&row.entry.parent, &row.entry.marks.parent, mark)),
                 )
@@ -437,10 +441,10 @@ impl Colet {
         let cell = |width: f32, text: String| {
             div()
                 .flex_none()
-                .w(px(width))
+                .w(scaled(width))
                 .flex()
                 .whitespace_nowrap()
-                .text_size(px(metrics::TEXT_BODY))
+                .text_size(scaled(metrics::TEXT_BODY))
                 .text_color(muted)
                 .child(text)
                 .into_any_element()
@@ -448,7 +452,7 @@ impl Colet {
         let chevron = if entry.directory {
             icon("chevron-right", 13., if lit { p.on_accent_muted } else { p.text_faint }).into_any_element()
         } else {
-            div().w(px(13.)).flex_none().into_any_element()
+            div().w(scaled(13.)).flex_none().into_any_element()
         };
         [cell(SIZE_WIDTH, size), cell(MODIFIED_WIDTH, modified), chevron]
     }
@@ -512,15 +516,15 @@ impl Colet {
             rows = rows.child(
                 div()
                     // Set off from the kind above, so the kinds read apart.
-                    .when(k > 0, |d| d.mt(px(8.)))
+                    .when(k > 0, |d| d.mt(scaled(8.)))
                     .relative()
                     .child(canvas(move |bounds, _, _| headings.borrow_mut().push(bounds), |_, _, _, _| {}).absolute().inset_0())
-                    .h(px(28.))
+                    .h(scaled(28.))
                     .px_3()
-                    .pb(px(6.))
+                    .pb(scaled(6.))
                     .flex()
                     .items_end()
-                    .text_size(px(metrics::TEXT_BODY))
+                    .text_size(scaled(metrics::TEXT_BODY))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(p.text_muted)
                     .child(title),
@@ -534,13 +538,13 @@ impl Colet {
                     d.child(
                         div()
                             .absolute()
-                            .left(px(6.))
-                            .right(px(6.))
-                            .h(px(2.))
-                            .rounded(px(1.))
+                            .left(scaled(6.))
+                            .right(scaled(6.))
+                            .h(scaled(2.))
+                            .rounded(scaled(1.))
                             .bg(p.accent)
-                            .when(above, |l| l.top(px(-1.)))
-                            .when(!above, |l| l.bottom(px(-1.))),
+                            .when(above, |l| l.top(scaled(-1.)))
+                            .when(!above, |l| l.bottom(scaled(-1.))),
                     )
                 }));
             }
@@ -550,7 +554,7 @@ impl Colet {
             .min_h_0()
             .relative()
             .child(rows)
-            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&self.scrolls.home), p)))
+            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&self.scrolls.home), p, self.scale())))
             .into_any_element()
     }
 
@@ -577,7 +581,7 @@ impl Colet {
         .size_full()
         .p_1()
         // The last row scrolls clear of the columns' scrollbar laid over the bottom.
-        .pb(px(4. + SCROLLBAR_WIDTH));
+        .pb(scaled(4. + SCROLLBAR_WIDTH));
         // Shift and the wheel send the columns sideways; the rows under it stay put. A list has no
         // builder for this, as a div has.
         list.style().restrict_scroll_to_axis = Some(true);
@@ -592,15 +596,11 @@ impl Colet {
             .child(list)
             .when(more_to_come, |d| d.child(next_page_at_end(id, count, &handle, cx)))
             // Clear of the half of the edge that falls inside.
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left_0()
-                    .right(px(RESIZER_WIDTH / 2.))
-                    .child(scrollbar(gpui_kit::base::Scrollbar::vertical(&handle), p)),
-            )
+            .child(div().absolute().top_0().bottom_0().left_0().right(scaled(RESIZER_WIDTH / 2.)).child(scrollbar(
+                gpui_kit::base::Scrollbar::vertical(&handle),
+                p,
+                self.scale(),
+            )))
             .into_any_element()
     }
 }

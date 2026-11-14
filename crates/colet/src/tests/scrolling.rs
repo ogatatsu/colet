@@ -471,3 +471,53 @@ fn stretches_the_results_into_what_one_folder_beside_them_leaves_alike_for_a_fol
     assert_eq!(width(&ui, cx), own);
     assert!(resizer(&ui, cx));
 }
+
+#[gpui_kit::test]
+fn widens_home_by_as_much_as_the_pointer_moves_at_the_size_chosen(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    fake.settings.lock().unwrap().zoom = 125;
+    let ui = open(cx, fake.clone());
+    let edge = ui.act(cx, |window, _| window.find("sidebar-resizer").bounds().center());
+    ui.act(cx, |window, cx| window.drag(edge, point(edge.x + px(100.), edge.y), cx));
+    settle(cx);
+    // Kept as at 100%, so it is as wide against the text whatever the size.
+    assert_eq!(ui.read(cx, |v| v.widths.sidebar), 320.);
+    assert_eq!(fake.settings.lock().unwrap().sidebar_width, 320.);
+    assert_eq!(ui.act(cx, |window, _| f32::from(window.find("sidebar").bounds().size.width)), 400.);
+}
+
+#[gpui_kit::test]
+fn narrows_home_in_a_window_the_size_chosen_leaves_too_narrow(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    fake.settings.lock().unwrap().zoom = 200;
+    let ui = open(cx, fake.clone());
+    // 1200 pixels hold 600 at 100%: home gives way to its least, so the rest keeps its own.
+    assert_eq!(ui.act(cx, |window, _| f32::from(window.find("sidebar").bounds().size.width)), 2. * crate::app::SIDEBAR_WIDTHS.0);
+    assert_eq!(ui.read(cx, |v| v.widths.sidebar), 240.);
+}
+
+#[gpui_kit::test]
+fn keeps_the_last_column_at_the_right_edge_as_the_size_changes(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    // Wide enough at 200% for the column worked in and the last beside it: narrower, the one worked in is
+    // kept whole rather than the last flush.
+    cx.simulate_window_resize(ui.window, size(px(1800.), px(900.)));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    assert!(room_past_last(&ui, cx).abs() < 1.);
+    let last = ui.read(cx, |v| v.state.columns.last().unwrap().id);
+    for zoom in [150, 90, 200, 100] {
+        ui.view.update(cx, |v, cx| v.set_zoom(zoom, cx));
+        rest(&ui, cx);
+        let room = room_past_last(&ui, cx);
+        assert!(room.abs() < 1., "{zoom}: {room}");
+        // Each column as wide as its width at 100% grown by the size.
+        let width = ui.act(cx, |window, _| f32::from(window.find(("column", last)).bounds().size.width));
+        let expected = ui.read(cx, |v| v.widths.column) * f32::from(zoom) / 100.;
+        assert!((width - expected).abs() < 1., "{zoom}: {width} against {expected}");
+    }
+}

@@ -216,9 +216,21 @@ pub fn init(cx: &mut App) {
         // three at most.
         let notices = &mut kit.notification;
         notices.placement = gpui_kit::Anchor::BottomRight;
-        notices.margins.bottom = gpui_kit::px(36.);
-        notices.margins.right = gpui_kit::px(12.);
         notices.max_items = 3;
+    });
+    set_zoom(100, cx);
+}
+
+/// Draws everything at `zoom` percent: the theme's base font is the window's rem, which every size Colet
+/// and the component library give in rems follows (see [`crate::metrics`]). The notices' margins, which
+/// the library takes in pixels, follow with it.
+pub fn set_zoom(zoom: u16, cx: &mut App) {
+    let scale = f32::from(zoom) / 100.;
+    gpui_kit::component::Theme::update(cx, |kit| {
+        kit.font_size = gpui_kit::px(crate::metrics::BASE * scale);
+        // Clear of the status bar, by the history the notices tell of.
+        kit.notification.margins.bottom = gpui_kit::px(36. * scale);
+        kit.notification.margins.right = gpui_kit::px(12. * scale);
     });
 }
 

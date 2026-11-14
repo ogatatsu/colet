@@ -41,37 +41,37 @@ impl Colet {
             self.ringed(clear, "clear-search", RingAt::Edge, window, cx)
         });
         div()
-            .h(px(48.))
+            .h(scaled(48.))
             .flex_none()
             .px_3()
             .flex()
             .items_center()
             .gap_2()
-            .child(div().flex().flex_none().gap(px(2.)).child(back).child(forward).child(refresh))
+            .child(div().flex().flex_none().gap(scaled(2.)).child(back).child(forward).child(refresh))
             .child(filter_button)
             .child(
                 // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row. It keeps
                 // its width while the address beside it gives way, then narrows, keeping room to type in.
                 frame(p, focused, metrics::FIELD_RADIUS)
                     .flex_none()
-                    .w(px(field_width))
+                    .w(scaled(field_width))
                     .flex_shrink(1.)
-                    .min_w(px(SEARCH_FIELD_WIDTHS.0))
-                    .m(px(-RING_ROOM))
+                    .min_w(scaled(SEARCH_FIELD_WIDTHS.0))
+                    .m(scaled(-RING_ROOM))
                     .child(
                         div()
                             .id("search-box")
                             .w_full()
-                            .h(px(metrics::CONTROL_HEIGHT))
-                            .pl(px(10.))
-                            .pr(px(4.))
+                            .h(scaled(metrics::CONTROL_HEIGHT))
+                            .pl(scaled(10.))
+                            .pr(scaled(4.))
                             .flex()
                             .items_center()
                             .gap_2()
                             .bg(p.surface)
                             .border_1()
                             .border_color(p.border_strong)
-                            .rounded(px(metrics::FIELD_RADIUS))
+                            .rounded(scaled(metrics::FIELD_RADIUS))
                             .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
                             .child(
                                 div()
@@ -113,18 +113,18 @@ impl Colet {
             .id(ID)
             .group(ID)
             .flex_none()
-            .h(px(metrics::CONTROL_HEIGHT))
-            .px(px(4.))
-            .mx(px(-4.))
+            .h(scaled(metrics::CONTROL_HEIGHT))
+            .px(scaled(4.))
+            .mx(scaled(-4.))
             .flex()
             .items_center()
             .cursor_col_resize()
             // As wide as the chevron was, so the toolbar keeps its widths.
             .child(
-                div().w(px(metrics::GLYPH)).flex().justify_center().child(
+                div().w(scaled(metrics::GLYPH)).flex().justify_center().child(
                     div()
-                        .w(px(2.))
-                        .h(px(16.))
+                        .w(scaled(2.))
+                        .h(scaled(16.))
                         .rounded_full()
                         .bg(if dragging { p.accent } else { p.border_strong })
                         .group_hover(ID, |s| s.bg(p.accent)),
@@ -174,9 +174,9 @@ impl Colet {
             .flex_shrink(100.)
             // The funnel and the chevron with their padding, gaps and border: the button never goes under
             // the sort order's.
-            .min_w(px(60.))
+            .min_w(scaled(60.))
             .child(
-                frame(p, focus.is_focused(window), metrics::FIELD_RADIUS).min_w_0().m(px(-RING_ROOM)).child(
+                frame(p, focus.is_focused(window), metrics::FIELD_RADIUS).min_w_0().m(scaled(-RING_ROOM)).child(
                     crate::view::keep_focus(div().id("search-filter"))
                         .test_support()
                         .track_focus(&focus)
@@ -185,19 +185,19 @@ impl Colet {
                         .role(Role::Button)
                         .aria_label(label.clone())
                         .aria_expanded(self.filter_open())
-                        .h(px(metrics::CONTROL_HEIGHT))
-                        .max_w(px(200.))
-                        .pl(px(10.))
+                        .h(scaled(metrics::CONTROL_HEIGHT))
+                        .max_w(scaled(200.))
+                        .pl(scaled(10.))
                         .pr_2()
                         .flex()
                         .items_center()
-                        .gap(px(6.))
-                        .text_size(px(metrics::TEXT_BODY))
+                        .gap(scaled(6.))
+                        .text_size(scaled(metrics::TEXT_BODY))
                         .text_color(if on { p.accent } else { p.text_muted })
                         .bg(p.surface)
                         .border_1()
                         .border_color(if on { p.accent } else { p.border_strong })
-                        .rounded(px(metrics::FIELD_RADIUS))
+                        .rounded(scaled(metrics::FIELD_RADIUS))
                         .hover(|d| d.bg(p.hover))
                         .tip_while_shut(self.filter_open(), format!("{label}（Ctrl+Shift+F）"))
                         .child(icon("funnel", metrics::GLYPH, if on { p.accent } else { p.text_muted }))
@@ -214,7 +214,7 @@ impl Colet {
                 ),
             )
             .when_some(self.menu_element("search-filter-menu", "検索フィルター", cx).filter(|_| self.filter_open()), |d, menu| {
-                d.child(drop_down(menu, MenuSide::Left, 200., Some(320.)))
+                d.child(drop_down(menu, MenuSide::Left, 200., Some(320.), self.scale()))
             })
             .into_any_element()
     }

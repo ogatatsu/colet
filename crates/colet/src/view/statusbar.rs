@@ -39,11 +39,11 @@ impl Colet {
             Engine::Failed(_) => (p.danger, Some(p.danger)),
         };
         StatusBar::new()
-            .h(px(26.))
+            .h(scaled(26.))
             .flex_none()
             .px_3()
             .gap_4()
-            .text_size(px(metrics::TEXT_BODY))
+            .text_size(scaled(metrics::TEXT_BODY))
             .child(
                 div()
                     .id("place")
@@ -61,15 +61,15 @@ impl Colet {
                 div()
                     .id("engine")
                     .flex_none()
-                    .max_w(px(200.))
+                    .max_w(scaled(200.))
                     .flex()
                     .items_center()
-                    .gap(px(6.))
+                    .gap(scaled(6.))
                     .text_color(color)
                     .tip(title)
                     .child(
                         div()
-                            .size(px(6.))
+                            .size(scaled(6.))
                             .rounded_full()
                             .border_1()
                             .border_color(dot.unwrap_or(p.text_faint))

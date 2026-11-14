@@ -24,7 +24,7 @@ impl Colet {
     /// Home's pane as drawn: as wide as dragged, but narrower in a narrow window, down to its least, so
     /// the rest keeps [`MAIN_MIN`]. The width kept stays as dragged, and comes back as the window widens.
     pub fn sidebar_width(&self, window: &Window) -> f32 {
-        let room = f32::from(window.viewport_size().width) - MAIN_MIN;
+        let room = Scale::of(window).down(f32::from(window.viewport_size().width)) - MAIN_MIN;
         self.widths.sidebar.min(room.max(SIDEBAR_WIDTHS.0))
     }
 
@@ -76,10 +76,10 @@ impl Colet {
     pub fn on_screen(&self) -> OnScreen {
         let first = if self.state.pinned() { 2 } else { 1 } + self.state.folded_away();
         let count = self.state.columns.len().saturating_sub(first);
-        let view = f32::from(self.scrolls.sideways.scroll.bounds().size.width);
+        let view = self.scrolls.sideways.view_width();
         // A wheel moves the offset past its bounds until the next layout brings it back: read it as it
         // will be drawn, so the edges' shades do not flash on.
-        let max = f32::from(self.scrolls.sideways.scroll.max_offset().x).max(self.scrolls.sideways.hold);
+        let max = self.scrolls.sideways.max_offset().max(self.scrolls.sideways.hold);
         let from = self.scrolls.sideways.offset().clamp(0., max);
         let cells: Vec<Cell> = (0..count).map(|i| Cell { start: i as f32 * self.widths.column, width: self.widths.column }).collect();
         OnScreen { first, count, span: on_screen(from, view, &cells) }
@@ -91,7 +91,7 @@ impl Colet {
         let focus = self.stop("unfold", cx);
         div()
             .id("unfold-strip")
-            .w(px(FOLD_WIDTH))
+            .w(scaled(FOLD_WIDTH))
             .h_full()
             .flex_none()
             .relative()
@@ -106,7 +106,7 @@ impl Colet {
             .child(
                 div()
                     .id("unfold-head")
-                    .h(px(metrics::HEADING_HEIGHT))
+                    .h(scaled(metrics::HEADING_HEIGHT))
                     .w_full()
                     .flex_none()
                     .flex()
@@ -126,7 +126,7 @@ impl Colet {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .text_size(px(metrics::TEXT_BODY))
+                    .text_size(scaled(metrics::TEXT_BODY))
                     .text_color(p.text_muted)
                     .child(away.to_string())
                     .child("階")
@@ -175,8 +175,9 @@ impl Colet {
             // change in its width before they are drawn.
             .child(
                 canvas(
-                    move |bounds, _, cx| {
-                        fit.update(cx, |this, cx| this.fit(f32::from(bounds.size.width), cx)).ok();
+                    move |bounds, window, cx| {
+                        let view = Scale::of(window).down(f32::from(bounds.size.width));
+                        fit.update(cx, |this, cx| this.fit(view, cx)).ok();
                     },
                     |_, _, _, _| {},
                 )
@@ -193,19 +194,25 @@ impl Colet {
                     .track_scroll(&self.scrolls.sideways.scroll)
                     // The crumbs' bar and the edges' shades follow the columns as they scroll.
                     .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
-                    .child(div().h_full().w(px(content)).flex().children(columns))
+                    .child(div().h_full().w(scaled(content)).flex().children(columns))
                     // The room past the last column is no column's: a press there leaves the keys where they
                     // are, rather than the columns' focus sending them beside home.
-                    .child(keep_focus(div().id("columns-rest")).absolute().top_0().bottom_0().left(px(content)).right_0().test_support())
+                    .child(
+                        keep_focus(div().id("columns-rest")).absolute().top_0().bottom_0().left(scaled(content)).right_0().test_support(),
+                    )
                     // Room up to a view's width past where the columns were brought, so the scroll width
                     // cannot shrink under them while they slide back. A view wide however wide layout makes
                     // it: reckoned here, it would be the last frame's.
-                    .child(div().absolute().top_0().left(px(hold)).w_full().h(px(0.)))
+                    .child(div().absolute().top_0().left(scaled(hold)).w_full().h_0())
                     .test_support(),
             )
-            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::horizontal(&self.scrolls.sideways.scroll), p)))
-            .when(screen.hidden_left(), |d| d.child(div().absolute().top_0().bottom_0().left_0().w(px(28.)).bg(shade(90.))))
-            .when(screen.hidden_right(), |d| d.child(div().absolute().top_0().bottom_0().right_0().w(px(28.)).bg(shade(270.))))
+            .child(div().absolute().inset_0().child(scrollbar(
+                gpui_kit::base::Scrollbar::horizontal(&self.scrolls.sideways.scroll),
+                p,
+                self.scale(),
+            )))
+            .when(screen.hidden_left(), |d| d.child(div().absolute().top_0().bottom_0().left_0().w(scaled(28.)).bg(shade(90.))))
+            .when(screen.hidden_right(), |d| d.child(div().absolute().top_0().bottom_0().right_0().w(scaled(28.)).bg(shade(270.))))
             .child(self.scrolling_frame(window))
             .into_any_element()
     }
@@ -224,6 +231,9 @@ impl Colet {
                 |_, _, _| {},
                 move |bounds, _, window, _| {
                     let Some(active) = active else { return };
+                    // Reckoned as drawn, so the frame's lines stay a pixel wide and on the column's at any
+                    // zoom.
+                    let width = Scale::of(window).up(width);
                     let view = f32::from(bounds.size.width) - 1.;
                     let start = active as f32 * width + f32::from(scroll.offset().x);
                     let (left, right) = ((start - 1.).max(-1.), (start + width).min(view));
@@ -235,6 +245,7 @@ impl Colet {
                 },
             )
             .absolute()
+            // A pixel's line, which stays one at any zoom.
             .top(px(-1.))
             .bottom(px(-1.))
             .left(px(-1.))
@@ -244,7 +255,7 @@ impl Colet {
 
     /// Slides the columns toward where they should rest, a frame at a time.
     pub(super) fn reveal(&mut self, window: &mut Window) {
-        let mut view = f32::from(self.scrolls.sideways.scroll.bounds().size.width);
+        let mut view = self.scrolls.sideways.view_width();
         let mut from = self.scrolls.sideways.offset();
         // The results beside the columns narrow or widen, as folders open or close: the view's left edge
         // moves by as much, and its width with it. The columns on screen stay where they are drawn, so the

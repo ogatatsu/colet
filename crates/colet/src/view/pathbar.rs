@@ -25,16 +25,19 @@ impl Colet {
                     canvas(
                         |_, _, _| {},
                         move |row, _, window, _| {
-                            let bounds = bounds.borrow();
+                            let (bounds, scale) = (bounds.borrow(), Scale::of(window));
                             let drawn = |k: usize| {
                                 let b = bounds.get(ids.get(k)?)?;
-                                Some((f32::from(b.left()), f32::from(b.right())))
+                                Some((scale.down(f32::from(b.left())), scale.down(f32::from(b.right()))))
                             };
                             let placed = crate::crumbs::bar(span, drawn);
                             bar.set(placed);
                             if let Some((start, end)) = placed {
-                                let at = Bounds::new(point(px(start), row.bottom() - px(2.)), size(px((end - start).max(0.)), px(2.)));
-                                window.paint_quad(fill(at, color).corner_radii(px(1.)));
+                                let at = Bounds::new(
+                                    point(scale.px(start), row.bottom() - scale.px(2.)),
+                                    size(scale.px((end - start).max(0.)), scale.px(2.)),
+                                );
+                                window.paint_quad(fill(at, color).corner_radii(scale.px(1.)));
                             }
                         },
                     )
@@ -58,9 +61,10 @@ impl Colet {
             .collect()
     }
 
-    /// Each crumb's whole width as drawn: its 13px name, padding, the chevron before it and the gap after.
+    /// Each crumb's whole width at 100%: its name in the window's text size, padding, the chevron before it and the
+    /// gap after.
     fn crumb_widths(&self, crumbs: &[Crumb], window: &Window) -> Vec<f32> {
-        let font = font(metrics::FONT_UI);
+        let (font, scale) = (font(metrics::FONT_UI), Scale::of(window));
         crumbs
             .iter()
             .enumerate()
@@ -73,10 +77,10 @@ impl Colet {
                     underline: None,
                     strikethrough: None,
                 };
-                let shaped = window.text_system().shape_line(label.clone().into(), px(13.), &[run], None);
+                let shaped = window.text_system().shape_line(label.clone().into(), scale.px(metrics::TEXT_LARGE), &[run], None);
                 // The first stands at the bar's start, with no chevron or gap before it.
                 let before = if k == 0 { 0. } else { crate::crumbs::SEPARATOR + crate::crumbs::GAP };
-                f32::from(shaped.width).ceil() + 12. + before
+                scale.down(f32::from(shaped.width)).ceil() + 12. + before
             })
             .collect()
     }
@@ -86,7 +90,7 @@ impl Colet {
         let p = self.palette;
         let controls = self.view_controls(window, cx);
         div()
-            .h(px(40.))
+            .h(scaled(40.))
             .flex_none()
             .px_3()
             .flex()
@@ -107,8 +111,9 @@ impl Colet {
         let widths = self.crumb_widths(&crumbs, window);
         // The room the bar was last drawn with; before the first frame, a guess at what the toolbar leaves it.
         let row_width = match self.crumbs.row.get() {
-            Some(row) => f32::from(row.size.width),
-            None => (f32::from(window.viewport_size().width) - ADDRESS_GUESS - self.widths.field).max(crate::crumbs::TYPING_ROOM),
+            Some(row) => self.scale().down(f32::from(row.size.width)),
+            None => (self.scale().down(f32::from(window.viewport_size().width)) - ADDRESS_GUESS - self.widths.field)
+                .max(crate::crumbs::TYPING_ROOM),
         };
         self.crumbs.room.set(row_width);
         // The crumbs leave a strip to press to type a path, however long the trail.
@@ -131,7 +136,7 @@ impl Colet {
             .h_full()
             .relative()
             .items_center()
-            .gap(px(2.))
+            .gap(scaled(2.))
             .min_w_0()
             .overflow_hidden()
             .child({
@@ -139,7 +144,7 @@ impl Colet {
                 canvas(
                     move |bounds, window, _| {
                         row.set(Some(bounds));
-                        if (f32::from(bounds.size.width) - room.get()).abs() > 0.5 {
+                        if (Scale::of(window).down(f32::from(bounds.size.width)) - room.get()).abs() > 0.5 {
                             window.request_animation_frame();
                         }
                     },
@@ -159,13 +164,13 @@ impl Colet {
                 div()
                     .id("address-room")
                     .flex_1()
-                    .min_w(px(crate::crumbs::TYPING_ROOM))
+                    .min_w(scaled(crate::crumbs::TYPING_ROOM))
                     .h_full()
                     .cursor_text()
                     .when(crumbs.is_empty(), |d| {
                         d.flex()
                             .items_center()
-                            .px(px(6.))
+                            .px(scaled(6.))
                             .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(crate::address::PLACEHOLDER))
                     })
                     .on_click(cx.listener(|this, _, window, cx| this.open_address(window, cx)))
@@ -174,7 +179,7 @@ impl Colet {
         let field = div()
             .flex_1()
             .min_w_0()
-            .px(px(6.))
+            .px(scaled(6.))
             .key_context(ADDRESS)
             .capture_any_mouse_down(Self::right_press_menu(self.address.field(), cx))
             .on_action(cx.listener(|this, _: &input::Escape, window, cx| this.leave_address(window, cx)))
@@ -184,22 +189,22 @@ impl Colet {
         // way first in a narrow window, folding its crumbs.
         frame(p, editing, metrics::FIELD_RADIUS)
             .flex_1()
-            .min_w(px(ADDRESS_MIN))
-            .m(px(-RING_ROOM))
-            .text_size(px(metrics::TEXT_BODY))
+            .min_w(scaled(ADDRESS_MIN))
+            .m(scaled(-RING_ROOM))
+            .text_size(scaled(metrics::TEXT_BODY))
             .child(
                 div()
                     .id("address")
                     .w_full()
-                    .h(px(metrics::CONTROL_HEIGHT))
-                    .pl(px(4.))
-                    .pr(px(2.))
+                    .h(scaled(metrics::CONTROL_HEIGHT))
+                    .pl(scaled(4.))
+                    .pr(scaled(2.))
                     .flex()
                     .items_center()
                     .bg(p.surface)
                     .border_1()
                     .border_color(p.border_strong)
-                    .rounded(px(metrics::FIELD_RADIUS))
+                    .rounded(scaled(metrics::FIELD_RADIUS))
                     .when(editing, |d| d.child(field))
                     .when(!editing, |d| d.child(trail))
                     .test_support(),
@@ -221,11 +226,11 @@ impl Colet {
                     .role(Role::Button)
                     .aria_label("上の階層")
                     .aria_expanded(open)
-                    .size(px(metrics::ICON_BUTTON))
+                    .size(scaled(metrics::ICON_BUTTON))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(metrics::RADIUS))
+                    .rounded(scaled(metrics::RADIUS))
                     .hover(|d| d.bg(p.hover))
                     .tip_while_shut(open, "上の階層")
                     .child(icon("ellipsis", 15., if current { p.text } else { p.text_muted }))
@@ -239,7 +244,7 @@ impl Colet {
                     }))
                     .test_support(),
             )
-            .when_some(menu, |d, menu| d.child(drop_down(menu, MenuSide::Left, 160., None)))
+            .when_some(menu, |d, menu| d.child(drop_down(menu, MenuSide::Left, 160., None, self.scale())))
             .into_any_element()
     }
 
@@ -256,10 +261,10 @@ impl Colet {
         div()
             .flex()
             .items_center()
-            .gap(px(2.))
+            .gap(scaled(2.))
             // As large as the rows' names, though the bar's buttons stay smaller.
-            .text_size(px(metrics::TEXT_LARGE))
-            .when_some(max_width, |d, width| d.min_w_0().max_w(px(width)))
+            .text_size(scaled(metrics::TEXT_LARGE))
+            .when_some(max_width, |d, width| d.min_w_0().max_w(scaled(width)))
             .when(max_width.is_none(), |d| d.flex_none())
             .when(chevron, |d| d.child(icon("chevron-right", 13., p.text_faint)))
             .child(
@@ -279,13 +284,13 @@ impl Colet {
                         .absolute()
                         .size_full()
                     })
-                    .h(px(24.))
-                    .px(px(6.))
+                    .h(scaled(24.))
+                    .px(scaled(6.))
                     .flex()
                     .items_center()
                     .gap_1()
                     .min_w_0()
-                    .rounded(px(metrics::RADIUS))
+                    .rounded(scaled(metrics::RADIUS))
                     .text_color(if current { p.text } else { p.text_muted })
                     .hover(|d| d.bg(p.hover))
                     .tip(path)
