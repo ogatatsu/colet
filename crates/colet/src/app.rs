@@ -593,6 +593,7 @@ impl Colet {
             });
         }
         self.loading.keep(&live);
+        self.stop_search_out_of_sight(cx);
         self.scrolls.rows.keep(&live);
         let fresh: Vec<(ColumnId, Kind)> = self.state.columns.iter().filter(|c| self.loading.first(c.id)).map(|c| (c.id, c.kind)).collect();
         for (id, kind) in fresh {
@@ -934,6 +935,22 @@ impl Colet {
         })
     }
 
+    /// The tab in front searches no more, as another without a search came to the front, or its search
+    /// was cleared or closed: Everything stops watching the last search. It comes back with the next.
+    fn stop_search_out_of_sight(&mut self, cx: &mut Context<Self>) {
+        if self.searches() {
+            return;
+        }
+        let Some(request) = self.loading.stop_searching() else { return };
+        let backend = self.backend.clone();
+        cx.background_executor().spawn(async move { backend.stop_search(request) }).detach();
+    }
+
+    /// The tab in front has a search.
+    fn searches(&self) -> bool {
+        self.state.columns.iter().any(|c| c.kind == Kind::Search)
+    }
+
     /// Says which folders the watcher could list but not watch, each once.
     fn take_missed(&mut self, cx: &mut Context<Self>) {
         let fresh = self.loading.watching_mut().take_missed();
@@ -964,6 +981,9 @@ impl Colet {
                     .update(cx, |this, cx| match result {
                         Ok(true) => this.search_changed(cx),
                         Ok(false) => {}
+                        // Heard of a search no longer in front, as it was let go of: the next search
+                        // connects afresh if it must.
+                        Err(_) if !this.searches() => {}
                         Err(error) => {
                             this.loading.search_failed(error.clone());
                             this.notify(error, Tone::Error, cx);

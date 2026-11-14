@@ -61,6 +61,9 @@ pub trait Backend: Send + Sync + 'static {
     fn count(&self, query: &str) -> Result<usize, String>;
     /// Whether the last search's results changed; so until it is searched afresh.
     fn search_changed(&self) -> Result<bool, String>;
+    /// Stops watching the last search, as none is in front, unless a search asked after `request` came
+    /// first. It may wait for a search under way: never call it on the UI thread.
+    fn stop_search(&self, request: u64);
     fn load_settings(&self) -> Loaded<Settings>;
     fn save_settings(&self, settings: &Settings) -> Result<(), String>;
     fn load_sorts(&self) -> Loaded<Sorts>;
@@ -165,6 +168,15 @@ impl Backend for Live {
             // A search under way, perhaps waiting out a busy Everything, is asked next time.
             Err(std::sync::TryLockError::WouldBlock) => Ok(false),
             Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn stop_search(&self, request: u64) {
+        // A search asked before it and not yet run is not run: it is no longer in front.
+        self.latest.fetch_max(request, Ordering::Relaxed);
+        let Ok(mut session) = self.session.lock() else { return };
+        if self.latest.load(Ordering::Relaxed) == request {
+            session.release();
         }
     }
 

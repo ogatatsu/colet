@@ -79,6 +79,36 @@ fn warns_once_a_connection_of_what_everything_does_not_index_and_keeps_the_warni
 }
 
 #[gpui_kit::test]
+fn stops_watching_the_search_once_none_is_in_front_and_drops_what_the_watch_heard(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    let ui = open(cx, fake.clone());
+    let stopped = || fake.stopped.load(Ordering::Relaxed);
+    ui.input(cx, "x");
+    assert_eq!(stopped(), 0);
+    // Another tab of home alone comes to the front.
+    ui.press(cx, "ctrl-t");
+    assert_eq!(stopped(), 1);
+    // What the watch heard of the search left behind is not told.
+    *fake.watch_failing.lock().unwrap() = Some("Everythingとの接続が切れました。".into());
+    settle(cx);
+    assert!(ui.toasts(cx).is_empty(), "{:?}", ui.toasts(cx));
+    *fake.watch_failing.lock().unwrap() = None;
+    // Back to the search: it searches afresh, and is watched again until cleared.
+    ui.press(cx, "ctrl-tab");
+    assert_eq!(fake.searches.lock().unwrap().iter().filter(|(q, _)| q == "x").count(), 2);
+    ui.press(cx, "ctrl-tab");
+    assert_eq!(stopped(), 2);
+    // Nothing more to let go of from home to home.
+    ui.press(cx, "ctrl-t");
+    assert_eq!(stopped(), 2);
+    // A search cleared with Esc is let go of too.
+    ui.input(cx, "x");
+    assert_eq!(stopped(), 2);
+    ui.press(cx, "escape");
+    assert_eq!(stopped(), 3);
+}
+
+#[gpui_kit::test]
 fn loads_the_next_page_of_results_as_the_list_nears_its_end(cx: &mut TestAppContext) {
     let results: Vec<Entry> = (0..1200).map(|i| file(&format!(r"D:\file{i:04}.txt"))).collect();
     let fake = Arc::new(Fake::default().with_results(results));

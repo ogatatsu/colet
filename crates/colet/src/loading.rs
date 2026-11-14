@@ -21,6 +21,8 @@ pub struct Loading {
     search_refresh: SearchRefresh,
     watching: Watching,
     engine: Engine,
+    /// A search was sent since the last was let go of: Everything watches it until it is.
+    searched: bool,
 }
 
 impl Loading {
@@ -72,9 +74,16 @@ impl Loading {
 
     /// A search is on its way: connecting, unless already connected.
     pub fn searching(&mut self) {
+        self.searched = true;
         if !matches!(self.engine, Engine::Connected(_)) {
             self.engine = Engine::Connecting;
         }
+    }
+
+    /// No search is in front: the request number to let go of the last one sent with, so a search
+    /// asked before it is not run; none when there is none to let go of.
+    pub fn stop_searching(&mut self) -> Option<u64> {
+        std::mem::take(&mut self.searched).then(|| self.listings.next())
     }
 
     /// A search answered through `connection`, `current` when it is the latest for its column: one left
@@ -165,8 +174,14 @@ impl Listings {
 
     /// A listing of `id`, overtaking any still out: its number.
     fn start(&mut self, id: ColumnId) -> u64 {
+        let request = self.next();
+        self.pending.insert(id, request);
+        request
+    }
+
+    /// A request number after every one before it.
+    fn next(&mut self) -> u64 {
         self.last_request += 1;
-        self.pending.insert(id, self.last_request);
         self.last_request
     }
 

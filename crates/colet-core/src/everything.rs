@@ -260,6 +260,21 @@ impl SearchSession {
         self.watch_retry_at = None;
     }
 
+    /// Lets go of the last search and the watch on it, as none is in front: the connection its results
+    /// are read through stays, so the next search starts at once. No failure, it leaves the next watch
+    /// free to start.
+    pub fn release(&mut self) {
+        self.watch = None;
+        self.watch_retry_at = None;
+        self.key = None;
+        if !self.state.is_null() {
+            unsafe {
+                Everything3_DestroySearchState(self.state);
+            }
+            self.state = ptr::null_mut();
+        }
+    }
+
     /// Whether Everything has said the last search's results changed; it stays so until searched afresh.
     pub fn changed(&mut self) -> Result<bool, String> {
         let Some(watch) = self.watch.as_ref().filter(|_| self.key.is_some()) else { return Ok(false) };

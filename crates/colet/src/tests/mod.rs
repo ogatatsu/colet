@@ -76,6 +76,10 @@ struct Fake {
     /// What the next search that answers warns of Everything, as a fresh connection does once.
     warning: Mutex<Option<String>>,
     changed: AtomicBool,
+    /// What the watch on the last search fails with, as Everything's may.
+    watch_failing: Mutex<Option<String>>,
+    /// How many times the watch on the last search was let go of.
+    stopped: AtomicUsize,
     /// The settings as last written, starting from those it is made with.
     settings: Mutex<Settings>,
     saves: AtomicUsize,
@@ -187,7 +191,14 @@ impl Backend for Fake {
     }
 
     fn search_changed(&self) -> Result<bool, String> {
+        if let Some(error) = self.watch_failing.lock().unwrap().clone() {
+            return Err(error);
+        }
         Ok(self.changed.load(Ordering::Relaxed))
+    }
+
+    fn stop_search(&self, _: u64) {
+        self.stopped.fetch_add(1, Ordering::Relaxed);
     }
 
     fn load_settings(&self) -> Loaded<Settings> {
