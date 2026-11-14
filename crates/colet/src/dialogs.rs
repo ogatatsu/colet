@@ -478,7 +478,10 @@ impl Colet {
             ),
             (
                 "delete-filter",
-                push("delete-filter", "削除", true, true).on_click(cx.listener(|this, _, window, cx| this.delete_filter(window, cx))),
+                // Destructive: drawn as danger, not as the primary commit.
+                push("delete-filter", "削除", false, true)
+                    .danger()
+                    .on_click(cx.listener(|this, _, window, cx| this.delete_filter(window, cx))),
             ),
         ];
         (content, buttons)
