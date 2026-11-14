@@ -66,6 +66,8 @@ pub const CONTROL_HEIGHT: f32 = 32.;
 pub const SMALL_CONTROL_HEIGHT: f32 = 28.;
 /// A square button holding only a glyph: a column's order, the folded crumbs.
 pub const ICON_BUTTON: f32 = 24.;
+/// The status bar along the bottom; the notices stand clear of it.
+pub const STATUS_BAR_HEIGHT: f32 = 26.;
 
 /// The corners of a row, a crumb, a tab and a quiet button. A ring drawn round one takes the same, so the
 /// two stay concentric.

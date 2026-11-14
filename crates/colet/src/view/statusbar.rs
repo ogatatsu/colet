@@ -39,7 +39,7 @@ impl Colet {
             Engine::Failed(_) => (p.danger, Some(p.danger)),
         };
         StatusBar::new()
-            .h(scaled(26.))
+            .h(scaled(metrics::STATUS_BAR_HEIGHT))
             .flex_none()
             .px_3()
             .gap_4()

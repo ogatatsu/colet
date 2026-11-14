@@ -1002,7 +1002,7 @@ impl Colet {
                         .min_w_3p5()
                         .h_3p5()
                         .px(scaled(3.))
-                        .rounded(scaled(7.))
+                        .rounded_full()
                         // White on the deep red: past 4.5:1 in either theme.
                         .bg(p.danger_fill)
                         .text_color(p.on_accent)

@@ -238,8 +238,8 @@ pub fn set_zoom(zoom: u16, cx: &mut App) {
     let scale = f32::from(zoom) / 100.;
     gpui_kit::component::Theme::update(cx, |kit| {
         kit.font_size = gpui_kit::px(crate::metrics::BASE * scale);
-        // Clear of the status bar, by the history the notices tell of.
-        kit.notification.margins.bottom = gpui_kit::px(36. * scale);
+        // Clear of the status bar by 10, by the history the notices tell of.
+        kit.notification.margins.bottom = gpui_kit::px((crate::metrics::STATUS_BAR_HEIGHT + 10.) * scale);
         kit.notification.margins.right = gpui_kit::px(12. * scale);
     });
 }

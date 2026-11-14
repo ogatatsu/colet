@@ -41,6 +41,11 @@ impl Render for HomeGhost {
 /// The widths a row's size and modified time take: `1023.9 MB` and `2026/12/31 23:59`, at 12px.
 pub(super) const SIZE_WIDTH: f32 = 56.;
 pub(super) const MODIFIED_WIDTH: f32 = 96.;
+/// The chevron closing a folder's row, and the room a file's row keeps in its place.
+const CHEVRON: f32 = 13.;
+/// The line showing where a row dragged in home lands: drawn across the boundary between two rows, half
+/// on either side.
+const LANDING_LINE: f32 = 2.;
 /// What the pointer is on for a row's icon to turn to its checkbox.
 const CHECK_GROUP: &str = "check";
 
@@ -465,9 +470,9 @@ impl Colet {
                 .into_any_element()
         };
         let chevron = if entry.directory {
-            icon("chevron-right", 13., if lit { p.on_accent_muted } else { p.text_faint }).into_any_element()
+            icon("chevron-right", CHEVRON, if lit { p.on_accent_muted } else { p.text_faint }).into_any_element()
         } else {
-            div().w(scaled(13.)).flex_none().into_any_element()
+            div().w(scaled(CHEVRON)).flex_none().into_any_element()
         };
         [cell(SIZE_WIDTH, size), cell(MODIFIED_WIDTH, modified), chevron]
     }
@@ -555,11 +560,11 @@ impl Colet {
                             .absolute()
                             .left_1p5()
                             .right_1p5()
-                            .h_0p5()
-                            .rounded(scaled(1.))
+                            .h(scaled(LANDING_LINE))
+                            .rounded_full()
                             .bg(p.accent)
-                            .when(above, |l| l.top(scaled(-1.)))
-                            .when(!above, |l| l.bottom(scaled(-1.))),
+                            .when(above, |l| l.top(scaled(-LANDING_LINE / 2.)))
+                            .when(!above, |l| l.bottom(scaled(-LANDING_LINE / 2.))),
                     )
                 }));
             }
