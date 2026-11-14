@@ -7,12 +7,11 @@ pub struct HomeGhost {
     search: bool,
     image: Option<std::sync::Arc<RenderImage>>,
     width: Pixels,
-    palette: crate::theme::Palette,
 }
 
 impl Render for HomeGhost {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let p = self.palette;
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = cx.palette();
         let picture = match (self.search, self.image.clone()) {
             (true, _) => icon("search", 16., p.text_muted).into_any_element(),
             (false, Some(image)) => img(image).size(scaled(metrics::ICON)).flex_none().into_any_element(),
@@ -64,6 +63,25 @@ pub(super) struct DrawnRow<'a> {
 
 fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
+}
+
+/// The inks a row's text takes: on the selection's fill while it is `lit`, on the column's otherwise.
+#[derive(Clone, Copy)]
+struct RowInks {
+    ink: Hsla,
+    muted: Hsla,
+    /// What a search or the column's filter matched.
+    mark: Hsla,
+}
+
+impl RowInks {
+    fn on(p: crate::theme::Palette, lit: bool) -> Self {
+        if lit {
+            Self { ink: p.on_accent, muted: p.on_accent_muted, mark: p.on_accent_match }
+        } else {
+            Self { ink: p.text, muted: p.text_muted, mark: p.accent }
+        }
+    }
 }
 
 /// How a row stands, from the column, the clipboard, the menu and a drag in home; see [`Colet::row_look`].
@@ -146,7 +164,7 @@ impl Colet {
     }
 
     pub(super) fn row(&mut self, index: usize, entry: &Entry, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let RowLook { selected, highlighted, barred, lit, focused, target, aside, held, cut, faded, dragged, within, narrow } =
             self.row_look(index, entry, marked, keys, cx);
         let c = &self.state.columns[index];
@@ -226,7 +244,7 @@ impl Colet {
                             .find(|(path, _)| *path == drag.path)
                             .map_or(Scale::of(window).px(200.), |(_, b)| b.size.width);
                         let (name, search, image) = (name.clone(), HomeKey::of(&drag.path).is_search(), image.clone());
-                        cx.new(|_| HomeGhost { name, search, image, width, palette: p })
+                        cx.new(|_| HomeGhost { name, search, image, width })
                     })
             })
             .when(dragged, |r| r.opacity(0.4))
@@ -255,7 +273,7 @@ impl Colet {
                 let picture = div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture);
                 if kind == Kind::Home { r.child(picture) } else { r.child(self.check(index, drawn, selected, lit, picture, cx)) }
             })
-            .child(self.row_name(drawn, name_marks.as_deref().unwrap_or(&entry.marks.name), kind, lit, within, narrow))
+            .child(self.row_name(drawn, name_marks.as_deref().unwrap_or(&entry.marks.name), kind, RowInks::on(p, lit), within, narrow))
             // Out of the name, so the name stays the file's own: a fade alone would read as hidden.
             .when(held, |r| {
                 r.child(
@@ -294,7 +312,7 @@ impl Colet {
         picture: Div,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let p = self.palette;
+        let p = cx.palette();
         let path = row.entry.path.clone();
         let boxed = selected && self.state.columns[index].selected.len() > 1;
         // Ringed on the row's own fill, filled on any other.
@@ -364,14 +382,11 @@ impl Colet {
         row: DrawnRow,
         marks: &[Range<usize>],
         kind: Kind,
-        lit: bool,
+        inks: RowInks,
         within: Option<String>,
         narrow: Option<String>,
     ) -> Div {
-        let p = self.palette;
-        let ink = if lit { p.on_accent } else { p.text };
-        let muted = if lit { p.on_accent_muted } else { p.text_muted };
-        let mark = if lit { p.on_accent_match } else { p.accent };
+        let RowInks { ink, muted, mark } = inks;
         div()
             .flex_1()
             .min_w_0()
@@ -491,7 +506,7 @@ impl Colet {
     /// Home's rows: a handful of places, so no need to virtualize. The kinds stand under headings, so they
     /// don't read as one list; a drag among them shows where it would land.
     pub(super) fn home_rows(&mut self, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let entries = self.state.columns[0].entries.clone();
         let groups = crate::places::home_groups(self.stored.settings(), &entries);
         // Drawn afresh below, for a drag to find its place.
@@ -561,7 +576,7 @@ impl Colet {
     /// The rows of a folder or the results: only those in sight are drawn, and the results load their
     /// next page as the list nears the end of what it has (see [`next_page_at_end`]).
     pub(super) fn column_rows(&mut self, index: usize, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let c = &self.state.columns[index];
         let (id, count) = (c.id, c.entries.len());
         let more_to_come = c.kind == Kind::Search && count < c.total;

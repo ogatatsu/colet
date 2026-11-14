@@ -25,6 +25,7 @@ use crate::{
     places::Dialog,
     settings::Favorite,
     state::{Column, ColumnId, HomeKey, Kind as ColumnKind},
+    theme::ActivePalette,
 };
 
 /// The most operations kept, and the most items of each.
@@ -830,7 +831,7 @@ impl Colet {
             }
             InputEvent::Focus | InputEvent::Blur => cx.notify(),
         });
-        self.palette.style_input(&input, cx);
+        cx.palette().style_input(&input, cx);
         self.overlays.listen_in_dialog(subscription);
         input.update(cx, |input, cx| {
             input.focus(window, cx);

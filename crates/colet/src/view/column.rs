@@ -160,8 +160,8 @@ impl Colet {
             .size_full()
     }
 
-    pub(super) fn message(&self, icon_name: &'static str, text: String) -> Div {
-        let p = self.palette;
+    pub(super) fn message(&self, icon_name: &'static str, text: String, cx: &App) -> Div {
+        let p = cx.palette();
         div()
             .flex()
             .flex_col()
@@ -175,8 +175,8 @@ impl Colet {
             .child(div().text_center().child(text))
     }
 
-    pub(super) fn loading(&self) -> Div {
-        let p = self.palette;
+    pub(super) fn loading(&self, cx: &App) -> Div {
+        let p = cx.palette();
         div()
             .flex()
             .items_center()
@@ -198,7 +198,7 @@ impl Colet {
             return self.column_error(id, error, window, cx);
         }
         if c.unread() {
-            return self.loading().into_any_element();
+            return self.loading(cx).into_any_element();
         }
         if c.entries.is_empty() {
             let (name, text) = match kind {
@@ -210,7 +210,7 @@ impl Colet {
                 Kind::Folder if c.total > 0 => ("eye-off", "隠しファイルのみがあります"),
                 Kind::Folder => ("folder", "このフォルダーは空です"),
             };
-            return self.message(name, text.into()).into_any_element();
+            return self.message(name, text.into(), cx).into_any_element();
         }
         // The keys are on the column worked in: its focused row is ringed.
         let keys = marked && self.keys_in_column(window);
@@ -232,12 +232,12 @@ impl Colet {
             },
         ));
         let retry = self.ringed(retry, Stop::Retry(id), RingAt::Round, window, cx).m(scaled(-RING_ROOM));
-        self.message("circle-alert", error).child(retry).into_any_element()
+        self.message("circle-alert", error, cx).child(retry).into_any_element()
     }
 
     /// The edge a drag widens a column from: astride its border, so its scrollbar stays clear of it.
     pub(super) fn resizer(&self, id: &'static str, of: WidthOf, width: f32, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         // Over what lies past the border, drawn after it; none over a dialog, which covers it.
         if self.overlays.has_dialog() {
             return div().into_any_element();
@@ -268,7 +268,7 @@ impl Colet {
     }
 
     pub(super) fn render_column(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let marked = index == self.state.active && self.columns_marked(window);
         let c: &Column = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
@@ -377,7 +377,7 @@ impl Colet {
     /// The star in the column's heading: keeps the folder as a favorite, or the search as a saved one, as
     /// it is narrowed now, or lets go of it.
     fn star_button(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = self.palette;
+        let p = cx.palette();
         let c = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
         // What it is narrowed to now is part of what is kept, and so for the results is their order.
@@ -416,7 +416,7 @@ impl Colet {
     /// The button of the column's own order, beside its star: accented while it is given one apart from
     /// the default, and its menu under it.
     fn sort_button(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let c = &self.state.columns[index];
         let id = c.id;
         let (order, own) = (self.order_of(c), self.own_order(c).is_some());
@@ -455,7 +455,7 @@ impl Colet {
     /// The headings over the column's rows, each sorting it by what it heads; the one it goes by shows
     /// the way it runs. Laid out as a row is, so each stands over its cells.
     pub(super) fn headings(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let c = &self.state.columns[index];
         let id = c.id;
         let order = self.order_of(c);
@@ -555,7 +555,7 @@ impl Colet {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let p = self.palette;
+        let p = cx.palette();
         let focused = self.has_keys(input, window, cx);
         let has_text = !input.read(cx).value().is_empty();
         let clear = has_text.then(|| {

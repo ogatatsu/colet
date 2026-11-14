@@ -37,7 +37,7 @@ use crate::{
     sorts::Sorts,
     state::{ColumnId, HomeKey, Kind},
     stops::Stop,
-    theme::Palette,
+    theme::{ActivePalette, Palette},
 };
 
 mod address;

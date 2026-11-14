@@ -7,10 +7,7 @@ use colet_core::{
     shell::IconSource,
 };
 use gpui_kit::base::input::{self, InputState};
-use gpui_kit::component::{
-    ActiveTheme,
-    menu::{PopupMenu, PopupMenuItem},
-};
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -20,6 +17,7 @@ use crate::{
     places::Dialog,
     state::{ColumnId, HomeKey, Kind},
     tabs::TabId,
+    theme::ActivePalette,
     view::TipExt,
 };
 
@@ -687,7 +685,7 @@ impl Colet {
                 });
                 // Colet's own colors, as everything else it draws takes them; read as drawn, so a theme
                 // changed while the menu is open shows.
-                let muted = drawn.upgrade().map_or(cx.theme().muted_foreground, |c| c.read(cx).palette.text_muted);
+                let muted = cx.palette().text_muted;
                 div()
                     .id(id.clone())
                     .test_support()

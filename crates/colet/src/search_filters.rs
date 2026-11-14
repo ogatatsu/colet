@@ -3,7 +3,7 @@
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 
-use crate::{app::Colet, places::Dialog, settings::SearchFilter, state::HomeKey};
+use crate::{app::Colet, places::Dialog, settings::SearchFilter, state::HomeKey, theme::ActivePalette};
 
 /// A filter being added, or edited, found by the name it had as the edit began.
 pub struct FilterEdit {
@@ -72,7 +72,7 @@ impl Colet {
                 InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
             });
             self.overlays.listen_in_dialog(subscription);
-            self.palette.style_input(input, cx);
+            cx.palette().style_input(input, cx);
         }
         name.update(cx, |input, cx| input.focus(window, cx));
         self.overlays.set_dialog(Dialog::Filters { edit: Some(FilterEdit { original, name, query }), deleting: None });

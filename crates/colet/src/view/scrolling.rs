@@ -87,7 +87,7 @@ impl Colet {
 
     /// The strip the `away` folders folded above a result stand in for, which brings them out.
     pub(super) fn unfold_strip(&mut self, away: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let focus = self.stop("unfold", cx);
         div()
             .id("unfold-strip")
@@ -160,7 +160,7 @@ impl Colet {
     /// The scrolling `columns` in their sideways scroll, with its scrollbar and a shade on each edge that
     /// cuts a column.
     pub(super) fn scrolling_columns(&self, columns: Vec<AnyElement>, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let screen = self.on_screen();
         let content = screen.count as f32 * self.widths.column;
         let hold = self.scrolls.sideways.hold;
@@ -213,7 +213,7 @@ impl Colet {
             )))
             .when(screen.hidden_left(), |d| d.child(div().absolute().top_0().bottom_0().left_0().w(scaled(28.)).bg(shade(90.))))
             .when(screen.hidden_right(), |d| d.child(div().absolute().top_0().bottom_0().right_0().w(scaled(28.)).bg(shade(270.))))
-            .child(self.scrolling_frame(window))
+            .child(self.scrolling_frame(window, cx))
             .into_any_element()
     }
 
@@ -221,9 +221,9 @@ impl Colet {
     /// so it lies on the lines round the column: the one before it (or what stands left of the scroll),
     /// the path bar's above, its own, and the status bar's below. Where the column is cut, it runs along
     /// the edge of the view. Read at paint, it stays on the column as it scrolls.
-    fn scrolling_frame(&self, window: &Window) -> impl IntoElement {
+    fn scrolling_frame(&self, window: &Window, cx: &App) -> impl IntoElement {
         let active = if self.columns_marked(window) { self.scrolling().1 } else { None };
-        let (scroll, width, color) = (self.scrolls.sideways.scroll.clone(), self.widths.column, self.palette.accent);
+        let (scroll, width, color) = (self.scrolls.sideways.scroll.clone(), self.widths.column, cx.palette().accent);
         // A pixel past the view on every side but the right, where the window ends; drawn last, or the
         // status bar drawn after the columns would cover its bottom.
         on_top(

@@ -27,7 +27,7 @@ use crate::{
     settings::{Favorite, Theme, ZOOMS},
     state::Kind,
     stops::{FilterTool, OrderChoice, Stop},
-    theme::Palette,
+    theme::{ActivePalette, Palette},
     view::{RING_ROOM, RingAt},
 };
 
@@ -243,7 +243,7 @@ impl Colet {
     /// The field for what a favorite or saved search opens narrowed to, and why it cannot be kept, if it
     /// cannot.
     fn narrow_field(&self, input: &Entity<InputState>, problem: Option<&'static str>, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = self.palette;
+        let p = cx.palette();
         div()
             .flex()
             .flex_col()
@@ -261,7 +261,7 @@ impl Colet {
     /// The order a saved search lists its results in: what it sorts by, the way it runs, and whether folders
     /// come first, each a row of choices as the sort order's menu has them.
     fn order_field(&self, order: Order, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = self.palette;
+        let p = cx.palette();
         let mut row = |id: &'static str, label: &'static str, choices: Vec<(OrderChoice, &'static str)>| {
             let choices = choices
                 .into_iter()
@@ -326,7 +326,7 @@ impl Colet {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> (Div, Buttons) {
-        let p = self.palette;
+        let p = cx.palette();
         let Request { kind, paths, destination, .. } = request;
         let problem = self.name_problem(cx);
         let empty = input.read(cx).value().trim().is_empty();
@@ -374,7 +374,7 @@ impl Colet {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> (Div, Buttons) {
-        let p = self.palette;
+        let p = cx.palette();
         let problem = self.favorite_edit_problem(cx);
         let content = div()
             .flex()
@@ -422,7 +422,7 @@ impl Colet {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> (Div, Buttons) {
-        let p = self.palette;
+        let p = cx.palette();
         // The saved search's choice of filter, none first.
         let choices: Vec<Option<String>> =
             std::iter::once(None).chain(self.stored.settings().filters.iter().map(|f| Some(f.name.clone()))).collect();
@@ -491,7 +491,7 @@ impl Colet {
 
     /// A search filter added or edited.
     fn filter_edit_dialog(&self, edit: &FilterEdit, window: &Window, cx: &mut Context<Self>) -> (Div, Buttons) {
-        let p = self.palette;
+        let p = cx.palette();
         let FilterEdit { name, query, .. } = edit;
         let problem = self.filter_problem(cx);
         let content =
@@ -537,7 +537,7 @@ impl Colet {
 
     /// Whether the search filter `name` is to go.
     fn filter_delete_dialog(&self, name: &str, cx: &mut Context<Self>) -> (Div, Buttons) {
-        let p = self.palette;
+        let p = cx.palette();
         let users = self.filter_users(name);
         let content =
             div().flex().flex_col().gap_2().text_size(scaled(metrics::TEXT_LARGE)).child(format!("「{name}」を削除しますか？")).when(
@@ -566,7 +566,7 @@ impl Colet {
 
     /// The search filters, in their order.
     fn filters_dialog(&self, window: &Window, cx: &mut Context<Self>) -> (Div, Buttons) {
-        let p = self.palette;
+        let p = cx.palette();
         let filters = self.stored.settings().filters.clone();
         let default = self.default_filter();
         let last = filters.len().saturating_sub(1);
@@ -706,7 +706,7 @@ impl Colet {
 
     /// The theme, the display, and the keys.
     fn preferences_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> (Div, Buttons) {
-        let p = self.palette;
+        let p = cx.palette();
         let themes = Theme::ALL
             .into_iter()
             .map(|theme| {
@@ -779,7 +779,7 @@ impl Colet {
 
     /// Whether to open `count` files together.
     fn open_dialog(&mut self, count: usize, cx: &mut Context<Self>) -> (Div, Buttons) {
-        let p = self.palette;
+        let p = cx.palette();
         let content =
             div().flex().flex_col().gap_2().text_size(scaled(metrics::TEXT_LARGE)).child(format!("{count} 項目を開きますか？")).child(
                 div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"),
@@ -887,7 +887,7 @@ impl Colet {
 
     /// The file actions under the toolbar.
     pub fn render_actions(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let reasons = self.reasons(cx);
         let action = |id: &'static str, glyph: &'static str, label: &'static str, key: &'static str, off: Option<&'static str>| {
             let tip = match off {
@@ -985,7 +985,7 @@ impl Colet {
     /// The history's button in the status bar: turning while an operation runs, with the count of those
     /// with problems not seen yet.
     pub fn history_button(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let operations = self.operations.read(cx);
         let (unseen, running) = (operations.history.unseen, operations.is_running());
         let label = if unseen > 0 { format!("操作履歴（問題のある操作 {unseen} 件）") } else { "操作履歴".to_owned() };
@@ -1031,7 +1031,7 @@ impl Colet {
         if !self.history_panel.open {
             return None;
         }
-        let p = self.palette;
+        let p = cx.palette();
         // Each row and each item that opens a stop for Tab; the mouse leaves the keys
         // where they are, as before.
         let mut keys = Vec::new();

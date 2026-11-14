@@ -7,7 +7,7 @@ impl Colet {
     }
 
     pub(super) fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let focused = self.search_has_keys(window, cx);
         let has_query = !self.state.query.is_empty();
         let field_width = self.widths.field;
@@ -106,7 +106,7 @@ impl Colet {
     /// side, and is lit while pointed at or dragged.
     fn field_resizer(&self, cx: &mut Context<Self>) -> AnyElement {
         const ID: &str = "search-field-resizer";
-        let p = self.palette;
+        let p = cx.palette();
         let dragging = self.widths.resizing() == Some(WidthOf::Field);
         let width = self.widths.field;
         div()
@@ -161,7 +161,7 @@ impl Colet {
 
     /// The search filters' button beside the field, naming the one chosen in the accent color, and its menu.
     fn filter_button(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let focus = self.stop("search-filter", cx);
         let chosen = self.chosen_filter.clone();
         let on = chosen.is_some();

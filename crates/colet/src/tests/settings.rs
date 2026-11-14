@@ -56,21 +56,21 @@ fn fixes_the_theme_from_the_preferences_at_once_and_keeps_it(cx: &mut TestAppCon
     let fake = Arc::new(Fake::default());
     let ui = open(cx, fake.clone());
     // A test window's appearance is light, as Windows set light.
-    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::light().bg);
+    assert_eq!(cx.read(|cx| cx.palette().bg), Palette::light().bg);
     ui.click(cx, "preferences");
     ui.click(cx, ("theme", Theme::Dark as usize));
-    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::dark().bg);
+    assert_eq!(cx.read(|cx| cx.palette().bg), Palette::dark().bg);
     // The components draw in it too.
     assert!(cx.read(|cx| gpui_kit::component::Theme::global(cx).is_dark()));
     assert_eq!(fake.settings.lock().unwrap().theme, Theme::Dark);
     ui.click(cx, ("theme", Theme::Light as usize));
-    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::light().bg);
+    assert_eq!(cx.read(|cx| cx.palette().bg), Palette::light().bg);
     assert!(!cx.read(|cx| gpui_kit::component::Theme::global(cx).is_dark()));
     assert_eq!(fake.settings.lock().unwrap().theme, Theme::Light);
     // Back to following Windows, light here.
     ui.click(cx, ("theme", Theme::Dark as usize));
     ui.click(cx, ("theme", Theme::System as usize));
-    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::light().bg);
+    assert_eq!(cx.read(|cx| cx.palette().bg), Palette::light().bg);
     assert_eq!(fake.settings.lock().unwrap().theme, Theme::System);
     // From the keys, as a stop for Tab.
     let dark = ui.read(cx, |v| v.stops.get(&Stop::Theme(Theme::Dark)).unwrap());
@@ -118,8 +118,8 @@ fn moves_among_the_themes_with_the_arrows_and_tabs_past_them_at_once(cx: &mut Te
 fn opens_in_the_theme_kept_whatever_windows_is_set_to(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default());
     fake.settings.lock().unwrap().theme = Theme::Dark;
-    let ui = open(cx, fake);
-    assert_eq!(ui.read(cx, |v| v.palette.bg), Palette::dark().bg);
+    let _ui = open(cx, fake);
+    assert_eq!(cx.read(|cx| cx.palette().bg), Palette::dark().bg);
 }
 
 #[gpui_kit::test]
@@ -167,4 +167,17 @@ fn opens_at_the_size_kept(cx: &mut TestAppContext) {
     assert_eq!(ui.act(cx, |window, _| window.rem_size()), px(20.));
     // The notices keep clear of the status bar as it grows.
     assert_eq!(cx.read(|cx| gpui_kit::component::Theme::global(cx).notification.margins.bottom), px(45.));
+}
+
+#[gpui_kit::test]
+fn takes_its_colors_from_the_library_s_theme_however_it_changes(cx: &mut TestAppContext) {
+    let _ui = open(cx, Arc::new(Fake::default()));
+    // One source: the library's mode picks Colet's colors, with nothing of Colet's own to fall behind.
+    for (mode, palette) in
+        [(gpui_kit::component::ThemeMode::Dark, Palette::dark()), (gpui_kit::component::ThemeMode::Light, Palette::light())]
+    {
+        cx.update(|cx| gpui_kit::component::Theme::change(mode, None, cx));
+        assert_eq!(cx.read(|cx| cx.palette().bg), palette.bg, "{mode:?}");
+        assert_eq!(cx.read(|cx| cx.palette().accent), palette.accent, "{mode:?}");
+    }
 }

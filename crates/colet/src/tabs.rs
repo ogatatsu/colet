@@ -17,6 +17,7 @@ use crate::{
     metrics::{self, Scale, scaled},
     settings::{KeptTab, Settings},
     state::{ColumnId, HomeKey, Kind, State},
+    theme::ActivePalette,
     view::TipExt,
 };
 
@@ -99,12 +100,11 @@ pub struct DraggedTab {
     glyph: &'static str,
     /// The tab's width on the strip, curves aside.
     width: f32,
-    palette: crate::theme::Palette,
 }
 
 impl Render for DraggedTab {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let p = self.palette;
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = cx.palette();
         // As wide as the tab and held where it was picked up; the curves reach out beside it. Faint
         // enough that the landing line it passes over still shows through.
         div()
@@ -519,7 +519,7 @@ impl Colet {
 
     /// The strip of tabs over the window, and room right of them to open another.
     pub fn render_tabbar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         // The tabs share the room there is, down to their least; past that the strip scrolls.
         let count = self.tabs.len() as f32;
         let room = Scale::of(window).down(f32::from(window.viewport_size().width)) - BESIDE_TABS;
@@ -642,13 +642,13 @@ impl Colet {
     }
 
     fn render_tab(&mut self, index: usize, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
-        let p = self.palette;
+        let p = cx.palette();
         let tab = &self.tabs.get(index).expect("a tab drawn is on the strip");
         let id = tab.id();
         let current = index == self.tabs.current();
         let group = SharedString::from(format!("tab-{id}"));
         let Title { glyph, name, tip } = title(tab.parked().map_or(&self.state, |parked| &parked.front.state), self.stored.settings());
-        let dragged = DraggedTab { id, name: name.clone(), glyph, width, palette: p };
+        let dragged = DraggedTab { id, name: name.clone(), glyph, width };
         let dragging = self.tabs.carried().is_some();
         let carried = self.tabs.carried() == Some(id);
         let view = cx.entity().downgrade();

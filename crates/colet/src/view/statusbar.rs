@@ -4,7 +4,7 @@ use crate::loading::Engine;
 
 impl Colet {
     pub(super) fn render_statusbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let history = self.history_button(window, cx);
         let active = &self.state.columns[self.state.active];
         let place = match active.kind {

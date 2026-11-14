@@ -23,6 +23,7 @@ use crate::{
     sorts::Sorts,
     state::{HomeKey, Kind, narrowing},
     stops::Stop,
+    theme::ActivePalette,
 };
 
 pub enum Dialog {
@@ -528,7 +529,7 @@ impl Colet {
             InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
         });
         self.overlays.listen_in_dialog(subscription);
-        self.palette.style_input(&input, cx);
+        cx.palette().style_input(&input, cx);
         input
     }
 

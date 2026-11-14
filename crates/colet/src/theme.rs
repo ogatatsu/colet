@@ -1,6 +1,6 @@
 //! Colet's colors by role, dark and light, as Windows is set or as the settings fix them. The light ones
 //! keep the dark ones' roles, hues and contrasts on a light ground.
-use std::rc::Rc;
+use std::{rc::Rc, sync::LazyLock};
 
 use gpui_kit::base::input::{InputEditorStyle, InputState};
 use gpui_kit::component::{ThemeConfig, ThemeConfigColors, ThemeMode};
@@ -10,6 +10,21 @@ use crate::settings::Theme;
 
 fn hsl(h: f32, s: f32, l: f32) -> Hsla {
     hsla(h / 360., s / 100., l / 100., 1.)
+}
+
+/// Colet's colors as the component library's theme draws now. The library's theme is the one source: its
+/// mode, set by [`apply`], picks these, and its own colors are made from them (see [`init`]), so Colet's
+/// parts and the library's never draw from two settings.
+pub trait ActivePalette {
+    fn palette(&self) -> Palette;
+}
+
+impl ActivePalette for App {
+    fn palette(&self) -> Palette {
+        static LIGHT: LazyLock<Palette> = LazyLock::new(Palette::light);
+        static DARK: LazyLock<Palette> = LazyLock::new(Palette::dark);
+        if gpui_kit::component::Theme::global(self).is_dark() { *DARK } else { *LIGHT }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -129,11 +144,6 @@ impl Palette {
             caret: self.text,
             ..Default::default()
         }
-    }
-
-    /// The colors `theme` gives: its own, or for following Windows, those of the window's appearance.
-    pub fn for_window(window: &Window, theme: Theme) -> Self {
-        if is_dark(window, theme) { Self::dark() } else { Self::light() }
     }
 
     /// These roles as a theme for the component library, its other colors, hovers and presses among them,

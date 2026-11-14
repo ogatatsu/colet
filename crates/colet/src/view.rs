@@ -27,6 +27,7 @@ use crate::{
     state::HomeKey,
     state::{Column, ColumnId, Kind},
     stops::Stop,
+    theme::ActivePalette,
 };
 
 mod column;
@@ -182,7 +183,7 @@ impl Colet {
     /// rather than as the library rings it. The library's button leaves the keys where they are when the
     /// mouse presses it. Ringed round it, the ring's room is the caller's to give or lay over the gaps.
     pub(crate) fn ringed(&self, button: Button, key: impl Into<Stop>, at: RingAt, window: &Window, cx: &App) -> Div {
-        let p = self.palette;
+        let p = cx.palette();
         let focus = self.stop(key, cx);
         let shown = focus.is_focused(window);
         // The library's corners stay as many pixels at any zoom: the ring's are given at 100%.
@@ -219,7 +220,7 @@ impl Colet {
     }
 
     fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let pinned = self.state.pinned();
         let away = self.state.folded_away();
         let first = if pinned { 2 } else { 1 } + away;
@@ -266,7 +267,7 @@ impl Colet {
     }
 
     fn home_hint(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         div()
             .absolute()
             .inset_0()
@@ -348,7 +349,7 @@ impl Render for Colet {
         // same frame, and folders coming out of a fold are shifted in the frame they first appear in.
         // It never notifies; it asks for another frame only while a slide is under way.
         self.reveal(window);
-        let p = self.palette;
+        let p = cx.palette();
         let tabbar = self.render_tabbar(window, cx);
         let sidebar = self.render_sidebar(window, cx);
         let toolbar = self.render_toolbar(window, cx);

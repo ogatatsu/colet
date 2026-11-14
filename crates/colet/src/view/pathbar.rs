@@ -5,7 +5,7 @@ impl Colet {
     /// The bar under the crumbs of the columns on screen, cut where the edges cut the columns; only while
     /// some are out of sight, folded away too. Painted from where the crumbs stand in the same frame: their
     /// places are all known once the frame is laid out, so a crumb just added has its bar at once.
-    fn crumb_bar(&self) -> Option<AnyElement> {
+    fn crumb_bar(&self, cx: &App) -> Option<AnyElement> {
         let screen = self.on_screen();
         let out = screen.hidden_left() || screen.hidden_right() || self.state.folded_away() > 0;
         let Some(span) = screen.span.filter(|_| out) else {
@@ -15,7 +15,7 @@ impl Colet {
         // The crumbs' ids by the columns' places on screen, read against their places once painted.
         let ids: Vec<ColumnId> = self.state.columns.iter().skip(screen.first).map(|c| c.id).collect();
         let (bounds, bar) = (self.crumbs.bounds.clone(), self.crumbs.bar.clone());
-        let color = self.palette.border_strong;
+        let color = cx.palette().border_strong;
         Some(
             div()
                 .id("crumb-bar")
@@ -72,7 +72,8 @@ impl Colet {
                 let run = TextRun {
                     len: label.len(),
                     font: font.clone(),
-                    color: self.palette.text,
+                    // Only measured: the color does not change the width.
+                    color: Hsla::default(),
                     background_color: None,
                     underline: None,
                     strikethrough: None,
@@ -87,7 +88,7 @@ impl Colet {
 
     /// The row under the toolbar: the file actions, and at its end how the columns show their items.
     pub(super) fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let controls = self.view_controls(window, cx);
         div()
             .h(scaled(40.))
@@ -106,7 +107,7 @@ impl Colet {
 
     /// The address beside the search field: the trail of crumbs, or the field to type a path in.
     pub(super) fn render_address(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let crumbs = self.trail();
         let widths = self.crumb_widths(&crumbs, window);
         // The room the bar was last drawn with; before the first frame, a guess at what the toolbar leaves it.
@@ -153,7 +154,7 @@ impl Colet {
                 .absolute()
                 .size_full()
             })
-            .children(self.crumb_bar())
+            .children(self.crumb_bar(cx))
             .children(fold)
             .children(shown.into_iter().enumerate().map(|(k, crumb)| {
                 let max_width = (folded + k == last).then_some(room / 2.);
@@ -215,7 +216,7 @@ impl Colet {
     /// The "…" button the crumbs folded off the trail go into, with their menu while it is open;
     /// `current` while the column worked in is among them.
     fn crumb_fold(&mut self, current: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let open = self.crumbs_open();
         let menu = if open { self.menu_element("crumb-menu", "上の階層", cx) } else { None };
         let focus = self.stop("crumb-fold", cx);
@@ -251,7 +252,7 @@ impl Colet {
     /// A crumb on the trail, a chevron before it unless it stands first; the last is clipped to
     /// `max_width`, the others keep their whole names.
     pub(super) fn crumb(&self, crumb: Crumb, chevron: bool, max_width: Option<f32>, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = self.palette;
+        let p = cx.palette();
         let Crumb { column: id, name: label, path } = crumb;
         let current = self.state.index_of(id) == Some(self.state.active);
         let stop = self.stops.get(&Stop::Crumb(id));

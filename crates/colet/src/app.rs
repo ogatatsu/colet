@@ -47,7 +47,7 @@ use crate::{
     stops::{Stop, Stops},
     stored::Stored,
     tabs::Tabs,
-    theme::Palette,
+    theme::ActivePalette,
 };
 
 actions!(
@@ -337,7 +337,6 @@ pub struct Colet {
     pub chosen_filter: Option<String>,
     pub tabs: Tabs,
     pub widths: Widths,
-    pub palette: Palette,
     pub search: Entity<InputState>,
     pub address: Address,
     /// The field of each column, narrowing it to some names.
@@ -419,7 +418,6 @@ impl Colet {
             chosen_filter: None,
             tabs: Tabs::default(),
             widths: Widths::new(settings.sidebar_width, settings.search_width, settings.column_width, settings.search_field_width),
-            palette: Palette::for_window(window, settings.theme),
             search,
             address: Address::new(address),
             narrow_fields: HashMap::new(),
@@ -447,8 +445,10 @@ impl Colet {
         for problem in [problem, sorts_problem].into_iter().flatten() {
             this.notify(problem, Tone::Error, cx);
         }
-        this.palette.style_input(&this.search, cx);
-        this.palette.style_input(this.address.field(), cx);
+        // The library draws in the theme kept before anything takes its colors from it.
+        crate::theme::apply(window, this.stored.settings().theme, cx);
+        cx.palette().style_input(&this.search, cx);
+        cx.palette().style_input(this.address.field(), cx);
         this.restore_tabs(window, cx);
         // The window's dialog, the columns' fields and their scrolls follow `dialog` and the columns as each
         // change to Colet settles, before it is drawn.
@@ -472,7 +472,6 @@ impl Colet {
         }));
         this.sync_narrow_fields(window, cx);
         this.scroll_rows();
-        crate::theme::apply(window, this.stored.settings().theme, cx);
         crate::theme::set_zoom(this.stored.settings().zoom, cx);
         this.search.update(cx, |input, cx| input.focus(window, cx));
         this.sync(cx);
@@ -522,13 +521,12 @@ impl Colet {
 
     /// Takes the colors the theme now gives, in the fields too, the dialog's among them.
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
-        self.palette = Palette::for_window(window, self.stored.settings().theme);
         crate::theme::apply(window, self.stored.settings().theme, cx);
         let mut inputs = vec![self.search.clone(), self.address.field().clone()];
         inputs.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         inputs.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
         for input in &inputs {
-            self.palette.style_input(input, cx);
+            cx.palette().style_input(input, cx);
         }
         cx.notify();
     }
@@ -1268,7 +1266,7 @@ impl Colet {
                 None => {
                     let text = c.narrow.as_ref().map(|f| f.text().to_owned()).unwrap_or_default();
                     let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む").default_value(text.clone()));
-                    self.palette.style_input(&input, cx);
+                    cx.palette().style_input(&input, cx);
                     let subscription = cx.subscribe_in(&input, window, move |this: &mut Self, input, event, window, cx| match event {
                         InputEvent::Change => {
                             let text = input.read(cx).value().to_string();

@@ -3,7 +3,7 @@ use super::*;
 
 impl Colet {
     pub(super) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = self.palette;
+        let p = cx.palette();
         let home = &self.state.columns[0];
         let (id, narrowed) = (home.id, home.narrow.is_some());
         let field = self.narrow_fields.get(&id).map(|field| field.input.clone());
