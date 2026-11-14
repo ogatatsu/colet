@@ -354,7 +354,7 @@ fn picks_rows_apart_from_the_keys(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn picks_rows_with_their_checkboxes_as_ctrl_does(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
-    let check = |path: &str| ElementId::Name(format!("check:{}", id_text(Path::new(path))).into());
+    let check = |path: &str| row_part(path, "check");
     // Home picks one row at a time, and has none.
     assert!(ui.act(cx, |window, _| window.try_find(check(r"D:\")).is_none()));
     ui.click(cx, check(r"D:\work\c.txt"));
@@ -389,7 +389,7 @@ fn picks_every_row_or_none_with_the_checkbox_over_them(cx: &mut TestAppContext) 
     assert!(ui.selected(cx, 2).is_empty());
     assert_eq!(ui.read(cx, |v| v.state.columns[2].focused.clone()), focused);
     // Some picked, it picks them all.
-    ui.click(cx, ElementId::Name(format!("check:{}", id_text(Path::new(r"D:\work\b.txt"))).into()));
+    ui.click(cx, row_part(r"D:\work\b.txt", "check"));
     ui.click(cx, ("check-all", work));
     assert_eq!(ui.selected(cx, 2).len(), 3);
 }

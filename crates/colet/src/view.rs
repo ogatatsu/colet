@@ -40,6 +40,8 @@ mod toolbar;
 use elements::on_top;
 use rows::{MODIFIED_WIDTH, SIZE_WIDTH};
 pub(crate) use rows::{PAGE_AHEAD, rows_in_sight};
+#[cfg(test)]
+pub(crate) use rows::{row_id, row_part_id};
 
 pub trait TipExt {
     /// A line of text shown while the pointer rests on it.

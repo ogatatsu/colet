@@ -45,6 +45,23 @@ pub(super) const MODIFIED_WIDTH: f32 = 96.;
 /// What the pointer is on for a row's icon to turn to its checkbox.
 const CHECK_GROUP: &str = "check";
 
+/// A row's id: its path, which tells it from every other.
+pub(crate) fn row_id(path: &std::path::Path) -> ElementId {
+    ElementId::Name(id_text(path).into())
+}
+
+/// The part `part` of the row whose id is `row`: the row's id is shared, not written out again for each part.
+pub(crate) fn row_part_id(row: &std::sync::Arc<ElementId>, part: &'static str) -> ElementId {
+    ElementId::NamedChild(row.clone(), part.into())
+}
+
+/// A row being drawn: its item, and its id, which its parts' ids are made from.
+#[derive(Clone, Copy)]
+pub(super) struct DrawnRow<'a> {
+    entry: &'a Entry,
+    id: &'a std::sync::Arc<ElementId>,
+}
+
 fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
 }
@@ -162,8 +179,11 @@ impl Colet {
         let tab_path = entry.path.clone();
         let press_path = entry.path.clone();
         let focused_row = (marked && c.focused.as_ref() == Some(&entry.path)).then(|| self.focused_row.clone());
+        // Built once a row: its parts take it as their parent's rather than each writing out the path.
+        let id = std::sync::Arc::new(row_id(&entry.path));
+        let drawn = DrawnRow { entry, id: &id };
         div()
-            .id(SharedString::from(id_text(&entry.path)))
+            .id(ElementId::clone(&id))
             // Like Finder, the selection stays: the menu acts on the row clicked, or the whole selection if
             // that is part of it.
             .on_mouse_down(
@@ -229,14 +249,14 @@ impl Colet {
             // The selection in home while the columns are worked in: marked at its edge, as in a sidebar.
             .map(|r| {
                 let picture = div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture);
-                if kind == Kind::Home { r.child(picture) } else { r.child(self.check(index, entry, selected, lit, picture, cx)) }
+                if kind == Kind::Home { r.child(picture) } else { r.child(self.check(index, drawn, selected, lit, picture, cx)) }
             })
-            .child(self.row_name(entry, name_marks.as_deref().unwrap_or(&entry.marks.name), kind, lit, within, narrow))
+            .child(self.row_name(drawn, name_marks.as_deref().unwrap_or(&entry.marks.name), kind, lit, within, narrow))
             // Out of the name, so the name stays the file's own: a fade alone would read as hidden.
             .when(held, |r| {
                 r.child(
                     div()
-                        .id(SharedString::from(format!("held:{}", id_text(&entry.path))))
+                        .id(row_part_id(&id, "held"))
                         .tip(if cut { "切り取り中" } else { "コピー中" })
                         .child(icon(
                             if cut { "scissors" } else { "copy" },
@@ -264,14 +284,14 @@ impl Colet {
     pub(super) fn check(
         &self,
         index: usize,
-        entry: &Entry,
+        row: DrawnRow,
         selected: bool,
         lit: bool,
         picture: Div,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let p = self.palette;
-        let path = entry.path.clone();
+        let path = row.entry.path.clone();
         let boxed = selected && self.state.columns[index].selected.len() > 1;
         // Ringed on the row's own fill, filled on any other.
         let (fill, mark) = if lit { (p.on_accent, p.accent_fill) } else { (p.accent_fill, p.on_accent) };
@@ -283,7 +303,7 @@ impl Colet {
             .justify_center()
             .map(|b| if selected { b.bg(fill).child(icon("check", 11., mark)) } else { b.border_1().border_color(p.text_muted) });
         div()
-            .id(SharedString::from(format!("check:{}", id_text(&entry.path))))
+            .id(row_part_id(row.id, "check"))
             .group(CHECK_GROUP)
             .relative()
             .flex_none()
@@ -337,7 +357,7 @@ impl Colet {
     /// `marks`: where the name is marked, by the column's filter or the search.
     fn row_name(
         &self,
-        entry: &Entry,
+        row: DrawnRow,
         marks: &[Range<usize>],
         kind: Kind,
         lit: bool,
@@ -360,7 +380,7 @@ impl Colet {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().min_w_0().truncate().child(with_marks(&entry.name, marks, mark)))
+                    .child(div().min_w_0().truncate().child(with_marks(&row.entry.name, marks, mark)))
                     // A badge, tinted with the row's own ink so it shows on any of its fills.
                     .when_some(within, |d, filter| {
                         d.child(
@@ -382,7 +402,7 @@ impl Colet {
                     .when_some(narrow, |d, narrow| {
                         d.child(
                             div()
-                                .id(SharedString::from(format!("narrow:{}", id_text(&entry.path))))
+                                .id(row_part_id(row.id, "narrow"))
                                 .min_w(px(24.))
                                 .flex_shrink_1()
                                 .flex()
@@ -403,7 +423,7 @@ impl Colet {
                         .text_ellipsis_start()
                         .text_size(px(metrics::TEXT_BODY))
                         .text_color(muted)
-                        .child(with_marks(&entry.parent, &entry.marks.parent, mark)),
+                        .child(with_marks(&row.entry.parent, &row.entry.marks.parent, mark)),
                 )
             })
     }

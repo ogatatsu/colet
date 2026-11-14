@@ -39,7 +39,7 @@ fn marks_the_rows_the_clipboard_holds(cx: &mut TestAppContext) {
     ui.press(cx, "ctrl-x");
     settle(cx);
     assert!(ui.ops(cx, |o| o.clipboard.files.cut && texts(&o.clipboard.files.paths) == [r"D:\work\a.txt"]));
-    assert!(ui.act(cx, |window, _| window.try_find(SharedString::from(r"held:D:\work\a.txt")).is_some()));
+    assert!(ui.act(cx, |window, _| window.try_find(row_part(r"D:\work\a.txt", "held")).is_some()));
 }
 
 #[gpui_kit::test]
@@ -49,7 +49,7 @@ fn marks_a_row_another_app_put_on_the_clipboard_in_another_case(cx: &mut TestApp
         ClipboardFiles { paths: vec![r"d:\WORK\A.TXT".into()], cut: false, sequence: 2, ..Default::default() };
     (fake.watcher.lock().unwrap().as_ref().unwrap())();
     settle(cx);
-    assert!(ui.act(cx, |window, _| window.try_find(SharedString::from(r"held:D:\work\a.txt")).is_some()));
+    assert!(ui.act(cx, |window, _| window.try_find(row_part(r"D:\work\a.txt", "held")).is_some()));
 }
 
 #[gpui_kit::test]

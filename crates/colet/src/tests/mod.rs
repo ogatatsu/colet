@@ -15,7 +15,7 @@ use colet_core::{
     entry::{Entry, Hiding, Marks, Order, Sort},
     everything::Page,
     operations::{CANCELLED, Event, Kind as Operation, Request},
-    paths::{ancestors, child, folder_name, id_text, path_key},
+    paths::{ancestors, child, folder_name, path_key},
     quick_look::{Error as QuickLookError, Message as QuickLookMessage},
     shell::{Dropped, Owner, SendTarget, clipboard::ClipboardFiles},
     watch::Changes,
@@ -638,7 +638,12 @@ fn crumb(ui: &Ui, cx: &mut TestAppContext, index: usize) -> ElementId {
 }
 
 fn row(path: impl AsRef<Path>) -> ElementId {
-    ElementId::Name(id_text(path.as_ref()).into())
+    crate::view::row_id(path.as_ref())
+}
+
+/// The part `part` of the row of `path`: its checkbox, its mark of being on the clipboard.
+fn row_part(path: impl AsRef<Path>, part: &'static str) -> ElementId {
+    crate::view::row_part_id(&Arc::new(row(path)), part)
 }
 
 fn drive_d() -> Fake {
