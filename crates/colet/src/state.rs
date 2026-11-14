@@ -583,7 +583,7 @@ fn bare_entry(path: &Path, directory: bool) -> Entry {
     Entry {
         path: path.into(),
         name: shown(folder_name(path)),
-        parent: parent_folder(path).map(shown).unwrap_or_default(),
+        parent: parent_folder(path).map(|p| shown(p).into()).unwrap_or_default(),
         directory,
         size: None,
         modified: None,
@@ -1346,7 +1346,7 @@ impl State {
                     e.name = name.clone();
                 }
                 if let Some(path) = path {
-                    e.parent = path.parent().map(shown).unwrap_or_default();
+                    e.parent = colet_core::entry::parent_shown(&path);
                     e.path = path;
                 }
             }
@@ -1391,7 +1391,7 @@ impl State {
             f.text
         });
         if c.entry(path).is_none() {
-            c.entries.push(Arc::new(Entry { parent: shown(parent), ..Entry::folder(path, &shown(folder_name(path))) }));
+            c.entries.push(Arc::new(Entry { parent: shown(parent).into(), ..Entry::folder(path, &shown(folder_name(path))) }));
             c.total += 1;
         }
         // It shows, to be seen picked, even where the filter would hide it: the filter's text goes then.

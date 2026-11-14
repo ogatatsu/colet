@@ -261,7 +261,10 @@ impl Backend for Fake {
             }
             Operation::NewFolder => {
                 let path = child(&request.destination, &request.name);
-                self.add(&request.destination, Entry { parent: colet_core::paths::shown(&request.destination), ..folder(&text(&path)) });
+                self.add(
+                    &request.destination,
+                    Entry { parent: colet_core::paths::shown(&request.destination).into(), ..folder(&text(&path)) },
+                );
                 self.folders.lock().unwrap().insert(text(&path), vec![]);
                 report(Event::Done { path });
             }
@@ -400,7 +403,7 @@ fn entry(path: &str, directory: bool) -> Entry {
     Entry {
         path: path.into(),
         name: colet_core::paths::shown(folder_name(Path::new(path))),
-        parent: chain.len().checked_sub(2).map(|i| colet_core::paths::shown(&chain[i])).unwrap_or_default(),
+        parent: chain.len().checked_sub(2).map(|i| colet_core::paths::shown(&chain[i]).into()).unwrap_or_default(),
         directory,
         size: (!directory).then_some(1),
         modified: None,

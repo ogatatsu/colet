@@ -6,7 +6,7 @@ fn entry(path: &str, directory: bool) -> Entry {
     Entry {
         path: path.into(),
         name: path.into(),
-        parent: chain.len().checked_sub(2).map(|i| shown(&chain[i])).unwrap_or_default(),
+        parent: chain.len().checked_sub(2).map(|i| shown(&chain[i]).into()).unwrap_or_default(),
         directory,
         size: None,
         modified: None,
@@ -548,7 +548,7 @@ fn carries_a_renamed_folders_selection_and_open_columns_to_its_new_name() {
     assert_eq!(s.columns[1].entries[0].name, "projects");
     assert_eq!(s.columns[2].path, Path::new(r"D:\projects"));
     assert_eq!(s.columns[2].selected, one(r"D:\projects\a.txt"));
-    assert_eq!(s.columns[2].entries[0].parent, r"D:\projects");
+    assert_eq!(s.columns[2].entries[0].parent, Arc::<str>::from(r"D:\projects"));
     assert_eq!(s.past.last().unwrap().folders.iter().map(|f| f.0.to_str().unwrap()).collect::<Vec<_>>(), [r"D:\", r"D:\projects"]);
     // The listing finds it under its new name, so nothing closes.
     let parent = s.columns[1].id;

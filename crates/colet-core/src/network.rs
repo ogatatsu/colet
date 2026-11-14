@@ -61,6 +61,7 @@ pub fn shares(server: &Path) -> io::Result<Vec<Entry>> {
     }
     let infos: &[SHARE_INFO_1] =
         if buffer.0.is_null() { &[] } else { unsafe { std::slice::from_raw_parts(buffer.0 as *const SHARE_INFO_1, read as usize) } };
+    let parent: std::sync::Arc<str> = shown(server).into();
     Ok(infos
         .iter()
         .filter(|info| info.shi1_type.0 & STYPE_MASK.0 == STYPE_DISKTREE.0)
@@ -70,7 +71,7 @@ pub fn shares(server: &Path) -> io::Result<Vec<Entry>> {
             let shown_name = shown(&name);
             Entry {
                 hidden: if shown_name.ends_with('$') { Hiding::Hidden } else { Hiding::Shown },
-                parent: shown(server),
+                parent: parent.clone(),
                 ..Entry::folder(path, &shown_name)
             }
         })

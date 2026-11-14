@@ -1,7 +1,10 @@
 //! What a folder holds, and the drives home lists.
 use std::{
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use windows::Win32::Storage::FileSystem::{
@@ -88,6 +91,8 @@ pub fn list(path: &Path, order: Order, cancelled: &AtomicBool, owner: Owner) -> 
         return Ok(shares);
     }
     let items = network::signing_in(path, owner, || std::fs::read_dir(path)).map_err(|e| format!("フォルダーを開けません: {e}"))?;
+    // One for all its items: each would otherwise hold a copy of the same text.
+    let parent: Arc<str> = shown(path).into();
     let entries = collect(
         items.map(|entry| {
             // Not one item unreadable, whose name it would still give, but the listing broken off: a part
@@ -99,17 +104,17 @@ pub fn list(path: &Path, order: Order, cancelled: &AtomicBool, owner: Owner) -> 
             // its own attributes say, as in Explorer: "Documents and Settings" is hidden, "Users" not.
             let listed = entry.metadata();
             let item = match &listed {
-                Ok(m) if !m.file_type().is_symlink() => Ok(Entry::from_metadata(&p, m)),
+                Ok(m) if !m.file_type().is_symlink() => Ok(Entry::from_metadata_in(&p, m, parent.clone())),
                 Ok(m) => {
                     let hidden = hiding(&p, std::os::windows::fs::MetadataExt::file_attributes(m));
-                    Entry::from_path(&p).map(|e| Entry { hidden, ..e })
+                    Entry::from_path(&p).map(|e| Entry { hidden, parent: parent.clone(), ..e })
                 }
-                Err(_) => Entry::from_path(&p),
+                Err(_) => Entry::from_path(&p).map(|e| Entry { parent: parent.clone(), ..e }),
             };
             // Keep an item it cannot read in sight: a failure must not silently hide it.
             Ok(item.unwrap_or_else(|_| Entry {
                 name: shown(entry.file_name()),
-                parent: shown(path),
+                parent: parent.clone(),
                 path: p.clone(),
                 directory: entry.file_type().is_ok_and(|t| t.is_dir()),
                 size: None,

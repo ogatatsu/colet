@@ -5,6 +5,7 @@ use std::{
     ops::Range,
     os::windows::fs::MetadataExt,
     path::{Path, PathBuf},
+    sync::Arc,
     time::UNIX_EPOCH,
 };
 
@@ -20,8 +21,8 @@ pub struct Entry {
     pub path: PathBuf,
     /// What is shown of its name, and searched and sorted by.
     pub name: String,
-    /// What is shown of the folder it is in.
-    pub parent: String,
+    /// What is shown of the folder it is in: shared by the items of one folder.
+    pub parent: Arc<str>,
     pub directory: bool,
     pub size: Option<u64>,
     /// Milliseconds since the Unix epoch.
@@ -99,16 +100,27 @@ pub fn hiding(path: &Path, attributes: u32) -> Hiding {
     }
 }
 
+/// What is shown of the folder `path` is in; empty for a drive.
+pub fn parent_shown(path: &Path) -> Arc<str> {
+    path.parent().map(|p| shown(p).into()).unwrap_or_default()
+}
+
 impl Entry {
     pub fn from_path(path: &Path) -> std::io::Result<Self> {
         Ok(Self::from_metadata(path, &path.metadata()?))
     }
 
     pub fn from_metadata(path: &Path, metadata: &std::fs::Metadata) -> Self {
+        Self::from_metadata_in(path, metadata, parent_shown(path))
+    }
+
+    /// [`Entry::from_metadata`] for an item of the folder shown as `parent`, which a folder's items
+    /// share rather than each holding its own.
+    pub fn from_metadata_in(path: &Path, metadata: &std::fs::Metadata, parent: Arc<str>) -> Self {
         Self {
             path: path.to_owned(),
             name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| shown(path)),
-            parent: path.parent().map(shown).unwrap_or_default(),
+            parent,
             directory: metadata.is_dir(),
             size: (!metadata.is_dir()).then_some(metadata.len()),
             modified: metadata.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64),
@@ -122,7 +134,7 @@ impl Entry {
         Self {
             path: path.into(),
             name: name.into(),
-            parent: String::new(),
+            parent: Arc::default(),
             directory: true,
             size: None,
             modified: None,
@@ -323,7 +335,7 @@ mod tests {
         let entry = |name: &str, directory: bool, size: Option<u64>| Entry {
             path: format!(r"C:\{name}").into(),
             name: name.into(),
-            parent: String::new(),
+            parent: Arc::default(),
             directory,
             size,
             modified: None,
@@ -347,7 +359,7 @@ mod tests {
         let entry = |path: &str| Entry {
             path: path.into(),
             name: path.rsplit('\\').next().unwrap().into(),
-            parent: String::new(),
+            parent: Arc::default(),
             directory: false,
             size: None,
             modified: None,
@@ -383,7 +395,7 @@ mod tests {
         let entry = |path: &str, size: Option<u64>, modified: Option<u64>| Entry {
             path: path.into(),
             name: path.rsplit('\\').next().unwrap().into(),
-            parent: String::new(),
+            parent: Arc::default(),
             directory: false,
             size,
             modified,
@@ -414,7 +426,7 @@ mod tests {
         let entry = |name: &str| Entry {
             path: format!(r"C:\{name}").into(),
             name: name.into(),
-            parent: String::new(),
+            parent: Arc::default(),
             directory: false,
             size: Some(1),
             modified: None,

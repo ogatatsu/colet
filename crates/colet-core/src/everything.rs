@@ -454,6 +454,8 @@ unsafe fn read(result: Handle, offset: usize) -> Page {
         let total = Everything3_GetResultListCount(result);
         let count = Everything3_GetResultListViewportCount(result);
         let mut entries = Vec::with_capacity(count);
+        // Results of one folder often come one after another: they share its text.
+        let mut last_parent: Arc<str> = Arc::default();
         for index in 0..count {
             let path = from_wide(&wide(|buf, size| Everything3_GetResultFullPathNameW(result, index, buf, size)));
             let highlighted =
@@ -465,6 +467,10 @@ unsafe fn read(result: Handle, offset: usize) -> Page {
             let name = p.file_name().map(shown).unwrap_or_else(|| shown(p));
             let parent = p.parent().map(shown).unwrap_or_default();
             let marks = Marks { name: marked(&highlighted(NAME), &name), parent: marked(&highlighted(PATH), &parent) };
+            if *last_parent != *parent {
+                last_parent = parent.into();
+            }
+            let parent = last_parent.clone();
             entries.push(Entry {
                 name,
                 parent,
