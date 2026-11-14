@@ -6,6 +6,7 @@ use std::{
     ffi::OsString,
     ops::Range,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use colet_core::{
@@ -30,7 +31,8 @@ pub struct Column {
     pub kind: Kind,
     /// The folder a folder column lists; empty for the others.
     pub path: PathBuf,
-    pub entries: Vec<Entry>,
+    /// Shared, so a filter, a page or a frame takes them up without copying them.
+    pub entries: Vec<Arc<Entry>>,
     /// How many there are in all, of which `entries` may be the first pages.
     pub total: usize,
     pub selected: Vec<PathBuf>,
@@ -61,8 +63,11 @@ pub struct Column {
 /// that leaves out the hidden items has one too, its `text` empty when nothing else narrows it.
 #[derive(Clone, Debug)]
 pub struct Narrowing {
-    pub text: String,
-    all: Vec<Entry>,
+    text: String,
+    /// The words of `text`, read once rather than for each name.
+    needles: Needles,
+    /// Shared with `entries`, which holds those it lets through.
+    all: Vec<Arc<Entry>>,
     /// The search results, which Everything narrows, keep nothing aside: how many the search finds
     /// without the filter stands for them.
     pub whole: usize,
@@ -71,35 +76,114 @@ pub struct Narrowing {
 }
 
 impl Narrowing {
-    fn new(text: impl Into<String>, all: Vec<Entry>, whole: usize) -> Self {
-        Self { text: text.into(), all, whole, concealed: 0 }
+    fn new(text: impl Into<String>, all: Vec<Arc<Entry>>, whole: usize) -> Self {
+        let text = text.into();
+        Self { needles: Needles::new(&text), text, all, whole, concealed: 0 }
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The same, narrowed to `text` instead.
+    fn retext(self, text: impl Into<String>) -> Self {
+        let text = text.into();
+        Self { needles: Needles::new(&text), text, ..self }
+    }
+}
+
+/// The words of a filter, each lowered once, to look for in many names.
+#[derive(Clone, Debug, Default)]
+pub struct Needles(Vec<String>);
+
+impl Needles {
+    pub fn new(text: &str) -> Self {
+        Self(narrow_words(text).iter().map(|word| word.to_lowercase()).collect())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Where `name` holds each word, in any order, if it holds them all: the ranges of all of them, those
+    /// that meet as one. No words, nothing marked, are held by any name.
+    pub fn holds(&self, name: &str) -> Option<Vec<Range<usize>>> {
+        let mut ranges = Vec::new();
+        for word in &self.0 {
+            let start = ranges.len();
+            found_lowered(name, word, &mut ranges);
+            if ranges.len() == start {
+                return None;
+            }
+        }
+        ranges.sort_by_key(|r| r.start);
+        let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+        for r in ranges {
+            match merged.last_mut() {
+                Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
+                _ => merged.push(r),
+            }
+        }
+        Some(merged)
     }
 }
 
 /// Where `needle` stands in `name`, case aside, each time it does: byte ranges of `name`.
+#[cfg(test)]
 pub fn found(name: &str, needle: &str) -> Vec<Range<usize>> {
-    let needle = needle.to_lowercase();
     let mut ranges = Vec::new();
-    if needle.is_empty() {
-        return ranges;
-    }
-    let chars: Vec<(usize, char)> = name.char_indices().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        // A letter may lower into more than one, so the name is lowered a letter at a time from here.
-        let (mut lowered, mut j) = (String::new(), i);
-        while j < chars.len() && lowered.len() < needle.len() {
-            lowered.extend(chars[j].1.to_lowercase());
-            j += 1;
-        }
-        if lowered == needle {
-            ranges.push(chars[i].0..chars.get(j).map_or(name.len(), |c| c.0));
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
+    found_lowered(name, &needle.to_lowercase(), &mut ranges);
     ranges
+}
+
+/// Where the already lowered `needle` stands in `name`, case aside, each time it does, added to `ranges`. Run over every name in a folder at each
+/// key typed, so it allocates nothing of its own.
+fn found_lowered(name: &str, needle: &str, ranges: &mut Vec<Range<usize>>) {
+    if needle.is_empty() {
+        return;
+    }
+    // An ASCII name lowers byte for byte into ASCII, which only an ASCII word can match: the bytes are
+    // compared as they are.
+    if name.is_ascii() && needle.is_ascii() {
+        let (name, needle) = (name.as_bytes(), needle.as_bytes());
+        let mut i = 0;
+        while i + needle.len() <= name.len() {
+            if name[i..i + needle.len()].eq_ignore_ascii_case(needle) {
+                ranges.push(i..i + needle.len());
+                i += needle.len();
+            } else {
+                i += 1;
+            }
+        }
+        return;
+    }
+    let mut at = 0;
+    while let Some(c) = name[at..].chars().next() {
+        match lowered_match(&name[at..], needle) {
+            Some(len) => {
+                ranges.push(at..at + len);
+                at += len;
+            }
+            None => at += c.len_utf8(),
+        }
+    }
+}
+
+/// How long the start of `rest` is that lowers, a letter at a time, into exactly `needle`: a letter may
+/// lower into more than one, and one that runs past the needle's end does not match.
+fn lowered_match(rest: &str, needle: &str) -> Option<usize> {
+    let mut wanted = needle.chars();
+    for (at, c) in rest.char_indices() {
+        for lower in c.to_lowercase() {
+            if wanted.next() != Some(lower) {
+                return None;
+            }
+        }
+        if wanted.as_str().is_empty() {
+            return Some(at + c.len_utf8());
+        }
+    }
+    None
 }
 
 /// The words a filter's `text` asks a name to hold, apart at any space, half or full width, but in quotes,
@@ -152,33 +236,20 @@ pub fn room_for_a_word(held: &str) -> String {
 
 /// Where `name` holds each of the words of `text`, in any order, if it holds them all: the ranges of all
 /// of them, those that meet as one. No words, nothing marked, are held by any name.
+/// For one name; many are asked through [`Needles`].
 pub fn holds(name: &str, text: &str) -> Option<Vec<Range<usize>>> {
-    let mut ranges = Vec::new();
-    for word in narrow_words(text) {
-        let at = found(name, &word);
-        if at.is_empty() {
-            return None;
-        }
-        ranges.extend(at);
-    }
-    ranges.sort_by_key(|r| r.start);
-    let mut merged: Vec<Range<usize>> = Vec::new();
-    for r in ranges {
-        match merged.last_mut() {
-            Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
-            _ => merged.push(r),
-        }
-    }
-    Some(merged)
-}
-
-/// `entry` with its marks on where its name holds the words of `text`, if it holds them all.
-fn narrowed(entry: &Entry, text: &str) -> Option<Entry> {
-    let name = holds(&entry.name, text)?;
-    Some(Entry { marks: Marks { name, parent: Vec::new() }, ..entry.clone() })
+    Needles::new(text).holds(name)
 }
 
 impl Column {
+    /// Where a row's `name` holds the words its filter narrows it to, found as the row is drawn rather
+    /// than kept for every row; `None` when they are the entry's own marks, as Everything marks a
+    /// result.
+    pub fn narrow_marks(&self, name: &str) -> Option<Vec<Range<usize>>> {
+        let filter = self.narrow.as_ref().filter(|f| self.kind != Kind::Search && !f.needles.is_empty())?;
+        Some(filter.needles.holds(name).unwrap_or_default())
+    }
+
     fn new(id: ColumnId, kind: Kind, path: &Path, highlight: Option<PathBuf>) -> Self {
         Self {
             id,
@@ -246,7 +317,7 @@ impl Column {
     }
 
     pub fn entry(&self, path: &Path) -> Option<&Entry> {
-        self.entries.iter().find(|e| e.path == path)
+        self.entries.iter().find(|e| e.path == path).map(|e| &**e)
     }
 
     /// What it is narrowed to, as a favorite or saved search keeps it.
@@ -1264,10 +1335,17 @@ impl State {
         for c in &mut self.columns {
             c.path = moved(&c.path);
             for e in c.entries.iter_mut().chain(c.narrow.iter_mut().flat_map(|f| f.all.iter_mut())) {
-                if e.path == from {
+                let renamed = e.path == from;
+                let path = paths::moved(&e.path, from, to);
+                if !renamed && path.is_none() {
+                    continue;
+                }
+                // Shared with the filter's list, where it is changed alike.
+                let e = Arc::make_mut(e);
+                if renamed {
                     e.name = name.clone();
                 }
-                if let Some(path) = paths::moved(&e.path, from, to) {
+                if let Some(path) = path {
                     e.parent = path.parent().map(shown).unwrap_or_default();
                     e.path = path;
                 }
@@ -1313,7 +1391,7 @@ impl State {
             f.text
         });
         if c.entry(path).is_none() {
-            c.entries.push(Entry { parent: shown(parent), ..Entry::folder(path, &shown(folder_name(path))) });
+            c.entries.push(Arc::new(Entry { parent: shown(parent), ..Entry::folder(path, &shown(folder_name(path))) }));
             c.total += 1;
         }
         // It shows, to be seen picked, even where the filter would hide it: the filter's text goes then.
@@ -1362,7 +1440,7 @@ impl State {
         if c.kind == Kind::Search {
             c.narrow = match (text, c.narrow.take()) {
                 (None, _) => None,
-                (Some(text), Some(filter)) => Some(Narrowing { text: text.into(), ..filter }),
+                (Some(text), Some(filter)) => Some(filter.retext(text)),
                 (Some(text), None) => Some(Narrowing::new(text, Vec::new(), c.total)),
             };
             return;
@@ -1403,7 +1481,7 @@ impl State {
                     concealed += 1;
                     return None;
                 }
-                narrowed(e, &filter.text)
+                filter.needles.holds(&e.name).is_some().then(|| e.clone())
             })
             .collect();
         filter.concealed = concealed;
@@ -1419,7 +1497,7 @@ impl State {
     /// Whether the folder column at `index` narrowed to its names, holds `path` but hides it.
     fn hides(&self, index: usize, path: &Path) -> bool {
         let c = &self.columns[index];
-        c.narrow.as_ref().is_some_and(|f| f.all.iter().any(|e| e.path == path && holds(&e.name, &f.text).is_none()))
+        c.narrow.as_ref().is_some_and(|f| f.all.iter().any(|e| e.path == path && f.needles.holds(&e.name).is_none()))
     }
 
     /// Picked in the folder they went to once it lists them, while it is the column worked in.
@@ -1483,7 +1561,7 @@ impl State {
         // in the other columns, told by its name.
         if c.kind == Kind::Search {
             let hidden: Vec<PathBuf> = match &c.narrow {
-                Some(filter) => c.selected.iter().filter(|p| holds(&shown(folder_name(p)), &filter.text).is_none()).cloned().collect(),
+                Some(filter) => c.selected.iter().filter(|p| filter.needles.holds(&shown(folder_name(p))).is_none()).cloned().collect(),
                 None => Vec::new(),
             };
             let keys = c.focused.clone().or_else(|| c.hid.take());
@@ -1496,7 +1574,7 @@ impl State {
             if let Some(path) = keys {
                 if c.entry(&path).is_some() {
                     c.focused = Some(path);
-                } else if c.narrow.as_ref().is_some_and(|f| holds(&shown(folder_name(&path)), &f.text).is_none()) {
+                } else if c.narrow.as_ref().is_some_and(|f| f.needles.holds(&shown(folder_name(&path))).is_none()) {
                     c.focused = None;
                     c.hid = Some(path);
                 }
@@ -1515,7 +1593,8 @@ impl State {
         // What was just pasted here shows picked, as a new folder does: the filter's text goes when it hides
         // any.
         let picked = waiting && c.pick.is_none() && index == self.active;
-        if picked && c.selected.iter().any(|p| c.entry(p).is_some_and(|e| narrowed(e, &text).is_none())) {
+        let needles = Needles::new(&text);
+        if picked && c.selected.iter().any(|p| c.entry(p).is_some_and(|e| needles.holds(&e.name).is_none())) {
             text.clear();
         }
         self.renarrow(index, text);
@@ -1568,10 +1647,10 @@ impl State {
         let old = std::mem::take(&mut c.entries);
         if offset > 0 {
             let known: HashSet<&PathBuf> = old.iter().map(|e| &e.path).collect();
-            let fresh: Vec<Entry> = entries.into_iter().filter(|e| !known.contains(&e.path)).collect();
+            let fresh: Vec<Arc<Entry>> = entries.into_iter().filter(|e| !known.contains(&e.path)).map(Arc::new).collect();
             c.entries = old.iter().cloned().chain(fresh).collect();
         } else {
-            c.entries = entries;
+            c.entries = entries.into_iter().map(Arc::new).collect();
         }
         if c.kind == Kind::Folder {
             // Listed under the folder as asked for, which may since have taken the disk's case.
@@ -1579,7 +1658,7 @@ impl State {
             if c.entries.iter().any(|e| !e.path.starts_with(&folder)) {
                 for e in &mut c.entries {
                     if let Some(path) = paths::moved(&e.path, &folder, &folder) {
-                        e.path = path;
+                        Arc::make_mut(e).path = path;
                     }
                 }
             }

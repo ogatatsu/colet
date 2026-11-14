@@ -134,6 +134,7 @@ impl Colet {
             self.row_look(index, entry, marked, keys, cx);
         let c = &self.state.columns[index];
         let kind = c.kind;
+        let name_marks = c.narrow_marks(&entry.name);
         // While a row in home is carried, only the line tells where it goes.
         let dragging = kind == Kind::Home && self.home_drag.carried.is_some();
         let key = HomeKey::of(&entry.path);
@@ -230,7 +231,7 @@ impl Colet {
                 let picture = div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture);
                 if kind == Kind::Home { r.child(picture) } else { r.child(self.check(index, entry, selected, lit, picture, cx)) }
             })
-            .child(self.row_name(entry, kind, lit, within, narrow))
+            .child(self.row_name(entry, name_marks.as_deref().unwrap_or(&entry.marks.name), kind, lit, within, narrow))
             // Out of the name, so the name stays the file's own: a fade alone would read as hidden.
             .when(held, |r| {
                 r.child(
@@ -333,7 +334,16 @@ impl Colet {
 
     /// The name, with the filter a saved search runs within and what a favorite or saved search opens
     /// narrowed to beside it, and a search result's folder under it.
-    fn row_name(&self, entry: &Entry, kind: Kind, lit: bool, within: Option<String>, narrow: Option<String>) -> Div {
+    /// `marks`: where the name is marked, by the column's filter or the search.
+    fn row_name(
+        &self,
+        entry: &Entry,
+        marks: &[Range<usize>],
+        kind: Kind,
+        lit: bool,
+        within: Option<String>,
+        narrow: Option<String>,
+    ) -> Div {
         let p = self.palette;
         let ink = if lit { p.on_accent } else { p.text };
         let muted = if lit { p.on_accent_muted } else { p.text_muted };
@@ -350,7 +360,7 @@ impl Colet {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().min_w_0().truncate().child(with_marks(&entry.name, &entry.marks.name, mark)))
+                    .child(div().min_w_0().truncate().child(with_marks(&entry.name, marks, mark)))
                     // A badge, tinted with the row's own ink so it shows on any of its fills.
                     .when_some(within, |d, filter| {
                         d.child(
@@ -538,7 +548,8 @@ impl Colet {
             view.update(cx, |this, cx| {
                 let Some(index) = this.state.index_of(id) else { return Vec::new() };
                 let c = &this.state.columns[index];
-                let entries: Vec<Entry> = c.entries[range.start.min(c.entries.len())..range.end.min(c.entries.len())].to_vec();
+                let entries: Vec<std::sync::Arc<Entry>> =
+                    c.entries[range.start.min(c.entries.len())..range.end.min(c.entries.len())].to_vec();
                 entries.iter().map(|entry| this.row(index, entry, marked, keys, cx)).collect()
             })
         })

@@ -361,7 +361,7 @@ impl Colet {
         let (mut state, directory) = if c.kind == Kind::Folder && c.path == path {
             let mut state = State::opening(path, true);
             let last = state.columns.len() - 1;
-            state.set_narrowing(last, c.narrow.as_ref().map(|f| f.text.as_str()));
+            state.set_narrowing(last, c.narrow.as_ref().map(|f| f.text()));
             (state, true)
         } else {
             let Some(entry) = c.entry(path) else { return };

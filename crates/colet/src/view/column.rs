@@ -8,7 +8,7 @@ fn count_text(c: &Column) -> String {
         _ if c.error.is_some() || c.unread() => String::new(),
         // Everything narrows the results: how many it lets through, of how many the search finds.
         Some(n) if c.kind == Kind::Search => format!("{} / {}", time::count(c.total as u64), time::count(n.whole as u64)),
-        Some(n) if !n.text.is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.shown_total() as u64)),
+        Some(n) if !n.text().is_empty() => format!("{} / {}", time::count(c.entries.len() as u64), time::count(c.shown_total() as u64)),
         _ => time::count(c.shown_total() as u64),
     }
 }

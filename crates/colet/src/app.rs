@@ -710,7 +710,7 @@ impl Colet {
                 let whole = everything_query(&self.state.query, filter);
                 // Narrowed, the search is counted without it too, along with the first page.
                 let (query, whole) = match &c.narrow {
-                    Some(filter) => (narrowed_query(&whole, &filter.text), (offset == 0).then_some(whole)),
+                    Some(filter) => (narrowed_query(&whole, filter.text()), (offset == 0).then_some(whole)),
                     None => (whole, None),
                 };
                 // A refresh reloads the pages in sight and those the picked rows and the keys are on, so
@@ -1227,14 +1227,14 @@ impl Colet {
                         field.applied.clear();
                         field.input.update(cx, |input, cx| input.set_value("", window, cx));
                     }
-                    Some(filter) if filter.text != field.applied => {
-                        field.applied = filter.text.clone();
-                        field.input.update(cx, |input, cx| input.set_value(filter.text.clone(), window, cx));
+                    Some(filter) if filter.text() != field.applied => {
+                        field.applied = filter.text().to_owned();
+                        field.input.update(cx, |input, cx| input.set_value(filter.text().to_owned(), window, cx));
                     }
                     _ => {}
                 },
                 None => {
-                    let text = c.narrow.as_ref().map(|f| f.text.clone()).unwrap_or_default();
+                    let text = c.narrow.as_ref().map(|f| f.text().to_owned()).unwrap_or_default();
                     let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む").default_value(text.clone()));
                     self.palette.style_input(&input, cx);
                     let subscription = cx.subscribe_in(&input, window, move |this: &mut Self, input, event, window, cx| match event {
@@ -1309,7 +1309,7 @@ impl Colet {
                 this.update(cx, |this, cx| {
                     let Some(index) = this.state.index_of(id) else { return };
                     // Spaces alone, no words, ask for all as an empty field does.
-                    let applied = this.state.columns[index].narrow.as_ref().map_or("", |f| f.text.as_str());
+                    let applied = this.state.columns[index].narrow.as_ref().map_or("", |f| f.text());
                     if applied == text || applied.is_empty() && narrow_words(&text).is_empty() {
                         this.load(id, 0, true, cx);
                     }

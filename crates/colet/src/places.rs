@@ -86,15 +86,16 @@ pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {
 }
 
 /// Home's headings and their rows, shared by drawing and scrolling to the focused row.
-pub fn home_groups<'a>(settings: &Settings, entries: &'a [Entry]) -> Vec<(&'static str, Vec<&'a Entry>)> {
+pub fn home_groups<'a>(settings: &Settings, entries: &'a [std::sync::Arc<Entry>]) -> Vec<(&'static str, Vec<&'a Entry>)> {
     let pinned = |e: &&Entry| settings.is_pinned(&e.path);
     let favorite = |e: &&Entry| !pinned(e) && settings.is_favorite(&e.path);
     let search = |e: &&Entry| !pinned(e) && HomeKey::of(&e.path).is_search();
+    let entries = || entries.iter().map(|e| &**e);
     [
-        ("ピン留め", entries.iter().filter(pinned).collect::<Vec<_>>()),
-        ("お気に入り", entries.iter().filter(favorite).collect()),
-        ("保存した検索", entries.iter().filter(search).collect()),
-        ("場所", entries.iter().filter(|e| !pinned(e) && !favorite(e) && !search(e)).collect()),
+        ("ピン留め", entries().filter(pinned).collect::<Vec<_>>()),
+        ("お気に入り", entries().filter(favorite).collect()),
+        ("保存した検索", entries().filter(search).collect()),
+        ("場所", entries().filter(|e| !pinned(e) && !favorite(e) && !search(e)).collect()),
     ]
     .into_iter()
     .filter(|(_, rows)| !rows.is_empty())
@@ -789,7 +790,11 @@ mod tests {
             pinned: vec!["search:ext:pdf".into(), r"E:\".into(), r"c:\".into(), r"D:\Music".into()],
             ..Settings::default()
         };
-        let entries = home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)"), Entry::folder(r"D:\", "D:")]);
+        let entries: Vec<std::sync::Arc<Entry>> =
+            home_entries(&settings, vec![Entry::folder(r"C:\", "OS (C:)"), Entry::folder(r"D:\", "D:")])
+                .into_iter()
+                .map(std::sync::Arc::new)
+                .collect();
         let paths: Vec<&str> = entries.iter().map(|e| e.path.to_str().unwrap()).collect();
         assert_eq!(paths, ["search:ext:pdf", r"C:\", r"D:\Music", r"D:\Work", r"D:\"]);
         let groups: Vec<(&str, Vec<&str>)> = home_groups(&settings, &entries)

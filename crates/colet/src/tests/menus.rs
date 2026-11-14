@@ -94,7 +94,7 @@ fn copies_the_path_of_a_folder_column_and_opens_it_in_a_tab_from_its_empty_space
     assert_eq!(ui.read(cx, |v| (v.tabs.len(), v.tabs.current())), (2, 0));
     ui.press(cx, "ctrl-tab");
     settle(cx);
-    let last = ui.read(cx, |v| v.state.columns.last().map(|c| (text(&c.path), c.narrow.as_ref().map(|f| f.text.clone()))));
+    let last = ui.read(cx, |v| v.state.columns.last().map(|c| (text(&c.path), c.narrow.as_ref().map(|f| f.text().to_owned()))));
     assert_eq!(last, Some((r"D:\work".to_owned(), Some("b".to_owned()))));
     assert_eq!(
         ui.read(cx, |v| v.state.columns.last().unwrap().entries.iter().map(|e| text(&e.path)).collect::<Vec<_>>()),

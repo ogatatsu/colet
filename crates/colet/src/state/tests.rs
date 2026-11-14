@@ -24,7 +24,7 @@ fn file(path: &str) -> Entry {
 }
 
 fn with_entries(s: &mut State, index: usize, entries: Vec<Entry>) {
-    s.columns[index].entries = entries;
+    s.columns[index].entries = entries.into_iter().map(Arc::new).collect();
 }
 
 fn paths(s: &State) -> Vec<&str> {
@@ -54,7 +54,7 @@ fn removes_vanished_selection_and_focus_after_a_refresh() {
         let mut s = State::new();
         let (kept, gone) = (file(r"D:\kept"), file(r"D:\gone"));
         let mut c = s.column(kind, Path::new(""), None);
-        c.entries = vec![kept.clone(), gone.clone()];
+        c.entries = vec![Arc::new(kept.clone()), Arc::new(gone.clone())];
         c.selected = vec![kept.path.clone(), gone.path.clone()];
         c.focused = Some(gone.path.clone());
         c.request = 2;
@@ -73,7 +73,7 @@ fn a_refresh_with_thousands_picked_hands_what_colet_sent_away_to_the_next_row() 
     let entries: Vec<Entry> = (0..20_000).map(|i| file(&format!(r"D:\work\{i:05}"))).collect();
     let mut s = State::new();
     let mut c = s.column(Kind::Folder, Path::new(r"D:\work"), None);
-    c.entries = entries.clone();
+    c.entries = entries.iter().cloned().map(Arc::new).collect();
     c.selected = entries[..10_000].iter().map(|e| e.path.clone()).collect();
     c.request = 2;
     let id = c.id;
@@ -704,7 +704,7 @@ fn narrows_a_folder_to_the_names_holding_the_text_keeping_what_it_hides_picked()
     assert_eq!(s.columns.len(), 3);
     s.set_narrowing(1, Some("TA"));
     assert_eq!(names(&s, 1), [r"D:\beta.txt"]);
-    assert_eq!(s.columns[1].entries[0].marks.name, [5..7]);
+    assert_eq!(marks(&s, 1, 0), [5..7]);
     // The folder it had open beside it is hidden: it stays picked, and its column open, but is not
     // what is acted on.
     assert_eq!(s.columns[1].selected, one(r"D:\alpha"));
@@ -725,7 +725,7 @@ fn narrows_a_folder_to_the_names_holding_the_text_keeping_what_it_hides_picked()
     // Lifted, it lists all again, unmarked.
     s.set_narrowing(1, None);
     assert_eq!(names(&s, 1).len(), 3);
-    assert!(s.columns[1].entries.iter().all(|e| e.marks.name.is_empty()));
+    assert!((0..3).all(|row| marks(&s, 1, row).is_empty()));
     assert!(s.columns[1].narrow.is_none());
 }
 
@@ -853,7 +853,7 @@ fn lifts_the_filter_for_what_is_made_or_renamed_here_that_it_would_hide() {
     let mut s = drive(vec![file(r"D:\beta.txt"), file(r"D:\gamma")]);
     s.set_narrowing(1, Some("ta"));
     s.renamed(Path::new(r"D:\beta.txt"), Path::new(r"D:\beta2.txt"));
-    assert_eq!(s.columns[1].entries[0].marks.name, [2..4]);
+    assert_eq!(marks(&s, 1, 0), [2..4]);
     s.renamed(Path::new(r"D:\beta2.txt"), Path::new(r"D:\b.txt"));
     assert!(s.columns[1].narrow.is_none());
 
@@ -1132,4 +1132,22 @@ fn runs_a_saved_search_in_its_order_and_goes_back_to_the_order_before() {
     s.select(0, one(r"D:\"));
     s.back();
     assert_eq!(s.search_order, Order::default());
+}
+
+/// Where the row at `row` of the column at `index` is marked, as it is drawn.
+fn marks(s: &State, index: usize, row: usize) -> Vec<Range<usize>> {
+    let c = &s.columns[index];
+    let entry = &c.entries[row];
+    c.narrow_marks(&entry.name).unwrap_or_else(|| entry.marks.name.clone())
+}
+
+#[test]
+fn finds_a_word_in_any_case_without_lowering_names_whole() {
+    let needles = Needles::new("re \"Ü\"");
+    assert_eq!(needles.holds("Read_über.txt"), Some(vec![0..2, 5..7]));
+    assert_eq!(needles.holds("Read.txt"), None);
+    // ASCII names are compared byte by byte, and still find each time, without overlap.
+    assert_eq!(found("aAaA", "aa"), [0..2, 2..4]);
+    // A letter that lowers past the word's end does not match.
+    assert!(found("\u{130}", "i").is_empty());
 }

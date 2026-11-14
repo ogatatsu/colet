@@ -612,7 +612,7 @@ impl Colet {
     pub fn picked_entries(&self) -> Vec<Entry> {
         let Some(c) = self.action_column() else { return Vec::new() };
         let picked: HashSet<PathBuf> = self.picked().into_iter().collect();
-        c.entries.iter().filter(|e| picked.contains(&e.path)).cloned().collect()
+        c.entries.iter().filter(|e| picked.contains(&e.path)).map(|e| Entry::clone(e)).collect()
     }
 
     /// The folder column worked in's own folder, or server.
