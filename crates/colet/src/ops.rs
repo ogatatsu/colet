@@ -21,7 +21,7 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, Tone},
     backend::{self, PathKind},
-    clipboard::Clipboard,
+    clipboard::{Clipboard, Paste},
     places::Dialog,
     settings::Favorite,
     state::{Column, ColumnId, HomeKey, Kind as ColumnKind},
@@ -207,8 +207,8 @@ pub struct Operations {
 pub enum OperationsEvent {
     /// A line to put up in the window.
     Notice(String, Tone),
-    /// The clipboard writes a paste waited on are done: paste into this folder now.
-    PasteReady(PathBuf),
+    /// The clipboard writes a paste waited on are done: paste now, for the tab it was asked in.
+    PasteReady(Paste),
     /// What Send To offers changed: a file menu open shows it afresh.
     SendTargetsChanged,
     /// A send to Send To ended: what it moved has left its folder.
@@ -446,8 +446,8 @@ impl Operations {
                     Ok(()) => OperationsEvent::Notice(done, Tone::Info),
                     Err(error) => OperationsEvent::Notice(error, Tone::Error),
                 });
-                if let Some(destination) = this.clipboard.write_ended(which, written) {
-                    cx.emit(OperationsEvent::PasteReady(destination));
+                if let Some(paste) = this.clipboard.write_ended(which, written) {
+                    cx.emit(OperationsEvent::PasteReady(paste));
                 }
             })
             .ok();
@@ -728,9 +728,9 @@ impl Colet {
         match self.reasons(cx).paste {
             Some(reason) => self.refuse("貼り付け", reason, cx),
             None => {
-                let destination = self.destination().unwrap_or_default();
-                if let Some(destination) = self.operations.update(cx, |operations, _| operations.clipboard_mut().paste_into(destination)) {
-                    self.run(Request { kind: Kind::Paste, paths: Vec::new(), destination, name: String::new() }, cx);
+                let paste = Paste { destination: self.destination().unwrap_or_default(), tab: self.current_tab() };
+                if let Some(paste) = self.operations.update(cx, |operations, _| operations.clipboard_mut().paste(paste)) {
+                    self.run_paste(paste, cx);
                 }
             }
         }
@@ -1034,9 +1034,7 @@ impl Colet {
     pub(crate) fn on_operations_event(&mut self, event: &OperationsEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             OperationsEvent::Notice(text, tone) => self.notify(text.clone(), *tone, cx),
-            OperationsEvent::PasteReady(destination) => {
-                self.run(Request { kind: Kind::Paste, paths: Vec::new(), destination: destination.clone(), name: String::new() }, cx)
-            }
+            OperationsEvent::PasteReady(paste) => self.run_paste(paste.clone(), cx),
             OperationsEvent::SendTargetsChanged => {
                 if self.menu().is_some() {
                     self.show_menu(window, cx);
@@ -1063,9 +1061,21 @@ impl Colet {
         self.operations.update(cx, |operations, cx| operations.send_to(target, paths, shift, cx));
     }
 
+    /// Pastes as `paste` asks, for the tab it was asked in, whichever is in front now: that tab picks what
+    /// it pastes, unless closed since.
+    fn run_paste(&mut self, paste: Paste, cx: &mut Context<Self>) {
+        let request = Request { kind: Kind::Paste, paths: Vec::new(), destination: paste.destination, name: String::new() };
+        self.run_in(request, paste.tab, cx);
+    }
+
     /// Runs one file operation and keeps it in the history; a second waits for none, it is refused.
     pub fn run(&mut self, request: Request, cx: &mut Context<Self>) {
         let tab = self.current_tab();
+        self.run_in(request, tab, cx);
+    }
+
+    /// Runs `request` for the tab `tab`, which picks what it makes.
+    fn run_in(&mut self, request: Request, tab: crate::tabs::TabId, cx: &mut Context<Self>) {
         let Some(events) = self.operations.update(cx, |operations, cx| operations.begin(&request, tab, cx)) else {
             self.refuse(request.kind.title(), BUSY, cx);
             return;

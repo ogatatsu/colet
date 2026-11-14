@@ -69,6 +69,44 @@ fn pastes_a_copy_still_being_written_once_it_is_on_the_clipboard(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
+fn picks_what_a_waiting_paste_pasted_in_the_tab_it_was_asked_in_not_the_one_in_front(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    let asked_in = ui.read(cx, |v| v.current_tab());
+    ui.view.update(cx, |v, cx| {
+        v.copy(false, cx);
+        v.paste(cx);
+    });
+    // Another tab comes to the front while the copy is still being written.
+    ui.act(cx, |window, cx| window.press("ctrl-t", cx));
+    assert!(fake.operations.lock().unwrap().is_empty());
+    settle(cx);
+    let asked = fake.operations.lock().unwrap().clone();
+    assert_eq!((asked.len(), asked[0].destination.as_path()), (1, Path::new(r"D:\work")));
+    // The tab in front is left as it was, and stays in front.
+    assert_eq!(ui.read(cx, |v| (v.current_tab() != asked_in, v.state.columns.len())), (true, 1));
+    ui.press(cx, "ctrl-tab");
+    assert_eq!(ui.read(cx, |v| v.current_tab()), asked_in);
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt - コピー"]);
+}
+
+#[gpui_kit::test]
+fn pastes_all_the_same_once_the_tab_it_was_asked_in_is_closed(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    let asked_in = ui.read(cx, |v| v.current_tab());
+    ui.view.update(cx, |v, cx| {
+        v.copy(false, cx);
+        v.paste(cx);
+    });
+    ui.act(cx, |window, cx| window.press("ctrl-t", cx));
+    ui.click(cx, ("tab-close", asked_in as usize));
+    settle(cx);
+    assert!(ui.read(cx, |v| v.tabs.get(1).is_none() && v.current_tab() != asked_in));
+    let asked = fake.operations.lock().unwrap().clone();
+    assert_eq!((asked.len(), asked[0].kind), (1, Operation::Paste));
+    assert!(fake.folders.lock().unwrap()[r"D:\work"].iter().any(|e| e.name == "a.txt - コピー"));
+}
+
+#[gpui_kit::test]
 fn lets_go_of_what_a_paste_moves_as_the_clipboard_holds_it_not_as_last_seen(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "ctrl-c");
