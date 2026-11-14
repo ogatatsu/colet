@@ -546,28 +546,7 @@ pub struct File {
 
 pub const SETTINGS: File = File { stem: "settings", what: "設定", file: "設定ファイル", fallback: "既定の設定" };
 
-/// Writes a file kept on a lane of its own, one save after another in the order they were sent, so an
-/// older save never lands over a newer one: the final save on close waits for those before it.
-pub struct Saver<T> {
-    lane: Lane,
-    write: Arc<Write<T>>,
-    /// What the file holds, for saying it could not be saved: "設定".
-    what: &'static str,
-}
-
 type Write<T> = dyn Fn(&T) -> Result<(), String> + Send + Sync;
-
-impl<T: Send + 'static> Saver<T> {
-    pub fn new(file: &File, write: impl Fn(&T) -> Result<(), String> + Send + Sync + 'static) -> Self {
-        Self { lane: Lane::default(), write: Arc::new(write), what: file.what }
-    }
-
-    /// Queues `kept` behind the saves before it; [`Queued::written`] says how its write went.
-    pub fn save(&self, kept: T) -> Queued {
-        let write = self.write.clone();
-        Queued { result: self.lane.run(move || write(&kept)), what: self.what }
-    }
-}
 
 /// A save on its way.
 pub struct Queued {
@@ -587,36 +566,51 @@ impl Queued {
     }
 }
 
-/// The saves of a kept file: a save waiting out a burst of changes goes only for the last of them. None
-/// are written when the file read at start could not be read and is still there, so it is never written
-/// over this session.
+/// The saves of a kept file, written on a lane of their own one after another in the order sent, so an
+/// older save never lands over a newer one and the final save on close waits for those before it. A save
+/// waiting out a burst of changes goes only for the last of them. None are written when the file read at
+/// start could not be read and is still there, so it is never written over this session.
 pub struct Saves<T> {
-    saver: Option<Saver<T>>,
+    lane: Lane,
+    /// None while nothing is written.
+    write: Option<Arc<Write<T>>>,
+    /// What the file holds, for saying it could not be saved: "設定".
+    what: &'static str,
     /// Counts the changes.
     changes: u64,
 }
 
 impl<T: Clone + Send + 'static> Saves<T> {
-    pub fn new(saver: Option<Saver<T>>) -> Self {
-        Self { saver, changes: 0 }
+    pub fn new(file: &File, write: Option<impl Fn(&T) -> Result<(), String> + Send + Sync + 'static>) -> Self {
+        let write = write.map(|write| Arc::new(write) as Arc<Write<T>>);
+        Self { lane: Lane::default(), write, what: file.what, changes: 0 }
+    }
+
+    /// Queues `kept` behind the saves before it; [`Queued::written`] says how its write went.
+    fn save(&self, kept: &T) -> Option<Queued> {
+        let write = self.write.clone()?;
+        let kept = kept.clone();
+        Some(Queued { result: self.lane.run(move || write(&kept)), what: self.what })
     }
 
     /// Notes a change: the number a save of it waits with, none when nothing is written.
     pub fn changed(&mut self) -> Option<u64> {
         self.changes += 1;
-        self.saver.as_ref().map(|_| self.changes)
+        self.write.as_ref().map(|_| self.changes)
     }
 
     /// Queues `kept` unless a change came after `change`, which has its own save coming.
     pub fn save_if_last(&self, change: u64, kept: &T) -> Option<Queued> {
-        let saver = self.saver.as_ref().filter(|_| self.changes == change)?;
-        Some(saver.save(kept.clone()))
+        if self.changes != change {
+            return None;
+        }
+        self.save(kept)
     }
 
     /// Queues `kept` now, dropping the saves still waiting out a burst.
     pub fn save_now(&mut self, kept: &T) -> Option<Queued> {
         self.changes += 1;
-        self.saver.as_ref().map(|saver| saver.save(kept.clone()))
+        self.save(kept)
     }
 }
 
@@ -727,18 +721,21 @@ mod tests {
         let (release, released) = mpsc::channel::<()>();
         let gate = Mutex::new((started, released));
         let target = path.clone();
-        let saver = Saver::new(&SETTINGS, move |settings: &Settings| {
-            if settings.favorites == [Favorite::new("older")] {
-                let gate = gate.lock().unwrap();
-                gate.0.send(()).unwrap();
-                gate.1.recv().unwrap();
-            }
-            save_to(settings, &target)
-        });
-        let older = saver.save(Settings { favorites: vec!["older".into()], ..Settings::default() });
+        let mut saves = Saves::new(
+            &SETTINGS,
+            Some(move |settings: &Settings| {
+                if settings.favorites == [Favorite::new("older")] {
+                    let gate = gate.lock().unwrap();
+                    gate.0.send(()).unwrap();
+                    gate.1.recv().unwrap();
+                }
+                save_to(settings, &target)
+            }),
+        );
+        let older = saves.save_now(&Settings { favorites: vec!["older".into()], ..Settings::default() }).unwrap();
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
         // The older save is in the middle of its write; the final one waits behind it.
-        let latest = saver.save(Settings { favorites: vec!["latest".into()], ..Settings::default() });
+        let latest = saves.save_now(&Settings { favorites: vec!["latest".into()], ..Settings::default() }).unwrap();
         assert!(latest.pending());
         release.send(()).unwrap();
         older.written().unwrap();

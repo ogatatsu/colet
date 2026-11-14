@@ -906,7 +906,7 @@ impl Colet {
     pub fn history_button(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let operations = self.operations.read(cx);
-        let (unseen, running) = (operations.history().unseen, operations.is_running());
+        let (unseen, running) = (operations.history.unseen, operations.is_running());
         let label = if unseen > 0 { format!("操作履歴（問題のある操作 {unseen} 件）") } else { "操作履歴".to_owned() };
         let button = Button::new("history-button")
             .ghost()
@@ -954,14 +954,14 @@ impl Colet {
         // Each row and each item that opens a stop for Tab; the mouse leaves the keys
         // where they are, as before.
         let mut keys = Vec::new();
-        for entry in &self.operations.read(cx).history().entries {
+        for entry in &self.operations.read(cx).history.entries {
             keys.push(Stop::HistoryEntry(entry.id));
             if self.history_panel.expanded.contains(&entry.id) {
                 keys.extend(entry.items.iter().enumerate().filter(|(_, item)| !item.gone).map(|(k, _)| Stop::HistoryItem(entry.id, k)));
             }
         }
         let stops: std::collections::HashMap<Stop, FocusHandle> = keys.into_iter().map(|key| (key.clone(), self.stop(key, cx))).collect();
-        let history = self.operations.read(cx).history();
+        let history = &self.operations.read(cx).history;
         let entries: Vec<AnyElement> = history
             .entries
             .iter()
@@ -1109,7 +1109,7 @@ impl Colet {
                                 crate::view::keep_focus(push("clear-history", "履歴を消去", false, clearable).ghost().small()).on_click(
                                     cx.listener(|this, _, _, cx| {
                                         this.operations.update(cx, |operations, cx| {
-                                            operations.history_mut().clear();
+                                            operations.history.clear();
                                             cx.notify();
                                         })
                                     }),

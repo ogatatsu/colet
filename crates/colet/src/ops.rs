@@ -194,8 +194,8 @@ pub struct Operations {
     /// The sends to Windows' Send To under way: their drops run in this process, so the window stays
     /// until each returns.
     sending: usize,
-    history: History,
-    clipboard: Clipboard,
+    pub history: History,
+    pub clipboard: Clipboard,
     /// What Windows' Send To offers, as last read: none until it is.
     send_targets: Vec<SendTarget>,
     /// What the latest operation sent away, by path key: a listing that finds it gone takes it as Colet's
@@ -245,22 +245,6 @@ impl Operations {
     /// A send to Windows' Send To is under way.
     pub fn is_sending(&self) -> bool {
         self.sending > 0
-    }
-
-    pub fn history(&self) -> &History {
-        &self.history
-    }
-
-    pub fn history_mut(&mut self) -> &mut History {
-        &mut self.history
-    }
-
-    pub fn clipboard(&self) -> &Clipboard {
-        &self.clipboard
-    }
-
-    pub fn clipboard_mut(&mut self) -> &mut Clipboard {
-        &mut self.clipboard
     }
 
     pub fn send_targets(&self) -> &[SendTarget] {
@@ -729,7 +713,7 @@ impl Colet {
             Some(reason) => self.refuse("貼り付け", reason, cx),
             None => {
                 let paste = Paste { destination: self.destination().unwrap_or_default(), tab: self.current_tab() };
-                if let Some(paste) = self.operations.update(cx, |operations, _| operations.clipboard_mut().paste(paste)) {
+                if let Some(paste) = self.operations.update(cx, |operations, _| operations.clipboard.paste(paste)) {
                     self.run_paste(paste, cx);
                 }
             }
@@ -1100,12 +1084,12 @@ impl Colet {
                         Some(_) => &[],
                         // Unread, as while another app holds it: the paste reads it again, and most likely
                         // fails as this did.
-                        None if operations.clipboard().files.cut => operations.clipboard().files.paths.as_slice(),
+                        None if operations.clipboard.files.cut => operations.clipboard.files.paths.as_slice(),
                         None => &[],
                     },
                     Kind::NewFolder => &[],
                 };
-                this.loading.watching_mut().released = leaving.iter().map(|p| path_key(p)).collect();
+                this.loading.watching.released = leaving.iter().map(|p| path_key(p)).collect();
                 this.watch(cx)
             }) else {
                 return;
@@ -1171,7 +1155,7 @@ impl Colet {
             return;
         };
         // Watched again by the refresh below, which lists what changed while they were not.
-        self.loading.watching_mut().released.clear();
+        self.loading.watching.released.clear();
         let Request { kind, paths, destination, name } = request;
         let (cancelled, problem) = match &result {
             Ok(()) => (false, None),
@@ -1230,7 +1214,7 @@ impl Colet {
         self.history_panel.set_open(open, entry);
         if open {
             self.operations.update(cx, |operations, cx| {
-                operations.history_mut().unseen = 0;
+                operations.history.unseen = 0;
                 cx.notify();
             });
         }

@@ -17,52 +17,82 @@ use crate::{state::ColumnId, view::PAGE_AHEAD, watching::Watching};
 
 #[derive(Default)]
 pub struct Loading {
-    listings: Listings,
-    search_refresh: SearchRefresh,
-    watching: Watching,
+    last_request: u64,
+    /// The columns listed at least once.
+    listed: HashSet<ColumnId>,
+    /// The latest listing still out for each column.
+    pending: HashMap<ColumnId, u64>,
+    /// What stops each folder's listing still out.
+    cancels: HashMap<ColumnId, Arc<AtomicBool>>,
+    pub search_refresh: SearchRefresh,
+    pub watching: Watching,
     engine: Engine,
     /// A search was sent since the last was let go of: Everything watches it until it is.
     searched: bool,
 }
 
 impl Loading {
-    // ---- The listings ----
+    // ---- The listings: each answer is told apart from those it was overtaken by ----
 
     /// True the first time `id` is asked about: it is to be listed.
     pub fn first(&mut self, id: ColumnId) -> bool {
-        self.listings.first(id)
+        self.listed.insert(id)
     }
 
     /// A listing of `id` is out.
     pub fn is_loading(&self, id: ColumnId) -> bool {
-        self.listings.loading(id)
+        self.pending.contains_key(&id)
     }
 
     /// A listing of `id`, overtaking any still out: its number.
     pub fn start(&mut self, id: ColumnId) -> u64 {
-        self.listings.start(id)
+        let request = self.next();
+        self.pending.insert(id, request);
+        request
+    }
+
+    /// A request number after every one before it.
+    fn next(&mut self) -> u64 {
+        self.last_request += 1;
+        self.last_request
     }
 
     /// What stops the folder listing of `id` just started; the one before it is stopped.
     pub fn cancel_before(&mut self, id: ColumnId) -> Arc<AtomicBool> {
-        self.listings.cancel_before(id)
+        let cancelled = Arc::new(AtomicBool::new(false));
+        if let Some(previous) = self.cancels.insert(id, cancelled.clone()) {
+            previous.store(true, Ordering::Relaxed);
+        }
+        cancelled
     }
 
     /// The answer to `request` came: true when it is the latest for `id`, which is then no longer out.
     pub fn answered(&mut self, id: ColumnId, request: u64) -> bool {
-        self.listings.answered(id, request)
+        let current = self.pending.get(&id) == Some(&request);
+        if current {
+            self.pending.remove(&id);
+        }
+        current
     }
 
     /// Only the columns `live` holds: a column gone stops its listing, and a late answer finds no column
     /// and is dropped.
     pub fn keep(&mut self, live: &HashSet<ColumnId>) {
-        self.listings.keep(live);
+        self.cancels.retain(|id, cancelled| {
+            let keep = live.contains(id);
+            if !keep {
+                cancelled.store(true, Ordering::Relaxed);
+            }
+            keep
+        });
+        self.listed.retain(|id| live.contains(id));
+        self.pending.retain(|id, _| live.contains(id));
     }
 
     /// Lets go of every listing still out and the search's reload waiting, as another tab comes to the
     /// front.
     pub fn let_go(&mut self) {
-        self.listings.keep(&HashSet::new());
+        self.keep(&HashSet::new());
         self.search_refresh.cancel();
     }
 
@@ -83,7 +113,7 @@ impl Loading {
     /// No search is in front: the request number to let go of the last one sent with, so a search
     /// asked before it is not run; none when there is none to let go of.
     pub fn stop_searching(&mut self) -> Option<u64> {
-        std::mem::take(&mut self.searched).then(|| self.listings.next())
+        std::mem::take(&mut self.searched).then(|| self.next())
     }
 
     /// A search answered through `connection`, `current` when it is the latest for its column: one left
@@ -97,33 +127,6 @@ impl Loading {
     /// The search engine could not be reached, or stopped answering.
     pub fn search_failed(&mut self, error: String) {
         self.engine = Engine::Failed(error);
-    }
-
-    // ---- The search's reloads ----
-
-    /// A reload is to wait its turn: how long until it may go, or none when one is already waiting.
-    pub fn refresh_wait(&mut self) -> Option<Duration> {
-        self.search_refresh.wait()
-    }
-
-    /// The reload waiting went now.
-    pub fn refresh_went(&mut self) {
-        self.search_refresh.went();
-    }
-
-    /// The reload waiting is no longer to go.
-    pub fn refresh_cancel(&mut self) {
-        self.search_refresh.cancel();
-    }
-
-    // ---- The watch on the folders ----
-
-    pub fn watching(&self) -> &Watching {
-        &self.watching
-    }
-
-    pub fn watching_mut(&mut self) -> &mut Watching {
-        &mut self.watching
     }
 }
 
@@ -150,78 +153,10 @@ impl Engine {
     }
 }
 
-/// The listings asked for, by column: each answer is told apart from those it was overtaken by.
-#[derive(Default)]
-struct Listings {
-    last_request: u64,
-    /// The columns listed at least once.
-    listed: HashSet<ColumnId>,
-    /// The latest listing still out for each column.
-    pending: HashMap<ColumnId, u64>,
-    /// What stops each folder's listing still out.
-    cancels: HashMap<ColumnId, Arc<AtomicBool>>,
-}
-
-impl Listings {
-    /// True the first time `id` is asked about: it is to be listed.
-    fn first(&mut self, id: ColumnId) -> bool {
-        self.listed.insert(id)
-    }
-
-    fn loading(&self, id: ColumnId) -> bool {
-        self.pending.contains_key(&id)
-    }
-
-    /// A listing of `id`, overtaking any still out: its number.
-    fn start(&mut self, id: ColumnId) -> u64 {
-        let request = self.next();
-        self.pending.insert(id, request);
-        request
-    }
-
-    /// A request number after every one before it.
-    fn next(&mut self) -> u64 {
-        self.last_request += 1;
-        self.last_request
-    }
-
-    /// What stops the folder listing of `id` just started; the one before it is stopped.
-    fn cancel_before(&mut self, id: ColumnId) -> Arc<AtomicBool> {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        if let Some(previous) = self.cancels.insert(id, cancelled.clone()) {
-            previous.store(true, Ordering::Relaxed);
-        }
-        cancelled
-    }
-
-    /// The answer to `request` came: true when it is the latest for `id`, which is then no longer out.
-    fn answered(&mut self, id: ColumnId, request: u64) -> bool {
-        let current = self.pending.get(&id) == Some(&request);
-        if current {
-            self.pending.remove(&id);
-        }
-        current
-    }
-
-    /// Only the columns `live` holds: a column gone stops its listing, and a late answer finds no column
-    /// and is dropped.
-    fn keep(&mut self, live: &HashSet<ColumnId>) {
-        self.cancels.retain(|id, cancelled| {
-            let keep = live.contains(id);
-            if !keep {
-                cancelled.store(true, Ordering::Relaxed);
-            }
-            keep
-        });
-        self.listed.retain(|id| live.contains(id));
-        self.pending.retain(|id, _| live.contains(id));
-    }
-}
-
 /// Reloads of the search for the changes Everything reports: one waiting at a time, and at most one every
 /// couple of seconds.
 #[derive(Default)]
-struct SearchRefresh {
+pub struct SearchRefresh {
     /// A reload is waiting to go.
     waiting: bool,
     /// When the last one went.
@@ -232,7 +167,7 @@ impl SearchRefresh {
     const EVERY: Duration = Duration::from_secs(2);
 
     /// A reload is to wait its turn: how long until it may go, or none when one is already waiting.
-    fn wait(&mut self) -> Option<Duration> {
+    pub fn wait(&mut self) -> Option<Duration> {
         if self.waiting {
             return None;
         }
@@ -241,13 +176,13 @@ impl SearchRefresh {
     }
 
     /// The reload waiting went now.
-    fn went(&mut self) {
+    pub fn went(&mut self) {
         self.waiting = false;
         self.last = Some(Instant::now());
     }
 
     /// The reload waiting is no longer to go.
-    fn cancel(&mut self) {
+    pub fn cancel(&mut self) {
         self.waiting = false;
     }
 }

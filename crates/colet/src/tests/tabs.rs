@@ -232,7 +232,7 @@ fn opens_a_favorite_narrowed_in_a_tab_with_the_caret_after_its_narrowing(cx: &mu
     settle(cx);
     // Named for the favorite it opened while still behind, not for home.
     let (glyph, name) = ui.read(cx, |v| {
-        let title = crate::tabs::title(v.tabs.get(1).unwrap().parked().unwrap().state(), v.stored.settings());
+        let title = crate::tabs::title(&v.tabs.get(1).unwrap().parked().unwrap().front.state, v.stored.settings());
         (title.glyph, title.name)
     });
     assert_eq!((glyph, name.as_str()), ("star-fill", "work"));

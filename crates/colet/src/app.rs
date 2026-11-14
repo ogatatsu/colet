@@ -40,7 +40,7 @@ use crate::{
     overlays::Overlays,
     places::{Dialog, HomeDragging, home_entries, home_groups},
     scrolls::Scrolls,
-    settings::{self, File, Loaded, Saver, Saves, Settings, everything_query, narrowed_query},
+    settings::{self, File, Loaded, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
     stops::{Stop, Stops},
@@ -208,16 +208,6 @@ impl Widths {
         Self { sidebar, search, column, field, resizing: None }
     }
 
-    /// The width `of` names.
-    pub fn width(&self, of: WidthOf) -> f32 {
-        match of {
-            WidthOf::Sidebar => self.sidebar,
-            WidthOf::Search => self.search,
-            WidthOf::Column => self.column,
-            WidthOf::Field => self.field,
-        }
-    }
-
     /// A drag on the edge of what `of` names starts at `x`, from `start_width`: the width it shows,
     /// which a narrow window may have narrowed.
     pub fn start_resize(&mut self, of: WidthOf, x: Pixels, start_width: f32) {
@@ -248,9 +238,9 @@ impl Widths {
         true
     }
 
-    /// The drag under way is over: which width it changed.
-    pub fn end_resize(&mut self) -> Option<WidthOf> {
-        self.resizing.take().map(|resize| resize.of)
+    /// The drag under way is over; false with none under way.
+    pub fn end_resize(&mut self) -> bool {
+        self.resizing.take().is_some()
     }
 }
 
@@ -305,7 +295,7 @@ fn kept<T: Default + Clone + Send + 'static>(
     write: impl Fn(&T) -> Result<(), String> + Send + Sync + 'static,
 ) -> (T, Saves<T>, Option<String>) {
     let still_there = read.problem.as_ref().is_some_and(|problem| problem.kept);
-    (read.value, Saves::new((!still_there).then(|| Saver::new(file, write))), read.problem.map(|problem| problem.message))
+    (read.value, Saves::new(file, (!still_there).then_some(write)), read.problem.map(|problem| problem.message))
 }
 
 /// What a listing came back with.
@@ -929,7 +919,7 @@ impl Colet {
             .filter(|c| c.kind == Kind::Folder && c.error.is_none() && !colet_core::paths::is_server(&c.path))
             .map(|c| c.path.clone())
             .collect();
-        self.loading.watching_mut().set(paths).unwrap_or_else(|error| {
+        self.loading.watching.set(paths).unwrap_or_else(|error| {
             self.notify(error, Tone::Error, cx);
             None
         })
@@ -953,7 +943,7 @@ impl Colet {
 
     /// Says which folders the watcher could list but not watch, each once.
     fn take_missed(&mut self, cx: &mut Context<Self>) {
-        let fresh = self.loading.watching_mut().take_missed();
+        let fresh = self.loading.watching.take_missed();
         if !fresh.is_empty() {
             let names: String = fresh.iter().map(|p| format!("「{}」", shown(colet_core::paths::folder_name(p)))).collect();
             self.notify(format!("{names}の変更を監視できません。F5で更新できます。"), Tone::Error, cx);
@@ -963,7 +953,7 @@ impl Colet {
     /// Takes in what changed, every 200ms: folder changes reload the columns showing them, and what the
     /// watch on Everything heard of the results.
     fn poll(&mut self, cx: &mut Context<Self>) {
-        let changed = self.loading.watching().changed.clone();
+        let changed = self.loading.watching.changed.clone();
         let backend = self.backend.clone();
         cx.spawn(async move |this, cx| {
             loop {
@@ -1026,7 +1016,7 @@ impl Colet {
     /// A busy disk reports changes each second: the first reloads at once, then at most one every couple
     /// of seconds. One met by a reload in flight waits for it, as it may have read the results before.
     fn search_changed(&mut self, cx: &mut Context<Self>) {
-        let Some(wait) = self.loading.refresh_wait() else {
+        let Some(wait) = self.loading.search_refresh.wait() else {
             return;
         };
         cx.spawn(async move |this, cx| {
@@ -1035,13 +1025,13 @@ impl Colet {
                 let busy = this
                     .update(cx, |this, cx| {
                         let Some(search) = this.state.columns.iter().find(|c| c.kind == Kind::Search).map(|c| c.id) else {
-                            this.loading.refresh_cancel();
+                            this.loading.search_refresh.cancel();
                             return false;
                         };
                         if this.loading.is_loading(search) {
                             return true;
                         }
-                        this.loading.refresh_went();
+                        this.loading.search_refresh.went();
                         this.load(search, 0, true, cx);
                         false
                     })

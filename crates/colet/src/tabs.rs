@@ -235,7 +235,7 @@ impl Colet {
             .tabs
             .iter()
             .map(|tab| match tab.parked() {
-                Some(parked) => KeptTab { place: parked.state().kept(), filter: parked.filter().map(Into::into) },
+                Some(Parked { front, .. }) => KeptTab { place: front.state.kept(), filter: front.filter.clone() },
                 None => KeptTab { place: self.state.kept(), filter: self.chosen_filter.clone() },
             })
             .collect();
@@ -256,7 +256,7 @@ impl Colet {
         if self.tabs.is_front(id) {
             return Some(&mut self.state);
         }
-        self.tabs.parked_mut(id).map(Parked::state_mut)
+        self.tabs.parked_mut(id).map(|parked| &mut parked.front.state)
     }
 
     /// Where the keys are in the tab in front.
@@ -294,11 +294,10 @@ impl Colet {
         if index == self.tabs.current() || self.tabs_held() {
             return;
         }
-        let Some(incoming) = self.tabs.take_parked(index) else { return };
+        let Some(Parked { front: incoming, keys }) = self.tabs.take_parked(index) else { return };
         let left = self.keys(window, cx);
-        let (incoming, keys) = incoming.into_front();
         let outgoing = self.swap_in(incoming);
-        self.tabs.bring_to_front(index, Parked::from_front(outgoing, left));
+        self.tabs.bring_to_front(index, Parked { front: outgoing, keys: left });
         let query = self.state.query.clone();
         self.search.update(cx, |input, cx| input.set_value(query, window, cx));
         self.relist(cx);
@@ -452,7 +451,7 @@ impl Colet {
     pub fn duplicate_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.tabs.get(index) else { return };
         let (state, filter) = match tab.parked() {
-            Some(parked) => (parked.state().clone(), parked.filter().map(Into::into)),
+            Some(Parked { front, .. }) => (front.state.clone(), front.filter.clone()),
             None => (self.state.clone(), self.chosen_filter.clone()),
         };
         let at = self.tabs.insert(index + 1, Parked::new(state, filter, Keys::Column));
@@ -641,7 +640,7 @@ impl Colet {
         let id = tab.id();
         let current = index == self.tabs.current();
         let group = SharedString::from(format!("tab-{id}"));
-        let Title { glyph, name, tip } = title(tab.parked().map_or(&self.state, Parked::state), self.stored.settings());
+        let Title { glyph, name, tip } = title(tab.parked().map_or(&self.state, |parked| &parked.front.state), self.stored.settings());
         let dragged = DraggedTab { id, name: name.clone(), glyph, width, palette: p };
         let dragging = self.tabs.carried().is_some();
         let carried = self.tabs.carried() == Some(id);

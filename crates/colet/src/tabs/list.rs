@@ -18,13 +18,9 @@ const CLOSED: usize = 10;
 
 /// A tab out of sight, kept as it was.
 pub struct Parked {
-    state: State,
-    /// The filter its next search is narrowed by.
-    filter: Option<String>,
-    narrow_fields: HashMap<ColumnId, NarrowField>,
-    scrolls: Scrolls,
+    pub front: Front,
     /// Where the keys were as it went, and go again as it comes back.
-    keys: Keys,
+    pub keys: Keys,
 }
 
 /// Where a tab's keys are.
@@ -46,6 +42,7 @@ pub enum Keys {
 /// comes to the front.
 pub struct Front {
     pub state: State,
+    /// The filter its next search is narrowed by.
     pub filter: Option<String>,
     pub narrow_fields: HashMap<ColumnId, NarrowField>,
     pub scrolls: Scrolls,
@@ -54,38 +51,15 @@ pub struct Front {
 impl Parked {
     /// A tab never in front yet: its fields and scrolls are made as it first comes there.
     pub fn new(state: State, filter: Option<String>, keys: Keys) -> Self {
-        Self { state, filter, narrow_fields: HashMap::new(), scrolls: Scrolls::default(), keys }
-    }
-
-    /// The tab in front, parked with the keys where they were in it.
-    pub fn from_front(front: Front, keys: Keys) -> Self {
-        let Front { state, filter, narrow_fields, scrolls } = front;
-        Self { state, filter, narrow_fields, scrolls, keys }
-    }
-
-    /// What it brings to the front, and where its keys go there.
-    pub fn into_front(self) -> (Front, Keys) {
-        let Self { state, filter, narrow_fields, scrolls, keys } = self;
-        (Front { state, filter, narrow_fields, scrolls }, keys)
-    }
-
-    pub fn state(&self) -> &State {
-        &self.state
-    }
-
-    pub fn state_mut(&mut self) -> &mut State {
-        &mut self.state
-    }
-
-    pub fn filter(&self) -> Option<&str> {
-        self.filter.as_deref()
+        Self { front: Front { state, filter, narrow_fields: HashMap::new(), scrolls: Scrolls::default() }, keys }
     }
 
     /// The search filter `from` is named `to` now, or is gone.
     fn rename_filter(&mut self, from: &str, to: Option<&str>) {
-        self.state.rename_search_filter(from, to);
-        if self.filter.as_deref() == Some(from) {
-            self.filter = to.map(Into::into);
+        let front = &mut self.front;
+        front.state.rename_search_filter(from, to);
+        if front.filter.as_deref() == Some(from) {
+            front.filter = to.map(Into::into);
         }
     }
 }
@@ -400,7 +374,7 @@ mod tests {
         let (was, next) = (tabs.current_id(), tabs.get(2).unwrap().id());
         assert!(tabs.take_parked(1).is_none(), "the tab in front is not parked");
         let incoming = tabs.take_parked(2).expect("parked");
-        tabs.bring_to_front(2, Parked::from_front(incoming.into_front().0, Keys::Search));
+        tabs.bring_to_front(2, Parked { keys: Keys::Search, ..incoming });
         assert_eq!(tabs.current_id(), next);
         assert!(tabs.is_front(next) && !tabs.is_front(was));
         assert_eq!(tabs.get(1).unwrap().parked().map(|p| p.keys.clone()), Some(Keys::Search));

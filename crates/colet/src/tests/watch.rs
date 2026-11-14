@@ -14,7 +14,7 @@ fn reloads_only_the_folders_a_change_names(cx: &mut TestAppContext) {
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
     fake.lists.lock().unwrap().clear();
     fake.folders.lock().unwrap().get_mut(r"D:\a").unwrap().push(file(r"D:\a\new.txt"));
-    let changed = ui.read(cx, |v| v.loading.watching().changed.clone());
+    let changed = ui.read(cx, |v| v.loading.watching.changed.clone());
     *changed.lock().unwrap() = Changes::Paths(HashSet::from([PathBuf::from(r"D:\a")]));
     settle(cx);
     assert_eq!(*fake.lists.lock().unwrap(), [r"D:\a"]);
@@ -53,7 +53,7 @@ fn lets_go_of_the_folders_at_or_inside_what_an_operation_moves() {
 fn watches_again_once_an_operation_ends(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "delete");
-    assert!(ui.read_app(cx, |v, app| !v.operations.read(app).is_running() && v.loading.watching().released.is_empty()));
+    assert!(ui.read_app(cx, |v, app| !v.operations.read(app).is_running() && v.loading.watching.released.is_empty()));
 }
 
 #[gpui_kit::test]

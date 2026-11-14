@@ -16,7 +16,7 @@ use gpui_kit::component::WindowExt;
 use gpui_kit::*;
 
 use crate::{
-    app::{Colet, Tone, WidthOf},
+    app::{Colet, Tone, Widths},
     search_filters::FilterEdit,
     settings::{Favorite, Placement, Queued, SavedSearch, Settings, Theme},
     sorts::Sorts,
@@ -321,14 +321,16 @@ impl Colet {
 
     /// A drag on an edge is over: keep the width it left.
     pub fn end_resize(&mut self, cx: &mut Context<Self>) {
-        let Some(of) = self.widths.end_resize() else { return };
-        let width = self.widths.width(of);
+        if !self.widths.end_resize() {
+            return;
+        }
+        let Widths { sidebar, search, column, field, .. } = self.widths;
         self.update_settings(
-            |s| match of {
-                WidthOf::Sidebar => s.sidebar_width = width,
-                WidthOf::Search => s.search_width = width,
-                WidthOf::Column => s.column_width = width,
-                WidthOf::Field => s.search_field_width = width,
+            |s| {
+                s.sidebar_width = sidebar;
+                s.search_width = search;
+                s.column_width = column;
+                s.search_field_width = field;
             },
             cx,
         );

@@ -91,7 +91,7 @@ impl Colet {
                     && narrow == self.state.search_narrowing().as_deref()
                     && order == self.state.search_order);
         // On the clipboard, cut or copied, whoever put it there.
-        let clipboard = self.operations.read(cx).clipboard();
+        let clipboard = &self.operations.read(cx).clipboard;
         let held = clipboard.holds(&entry.path);
         let cut = held && clipboard.files.cut;
         // The menu acts on a row outside the selection, or the folder itself: the selection steps back, so
