@@ -8,8 +8,9 @@ version = "0.1.0"
 publish = false
 
 [workspace.dependencies]
-gpui-kit = "=0.9.0"
-# Kept on the version gpui's Windows backend uses, so one copy is built.
+gpui-kit = "=0.9.1"
+# Kept on the version gpui's Windows backend uses, so Colet shares its copy
+# (gpui-base and gpui-component still pull in an older windows of their own).
 windows = "0.62"
 windows-core = "0.62"
 
