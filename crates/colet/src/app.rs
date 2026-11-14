@@ -1180,6 +1180,7 @@ impl Colet {
             let result = task.await;
             this.update(cx, |this, cx| match result {
                 Ok(Err(quick_look::Error::NotRunning)) => this.notify("QuickLook が起動していません", Tone::Info, cx),
+                Ok(Err(quick_look::Error::Unnamable)) => this.notify("この名前は QuickLook に渡せないため表示できません", Tone::Info, cx),
                 Ok(Err(quick_look::Error::Failed(error))) => {
                     this.notify(format!("QuickLook で表示できません: {}", message(error.code())), Tone::Error, cx)
                 }

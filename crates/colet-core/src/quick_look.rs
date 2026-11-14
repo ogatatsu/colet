@@ -39,6 +39,9 @@ pub enum Error {
     /// No QuickLook listens: it is not running, or not installed.
     NotRunning,
     Failed(windows::core::Error),
+    /// The path is not text, as a name holding half a surrogate pair is not: the line QuickLook reads
+    /// could only name another file.
+    Unnamable,
 }
 
 impl From<windows::core::Error> for Error {
@@ -110,6 +113,8 @@ fn pipe_name() -> windows::core::Result<String> {
 }
 
 fn send(pipe: &str, message: Message, path: &Path) -> Result<(), Error> {
+    // Before connecting: QuickLook takes a connection with nothing on it for a line.
+    let line = line(message, path).ok_or(Error::Unnamable)?;
     let name = Wide::new(pipe);
     let connect =
         || unsafe { CreateFileW(name.get(), GENERIC_WRITE.0, FILE_SHARE_NONE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None) };
@@ -124,16 +129,33 @@ fn send(pipe: &str, message: Message, path: &Path) -> Result<(), Error> {
         }
         result => result?,
     };
-    let line = format!("{}|{}|\n", message.name(), path.to_string_lossy());
     let mut written = 0;
     let result = unsafe { WriteFile(handle, Some(line.as_bytes()), Some(&mut written), None) };
     unsafe { CloseHandle(handle).ok() };
     Ok(result?)
 }
 
+/// The line that tells QuickLook `message` for `path`; none for a path that is not text, which the line
+/// cannot name as it is.
+fn line(message: Message, path: &Path) -> Option<String> {
+    Some(format!("{}|{}|\n", message.name(), path.to_str()?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_a_path_as_it_is_or_not_at_all() {
+        use std::os::windows::ffi::OsStringExt;
+        assert_eq!(
+            line(Message::Toggle, Path::new(r"D:\写真\a.png")).as_deref(),
+            Some("QuickLook.App.PipeMessages.Toggle|D:\\写真\\a.png|\n")
+        );
+        // Half a surrogate pair would come out as U+FFFD, the name of another file.
+        let wide: Vec<u16> = r"D:\a".encode_utf16().chain([0xD800]).collect();
+        assert_eq!(line(Message::Switch, Path::new(&std::ffi::OsString::from_wide(&wide))), None);
+    }
 
     #[test]
     fn names_the_pipe_after_the_users_sid() {

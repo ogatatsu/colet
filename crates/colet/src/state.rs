@@ -687,13 +687,19 @@ impl State {
     }
 
     fn snapshot(&self) -> Location {
+        self.place(|_, selected| selected.to_vec())
+    }
+
+    /// Where the tab is, with each column's pick, by its index, as `pick` makes it of what it picked:
+    /// only that is copied, not every column's whole selection.
+    fn place<P>(&self, mut pick: impl FnMut(usize, &[PathBuf]) -> P) -> Place<P> {
         let folders: Vec<&Column> = self.columns.iter().filter(|c| c.kind == Kind::Folder).collect();
-        Location {
+        Place {
             query: self.query.clone(),
             search_filter: self.search_filter.clone(),
             search_order: self.search_order,
             folders: folders.iter().map(|c| (c.path.clone(), c.highlight.clone())).collect(),
-            picks: self.columns.iter().map(|c| c.selected.clone()).collect(),
+            picks: self.columns.iter().enumerate().map(|(i, c)| pick(i, &c.selected)).collect(),
             active: self.active,
             fold: self.fold.and_then(|fold| {
                 let anchor = folders.iter().position(|c| c.id == fold.anchor)?;
@@ -740,7 +746,7 @@ impl State {
     /// What a tab keeps between starts: each column's pick only where it leads on to the next.
     pub fn kept(&self) -> Kept {
         let last = self.columns.len() - 1;
-        self.snapshot().map_picks(|i, selected| match selected.as_slice() {
+        self.place(|i, selected| match selected {
             [one] if i < last => Some(one.clone()),
             _ => None,
         })
