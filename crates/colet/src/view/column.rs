@@ -255,7 +255,7 @@ impl Colet {
             .justify_center()
             .cursor_col_resize()
             // A line on the border, not a band over the rows.
-            .child(div().w(scaled(2.)).h_full().group_hover(id, |d| d.bg(p.accent)))
+            .child(div().w_0p5().h_full().group_hover(id, |d| d.bg(p.accent)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -356,7 +356,7 @@ impl Colet {
                     div()
                         .flex_none()
                         .px_2()
-                        .py(scaled(6.))
+                        .py_1p5()
                         .border_b_1()
                         .border_color(p.border)
                         .child(self.column_narrow_field(id, narrowed, &input, window, cx)),
@@ -473,10 +473,10 @@ impl Colet {
                 .role(Role::Button)
                 .aria_label(label)
                 .h_full()
-                .px(scaled(4.))
+                .px_1()
                 .flex()
                 .items_center()
-                .gap(scaled(2.))
+                .gap_0p5()
                 .rounded(scaled(metrics::RADIUS))
                 .hover(|d| d.bg(p.hover))
                 .text_color(if chosen { p.text } else { p.text_muted })
@@ -489,8 +489,8 @@ impl Colet {
         // Each heading reaches 4px past its cells, over the gap, so its text stands where theirs does.
         div()
             .flex_none()
-            .h(scaled(24.))
-            .px(scaled(10.))
+            .h_6()
+            .px_2p5()
             .flex()
             .items_center()
             .border_b_1()
@@ -530,9 +530,9 @@ impl Colet {
             .flex_none()
             .h_full()
             // Where the rows' checkboxes stand, then the gap to their names less the heading's own 4px.
-            .ml(scaled(4.))
-            .mr(scaled(4.))
-            .w(scaled(16.))
+            .ml_1()
+            .mr_1()
+            .w_4()
             .flex()
             .items_center()
             .justify_center()
@@ -583,8 +583,8 @@ impl Colet {
                 .id(("filter", id))
                 .w_full()
                 .h(scaled(metrics::SMALL_CONTROL_HEIGHT))
-                .pl(scaled(8.))
-                .pr(scaled(2.))
+                .pl_2()
+                .pr_0p5()
                 .flex()
                 .items_center()
                 .gap_2()

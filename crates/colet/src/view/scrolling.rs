@@ -211,8 +211,8 @@ impl Colet {
                 p,
                 self.scale(),
             )))
-            .when(screen.hidden_left(), |d| d.child(div().absolute().top_0().bottom_0().left_0().w(scaled(28.)).bg(shade(90.))))
-            .when(screen.hidden_right(), |d| d.child(div().absolute().top_0().bottom_0().right_0().w(scaled(28.)).bg(shade(270.))))
+            .when(screen.hidden_left(), |d| d.child(div().absolute().top_0().bottom_0().left_0().w_7().bg(shade(90.))))
+            .when(screen.hidden_right(), |d| d.child(div().absolute().top_0().bottom_0().right_0().w_7().bg(shade(270.))))
             .child(self.scrolling_frame(window, cx))
             .into_any_element()
     }

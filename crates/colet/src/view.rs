@@ -283,15 +283,15 @@ impl Colet {
             .child("名前やEverythingの検索式で探せます")
             // Ringed as a field is; the rings' room makes up most of the gaps. In a narrow window they go on
             // to a second line rather than past the edges.
-            .child(div().flex().flex_wrap().justify_center().gap(scaled(2.)).children(
+            .child(div().flex().flex_wrap().justify_center().gap_0p5().children(
                 [("ext:pdf", "PDFファイル"), ("dm:today", "今日更新した項目"), ("size:>1gb", "1 GBを超えるファイル")].map(
                     |(query, label)| {
                         let button = Button::new(query)
                             .outline()
                             .accessibility_label(format!("{query} {label}"))
                             .h(scaled(metrics::SMALL_CONTROL_HEIGHT))
-                            .px(scaled(10.))
-                            .gap(scaled(6.))
+                            .px_2p5()
+                            .gap_1p5()
                             .child(div().text_color(p.accent).font_family(metrics::FONT_CODE).child(query))
                             .child(label)
                             .on_click(cx.listener(move |this, _, window, cx| {

@@ -76,7 +76,7 @@ impl Colet {
                         .id("home-filter")
                         .flex_none()
                         .px_2()
-                        .py(scaled(6.))
+                        .py_1p5()
                         .border_b_1()
                         .border_color(p.border)
                         .child(self.column_narrow_field(id, narrowed, &input, window, cx))

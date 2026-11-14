@@ -64,16 +64,11 @@ impl Colet {
                     .max_w(scaled(200.))
                     .flex()
                     .items_center()
-                    .gap(scaled(6.))
+                    .gap_1p5()
                     .text_color(color)
                     .tip(title)
                     .child(
-                        div()
-                            .size(scaled(6.))
-                            .rounded_full()
-                            .border_1()
-                            .border_color(dot.unwrap_or(p.text_faint))
-                            .when_some(dot, |d, c| d.bg(c)),
+                        div().size_1p5().rounded_full().border_1().border_color(dot.unwrap_or(p.text_faint)).when_some(dot, |d, c| d.bg(c)),
                     )
                     .child(div().truncate().child(name)),
             )

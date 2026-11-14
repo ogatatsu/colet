@@ -115,7 +115,7 @@ fn field(
     crate::view::frame(p, focused, metrics::FIELD_RADIUS).child(
         div()
             .h(scaled(metrics::CONTROL_HEIGHT))
-            .px(scaled(10.))
+            .px_2p5()
             .flex()
             .items_center()
             .bg(p.surface)
@@ -226,7 +226,7 @@ impl Colet {
             .id(id)
             .flex()
             .flex_wrap()
-            .gap(scaled(2.))
+            .gap_0p5()
             .role(Role::RadioGroup)
             .aria_label(label)
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
@@ -900,7 +900,7 @@ impl Colet {
             .flex()
             .flex_none()
             .items_center()
-            .gap(scaled(2.))
+            .gap_0p5()
             // Those done on the spot leave the keys where they were; the ones asking in a dialog take them.
             .child(self.ringed(
                 action("copy", "copy", "コピー", "Ctrl+C", reasons.copy).on_click(cx.listener(|this, _, _, cx| this.copy(false, cx))),
@@ -936,7 +936,7 @@ impl Colet {
                     cx,
                 ),
             )
-            .child(div().mx(scaled(6.)).w(px(1.)).h(scaled(16.)).bg(p.border))
+            .child(div().mx_1p5().w(px(1.)).h_4().bg(p.border))
             .child(
                 self.ringed(
                     action("rename", "pencil-line", "名前を変更", "F2", reasons.rename)
@@ -968,7 +968,7 @@ impl Colet {
                     cx,
                 ),
             )
-            .child(div().mx(scaled(6.)).w(px(1.)).h(scaled(16.)).bg(p.border))
+            .child(div().mx_1p5().w(px(1.)).h_4().bg(p.border))
             .child(
                 self.ringed(
                     action("properties", "info", "プロパティ", "Alt+Enter", reasons.properties)
@@ -999,8 +999,8 @@ impl Colet {
             .when(unseen > 0, |d| {
                 d.child(
                     div()
-                        .min_w(scaled(14.))
-                        .h(scaled(14.))
+                        .min_w_3p5()
+                        .h_3p5()
                         .px(scaled(3.))
                         .rounded(scaled(7.))
                         // White on the deep red: past 4.5:1 in either theme.
@@ -1075,7 +1075,7 @@ impl Colet {
                         .child(
                             svg()
                                 .path(if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" })
-                                .size(scaled(12.))
+                                .size_3()
                                 .text_color(p.text_faint),
                         )
                         .child(div().text_color(p.text_faint).child(clock(entry.started)))
@@ -1102,7 +1102,7 @@ impl Colet {
                             };
                             div()
                                 .px_3()
-                                .pl(scaled(32.))
+                                .pl_8()
                                 .py(scaled(3.))
                                 .flex()
                                 .flex_col()
@@ -1147,7 +1147,7 @@ impl Colet {
                         .when(entry.more > 0, |d| {
                             d.child(
                                 div()
-                                    .pl(scaled(32.))
+                                    .pl_8()
                                     .py_1()
                                     .text_size(scaled(metrics::TEXT_BODY))
                                     .text_color(p.text_faint)
@@ -1165,7 +1165,7 @@ impl Colet {
                     .id("history")
                     .absolute()
                     .right_3()
-                    .bottom(scaled(32.))
+                    .bottom_8()
                     .w(scaled(440.))
                     .max_h(scaled(520.))
                     .flex()
@@ -1180,7 +1180,7 @@ impl Colet {
                     .child(
                         div()
                             .px_3()
-                            .h(scaled(40.))
+                            .h_10()
                             .flex()
                             .items_center()
                             .border_b_1()
