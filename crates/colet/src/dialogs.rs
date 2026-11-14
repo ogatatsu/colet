@@ -1110,12 +1110,7 @@ impl Colet {
                             .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child("操作履歴"))
                             .child(
                                 crate::view::keep_focus(push("clear-history", "履歴を消去", false, clearable).ghost().small()).on_click(
-                                    cx.listener(|this, _, _, cx| {
-                                        this.operations.update(cx, |operations, cx| {
-                                            operations.history.clear();
-                                            cx.notify();
-                                        })
-                                    }),
+                                    cx.listener(|this, _, _, cx| this.operations.update(cx, |operations, cx| operations.clear_history(cx))),
                                 ),
                             ),
                     )

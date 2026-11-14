@@ -355,6 +355,18 @@ fn leaves_no_trace_of_a_deletion_turned_down_at_the_shells_question(cx: &mut Tes
 }
 
 #[gpui_kit::test]
+fn clears_the_operations_over_from_the_history(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "ctrl-c");
+    ui.press(cx, "ctrl-v");
+    assert_eq!(ui.ops(cx, |o| o.history.entries.len()), 1);
+    ui.click(cx, "history-button");
+    ui.click(cx, "clear-history");
+    assert!(ui.ops(cx, |o| o.history.entries.is_empty()));
+    assert!(ui.read(cx, |v| v.history_panel.open));
+}
+
+#[gpui_kit::test]
 fn never_sends_a_drive_at_home_to_the_bin(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake { roots: vec![Entry::folder(r"D:\", "D:")], ..Fake::default().with_folders(&[(r"D:\", vec![])]) });
     let ui = open(cx, fake.clone());

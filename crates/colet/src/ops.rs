@@ -283,6 +283,20 @@ impl Operations {
         changed
     }
 
+    /// Lets go of the operations in the history that are over; the one under way stays.
+    pub fn clear_history(&mut self, cx: &mut Context<Self>) {
+        self.history.clear();
+        cx.notify();
+    }
+
+    /// The history has been seen: no problems are left unseen.
+    pub fn mark_history_seen(&mut self, cx: &mut Context<Self>) {
+        if self.history.unseen != 0 {
+            self.history.unseen = 0;
+            cx.notify();
+        }
+    }
+
     /// What the latest operation sent away, by path key.
     pub fn departed(&self) -> &HashSet<OsString> {
         &self.departed
@@ -1269,10 +1283,7 @@ impl Colet {
         }
         self.history_panel.set_open(open, entry);
         if open {
-            self.operations.update(cx, |operations, cx| {
-                operations.history.unseen = 0;
-                cx.notify();
-            });
+            self.operations.update(cx, |operations, cx| operations.mark_history_seen(cx));
         }
         if !open && was_open {
             self.restore_keys(window, cx);
