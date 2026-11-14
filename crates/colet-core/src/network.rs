@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Mutex, PoisonError,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -102,15 +102,23 @@ fn connection(path: &Path) -> Option<PathBuf> {
 /// Does `attempt`, and when a server refuses the user as they are signed in, asks Windows to sign in to
 /// the server that holds `path`, which shows its own dialog for a name and password, then does it again.
 /// A listing that waited on another's sign-in tries again without asking a second time. Given up, the
-/// sign-in leaves the first error standing.
-pub fn signing_in<T>(path: &Path, owner: Owner, attempt: impl Fn() -> io::Result<T>) -> io::Result<T> {
+/// sign-in leaves the first error standing, as does `cancelled` set before the dialog shows: no one waits
+/// for that listing any more, so no one is asked.
+pub fn signing_in<T>(path: &Path, owner: Owner, cancelled: &AtomicBool, attempt: impl Fn() -> io::Result<T>) -> io::Result<T> {
     let seen = ASKED.load(Ordering::SeqCst);
     let error = match attempt() {
         Err(error) if refused(&error) => error,
         done => return done,
     };
     let Some(remote) = connection(path) else { return Err(error) };
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(error);
+    }
     let _asking = ASKING.lock().unwrap_or_else(PoisonError::into_inner);
+    // Waited behind another's dialog, it may have been let go of meanwhile.
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(error);
+    }
     if ASKED.load(Ordering::SeqCst) != seen {
         return attempt();
     }
@@ -140,13 +148,26 @@ mod tests {
 
     #[test]
     fn asks_no_one_where_the_attempt_is_let_in_or_fails_otherwise() {
-        let found = signing_in(Path::new(r"\\server\share"), 0, || Ok(1));
+        let waited = AtomicBool::new(false);
+        let found = signing_in(Path::new(r"\\server\share"), 0, &waited, || Ok(1));
         assert_eq!(found.unwrap(), 1);
-        let gone = signing_in(Path::new(r"\\server\share"), 0, || Err::<(), _>(io::Error::from_raw_os_error(53)));
+        let gone = signing_in(Path::new(r"\\server\share"), 0, &waited, || Err::<(), _>(io::Error::from_raw_os_error(53)));
         assert_eq!(gone.unwrap_err().raw_os_error(), Some(53));
         // A folder on a drive is never signed in to.
-        let denied = signing_in(Path::new(r"D:\a"), 0, || Err::<(), _>(io::Error::from_raw_os_error(5)));
+        let denied = signing_in(Path::new(r"D:\a"), 0, &waited, || Err::<(), _>(io::Error::from_raw_os_error(5)));
         assert_eq!(denied.unwrap_err().raw_os_error(), Some(5));
+    }
+
+    #[test]
+    fn asks_no_one_for_a_listing_let_go_of() {
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let refused = signing_in(Path::new(r"\\server\share"), 0, &AtomicBool::new(true), || {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            Err::<(), _>(io::Error::from_raw_os_error(5))
+        });
+        assert_eq!(refused.unwrap_err().raw_os_error(), Some(5));
+        // Not tried again, as it would be after a sign-in or another's.
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 
     #[test]

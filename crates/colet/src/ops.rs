@@ -91,6 +91,9 @@ pub struct HistoryEntry {
     pub items: Vec<HistoryItem>,
     /// Items past the most it keeps, counted only.
     pub more: usize,
+    /// How many of those failed and how many were skipped: what it says of its problems counts them too.
+    more_failed: usize,
+    more_skipped: usize,
 }
 
 impl HistoryEntry {
@@ -126,11 +129,23 @@ impl HistoryEntry {
             self.items.push(HistoryItem { path, from: None, status, error, gone });
         } else {
             self.more += 1;
+            match status {
+                ItemStatus::Failed => self.more_failed += 1,
+                ItemStatus::Skipped => self.more_skipped += 1,
+                _ => {}
+            }
         }
     }
 
+    /// How many of its items ended as `status`; of those past the most it keeps, only the failed and the
+    /// skipped are told apart.
     pub fn count(&self, status: ItemStatus) -> usize {
-        self.items.iter().filter(|i| i.status == status).count()
+        let more = match status {
+            ItemStatus::Failed => self.more_failed,
+            ItemStatus::Skipped => self.more_skipped,
+            _ => 0,
+        };
+        self.items.iter().filter(|i| i.status == status).count() + more
     }
 
     /// What it acted on, in a few words.
@@ -174,7 +189,7 @@ impl HistoryEntry {
     }
 
     pub fn has_problems(&self) -> bool {
-        self.status == Status::Error || self.items.iter().any(|i| matches!(i.status, ItemStatus::Failed | ItemStatus::Skipped))
+        self.status == Status::Error || self.count(ItemStatus::Failed) + self.count(ItemStatus::Skipped) > 0
     }
 }
 
@@ -211,8 +226,16 @@ pub enum OperationsEvent {
     PasteReady(Paste),
     /// What Send To offers changed: a file menu open shows it afresh.
     SendTargetsChanged,
-    /// A send to Send To ended: what it moved has left its folder.
-    Sent,
+    /// A send to Send To ended: what it moved has left its folder, and what it let go of, by the number
+    /// [`Colet::carry`] gave, may be watched again.
+    Sent(Option<u64>),
+}
+
+/// The watches let go of for a send or a drag, by the number to put them down with, and what hears once
+/// they are.
+pub struct Carried {
+    pub id: u64,
+    pub released: Option<std::sync::mpsc::Receiver<()>>,
 }
 
 impl EventEmitter<OperationsEvent> for Operations {}
@@ -441,10 +464,16 @@ impl Operations {
 
     /// Sends `paths` to `target`, one of Windows' Send To, as Explorer does: copied, or with `shift` moved
     /// where it allows it.
-    pub fn send_to(&mut self, target: PathBuf, paths: Vec<PathBuf>, shift: bool, cx: &mut Context<Self>) {
+    pub fn send_to(&mut self, target: PathBuf, paths: Vec<PathBuf>, shift: bool, carried: Option<Carried>, cx: &mut Context<Self>) {
         let name = self.send_targets.iter().find(|t| t.path == target).map_or_else(|| shown(folder_name(&target)), |t| t.name.clone());
         let (backend, owner) = (self.backend.clone(), self.owner);
-        let task = cx.background_executor().spawn(async move { backend.send_to(&target, &paths, shift, owner) });
+        let (carry, released) = carried.map_or((None, None), |c| (Some(c.id), c.released));
+        let task = cx.background_executor().spawn(async move {
+            if let Some(released) = released {
+                let _ = released.recv();
+            }
+            backend.send_to(&target, &paths, shift, owner)
+        });
         self.sending += 1;
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -455,7 +484,7 @@ impl Operations {
                     Ok(_) => {}
                     Err(error) => cx.emit(OperationsEvent::Notice(format!("「{name}」に送れません: {error}"), Tone::Error)),
                 }
-                cx.emit(OperationsEvent::Sent);
+                cx.emit(OperationsEvent::Sent(carry));
             })
             .ok();
         })
@@ -478,7 +507,17 @@ impl History {
     pub fn start(&mut self, request: Request) -> u64 {
         self.last_id += 1;
         let id = self.last_id;
-        let entry = HistoryEntry { id, request, started: now(), status: Status::Running, error: None, items: Vec::new(), more: 0 };
+        let entry = HistoryEntry {
+            id,
+            request,
+            started: now(),
+            status: Status::Running,
+            error: None,
+            items: Vec::new(),
+            more: 0,
+            more_failed: 0,
+            more_skipped: 0,
+        };
         self.entries.insert(0, entry);
         self.entries.truncate(MAX_ENTRIES);
         id
@@ -1025,7 +1064,8 @@ impl Colet {
                 }
             }
             // What it moved has left its folder.
-            OperationsEvent::Sent => self.refresh(cx),
+            OperationsEvent::Sent(Some(carried)) => self.put_down(*carried, cx),
+            OperationsEvent::Sent(None) => self.refresh(cx),
         }
     }
 
@@ -1042,7 +1082,23 @@ impl Colet {
             return;
         }
         let paths: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
-        self.operations.update(cx, |operations, cx| operations.send_to(target, paths, shift, cx));
+        // What may be moved goes unwatched first, with the folders inside it, until the send returns.
+        let carried = shift.then(|| self.carry(&paths, cx));
+        self.operations.update(cx, |operations, cx| operations.send_to(target, paths, shift, carried, cx));
+    }
+
+    /// Lets go of the watches on the folders at or inside `paths`, which a send or a drag may move, until
+    /// [`put_down`](Self::put_down) is told the number; what hears once they are let go of.
+    pub(crate) fn carry(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) -> Carried {
+        let id = self.loading.watching.carry(paths);
+        Carried { id, released: self.watch(cx) }
+    }
+
+    /// What [`carry`](Self::carry) let go of is watched again, by the refresh this makes, which lists what
+    /// changed while it was not; folders moved away meanwhile are closed rather than watched.
+    pub(crate) fn put_down(&mut self, carry: u64, cx: &mut Context<Self>) {
+        self.loading.watching.put_down(carry);
+        self.refresh(cx);
     }
 
     /// Pastes as `paste` asks, for the tab it was asked in, whichever is in front now: that tab picks what
@@ -1290,6 +1346,8 @@ mod tests {
             error: None,
             items: Vec::new(),
             more: 0,
+            more_failed: 0,
+            more_skipped: 0,
         }
     }
 
@@ -1308,6 +1366,20 @@ mod tests {
         assert!(paste.has_problems());
         assert_eq!(paste.target(), "3 項目 → dest");
         assert_eq!(paste.count(ItemStatus::Done), 1);
+    }
+
+    #[test]
+    fn counts_what_failed_or_was_skipped_past_the_items_it_keeps() {
+        let mut paste = entry(Kind::Paste);
+        for i in 0..super::MAX_ITEMS {
+            paste.record(Event::Done { path: format!(r"D:\{i}.txt").into() });
+        }
+        paste.record(Event::Skipped { path: r"D:\skipped.txt".into() });
+        paste.record(Event::Failed { path: r"D:\failed.txt".into(), error: "アクセスが拒否されました。".into() });
+        assert_eq!((paste.items.len(), paste.more), (super::MAX_ITEMS, 2));
+        paste.status = Status::Done;
+        assert_eq!(paste.outcome(), "1 件失敗・1 件スキップ");
+        assert!(paste.has_problems());
     }
 
     #[test]

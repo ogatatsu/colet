@@ -10,6 +10,9 @@ use crate::{
     state::HomeKey,
 };
 
+/// How often it asks whether the app the rows were dropped in is done writing them out.
+const WRITING_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// A row the left button went down on, which a drag may start from.
 #[derive(Clone, Debug)]
 pub struct Press {
@@ -56,13 +59,25 @@ impl Colet {
             vec![HomeKey::on_disk(&path).into_owned()]
         };
         cx.notify();
+        // The app it is dropped in may move it: it goes unwatched, with the folders inside it, until that
+        // app is done. Let go of by the time it is dropped, as the watcher closes them at once.
+        let carry = self.carry(&paths, cx).id;
         let (backend, owner) = (self.backend.clone(), self.owner);
         // Out of this update, on this thread: the drag runs the window's messages until it ends, and
         // they draw the window and reach the app meanwhile.
         cx.spawn(async move |this, cx| {
-            if let Err(error) = backend.drag_out(&paths, owner) {
-                this.update(cx, |this, cx| this.notify(format!("ドラッグできません: {error}"), Tone::Error, cx)).ok();
+            match backend.drag_out(&paths, owner) {
+                Ok(writing) => {
+                    // An Explorer target writes them out on a thread of its own, after the drag returns.
+                    while writing() {
+                        cx.background_executor().timer(WRITING_POLL).await;
+                    }
+                }
+                Err(error) => {
+                    this.update(cx, |this, cx| this.notify(format!("ドラッグできません: {error}"), Tone::Error, cx)).ok();
+                }
             }
+            this.update(cx, |this, cx| this.put_down(carry, cx)).ok();
         })
         .detach();
     }

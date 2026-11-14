@@ -124,6 +124,36 @@ fn discards_stale_and_removed_column_responses() {
 }
 
 #[test]
+fn entered_before_the_results_come_lands_on_the_first_of_them() {
+    let mut s = State::new();
+    s.set_query("cat");
+    let search = s.columns[1].id;
+    s.enter();
+    assert!(s.columns[1].focused.is_none());
+    s.load(search, 1, false);
+    s.page(search, 1, vec![file(r"D:\a.txt"), file(r"D:\b.txt")], 2, 0, &HashSet::new());
+    assert_eq!(s.columns[1].focused.as_deref(), Some(Path::new(r"D:\a.txt")));
+    assert_eq!(s.columns[1].selected, one(r"D:\a.txt"));
+    // Only once: a later reload leaves the keys where they went.
+    s.step(1);
+    s.load(search, 2, true);
+    s.page(search, 2, vec![file(r"D:\a.txt"), file(r"D:\b.txt")], 2, 0, &HashSet::new());
+    assert_eq!(s.columns[1].focused.as_deref(), Some(Path::new(r"D:\b.txt")));
+}
+
+#[test]
+fn entered_before_the_results_come_leaves_them_be_once_the_keys_went_elsewhere() {
+    let mut s = State::new();
+    s.set_query("cat");
+    let search = s.columns[1].id;
+    s.enter();
+    s.set_active(0);
+    s.load(search, 1, false);
+    s.page(search, 1, vec![file(r"D:\a.txt")], 1, 0, &HashSet::new());
+    assert!(s.columns[1].focused.is_none() && s.columns[1].selected.is_empty());
+}
+
+#[test]
 fn replaces_descendants_and_opens_a_search_file_parent_exactly_once() {
     let target = file(r"D:\parent\file");
     let mut s = State::new();

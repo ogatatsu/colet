@@ -84,13 +84,14 @@ pub fn list(path: &Path, order: Order, cancelled: &AtomicBool, owner: Owner) -> 
         return Err("絶対パスを指定してください".into());
     }
     if is_server(path) {
-        let mut shares =
-            network::signing_in(path, owner, || network::shares(path)).map_err(|e| format!("共有フォルダーを一覧できません: {e}"))?;
+        let mut shares = network::signing_in(path, owner, cancelled, || network::shares(path))
+            .map_err(|e| format!("共有フォルダーを一覧できません: {e}"))?;
         check(cancelled)?;
         sort_entries(&mut shares, order);
         return Ok(shares);
     }
-    let items = network::signing_in(path, owner, || std::fs::read_dir(path)).map_err(|e| format!("フォルダーを開けません: {e}"))?;
+    let items =
+        network::signing_in(path, owner, cancelled, || std::fs::read_dir(path)).map_err(|e| format!("フォルダーを開けません: {e}"))?;
     // One for all its items: each would otherwise hold a copy of the same text.
     let parent: Arc<str> = shown(path).into();
     let entries = collect(

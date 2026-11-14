@@ -114,6 +114,8 @@ struct Fake {
     sent: Mutex<Vec<(String, Vec<String>, bool)>>,
     /// What each drag out carried.
     dragged: Mutex<Vec<Vec<String>>>,
+    /// The app the drag was dropped in is still writing it out, while set.
+    drag_writing: Arc<AtomicBool>,
     /// What QuickLook was told, in order; it is not running while `no_quick_look` is set.
     quick_looks: Mutex<Vec<(QuickLookMessage, String)>>,
     no_quick_look: AtomicBool,
@@ -383,9 +385,10 @@ impl Backend for Fake {
         Ok(if shift { Dropped::Moved } else { Dropped::Copied })
     }
 
-    fn drag_out(&self, paths: &[PathBuf], _: Owner) -> Result<(), String> {
+    fn drag_out(&self, paths: &[PathBuf], _: Owner) -> Result<Box<dyn Fn() -> bool>, String> {
         self.dragged.lock().unwrap().push(paths.iter().map(|p| text(p)).collect());
-        Ok(())
+        let writing = self.drag_writing.clone();
+        Ok(Box::new(move || writing.load(Ordering::Relaxed)))
     }
 
     fn quick_look(&self, message: QuickLookMessage, path: PathBuf) -> mpsc::Receiver<Result<(), QuickLookError>> {

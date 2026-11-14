@@ -1016,7 +1016,7 @@ impl Colet {
     /// A busy disk reports changes each second: the first reloads at once, then at most one every couple
     /// of seconds. One met by a reload in flight waits for it, as it may have read the results before.
     fn search_changed(&mut self, cx: &mut Context<Self>) {
-        let Some(wait) = self.loading.search_refresh.wait() else {
+        let Some((reload, wait)) = self.loading.search_refresh.wait() else {
             return;
         };
         cx.spawn(async move |this, cx| {
@@ -1024,6 +1024,11 @@ impl Colet {
             loop {
                 let busy = this
                     .update(cx, |this, cx| {
+                        // Cancelled while it waited: the search in front now is another tab's, read afresh
+                        // as it came to the front.
+                        if !this.loading.search_refresh.is_waiting(reload) {
+                            return false;
+                        }
                         let Some(search) = this.state.columns.iter().find(|c| c.kind == Kind::Search).map(|c| c.id) else {
                             this.loading.search_refresh.cancel();
                             return false;

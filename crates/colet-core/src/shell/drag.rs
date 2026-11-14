@@ -18,15 +18,25 @@ use super::Owner;
 ///
 /// Call it on the thread that owns `owner`, with its mouse button down and OLE entered there, and not
 /// from within anything the window's messages call back into: the drag runs that thread's messages
-/// until it ends.
-pub fn drag_out(paths: &[PathBuf], owner: Owner) -> Result<()> {
+/// until it ends. What it returns tells, on the same thread, whether the target is still writing them out.
+pub fn drag_out(paths: &[PathBuf], owner: Owner) -> Result<Dragged> {
     let data = super::drop::items(paths)?;
     // An Explorer that may copy on its own thread does, and the drag returns at once.
-    if let Ok(asynchronous) = data.cast::<IDataObjectAsyncCapability>() {
-        let _ = unsafe { asynchronous.SetAsyncMode(true) };
-    }
+    let asynchronous = data.cast::<IDataObjectAsyncCapability>().ok().filter(|a| unsafe { a.SetAsyncMode(true) }.is_ok());
     let allowed = DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK;
-    unsafe { SHDoDragDrop(Some(HWND(owner as *mut _)), &data, None::<&IDropSource>, allowed) }.map(|_| ())
+    unsafe { SHDoDragDrop(Some(HWND(owner as *mut _)), &data, None::<&IDropSource>, allowed) }?;
+    Ok(Dragged(asynchronous))
+}
+
+/// Items dragged out and dropped, which the target may still be writing out on a thread of its own.
+pub struct Dragged(Option<IDataObjectAsyncCapability>);
+
+impl Dragged {
+    /// The target is still copying or moving them: until it is done, a folder among them is to stay
+    /// unwatched, or a move would fail on it.
+    pub fn writing(&self) -> bool {
+        self.0.as_ref().is_some_and(|a| unsafe { a.InOperation() }.is_ok_and(|b| b.as_bool()))
+    }
 }
 
 /// How far the pointer moves, held down, before a drag begins, in pixels at `dpi` along each axis, as

@@ -55,6 +55,9 @@ pub struct Column {
     /// What to pick once listed, by path key: the items just pasted here, which the listing that shows
     /// them may come after the paste is done.
     pub pick: Option<Vec<OsString>>,
+    /// The results entered while nothing was listed yet, as with Enter in the search field before they
+    /// come: the listing that brings rows lands the keys on them, as entering would have.
+    pub entering: bool,
     /// A column narrowed to some names: `entries` then holds only those.
     pub narrow: Option<Narrowing>,
 }
@@ -267,6 +270,7 @@ impl Column {
             anchor: None,
             base: None,
             pick: None,
+            entering: false,
             narrow: None,
         }
     }
@@ -1103,6 +1107,9 @@ impl State {
             } else {
                 self.select(index, vec![first]);
             }
+        } else if c.loading && c.kind == Kind::Search {
+            // Only the results: a folder gone to, as from the address bar, opens with nothing picked.
+            self.columns[index].entering = true;
         }
     }
 
@@ -1720,6 +1727,12 @@ impl State {
         // the next key acts on that. Gone some other way, no folder opens unasked.
         if index == self.active && all_departed {
             self.select(index, heir.into_iter().collect());
+        }
+        // Entered before it listed anything: the keys land now, unless they have gone to another column or
+        // a row since.
+        let c = &mut self.columns[index];
+        if std::mem::take(&mut c.entering) && index == self.active && c.focused.is_none() {
+            self.enter();
         }
     }
 }

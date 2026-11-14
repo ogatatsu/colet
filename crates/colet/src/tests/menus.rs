@@ -242,6 +242,24 @@ fn keeps_the_window_while_a_send_runs(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn lets_go_of_what_a_send_with_shift_may_move_until_it_returns(cx: &mut TestAppContext) {
+    let (fake, ui) = in_work(cx);
+    send_targets(&fake);
+    let carried = |cx: &mut TestAppContext| ui.read(cx, |v| v.loading.watching.carried.values().flatten().cloned().collect::<Vec<_>>());
+    ui.view.update(cx, |v, cx| {
+        v.operations.update(cx, |operations, _| operations.set_send_targets(fake.send_targets()));
+        v.send_to(r"C:\SendTo\USB.lnk".into(), true, cx);
+    });
+    assert_eq!(carried(cx), [colet_core::paths::path_key(Path::new(r"D:\work\a.txt"))]);
+    settle(cx);
+    assert_eq!(fake.sent.lock().unwrap().len(), 1);
+    assert!(carried(cx).is_empty());
+    // Copied, nothing leaves its place.
+    ui.view.update(cx, |v, cx| v.send_to(r"C:\SendTo\USB.lnk".into(), false, cx));
+    assert!(carried(cx).is_empty());
+}
+
+#[gpui_kit::test]
 fn sends_results_from_several_folders_moved_with_shift(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a\x.txt"), file(r"D:\b\y.txt")]));
     send_targets(&fake);

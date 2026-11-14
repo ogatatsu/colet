@@ -10,7 +10,7 @@ mod operation;
 mod properties;
 mod send_to;
 
-pub use drag::{drag_distance, drag_out, refuse_drops};
+pub use drag::{Dragged, drag_distance, drag_out, refuse_drops};
 pub use drop::{Dropped, drop_clipboard, send_to};
 pub use icon::{Icon, IconSource, icon};
 pub use menu::{BUSY_ERROR as MENU_BUSY, MenuThread, ShowMenu};

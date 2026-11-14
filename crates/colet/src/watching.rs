@@ -1,6 +1,6 @@
 //! Watching the folders the columns show, letting go of those an operation moves.
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ffi::OsString,
     path::PathBuf,
     sync::{Arc, Mutex, mpsc},
@@ -19,6 +19,10 @@ pub struct Watching {
     /// What the running operation moves or deletes, by path key: the folders at or inside it go unwatched
     /// until it ends, as Windows keeps a folder in place while a folder inside it is watched.
     pub(crate) released: HashSet<OsString>,
+    /// What each send to Send To with Shift and each drag out of the window may move, by path key, let go
+    /// of as `released` is until it ends. They run beside the operation and each other.
+    pub(crate) carried: HashMap<u64, HashSet<OsString>>,
+    next_carry: u64,
     /// Folders already said to go unwatched, each said once.
     unwatched: HashSet<OsString>,
     /// What the watcher saw change, collected until the UI takes it.
@@ -28,11 +32,24 @@ pub struct Watching {
 }
 
 impl Watching {
-    /// Watches `folders` but those `released` lets go. The watcher opens them on its own thread, so a
-    /// share slow to answer never holds up the window; the receiver hears once it has, when there was
-    /// anything to change. Errs when the watcher could not start.
+    /// Lets go of the folders at or inside `paths` until [`put_down`](Self::put_down) is told the number
+    /// it returns; the next [`set`](Self::set) leaves them unwatched.
+    pub fn carry(&mut self, paths: &[PathBuf]) -> u64 {
+        self.next_carry += 1;
+        self.carried.insert(self.next_carry, paths.iter().map(|p| path_key(p)).collect());
+        self.next_carry
+    }
+
+    /// What `carry` let go of may be watched again, from the next [`set`](Self::set).
+    pub fn put_down(&mut self, carry: u64) {
+        self.carried.remove(&carry);
+    }
+
+    /// Watches `folders` but those `released` or `carried` lets go. The watcher opens them on its own
+    /// thread, so a share slow to answer never holds up the window; the receiver hears once it has, when
+    /// there was anything to change. Errs when the watcher could not start.
     pub fn set(&mut self, folders: Vec<PathBuf>) -> Result<Option<mpsc::Receiver<()>>, String> {
-        let folders = kept_watching(folders, &self.released);
+        let folders = self.carried.values().fold(kept_watching(folders, &self.released), kept_watching);
         if folders == self.watched {
             return Ok(None);
         }

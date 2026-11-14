@@ -104,8 +104,9 @@ pub trait Backend: Send + Sync + 'static {
     fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> Result<Dropped, String>;
     /// Drags `paths`, from any folders, out of the window `owner` into another app, which copies, moves
     /// or links them. Call it on the window's own thread, out of any update: it runs the window's
-    /// messages until the drag ends.
-    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> Result<(), String>;
+    /// messages until the drag ends. What it returns tells, asked on the same thread, whether the app
+    /// they were dropped in is still writing them out on a thread of its own.
+    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> Result<Box<dyn Fn() -> bool>, String>;
     /// Asks QuickLook to show `path`, in the order asked; what it returns tells how that went.
     fn quick_look(&self, message: quick_look::Message, path: PathBuf) -> mpsc::Receiver<Result<(), quick_look::Error>>;
 }
@@ -273,8 +274,9 @@ impl Backend for Live {
         shell::send_to(target, paths, shift, owner).map_err(said)
     }
 
-    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> Result<(), String> {
-        shell::drag_out(paths, owner).map_err(said)
+    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> Result<Box<dyn Fn() -> bool>, String> {
+        let dragged = shell::drag_out(paths, owner).map_err(said)?;
+        Ok(Box::new(move || dragged.writing()))
     }
 
     fn quick_look(&self, message: quick_look::Message, path: PathBuf) -> mpsc::Receiver<Result<(), quick_look::Error>> {

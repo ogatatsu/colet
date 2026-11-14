@@ -157,8 +157,10 @@ impl Engine {
 /// couple of seconds.
 #[derive(Default)]
 pub struct SearchRefresh {
-    /// A reload is waiting to go.
-    waiting: bool,
+    /// The reload waiting, by its number; none when none is.
+    waiting: Option<u64>,
+    /// The number the next reload to wait takes.
+    next: u64,
     /// When the last one went.
     last: Option<Instant>,
 }
@@ -166,24 +168,33 @@ pub struct SearchRefresh {
 impl SearchRefresh {
     const EVERY: Duration = Duration::from_secs(2);
 
-    /// A reload is to wait its turn: how long until it may go, or none when one is already waiting.
-    pub fn wait(&mut self) -> Option<Duration> {
-        if self.waiting {
+    /// A reload is to wait its turn: its number and how long until it may go, or none when one is already
+    /// waiting.
+    pub fn wait(&mut self) -> Option<(u64, Duration)> {
+        if self.waiting.is_some() {
             return None;
         }
-        self.waiting = true;
-        Some(self.last.map_or(Duration::ZERO, |at| Self::EVERY.saturating_sub(at.elapsed())))
+        let reload = self.next;
+        self.next += 1;
+        self.waiting = Some(reload);
+        Some((reload, self.last.map_or(Duration::ZERO, |at| Self::EVERY.saturating_sub(at.elapsed()))))
+    }
+
+    /// Whether `reload` is still the one waiting: one cancelled since, as another tab came to the front,
+    /// is not to go, even with another waiting after it.
+    pub fn is_waiting(&self, reload: u64) -> bool {
+        self.waiting == Some(reload)
     }
 
     /// The reload waiting went now.
     pub fn went(&mut self) {
-        self.waiting = false;
+        self.waiting = None;
         self.last = Some(Instant::now());
     }
 
     /// The reload waiting is no longer to go.
     pub fn cancel(&mut self) {
-        self.waiting = false;
+        self.waiting = None;
     }
 }
 
@@ -200,6 +211,22 @@ pub fn reread_count(loaded: usize, last_kept: Option<usize>, in_sight: usize) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reload_cancelled_while_it_waits_stays_cancelled_with_another_waiting() {
+        let mut refresh = SearchRefresh::default();
+        let (first, wait) = refresh.wait().unwrap();
+        assert_eq!(wait, Duration::ZERO);
+        assert!(refresh.wait().is_none());
+        refresh.cancel();
+        let (second, _) = refresh.wait().unwrap();
+        assert!(!refresh.is_waiting(first));
+        assert!(refresh.is_waiting(second));
+        refresh.went();
+        assert!(!refresh.is_waiting(second));
+        // The next waits out the rest of the couple of seconds.
+        assert!(refresh.wait().unwrap().1 > Duration::from_secs(1));
+    }
 
     #[test]
     fn rereads_only_the_pages_in_sight_or_picked() {
