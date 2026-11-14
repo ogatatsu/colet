@@ -395,6 +395,18 @@ fn picks_every_row_or_none_with_the_checkbox_over_them(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
+fn picks_every_row_or_none_with_the_checkbox_from_the_keys(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    ui.tab_to(cx, ("check-all", work));
+    ui.press(cx, "space");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt", r"D:\work\b.txt", r"D:\work\c.txt"]);
+    assert!(ui.has_keys(cx, ("check-all", work)));
+    ui.press(cx, "space");
+    assert!(ui.selected(cx, 2).is_empty());
+}
+
+#[gpui_kit::test]
 fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     assert!(ui.columns_focused(cx));

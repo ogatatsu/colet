@@ -84,6 +84,37 @@ fn fixes_the_theme_from_the_preferences_at_once_and_keeps_it(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
+fn moves_among_the_themes_with_the_arrows_and_tabs_past_them_at_once(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    let ui = open(cx, fake.clone());
+    ui.click(cx, "preferences");
+    let theme = |t: Theme| ElementId::from(("theme", t as usize));
+    assert!(ui.has_keys(cx, theme(Theme::System)));
+    // The arrows pick as they go, round from the last to the first.
+    ui.press(cx, "right");
+    assert!(ui.has_keys(cx, theme(Theme::Light)));
+    assert_eq!(fake.settings.lock().unwrap().theme, Theme::Light);
+    ui.press(cx, "down");
+    ui.press(cx, "right");
+    assert!(ui.has_keys(cx, theme(Theme::System)));
+    ui.press(cx, "left");
+    assert!(ui.has_keys(cx, theme(Theme::Dark)));
+    assert_eq!(ui.read(cx, |v| v.stored.settings().theme), Theme::Dark);
+    // Tab leaves the group for what follows it; back, it lands on the theme chosen.
+    ui.press(cx, "tab");
+    assert!(Theme::ALL.iter().all(|t| !ui.has_keys(cx, theme(*t))));
+    ui.press(cx, "shift-tab");
+    assert!(ui.has_keys(cx, theme(Theme::Dark)));
+    // From the first of the themes too, past those after it, not onto the next.
+    ui.press(cx, "right");
+    assert!(ui.has_keys(cx, theme(Theme::System)));
+    ui.press(cx, "tab");
+    assert!(Theme::ALL.iter().all(|t| !ui.has_keys(cx, theme(*t))));
+    ui.press(cx, "shift-tab");
+    assert!(ui.has_keys(cx, theme(Theme::System)));
+}
+
+#[gpui_kit::test]
 fn opens_in_the_theme_kept_whatever_windows_is_set_to(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default());
     fake.settings.lock().unwrap().theme = Theme::Dark;

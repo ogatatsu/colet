@@ -422,39 +422,30 @@ impl Colet {
         let (order, own) = (self.order_of(c), self.own_order(c).is_some());
         let open = self.column_sort_open() == Some(id);
         let label = format!("並び順: {}{}", order.label(), if own { "" } else { "（既定）" });
-        let focus = self.stop(Stop::ColumnSort(id), cx);
-        let shown = focus.is_focused(window);
+        let button = Button::new(("column-sort", id))
+            .ghost()
+            .xsmall()
+            .icon(glyph("arrow-up-down").text_color(if own { p.accent } else { p.text_muted }))
+            .accessibility_label(label.clone())
+            .open(open)
+            // Shown only while the menu is shut: open, the tip would lie over it.
+            .when(!open, |b| b.tooltip(label))
+            // ↓ opens the menu as well as Enter and Space, as with the search filter's button.
+            .key_context(SORT)
+            .on_action(cx.listener(move |this, _: &OpenSort, window, cx| this.open_column_sort(id, window, cx)))
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                if this.column_sort_open() == Some(id) {
+                    this.close_menus(true, window, cx);
+                } else if !this.pressed_shut(event) {
+                    this.open_column_sort(id, window, cx);
+                }
+            }));
+        // The button takes no listener for the press, so the box round it notes it.
+        let button = self.ringed(button, Stop::ColumnSort(id), RingAt::Edge, window, cx);
         div()
             .relative()
             .flex_none()
-            .child(
-                crate::view::keep_focus(div().id(("column-sort", id)))
-                    .test_support()
-                    .track_focus(&focus)
-                    .key_context(SORT)
-                    .on_action(cx.listener(move |this, _: &OpenSort, window, cx| this.open_column_sort(id, window, cx)))
-                    .role(Role::Button)
-                    .aria_label(label.clone())
-                    .aria_expanded(open)
-                    .tip_while_shut(open, label)
-                    .size(px(metrics::ICON_BUTTON))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(metrics::RADIUS))
-                    .hover(|d| d.bg(p.hover))
-                    .when(open, |d| d.bg(p.hover))
-                    .child(icon("arrow-up-down", metrics::GLYPH, if own { p.accent } else { p.text_muted }))
-                    .map(|d| ring(d, p, shown, metrics::RADIUS))
-                    .map(|d| Self::opener(d, move |this| this.column_sort_open() == Some(id), cx))
-                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                        if this.column_sort_open() == Some(id) {
-                            this.close_menus(true, window, cx);
-                        } else if !this.pressed_shut(event) {
-                            this.open_column_sort(id, window, cx);
-                        }
-                    })),
-            )
+            .child(Self::opener(div().flex(), move |this| this.column_sort_open() == Some(id), cx).child(button))
             .when_some(self.menu_element("column-sort-menu", "並び順", cx).filter(|_| open), |d, menu| {
                 d.child(drop_down(menu, MenuSide::Right, 160., Some(160.)))
             })
@@ -530,16 +521,12 @@ impl Colet {
     }
 
     /// The checkbox heading the rows' own, over them: checked while every row shown is picked, a click
-    /// then picks none, and otherwise all. Faded, and pressed in vain, while there are no rows.
+    /// then picks none, and otherwise all. Disabled while there are no rows. A Tab stop, as the library's
+    /// checkbox is: Space presses it.
     fn check_all(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let p = self.palette;
         let c = &self.state.columns[index];
         let (id, empty, all) = (c.id, c.entries.is_empty(), c.all_selected());
-        let check = div().size(px(14.)).rounded(px(3.)).flex().items_center().justify_center().map(|b| {
-            if all { b.bg(p.accent_fill).child(icon("check", 11., p.on_accent)) } else { b.border_1().border_color(p.text_muted) }
-        });
         div()
-            .id(("check-all", id))
             .flex_none()
             .h_full()
             // Where the rows' checkboxes stand, then the gap to their names less the heading's own 4px.
@@ -549,20 +536,14 @@ impl Colet {
             .flex()
             .items_center()
             .justify_center()
-            .role(Role::CheckBox)
-            .aria_label("すべて選択")
-            .aria_toggled(if all { Toggled::True } else { Toggled::False })
-            .when(empty, |d| d.opacity(0.4))
-            .child(check)
-            .when(!empty, |d| {
-                d.on_click(cx.listener(move |this, _, _, cx| {
+            .child(Checkbox::new(("check-all", id)).small().accessibility_label("すべて選択").checked(all).disabled(empty).on_click(
+                cx.listener(move |this, _, _, cx| {
                     let Some(index) = this.state.index_of(id) else { return };
                     this.state.toggle_all(index);
                     this.state.set_active(index);
                     this.changed(cx);
-                }))
-            })
-            .test_support()
+                }),
+            ))
     }
 
     /// The field narrowing the column `id` to the names holding what is typed there.

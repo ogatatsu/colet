@@ -4,11 +4,11 @@ use colet_core::{
     operations::{Kind as Operation, Request},
     paths::{ancestors, folder_name, shown},
 };
-use std::path::PathBuf;
+use std::{path::PathBuf, rc::Rc};
 
 use gpui_kit::base::input::{Input, InputState};
 use gpui_kit::component::{
-    Disableable, Sizable,
+    Disableable, Selectable, Sizable,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     dialog::Dialog as DialogFrame,
@@ -156,12 +156,90 @@ pub(crate) fn history_item_id(entry: u64, k: usize) -> ElementId {
     ElementId::NamedChild(std::sync::Arc::new(("history-item", entry).into()), SharedString::from(k.to_string()))
 }
 
-/// A choice among the filters, checked as a radio button is.
-fn filter_choice(id: ElementId, text: &str, chosen: bool) -> Button {
-    push(id, text.to_owned(), chosen, true).role(Role::RadioButton).toggled(chosen)
+/// What picking a choice of a [`Colet::radio_group`] does.
+type Pick = Rc<dyn Fn(&mut Colet, &mut Window, &mut Context<Colet>)>;
+
+/// A choice of a [`Colet::radio_group`].
+struct Choice {
+    id: ElementId,
+    text: SharedString,
+    stop: Stop,
+    chosen: bool,
+    pick: Pick,
+}
+
+impl Choice {
+    fn new(id: impl Into<ElementId>, text: impl Into<SharedString>, stop: Stop, chosen: bool, pick: Pick) -> Self {
+        Choice { id: id.into(), text: text.into(), stop, chosen, pick }
+    }
+}
+
+/// How far an arrow moves among the choices of a radio group: back or on, whichever way they run.
+fn arrow_step(keystroke: &Keystroke) -> Option<isize> {
+    if keystroke.modifiers.modified() {
+        return None;
+    }
+    match keystroke.key.as_str() {
+        "left" | "up" => Some(-1),
+        "right" | "down" => Some(1),
+        _ => None,
+    }
 }
 
 impl Colet {
+    /// `choices` as a radio group named `label`: the chosen one drawn selected, as a pressed button is,
+    /// not as the primary button, which is what Enter does in the dialog. Tab stops at the chosen one only,
+    /// or the first while none is, and the arrows move among them, picking as they go, as in a radio group.
+    fn radio_group(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        choices: Vec<Choice>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let tab_at = choices.iter().position(|c| c.chosen).unwrap_or(0);
+        let stops: Rc<[Stop]> = choices.iter().map(|c| c.stop.clone()).collect();
+        let picks: Rc<[Pick]> = choices.iter().map(|c| c.pick.clone()).collect();
+        let buttons: Vec<Div> = choices
+            .into_iter()
+            .enumerate()
+            .map(|(k, Choice { id, text, stop, chosen, pick })| {
+                let (ring_stop, in_group) = (stop.clone(), stops.clone());
+                // Told to the button, not to the stop's handle: the button writes its own onto the handle it
+                // is given as it is drawn.
+                let button =
+                    Button::new(id).label(text).selected(chosen).role(Role::RadioButton).toggled(chosen).tab_stop(k == tab_at).on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            // The mouse leaves the keys where they are, but within the group they go with the
+                            // pick, so the ring does not stay on the last.
+                            if in_group.iter().any(|s| this.stop(s.clone(), cx).is_focused(window)) {
+                                this.stop(stop.clone(), cx).focus(window, cx);
+                            }
+                            pick(this, window, cx);
+                        }),
+                    );
+                self.ringed(button, ring_stop, RingAt::Round, window, cx)
+            })
+            .collect();
+        div()
+            .id(id)
+            .flex()
+            .flex_wrap()
+            .gap(px(2.))
+            .role(Role::RadioGroup)
+            .aria_label(label)
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                let Some(by) = arrow_step(&event.keystroke) else { return };
+                let Some(at) = stops.iter().position(|s| this.stop(s.clone(), cx).is_focused(window)) else { return };
+                let to = (at as isize + by).rem_euclid(stops.len() as isize) as usize;
+                cx.stop_propagation();
+                this.stop(stops[to].clone(), cx).focus(window, cx);
+                (picks[to])(this, window, cx);
+            }))
+            // Ringed as the fields are; the rings' room makes up most of the gaps.
+            .children(buttons)
+    }
     /// The field for what a favorite or saved search opens narrowed to, and why it cannot be kept, if it
     /// cannot.
     fn narrow_field(&self, input: &Entity<InputState>, problem: Option<&'static str>, window: &Window, cx: &mut Context<Self>) -> Div {
@@ -182,33 +260,26 @@ impl Colet {
     /// come first, each a row of choices as the sort order's menu has them.
     fn order_field(&self, order: Order, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = self.palette;
-        let row = |id: &'static str, label: &'static str, choices: Vec<(OrderChoice, &'static str)>| {
-            div()
-                .id(id)
-                .flex()
-                .flex_wrap()
-                .gap(px(2.))
-                .role(Role::RadioGroup)
-                .aria_label(label)
-                // Ringed as the fields are; the rings' room makes up most of the gaps.
-                .children(choices.into_iter().map(|(choice, text)| {
-                    let id = ElementId::NamedChild(std::sync::Arc::new(id.into()), SharedString::from(text));
-                    let button = filter_choice(id, text, choice.is_in(order))
-                        .on_click(cx.listener(move |this, _, _, cx| this.change_edit_order(|order| choice.apply(order), cx)));
-                    self.ringed(button, Stop::EditSearchOrder(choice), RingAt::Round, window, cx)
-                }))
+        let mut row = |id: &'static str, label: &'static str, choices: Vec<(OrderChoice, &'static str)>| {
+            let choices = choices
+                .into_iter()
+                .map(|(choice, text)| {
+                    let pick: Pick = Rc::new(move |this, _, cx| this.change_edit_order(|order| choice.apply(order), cx));
+                    let item = ElementId::NamedChild(std::sync::Arc::new(id.into()), SharedString::from(text));
+                    Choice::new(item, text, Stop::EditSearchOrder(choice), choice.is_in(order), pick)
+                })
+                .collect();
+            self.radio_group(id, label, choices, window, cx)
         };
         let by = Sort::ALL.into_iter().map(|by| (OrderChoice::By(by), by.label())).collect();
         let direction = [false, true].into_iter().map(|d| (OrderChoice::Descending(d), direction_label(d))).collect();
         let folders = vec![(OrderChoice::FoldersFirst(true), "フォルダを先に"), (OrderChoice::FoldersFirst(false), "混在")];
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(label(p, "並び順"))
-            .child(row("edit-search-sort", "並べ替え", by))
-            .child(row("edit-search-direction", "向き", direction))
-            .child(row("edit-search-folders", "フォルダ", folders))
+        let (by, direction, folders) = (
+            row("edit-search-sort", "並べ替え", by),
+            row("edit-search-direction", "向き", direction),
+            row("edit-search-folders", "フォルダ", folders),
+        );
+        div().flex().flex_col().gap_1().child(label(p, "並び順")).child(by).child(direction).child(folders)
     }
 
     fn dialog_parts(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(&'static str, Div, Buttons)> {
@@ -348,6 +419,21 @@ impl Colet {
             std::iter::once(None).chain(self.stored.settings().filters.iter().map(|f| Some(f.name.clone()))).collect();
         let problem = self.edit_problem(cx);
         let chosen = filter.clone();
+        let filters = choices
+            .into_iter()
+            .map(|choice| {
+                let text = choice.clone().unwrap_or_else(|| "なし".into());
+                let id = match &choice {
+                    Some(name) => filter_tool_id("edit-search-filter", name),
+                    None => "edit-search-filter-none".into(),
+                };
+                let picked = choice.clone();
+                let pick: Pick = Rc::new(move |this, _, cx| this.pick_edit_filter(picked.clone(), cx));
+                let is_chosen = choice == chosen;
+                Choice::new(id, text, Stop::EditSearchFilter(choice), is_chosen, pick)
+            })
+            .collect();
+        let filters = self.radio_group("edit-search-filters", "検索フィルター", filters, window, cx);
         let content = div()
             .flex()
             .flex_col()
@@ -374,29 +460,7 @@ impl Colet {
                         d.child(div().text_size(px(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
                     }),
             )
-            .child(
-                div().flex().flex_col().gap_1().child(label(p, "検索フィルター")).child(
-                    div()
-                        .id("edit-search-filters")
-                        .flex()
-                        .flex_wrap()
-                        .gap(px(2.))
-                        .role(Role::RadioGroup)
-                        .aria_label("検索フィルター")
-                        // Ringed as the fields are; the rings' room makes up most of the gaps.
-                        .children(choices.into_iter().map(|choice| {
-                            let text = choice.clone().unwrap_or_else(|| "なし".into());
-                            let id = match &choice {
-                                Some(name) => filter_tool_id("edit-search-filter", name),
-                                None => "edit-search-filter-none".into(),
-                            };
-                            let picked = choice.clone();
-                            let button = filter_choice(id, &text, choice == chosen)
-                                .on_click(cx.listener(move |this, _, _, cx| this.pick_edit_filter(picked.clone(), cx)));
-                            self.ringed(button, Stop::EditSearchFilter(choice), RingAt::Round, window, cx)
-                        })),
-                ),
-            )
+            .child(div().flex().flex_col().gap_1().child(label(p, "検索フィルター")).child(filters))
             .child(self.narrow_field(narrow, None, window, cx))
             .child(self.order_field(order, window, cx));
         let buttons = vec![
@@ -628,34 +692,21 @@ impl Colet {
     /// The theme, the display, and the keys.
     fn preferences_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> (Div, Buttons) {
         let p = self.palette;
-        // Each theme a stop for Tab, kept across frames.
-        let themes = Theme::ALL;
+        let themes = Theme::ALL
+            .into_iter()
+            .map(|theme| {
+                let pick: Pick = Rc::new(move |this, window, cx| this.set_theme(theme, window, cx));
+                let chosen = self.stored.settings().theme == theme;
+                Choice::new(("theme", theme as usize), theme.label(), Stop::Theme(theme), chosen, pick)
+            })
+            .collect();
+        let themes = self.radio_group("themes", "テーマ", themes, window, cx);
         let content = div()
             .flex()
             .flex_col()
             .gap_3()
             // Taken at once as one is picked, and kept.
-            .child(div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(
-                // Ringed as the fields are; the rings' room makes up most of the gaps.
-                div().id("themes").flex().gap(px(2.)).role(Role::RadioGroup).aria_label("テーマ").children(themes.into_iter().map(
-                    |theme| {
-                        let chosen = self.stored.settings().theme == theme;
-                        // The mouse leaves the keys where they are, but within the group they go with the
-                        // pick, as with a radio group's checked one, so the ring does not stay on the last.
-                        let button = push(("theme", theme as usize), theme.label(), chosen, true)
-                            .role(Role::RadioButton)
-                            .toggled(chosen)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                let in_group = Theme::ALL.iter().any(|t| this.stop(Stop::Theme(*t), cx).is_focused(window));
-                                if in_group {
-                                    this.stop(Stop::Theme(theme), cx).focus(window, cx);
-                                }
-                                this.set_theme(theme, window, cx)
-                            }));
-                        self.ringed(button, Stop::Theme(theme), RingAt::Round, window, cx)
-                    },
-                )),
-            ))
+            .child(div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(themes))
             // Taken at once, as the theme is. It counts only while the hidden items show, but is set at any time.
             .child({
                 let colet = cx.entity().downgrade();

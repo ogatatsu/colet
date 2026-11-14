@@ -11,6 +11,7 @@ use gpui_kit::base::input::{self, Input, InputState};
 use gpui_kit::component::{
     ActiveTheme, Disableable, FocusableExt, Selectable, Sizable,
     button::{Button, ButtonVariants},
+    checkbox::Checkbox,
     spinner::Spinner,
     status_bar::StatusBar,
 };
