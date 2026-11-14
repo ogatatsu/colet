@@ -272,8 +272,9 @@ impl Colet {
             return Keys::Search;
         }
         // Open, the field has the keys, or had them until the press that switches tabs.
-        if self.address.is_open() {
-            let field = self.address.field().read(cx);
+        let address = self.address.read(cx);
+        if address.is_open() {
+            let field = address.field().read(cx);
             let text = field.value().to_string();
             return Keys::Address { text, picked: field.selected_range(), reversed: field.is_selection_reversed() };
         }

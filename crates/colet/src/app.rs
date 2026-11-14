@@ -30,7 +30,7 @@ use gpui_kit::*;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use crate::{
-    address::Address,
+    address::AddressBar,
     backend::{self, Search},
     crumbs::Trail,
     icons::Icons,
@@ -338,7 +338,9 @@ pub struct Colet {
     pub tabs: Tabs,
     pub widths: Widths,
     pub search: Entity<InputState>,
-    pub address: Address,
+    /// The address bar's field and the asking whether what is typed there is: its own entity, which Colet
+    /// opens and closes and hears from.
+    pub address: Entity<AddressBar>,
     /// The field of each column, narrowing it to some names.
     pub narrow_fields: HashMap<ColumnId, NarrowField>,
     pub home_focus: FocusHandle,
@@ -386,10 +388,12 @@ impl Colet {
         cx: &mut Context<Self>,
     ) -> Self {
         let (search, typed) = Self::search_field(window, cx);
-        let (address, address_typed) = Self::address_field(window, cx);
+        let address = cx.new(|cx| AddressBar::new(backend.clone(), window, cx));
         let mut subscriptions = vec![
             typed,
-            address_typed,
+            // The field opening and closing redraws the trail in its place.
+            cx.observe(&address, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&address, window, |this, _, event, window, cx| this.on_address_event(event, window, cx)),
             // Followed only while the theme follows Windows.
             cx.observe_window_appearance(window, |this, window, cx| this.apply_theme(window, cx)),
             cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
@@ -419,7 +423,7 @@ impl Colet {
             tabs: Tabs::default(),
             widths: Widths::new(settings.sidebar_width, settings.search_width, settings.column_width, settings.search_field_width),
             search,
-            address: Address::new(address),
+            address,
             narrow_fields: HashMap::new(),
             home_focus: cx.focus_handle().tab_stop(true),
             columns_focus: cx.focus_handle().tab_stop(true),
@@ -448,7 +452,8 @@ impl Colet {
         // The library draws in the theme kept before anything takes its colors from it.
         crate::theme::apply(window, this.stored.settings().theme, cx);
         cx.palette().style_input(&this.search, cx);
-        cx.palette().style_input(this.address.field(), cx);
+        let address = this.address.read(cx).field().clone();
+        cx.palette().style_input(&address, cx);
         this.restore_tabs(window, cx);
         // The window's dialog, the columns' fields and their scrolls follow `dialog` and the columns as each
         // change to Colet settles, before it is drawn.
@@ -464,12 +469,8 @@ impl Colet {
         this._subscriptions.push(cx.on_focus(&home, window, |this, window, cx| this.follow_focus(window, cx)));
         this._subscriptions.push(cx.on_focus(&columns, window, |this, window, cx| this.follow_focus(window, cx)));
         // The keys leaving the open address field close it.
-        let address = this.address.field().read(cx).focus_handle(cx);
-        this._subscriptions.push(cx.on_focus_out(&address, window, |this, _, window, cx| {
-            if this.follow_address(window, cx) {
-                cx.notify();
-            }
-        }));
+        let address = this.address.read(cx).field().read(cx).focus_handle(cx);
+        this._subscriptions.push(cx.on_focus_out(&address, window, |this, _, window, cx| this.follow_address(window, cx)));
         this.sync_narrow_fields(window, cx);
         this.scroll_rows();
         crate::theme::set_zoom(this.stored.settings().zoom, cx);
@@ -522,7 +523,7 @@ impl Colet {
     /// Takes the colors the theme now gives, in the fields too, the dialog's among them.
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
         crate::theme::apply(window, self.stored.settings().theme, cx);
-        let mut inputs = vec![self.search.clone(), self.address.field().clone()];
+        let mut inputs = vec![self.search.clone(), self.address.read(cx).field().clone()];
         inputs.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         inputs.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
         for input in &inputs {

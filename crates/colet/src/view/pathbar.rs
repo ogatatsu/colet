@@ -130,7 +130,10 @@ impl Colet {
         let menu_current = crumbs[..folded].iter().any(|c| Some(c.column) == active);
         self.crumbs.folded = crumbs[..folded].to_vec();
         let fold = (folded > 0).then(|| self.crumb_fold(menu_current, window, cx));
-        let editing = self.address.is_open();
+        let (editing, address_field) = {
+            let address = self.address.read(cx);
+            (address.is_open(), address.field().clone())
+        };
         let trail = div()
             .flex()
             .flex_1()
@@ -182,10 +185,10 @@ impl Colet {
             .min_w_0()
             .px(scaled(6.))
             .key_context(ADDRESS)
-            .capture_any_mouse_down(Self::right_press_menu(self.address.field(), cx))
+            .capture_any_mouse_down(Self::right_press_menu(&address_field, cx))
             .on_action(cx.listener(|this, _: &input::Escape, window, cx| this.leave_address(window, cx)))
-            .on_action(cx.listener(|this, _: &GoToAddressInNewTab, window, cx| this.go_to_address(true, window, cx)))
-            .child(Input::new(self.address.field()));
+            .on_action(cx.listener(|this, _: &GoToAddressInNewTab, _, cx| this.go_to_address(true, cx)))
+            .child(Input::new(&address_field));
         // Ringed as the search field is while it takes the keys; the ring lies over the gaps around. It gives
         // way first in a narrow window, folding its crumbs.
         frame(p, editing, metrics::FIELD_RADIUS)

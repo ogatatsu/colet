@@ -3,7 +3,10 @@ use super::*;
 
 impl Ui {
     fn address(&self, cx: &mut TestAppContext) -> Option<String> {
-        let (open, field) = self.view.read_with(cx, |v, _| (v.address.is_open(), v.address.field().clone()));
+        let (open, field) = self.view.read_with(cx, |v, cx| {
+            let address = v.address.read(cx);
+            (address.is_open(), address.field().clone())
+        });
         open.then(|| field.read_with(cx, |input, _| input.value().to_string()))
     }
 
@@ -189,4 +192,22 @@ fn a_servers_shares_are_only_looked_at(cx: &mut TestAppContext) {
     // A share's own folder takes a new folder as any does.
     ui.press(cx, "right");
     assert_eq!(ui.read_app(cx, |v, app| v.reasons(app).paste), None);
+}
+
+#[gpui_kit::test]
+fn lets_go_of_the_answer_about_a_path_typed_over_or_closed_while_it_was_asked(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    for after in ["input", "escape"] {
+        ui.press(cx, "ctrl-l");
+        ui.input(cx, r"D:\other");
+        // Asked, then typed over or closed before the answer comes back: each a step of its own, with
+        // nothing let run between them.
+        ui.act(cx, |window, cx| window.press("enter", cx));
+        ui.act(cx, |window, cx| if after == "input" { window.input("x", cx) } else { window.press("escape", cx) });
+        settle(cx);
+        assert_eq!(ui.last_folder(cx), r"D:\work", "{after}");
+        assert!(ui.toasts(cx).is_empty(), "{after}: {:?}", ui.toasts(cx));
+    }
+    // The field typed over stays as it is; once closed, the trail is back.
+    assert_eq!(ui.address(cx), None);
 }

@@ -2,6 +2,10 @@
 //! Explorer's does. Enter goes there in the tab, Alt+Enter in a new one; a folder opens with its contents
 //! beside it, a file where it lives with it picked. Esc, or the keys going elsewhere, lets go of what was
 //! typed and the trail comes back.
+//!
+//! [`AddressBar`] owns the field, whether it is open, and the asking whether a typed path is there; it
+//! tells what came of it through [`AddressEvent`]. Colet owns the rest: the trail drawn in its place,
+//! what the field opens holding, where the keys went, and going to what was found.
 use std::path::PathBuf;
 
 use colet_core::paths::{address, shown};
@@ -10,80 +14,132 @@ use gpui_kit::*;
 
 use crate::{
     app::{Colet, Tone},
+    backend,
     state::Kind,
 };
 
 /// What the empty address says before and while editing.
 pub(crate) const PLACEHOLDER: &str = "パスを入力（Ctrl+L）";
 
-pub use bar::Address;
+/// The address bar's field, shown in place of the trail while open, and how many times anything has
+/// happened to it: a path typed, the field opened or closed. An answer about a path is taken only while
+/// nothing has happened since it was asked.
+pub struct AddressBar {
+    field: Entity<InputState>,
+    open: bool,
+    asked: u64,
+    backend: backend::Shared,
+    _typed: Subscription,
+}
 
-/// Apart from what Colet does with it, so only its own methods reach its fields.
-mod bar {
-    use gpui_kit::Entity;
-    use gpui_kit::base::input::InputState;
+/// What came of a path typed and gone to. Each is told once, after the bar has settled: closed for one
+/// found, still open, as typed, for one to put right.
+pub enum AddressEvent {
+    /// `path` is there, as written on disk: to be gone to in this tab or, `in_new_tab`, a new one.
+    Found { path: PathBuf, directory: bool, in_new_tab: bool },
+    /// What was typed cannot be gone to, and why, to be said.
+    Problem(String),
+}
 
-    /// The address bar's field, shown in place of the trail while open, and how many times anything has
-    /// happened to it: a path typed, the field opened or closed. An answer about a path is taken only while
-    /// nothing has happened since it was asked.
-    pub struct Address {
-        field: Entity<InputState>,
-        open: bool,
-        asked: u64,
+impl EventEmitter<AddressEvent> for AddressBar {}
+
+impl AddressBar {
+    /// Enter in the field goes to what is typed, in this tab.
+    pub fn new(backend: backend::Shared, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder(PLACEHOLDER));
+        let typed = cx.subscribe_in(&field, window, |this: &mut Self, _, event, _, cx| match event {
+            InputEvent::PressEnter { .. } => this.go(false, cx),
+            // What was asked for is no longer what the field holds.
+            InputEvent::Change => this.asked += 1,
+            _ => {}
+        });
+        Self { field, open: false, asked: 0, backend, _typed: typed }
     }
 
-    impl Address {
-        pub(crate) fn new(field: Entity<InputState>) -> Self {
-            Self { field, open: false, asked: 0 }
-        }
+    pub fn field(&self) -> &Entity<InputState> {
+        &self.field
+    }
 
-        pub fn field(&self) -> &Entity<InputState> {
-            &self.field
-        }
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
 
-        pub fn is_open(&self) -> bool {
-            self.open
-        }
+    /// Opens or closes the field; an answer still on its way is let go of.
+    fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.open = open;
+        self.asked += 1;
+        cx.notify();
+    }
 
-        /// Opens or closes the field; an answer still on its way is let go of.
-        pub(super) fn set_open(&mut self, open: bool) {
-            self.open = open;
-            self.asked += 1;
-        }
+    /// Opens the field holding `text`, all picked to be typed over, with the keys.
+    pub fn open(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_open(true, cx);
+        self.field.update(cx, |input, cx| {
+            input.set_value(text, window, cx);
+            input.focus(window, cx);
+            input.select_all(window, cx);
+        });
+    }
 
-        /// What the field holds changed: an answer still on its way is no longer about it.
-        pub(super) fn typed(&mut self) {
-            self.asked += 1;
-        }
+    /// Opens the field holding `text` with `picked` picked, as it was left, with the keys.
+    pub fn reopen(&mut self, text: String, picked: std::ops::Range<usize>, reversed: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_open(true, cx);
+        self.field.update(cx, |input, cx| {
+            input.set_value(text, window, cx);
+            input.focus(window, cx);
+            input.set_selected_range_with_direction(picked, reversed, cx);
+        });
+    }
 
-        /// Asks about what the field holds now: the number its answer is to come back with.
-        pub(super) fn ask(&mut self) -> u64 {
-            self.asked += 1;
-            self.asked
-        }
+    /// Lets go of what was typed; the trail shows again. Any answer still on its way is let go of too.
+    pub fn close(&mut self, cx: &mut Context<Self>) {
+        self.set_open(false, cx);
+    }
 
-        /// Nothing has happened to the field since `asked`.
-        pub(super) fn still_asked(&self, asked: u64) -> bool {
-            asked == self.asked
+    /// Goes to the path typed, in this tab or, `in_new_tab`, a new one. Whether it is there, and how its
+    /// names are written on disk, is asked off the UI thread, as a share can keep it waiting.
+    pub fn go(&mut self, in_new_tab: bool, cx: &mut Context<Self>) {
+        let text = self.field.read(cx).value().to_string();
+        if text.trim().is_empty() {
+            return;
         }
+        let Some(path) = address(&text, |name| std::env::var(name).ok()) else {
+            cx.emit(AddressEvent::Problem(format!(
+                "「{}」は開けません。ドライブ（C:\\…）かサーバー（\\\\server）から始まるパスを入力してください",
+                text.trim()
+            )));
+            return;
+        };
+        self.asked += 1;
+        let asked = self.asked;
+        let backend = self.backend.clone();
+        let found = {
+            let path = path.clone();
+            cx.background_executor().spawn(async move { backend.locate(&path) })
+        };
+        cx.spawn(async move |this, cx| {
+            let found = found.await;
+            this.update(cx, |this, cx| this.found(asked, path, found, in_new_tab, cx)).ok();
+        })
+        .detach();
+    }
+
+    /// The answer for the path last typed, unless the field was let go of or typed in anew since. What
+    /// is not there leaves the field as it is, to be put right.
+    fn found(&mut self, asked: u64, typed: PathBuf, found: Option<(PathBuf, bool)>, in_new_tab: bool, cx: &mut Context<Self>) {
+        if asked != self.asked {
+            return;
+        }
+        let Some((path, directory)) = found else {
+            cx.emit(AddressEvent::Problem(format!("「{}」が見つかりません", shown(&typed))));
+            return;
+        };
+        self.close(cx);
+        cx.emit(AddressEvent::Found { path, directory, in_new_tab });
     }
 }
 
 impl Colet {
-    /// The field, and what it tells: Enter goes to what is typed.
-    pub(crate) fn address_field(window: &mut Window, cx: &mut Context<Self>) -> (Entity<InputState>, Subscription) {
-        let field = cx.new(|cx| InputState::new(window, cx).placeholder(PLACEHOLDER));
-        let typed = cx.subscribe_in(&field, window, |this: &mut Self, _, event, window, cx| {
-            match event {
-                InputEvent::PressEnter { .. } => this.go_to_address(false, window, cx),
-                // What was asked for is no longer what the field holds.
-                InputEvent::Change => this.address.typed(),
-                _ => {}
-            }
-        });
-        (field, typed)
-    }
-
     /// The deepest folder open, as the field starts with it; none while only home or the results are.
     fn deepest_folder(&self) -> Option<PathBuf> {
         self.state.columns.iter().rev().find(|c| c.kind == Kind::Folder).map(|c| c.path.clone())
@@ -96,13 +152,7 @@ impl Colet {
             return;
         }
         let text = self.deepest_folder().map(shown).unwrap_or_default();
-        self.address.set_open(true);
-        self.address.field().update(cx, |input, cx| {
-            input.set_value(text, window, cx);
-            input.focus(window, cx);
-            input.select_all(window, cx);
-        });
-        cx.notify();
+        self.address.update(cx, |address, cx| address.open(text, window, cx));
     }
 
     /// Back to a tab left while typing an address: the field, holding what was typed and picked there.
@@ -114,93 +164,44 @@ impl Colet {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.address.set_open(true);
-        self.address.field().update(cx, |input, cx| {
-            input.set_value(text, window, cx);
-            input.focus(window, cx);
-            input.set_selected_range_with_direction(picked, reversed, cx);
-        });
-        cx.notify();
-    }
-
-    /// Lets go of what was typed; the trail shows again. Any answer still on its way is let go of too.
-    pub fn close_address(&mut self, cx: &mut Context<Self>) {
-        self.address.set_open(false);
-        cx.notify();
+        self.address.update(cx, |address, cx| address.reopen(text, picked, reversed, window, cx));
     }
 
     /// Esc: the trail comes back and the keys go to the column worked in.
     pub fn leave_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_address(cx);
+        self.address.update(cx, |address, cx| address.close(cx));
         self.focus_active(window, cx);
+    }
+
+    /// Alt+Enter, or Enter: goes to the path typed, in a new tab or this one.
+    pub fn go_to_address(&mut self, in_new_tab: bool, cx: &mut Context<Self>) {
+        self.address.update(cx, |address, cx| address.go(in_new_tab, cx));
     }
 
     /// While the field is open, the keys going anywhere else close it, and an answer still on its way is
     /// let go of; its own menu keeps it, and so does a menu, dialog or the history that gives the keys back
-    /// to it as it closes, with what was typed and picked there. Tells whether it closed.
-    pub(crate) fn follow_address(&mut self, window: &Window, cx: &App) -> bool {
-        let gone = self.address.is_open()
-            && !self.has_keys(self.address.field(), window, cx)
-            && !self.keys_go_back_to(&self.address.field().read(cx).focus_handle(cx));
+    /// to it as it closes, with what was typed and picked there.
+    pub(crate) fn follow_address(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let address = self.address.read(cx);
+        let gone = address.is_open()
+            && !self.has_keys(address.field(), window, cx)
+            && !self.keys_go_back_to(&address.field().read(cx).focus_handle(cx));
         if gone {
-            self.address.set_open(false);
+            self.address.update(cx, |address, cx| address.close(cx));
         }
-        gone
     }
 
-    /// Goes to the path typed, in this tab or, `in_new_tab`, a new one in front. Whether it is there, and
-    /// how its names are written on disk, is asked off the UI thread, as a share can keep it waiting. What
-    /// cannot be gone to is said, and the field stays as it is to be put right.
-    pub fn go_to_address(&mut self, in_new_tab: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.address.field().read(cx).value().to_string();
-        if text.trim().is_empty() {
-            return;
+    /// What the bar tells: a path found is gone to, and the keys go to the column worked in; what cannot
+    /// be gone to is said.
+    pub(crate) fn on_address_event(&mut self, event: &AddressEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            AddressEvent::Problem(problem) => self.notify(problem.clone(), Tone::Error, cx),
+            AddressEvent::Found { path, directory, in_new_tab: true } => self.open_path_in_tab(path, *directory, window, cx),
+            AddressEvent::Found { path, directory, in_new_tab: false } => {
+                self.state.go_to_path(path, *directory);
+                self.sync_search_field(window, cx);
+                self.focus_active(window, cx);
+            }
         }
-        let Some(path) = address(&text, |name| std::env::var(name).ok()) else {
-            self.notify(
-                format!("「{}」は開けません。ドライブ（C:\\…）かサーバー（\\\\server）から始まるパスを入力してください", text.trim()),
-                Tone::Error,
-                cx,
-            );
-            return;
-        };
-        let asked = self.address.ask();
-        let backend = self.backend.clone();
-        let found = {
-            let path = path.clone();
-            cx.background_executor().spawn(async move { backend.locate(&path) })
-        };
-        cx.spawn_in(window, async move |this, cx| {
-            let found = found.await;
-            this.update_in(cx, |this, window, cx| this.address_found(asked, path, found, in_new_tab, window, cx)).ok();
-        })
-        .detach();
-    }
-
-    /// The answer for the path last typed, unless the field was let go of or typed in anew since.
-    fn address_found(
-        &mut self,
-        asked: u64,
-        typed: PathBuf,
-        found: Option<(PathBuf, bool)>,
-        in_new_tab: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.address.still_asked(asked) {
-            return;
-        }
-        let Some((path, directory)) = found else {
-            self.notify(format!("「{}」が見つかりません", shown(&typed)), Tone::Error, cx);
-            return;
-        };
-        self.close_address(cx);
-        if in_new_tab {
-            self.open_path_in_tab(&path, directory, window, cx);
-            return;
-        }
-        self.state.go_to_path(&path, directory);
-        self.sync_search_field(window, cx);
-        self.focus_active(window, cx);
     }
 }

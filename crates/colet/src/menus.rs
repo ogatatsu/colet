@@ -254,7 +254,7 @@ impl Colet {
 
     /// The menu key in a text field opens its menu under the caret.
     pub fn open_focused_text_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(input) = self.text_fields().into_iter().find(|input| input.read(cx).focus_handle(cx).is_focused(window)) else {
+        let Some(input) = self.text_fields(cx).into_iter().find(|input| input.read(cx).focus_handle(cx).is_focused(window)) else {
             return;
         };
         let at = {
@@ -266,8 +266,8 @@ impl Colet {
 
     /// The text fields there are: the search's, the address bar's, the columns' filters', and the open
     /// dialog's.
-    fn text_fields(&self) -> Vec<Entity<InputState>> {
-        let mut fields = vec![self.search.clone(), self.address.field().clone()];
+    fn text_fields(&self, cx: &App) -> Vec<Entity<InputState>> {
+        let mut fields = vec![self.search.clone(), self.address.read(cx).field().clone()];
         fields.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         fields.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
         fields
