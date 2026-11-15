@@ -18,6 +18,8 @@ use crate::{
     state::Kind,
 };
 
+mod view;
+
 /// What the empty address says before and while editing.
 pub(crate) const PLACEHOLDER: &str = "パスを入力（Ctrl+L）";
 

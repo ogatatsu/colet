@@ -13,7 +13,7 @@ use std::{
 
 use colet_core::everything::PAGE;
 
-use crate::{state::ColumnId, view::PAGE_AHEAD, watching::Watching};
+use crate::{columns::PAGE_AHEAD, state::ColumnId, watching::Watching};
 
 #[derive(Default)]
 pub struct Loading {

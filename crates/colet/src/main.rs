@@ -5,6 +5,7 @@ mod app;
 mod backend;
 mod clipboard;
 mod column_order;
+mod columns;
 mod crumbs;
 mod dialogs;
 mod drag_out;

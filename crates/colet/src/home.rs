@@ -35,6 +35,10 @@ use crate::{
     theme::ActivePalette,
 };
 
+mod view;
+
+pub use view::HomeGhost;
+
 /// Home's rows: the pinned in their order, then the favorites, the saved searches and the places, each
 /// place once. A pin whose row is not there, a drive unplugged, waits for it unseen.
 pub fn home_entries(settings: &Settings, drives: Vec<Entry>) -> Vec<Entry> {

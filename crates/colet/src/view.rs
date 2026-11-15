@@ -1,18 +1,13 @@
-//! How the window looks: home's pane on the left; the search field, the trail of folders, the columns
-//! and the status bar beside it.
-use std::{ops::Range, rc::Rc, time::Instant};
+//! The window as a whole: the tabs, the toolbar ([`toolbar`]), home's pane beside the columns, and the
+//! status bar ([`statusbar`]), each region drawn by its own feature (home, the columns, the search bar,
+//! the address); the keys and drags that span the window; and the parts every feature draws with: rings
+//! round what has the keys, tips, glyphs, scrollbars and menus dropped from a button.
+use std::{ops::Range, rc::Rc};
 
-use colet_core::{
-    entry::{Entry, Sort, direction_label},
-    paths::{folder_name, id_text, shown},
-    time,
-};
-use gpui_kit::base::input::{self, Input, InputState};
+use colet_core::{paths::shown, time};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, FocusableExt, Selectable, Sizable,
+    ActiveTheme, Disableable, FocusableExt,
     button::{Button, ButtonVariants},
-    checkbox::Checkbox,
-    spinner::Spinner,
     status_bar::StatusBar,
 };
 use gpui_kit::prelude::FluentBuilder;
@@ -20,30 +15,17 @@ use gpui_kit::*;
 
 use crate::{
     app::*,
-    crumbs::Crumb,
-    home::{HomeDrag, movable},
     metrics::{self, Scale, scaled},
-    reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
-    state::HomeKey,
-    state::{Column, ColumnId, Kind},
+    state::Kind,
     stops::Stop,
     theme::ActivePalette,
 };
 
-mod column;
 mod elements;
-mod pathbar;
-mod rows;
-mod scrolling;
-mod sidebar;
 mod statusbar;
 mod toolbar;
 
-use elements::on_top;
-use rows::{MODIFIED_WIDTH, SIZE_WIDTH};
-pub(crate) use rows::{PAGE_AHEAD, rows_in_sight};
-#[cfg(test)]
-pub(crate) use rows::{row_id, row_part_id};
+pub(crate) use elements::on_top;
 
 pub trait TipExt {
     /// A line of text shown while the pointer rests on it.
@@ -87,18 +69,18 @@ pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette, scale
 }
 
 /// How wide the edge a drag widens a column or home's pane from is.
-const RESIZER_WIDTH: f32 = 6.;
+pub(crate) const RESIZER_WIDTH: f32 = 6.;
 /// How thick a scrollbar's track is.
 pub(crate) const SCROLLBAR_WIDTH: f32 = 8.;
 /// How thick a scrollbar's thumb is, within its track.
-const SCROLLBAR_THUMB: f32 = 6.;
+pub(crate) const SCROLLBAR_THUMB: f32 = 6.;
 
 /// How far a ring laid round what it rings stands out: a pixel's gap and its two pixels.
 pub const RING_ROOM: f32 = 3.;
 
 /// The focus ring itself: two pixels in the focus color, `inset` in from the edges of what holds it, its
 /// corners `radius`. Laid over what it rings, it takes no room and catches no pointer.
-fn ring_line(p: crate::theme::Palette, inset: f32, radius: f32) -> impl IntoElement {
+pub(crate) fn ring_line(p: crate::theme::Palette, inset: f32, radius: f32) -> impl IntoElement {
     div()
         .id("focus-ring")
         .test_support()
@@ -128,7 +110,7 @@ pub fn frame(p: crate::theme::Palette, shown: bool, radius: f32) -> Div {
 
 /// The frame round the column worked in, laid over it on the lines round it: from the path bar's line
 /// above to its own on the right; the caller sets its left and bottom.
-fn active_frame(p: crate::theme::Palette) -> Div {
+pub(crate) fn active_frame(p: crate::theme::Palette) -> Div {
     div().absolute().top(px(-1.)).right_0().border_1().border_color(p.accent)
 }
 
@@ -136,7 +118,7 @@ fn active_frame(p: crate::theme::Palette) -> Div {
 pub const MENU_MARGIN: f32 = 8.;
 /// How far in from the left of the row, or of the column's heading, the menu opened from the keyboard
 /// starts: past the row's own picture, so the menu does not hide what it acts on.
-const KEY_MENU_INSET: f32 = 16.;
+pub(crate) const KEY_MENU_INSET: f32 = 16.;
 
 /// Where the active column's focused row and its heading were drawn in the last frame: the menu opened
 /// from the keyboard drops from under the row, or from under the heading when no row has the keys. Both
@@ -161,7 +143,7 @@ impl KeyMenuAnchor {
     }
 }
 /// The room between a button and the menu dropped from it.
-const MENU_GAP: f32 = 4.;
+pub(crate) const MENU_GAP: f32 = 4.;
 
 /// Which side of its button a menu dropped from it lines up with.
 #[derive(Clone, Copy)]
@@ -195,12 +177,12 @@ pub fn keep_focus<E: InteractiveElement>(el: E) -> E {
     el.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
 }
 
-fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
+pub(crate) fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(scaled(size)).flex_none().text_color(color)
 }
 
 /// `text` with what a search matched in it in `color`.
-fn with_marks(text: &str, marks: &[Range<usize>], color: Hsla) -> StyledText {
+pub(crate) fn with_marks(text: &str, marks: &[Range<usize>], color: Hsla) -> StyledText {
     let style = HighlightStyle { color: Some(color), ..Default::default() };
     StyledText::new(text.to_owned()).with_highlights(marks.iter().map(|range| (range.clone(), style)))
 }
@@ -249,94 +231,8 @@ impl Colet {
     }
 
     /// The keys are in home's pane.
-    fn in_home(&self) -> bool {
+    pub(crate) fn in_home(&self) -> bool {
         self.state.columns.get(self.state.active).is_some_and(|c| c.kind == Kind::Home)
-    }
-
-    fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = cx.palette();
-        let pinned = self.state.pinned();
-        let away = self.state.folded_away();
-        let first = if pinned { 2 } else { 1 } + away;
-        let only_home = self.state.columns.len() == 1;
-        let pinned_column = pinned.then(|| self.render_column(1, window, cx));
-        let strip = (away > 0).then(|| self.unfold_strip(away, window, cx));
-        let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, window, cx)).collect();
-        let scrolling = self.scrolling_columns(columns, window, cx);
-        let measure = cx.entity().downgrade();
-        let main = div()
-            .id("main")
-            .track_focus(&self.columns_focus)
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .relative()
-            .bg(p.bg)
-            // How wide this side is, for the results to stretch into: a change lays it out again.
-            .child(
-                canvas(
-                    move |bounds, _, cx| {
-                        measure
-                            .update(cx, |this, cx| {
-                                let width = this.scale().down(f32::from(bounds.size.width));
-                                if (width - this.scrolls.sideways.main).abs() >= 0.5 {
-                                    this.scrolls.sideways.main = width;
-                                    cx.notify();
-                                }
-                            })
-                            .ok();
-                    },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .inset_0(),
-            )
-            .child(self.takes_text(&self.columns_focus, cx))
-            .children(pinned_column)
-            .children(strip)
-            .child(scrolling)
-            // Nothing searched or opened leaves this side dark; show where to start.
-            .when(only_home, |d| d.child(self.home_hint(window, cx)));
-        self.column_keys(main, cx).into_any_element()
-    }
-
-    fn home_hint(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = cx.palette();
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap_3()
-            .p_6()
-            .text_size(scaled(metrics::TEXT_BODY))
-            .text_color(p.text_muted)
-            .child(icon("search", 28., p.text_faint))
-            .child("名前やEverythingの検索式で探せます")
-            // Ringed as a field is; the rings' room makes up most of the gaps. In a narrow window they go on
-            // to a second line rather than past the edges.
-            .child(div().flex().flex_wrap().justify_center().gap_0p5().children(
-                [("ext:pdf", "PDFファイル"), ("dm:today", "今日更新した項目"), ("size:>1gb", "1 GBを超えるファイル")].map(
-                    |(query, label)| {
-                        let button = Button::new(query)
-                            .outline()
-                            .accessibility_label(format!("{query} {label}"))
-                            .h(scaled(metrics::SMALL_CONTROL_HEIGHT))
-                            .px_2p5()
-                            .gap_1p5()
-                            .child(div().text_color(p.accent).font_family(metrics::FONT_CODE).child(query))
-                            .child(label)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                let filter = this.chosen_filter(cx);
-                                this.search_for(query, filter, window, cx)
-                            }));
-                        self.ringed(button, Stop::Hint(query.to_string()), RingAt::Round, window, cx)
-                    },
-                ),
-            ))
-            .into_any_element()
     }
 }
 
@@ -392,7 +288,7 @@ impl Render for Colet {
         let tabbar = self.tab_bar();
         let sidebar = self.render_sidebar(window, cx);
         let toolbar = self.render_toolbar(window, cx);
-        let main = self.render_main(window, cx);
+        let main = self.render_columns(window, cx);
         div()
             .id("colet")
             .size_full()

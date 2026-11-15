@@ -11,6 +11,8 @@ use gpui_kit::*;
 
 use crate::app::Colet;
 
+mod view;
+
 /// What the empty search field says.
 const PLACEHOLDER: &str = "Everythingで検索（Ctrl+F）";
 

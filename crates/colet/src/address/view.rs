@@ -1,8 +1,21 @@
 //! The trail of folders above the columns, and the address field typed in in its place.
-use super::*;
-use gpui_kit::component::menu::PopupMenuItem;
 
-use crate::menus::Popup;
+use colet_core::paths::{folder_name, shown};
+use gpui_kit::base::input::{self, Input};
+use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+
+use crate::{
+    app::*,
+    crumbs::Crumb,
+    menus::Popup,
+    metrics::{self, Scale, scaled},
+    state::{ColumnId, Kind},
+    stops::Stop,
+    theme::ActivePalette,
+    view::*,
+};
 
 impl Colet {
     /// The bar under the crumbs of the columns on screen, cut where the edges cut the columns; only while
@@ -55,7 +68,7 @@ impl Colet {
     /// crumbs furthest from the deepest fold into a menu so the nearest stay readable.
     /// The crumbs of the trail: each folder column's. The search results have none: the search field beside
     /// it stands for them.
-    pub(super) fn trail(&self) -> Vec<Crumb> {
+    pub(crate) fn trail(&self) -> Vec<Crumb> {
         self.state
             .columns
             .iter()
@@ -90,7 +103,7 @@ impl Colet {
     }
 
     /// The address beside the search field: the trail of crumbs, or the field to type a path in.
-    pub(super) fn render_address(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_address(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let crumbs = self.trail();
         let widths = self.crumb_widths(&crumbs, window);
@@ -238,7 +251,7 @@ impl Colet {
 
     /// A crumb on the trail, a chevron before it unless it stands first; the last is clipped to
     /// `max_width`, the others keep their whole names.
-    pub(super) fn crumb(&self, crumb: Crumb, chevron: bool, max_width: Option<f32>, window: &Window, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn crumb(&self, crumb: Crumb, chevron: bool, max_width: Option<f32>, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = cx.palette();
         let Crumb { column: id, name: label, path } = crumb;
         let current = self.state.index_of(id) == Some(self.state.active);

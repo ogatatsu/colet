@@ -1,5 +1,30 @@
 //! A column: its heading, narrowing field, headings, rows and the edge that widens it.
-use super::*;
+
+use colet_core::{
+    entry::{Sort, direction_label},
+    paths::shown,
+    time,
+};
+use gpui_kit::base::input::{self, Input, InputState};
+use gpui_kit::component::{
+    Disableable, Selectable, Sizable,
+    button::{Button, ButtonVariants},
+    checkbox::Checkbox,
+    spinner::Spinner,
+};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+
+use crate::{
+    app::*,
+    metrics::{self, scaled},
+    state::{Column, ColumnId, Kind},
+    stops::Stop,
+    theme::ActivePalette,
+    view::*,
+};
+
+use super::{MODIFIED_WIDTH, SIZE_WIDTH};
 
 /// How many the column holds, in its heading: narrowed, how many show of how many in all. Nothing while it
 /// cannot be listed or has not been yet.
@@ -16,7 +41,7 @@ fn count_text(c: &Column) -> String {
 impl Colet {
     /// Shift+↑↓, with Ctrl adding: picks rows on the way, or in home, which picks one at a time, moves as
     /// the arrows do.
-    pub(super) fn extend_step(&mut self, by: isize, add: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn extend_step(&mut self, by: isize, add: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.in_home() {
             self.step(by, window, cx);
             return;
@@ -52,7 +77,7 @@ impl Colet {
     }
 
     /// The keys that move through a column and between them, for home's pane and the columns alike.
-    pub(super) fn column_keys(&self, el: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(crate) fn column_keys(&self, el: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
         let el = el.key_context(COLUMNS);
         let el = Self::on_rows::<SelectPrevious>(el, cx, |this, window, cx| this.step(-1, window, cx));
         let el = Self::on_rows::<SelectNext>(el, cx, |this, window, cx| this.step(1, window, cx));
@@ -151,14 +176,14 @@ impl Colet {
     }
 
     /// While `focus`, the rows', has the keys, what is typed there goes to their column's field.
-    pub(super) fn takes_text(&self, focus: &FocusHandle, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn takes_text(&self, focus: &FocusHandle, cx: &mut Context<Self>) -> impl IntoElement {
         let (focus, view) = (focus.clone(), cx.entity());
         canvas(|_, _, _| {}, move |bounds, _, window, cx| window.handle_input(&focus, ElementInputHandler::new(bounds, view), cx))
             .absolute()
             .size_full()
     }
 
-    pub(super) fn message(&self, icon_name: &'static str, text: String, cx: &App) -> Div {
+    pub(crate) fn message(&self, icon_name: &'static str, text: String, cx: &App) -> Div {
         let p = cx.palette();
         div()
             .flex()
@@ -173,7 +198,7 @@ impl Colet {
             .child(div().text_center().child(text))
     }
 
-    pub(super) fn loading(&self, cx: &App) -> Div {
+    pub(crate) fn loading(&self, cx: &App) -> Div {
         let p = cx.palette();
         div()
             .flex()
@@ -189,7 +214,7 @@ impl Colet {
 
     /// What a column lists, or why it lists nothing.
     /// The column at `index` under its headings: its rows, or why it has none.
-    pub(super) fn column_body(&mut self, index: usize, marked: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn column_body(&mut self, index: usize, marked: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let c = &self.state.columns[index];
         let (id, kind) = (c.id, c.kind);
         if let Some(error) = c.error.clone() {
@@ -234,7 +259,7 @@ impl Colet {
     }
 
     /// The edge a drag widens a column from: astride its border, so its scrollbar stays clear of it.
-    pub(super) fn resizer(&self, id: &'static str, of: WidthOf, width: f32, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn resizer(&self, id: &'static str, of: WidthOf, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         // Over what lies past the border, drawn after it; none over a dialog, which covers it.
         if self.overlays.has_dialog() {
@@ -265,7 +290,7 @@ impl Colet {
         on_top(handle).into_any_element()
     }
 
-    pub(super) fn render_column(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_column(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let marked = index == self.state.active && self.columns_marked(window);
         let c: &Column = &self.state.columns[index];
@@ -456,7 +481,7 @@ impl Colet {
 
     /// The headings over the column's rows, each sorting it by what it heads; the one it goes by shows
     /// the way it runs. Laid out as a row is, so each stands over its cells.
-    pub(super) fn headings(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn headings(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let c = &self.state.columns[index];
         let id = c.id;
@@ -549,7 +574,7 @@ impl Colet {
     }
 
     /// The field narrowing the column `id` to the names holding what is typed there.
-    pub(super) fn column_narrow_field(
+    pub(crate) fn column_narrow_field(
         &mut self,
         id: ColumnId,
         narrowed: bool,

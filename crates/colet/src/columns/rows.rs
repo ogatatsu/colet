@@ -1,51 +1,24 @@
 //! Rows of home and the folders; search results carry their folder on a second line.
-use super::*;
+use std::ops::Range;
 
-/// What follows the pointer as a row is dragged in home: its row, faint.
-pub struct HomeGhost {
-    name: String,
-    search: bool,
-    image: Option<std::sync::Arc<RenderImage>>,
-    width: Pixels,
-}
+use colet_core::{entry::Entry, paths::id_text, time};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
-impl Render for HomeGhost {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = cx.palette();
-        let picture = match (self.search, self.image.clone()) {
-            (true, _) => icon("search", 16., p.text_muted).into_any_element(),
-            (false, Some(image)) => img(image).size(scaled(metrics::ICON)).flex_none().into_any_element(),
-            (false, None) => div().size(scaled(metrics::ICON)).flex_none().into_any_element(),
-        };
-        div()
-            .w(self.width)
-            .h(scaled(row_height(Kind::Home)))
-            .px_2()
-            .flex()
-            .items_center()
-            .gap_2()
-            .rounded(scaled(metrics::RADIUS))
-            .border_1()
-            .border_color(p.border_strong)
-            .bg(p.raised)
-            // Faint enough that the landing line it passes over still shows through.
-            .opacity(0.5)
-            .font_family(metrics::FONT_UI)
-            .text_size(scaled(metrics::TEXT_LARGE))
-            .text_color(p.text)
-            .child(picture)
-            .child(div().min_w_0().truncate().child(self.name.clone()))
-    }
-}
+use crate::{
+    app::*,
+    home::{HomeDrag, HomeGhost, movable},
+    metrics::{self, Scale, scaled},
+    state::{ColumnId, HomeKey, Kind},
+    theme::ActivePalette,
+    view::*,
+};
 
 /// The widths a row's size and modified time take: `1023.9 MB` and `2026/12/31 23:59`, at 12px.
-pub(super) const SIZE_WIDTH: f32 = 56.;
-pub(super) const MODIFIED_WIDTH: f32 = 96.;
+pub(crate) const SIZE_WIDTH: f32 = 56.;
+pub(crate) const MODIFIED_WIDTH: f32 = 96.;
 /// The chevron closing a folder's row, and the room a file's row keeps in its place.
 const CHEVRON: f32 = 13.;
-/// The line showing where a row dragged in home lands: drawn across the boundary between two rows, half
-/// on either side.
-const LANDING_LINE: f32 = 2.;
 /// What the pointer is on for a row's icon to turn to its checkbox.
 const CHECK_GROUP: &str = "check";
 
@@ -61,12 +34,12 @@ pub(crate) fn row_part_id(row: &std::sync::Arc<ElementId>, part: &'static str) -
 
 /// A row being drawn: its item, and its id, which its parts' ids are made from.
 #[derive(Clone, Copy)]
-pub(super) struct DrawnRow<'a> {
+pub(crate) struct DrawnRow<'a> {
     entry: &'a Entry,
     id: &'a std::sync::Arc<ElementId>,
 }
 
-fn row_height(kind: Kind) -> f32 {
+pub(crate) fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
 }
 
@@ -168,7 +141,7 @@ impl Colet {
         }
     }
 
-    pub(super) fn row(&mut self, index: usize, entry: &Entry, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn row(&mut self, index: usize, entry: &Entry, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let RowLook { selected, highlighted, barred, lit, focused, target, aside, held, cut, faded, dragged, within, narrow } =
             self.row_look(index, entry, marked, keys, cx);
@@ -259,7 +232,7 @@ impl Colet {
                         Scale::of(window).px(pane)
                     });
                     let (name, search, image) = (name.clone(), HomeKey::of(&drag.path).is_search(), image.clone());
-                    cx.new(|_| HomeGhost { name, search, image, width })
+                    cx.new(|_| HomeGhost::new(name, search, image, width))
                 })
             })
             .when(dragged, |r| r.opacity(0.4))
@@ -318,7 +291,7 @@ impl Colet {
     /// The icon, which turns to a checkbox while its row is one of several selected or the pointer is on it,
     /// as Explorer's item check boxes do: one alone is the row gone into, not a set being gathered. It takes
     /// the row's edge and the gap after it, to be easy to hit.
-    pub(super) fn check(
+    pub(crate) fn check(
         &self,
         index: usize,
         row: DrawnRow,
@@ -518,81 +491,9 @@ impl Colet {
         self.changed(cx);
     }
 
-    /// Home's rows: a handful of places, so no need to virtualize. The kinds stand under headings, so they
-    /// don't read as one list; a drag among them shows where it would land.
-    pub(super) fn home_rows(&mut self, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
-        let p = cx.palette();
-        let entries = self.state.columns[0].entries.clone();
-        let groups = crate::home::home_groups(self.stored.settings(), &entries);
-        // Drawn afresh below, for a drag to find its place.
-        let dragging = self.home_drag.read(cx);
-        dragging.rows().borrow_mut().clear();
-        dragging.headings().borrow_mut().clear();
-        let headings = dragging.headings().clone();
-        // The line where a drag would land: above the row it goes before, or below its kind's last.
-        let landing = dragging.carried().zip(dragging.landing()).map(|(d, l)| (d.shelf, l.before.clone()));
-        let mut rows = div()
-            .id("home-rows")
-            .role(Role::ListBox)
-            .aria_label("ホーム")
-            .size_full()
-            .overflow_y_scroll()
-            .track_scroll(&self.scrolls.home)
-            .on_drag_move(
-                cx.listener(|this, event: &DragMoveEvent<HomeDrag>, _, cx| this.drag_home(event.event.position, event.bounds, cx)),
-            )
-            .on_drop(cx.listener(|this, drag: &HomeDrag, _, cx| this.drop_home(drag, cx)))
-            .test_support();
-        for (k, (title, items)) in groups.into_iter().enumerate() {
-            let headings = headings.clone();
-            rows = rows.child(
-                div()
-                    // Set off from the kind above, so the kinds read apart.
-                    .when(k > 0, |d| d.mt_2())
-                    .relative()
-                    .child(canvas(move |bounds, _, _| headings.borrow_mut().push(bounds), |_, _, _, _| {}).absolute().inset_0())
-                    .h_7()
-                    .px_3()
-                    .pb_1p5()
-                    .flex()
-                    .items_end()
-                    .text_size(scaled(metrics::TEXT_BODY))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(p.text_muted)
-                    .child(title),
-            );
-            for (i, entry) in items.iter().enumerate() {
-                let line = landing.as_ref().and_then(|(shelf, before)| match before {
-                    Some(before) => (*before == entry.path).then_some(true),
-                    None => (i + 1 == items.len() && movable(self.stored.settings(), &entry.path) == Some(*shelf)).then_some(false),
-                });
-                rows = rows.child(div().px_1().relative().child(self.row(0, entry, marked, keys, cx)).when_some(line, |d, above| {
-                    d.child(
-                        div()
-                            .absolute()
-                            .left_1p5()
-                            .right_1p5()
-                            .h(scaled(LANDING_LINE))
-                            .rounded_full()
-                            .bg(p.accent)
-                            .when(above, |l| l.top(scaled(-LANDING_LINE / 2.)))
-                            .when(!above, |l| l.bottom(scaled(-LANDING_LINE / 2.))),
-                    )
-                }));
-            }
-        }
-        div()
-            .flex_1()
-            .min_h_0()
-            .relative()
-            .child(rows)
-            .child(div().absolute().inset_0().child(scrollbar(gpui_kit::base::Scrollbar::vertical(&self.scrolls.home), p, self.scale())))
-            .into_any_element()
-    }
-
     /// The rows of a folder or the results: only those in sight are drawn, and the results load their
     /// next page as the list nears the end of what it has (see [`next_page_at_end`]).
-    pub(super) fn column_rows(&mut self, index: usize, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn column_rows(&mut self, index: usize, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let c = &self.state.columns[index];
         let (id, count) = (c.id, c.entries.len());

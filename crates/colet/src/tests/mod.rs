@@ -638,12 +638,12 @@ fn crumb(ui: &Ui, cx: &mut TestAppContext, index: usize) -> ElementId {
 }
 
 fn row(path: impl AsRef<Path>) -> ElementId {
-    crate::view::row_id(path.as_ref())
+    crate::columns::row_id(path.as_ref())
 }
 
 /// The part `part` of the row of `path`: its checkbox, its mark of being on the clipboard.
 fn row_part(path: impl AsRef<Path>, part: &'static str) -> ElementId {
-    crate::view::row_part_id(&Arc::new(row(path)), part)
+    crate::columns::row_part_id(&Arc::new(row(path)), part)
 }
 
 fn drive_d() -> Fake {

@@ -1,5 +1,17 @@
 //! The columns scrolled sideways: what of them is on screen, and bringing one in sight.
-use super::*;
+use std::time::Instant;
+
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+
+use crate::{
+    app::*,
+    metrics::{self, Scale, scaled},
+    reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
+    state::ColumnId,
+    theme::ActivePalette,
+    view::*,
+};
 
 /// What of the scrolling columns is on screen.
 pub struct OnScreen {
@@ -39,7 +51,7 @@ impl Colet {
     }
 
     /// The results are drawn wider than their own width.
-    pub(super) fn results_stretched(&self) -> bool {
+    pub(crate) fn results_stretched(&self) -> bool {
         self.scrolls.sideways.results > self.widths.search
     }
 
@@ -86,7 +98,7 @@ impl Colet {
     }
 
     /// The strip the `away` folders folded above a result stand in for, which brings them out.
-    pub(super) fn unfold_strip(&mut self, away: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn unfold_strip(&mut self, away: usize, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let focus = self.stop("unfold", cx);
         div()
@@ -159,7 +171,7 @@ impl Colet {
 
     /// The scrolling `columns` in their sideways scroll, with its scrollbar and a shade on each edge that
     /// cuts a column.
-    pub(super) fn scrolling_columns(&self, columns: Vec<AnyElement>, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn scrolling_columns(&self, columns: Vec<AnyElement>, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let screen = self.on_screen();
         let content = screen.count as f32 * self.widths.column;
@@ -254,7 +266,7 @@ impl Colet {
     }
 
     /// Slides the columns toward where they should rest, a frame at a time.
-    pub(super) fn reveal(&mut self, window: &mut Window) {
+    pub(crate) fn reveal(&mut self, window: &mut Window) {
         let mut view = self.scrolls.sideways.view_width();
         let mut from = self.scrolls.sideways.offset();
         // The results beside the columns narrow or widen, as folders open or close: the view's left edge
@@ -345,7 +357,7 @@ impl Colet {
     }
 
     /// The scrolling columns' places, and which of them is active: `None` for home or the pinned results.
-    pub(super) fn scrolling(&self) -> (Vec<Cell>, Option<usize>) {
+    pub(crate) fn scrolling(&self) -> (Vec<Cell>, Option<usize>) {
         let first = if self.state.pinned() { 2 } else { 1 } + self.state.folded_away();
         let count = self.state.columns.len().saturating_sub(first);
         let width = self.widths.column;
