@@ -13,7 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
-    app::Colet,
+    app::{Colet, Tone},
     backend::{self, PathKind},
     dialogs::push,
     metrics::{self, scaled},
@@ -330,5 +330,42 @@ impl Colet {
         // The button takes no listener for the press, so the box round it notes it.
         let button = self.ringed(button, "history-button", RingAt::Edge, window, cx);
         Self::opener(div().flex(), |this| this.overlays.is_history_open(), cx).child(button).into_any_element()
+    }
+}
+
+impl Colet {
+    /// Opened, the history has been seen, with `entry` shown opened; closed, the keys go back to where they
+    /// were as it opened.
+    pub fn show_history(&mut self, open: bool, entry: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
+        let was_open = self.overlays.is_history_open();
+        if open && !was_open {
+            self.remember_keys(window, cx);
+        }
+        self.overlays.set_history_open(open);
+        if open {
+            self.history.update(cx, |history, cx| history.opened(entry, cx));
+            self.operations.update(cx, |operations, cx| operations.mark_history_seen(cx));
+        } else {
+            self.history.update(cx, |history, _| history.closed());
+        }
+        if !open && was_open {
+            self.restore_keys(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// What the history asks for. An item pressed in it is answered for only while it stays open, so one
+    /// still there closes it and opens in the columns.
+    pub(crate) fn on_history_event(&mut self, event: &HistoryEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            HistoryEvent::Dismiss => self.show_history(false, None, window, cx),
+            HistoryEvent::Gone(path) => self.notify(format!("「{}」はもうありません", shown(folder_name(path))), Tone::Info, cx),
+            HistoryEvent::Reveal { path, folder } => {
+                self.show_history(false, None, window, cx);
+                self.state.go_to_path(path, *folder);
+                self.sync_search_field(window, cx);
+                self.focus_active(window, cx);
+            }
+        }
     }
 }

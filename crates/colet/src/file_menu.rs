@@ -9,7 +9,8 @@ use gpui_kit::*;
 use crate::{
     app::Colet,
     menus::{Line, Popup, choice, line},
-    ops::{Menu, NEEDS_FILE, NEEDS_FOLDER, ONE_ITEM},
+    ops::{NEEDS_FILE, NEEDS_FOLDER, ONE_ITEM},
+    state::ColumnId,
     state::Kind,
 };
 
@@ -38,6 +39,17 @@ pub enum FileCommand {
         shift: bool,
     },
     Windows,
+}
+
+/// Where a menu opened by a right-click or the menu key stands, and what it acts on.
+pub struct Menu {
+    pub column: ColumnId,
+    /// `None` for the column's selection; empty from its empty space, for the folder itself.
+    pub paths: Option<Vec<PathBuf>>,
+    /// In the window.
+    pub at: Point<Pixels>,
+    /// On the screen, for the Windows menu.
+    pub screen: (i32, i32),
 }
 
 impl FileCommand {
