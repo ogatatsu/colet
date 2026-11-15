@@ -32,6 +32,9 @@ pub struct Palette {
     // Surfaces, darkest to lightest in the dark setting.
     /// Behind the tabs: darker than `bg`, which the current tab takes, so that tab stands off the rest.
     pub tab_strip: Hsla,
+    /// A tab not current under the pointer: between `tab_strip` and `bg`, so it never outshines the
+    /// current tab.
+    pub tab_hover: Hsla,
     /// The frame around the columns: the toolbar, the file actions' row, home, the fold strip and the
     /// status bar, all in one.
     pub bg: Hsla,
@@ -75,26 +78,27 @@ impl Palette {
     pub fn dark() -> Self {
         Self {
             tab_strip: hsl(220., 4., 4.),
-            bg: hsl(220., 4., 9.),
-            surface: hsl(220., 4., 12.),
-            raised: hsl(220., 3., 16.),
-            hover: hsl(220., 3., 17.),
-            raised_hover: hsl(220., 3., 22.),
-            border: hsl(220., 3., 19.),
-            border_strong: hsl(220., 3., 28.),
+            tab_hover: hsl(220., 4., 9.),
+            bg: hsl(220., 4., 11.),
+            surface: hsl(220., 4., 14.),
+            raised: hsl(220., 3., 18.),
+            hover: hsl(220., 3., 19.),
+            raised_hover: hsl(220., 3., 24.),
+            border: hsl(220., 3., 21.),
+            border_strong: hsl(220., 3., 30.),
             text: hsl(220., 4., 90.),
-            text_muted: hsl(220., 3., 62.),
-            text_faint: hsl(220., 3., 56.),
-            accent: hsl(212., 85., 72.),
-            accent_fill: hsl(214., 62., 36.),
-            selected_inactive: hsl(220., 3., 21.),
-            highlight: hsl(214., 30., 22.),
+            text_muted: hsl(220., 3., 65.),
+            text_faint: hsl(220., 3., 58.),
+            accent: hsl(213., 65., 72.),
+            accent_fill: hsl(214., 48., 38.),
+            selected_inactive: hsl(220., 3., 23.),
+            highlight: hsl(214., 24., 25.),
             danger: hsl(0., 72., 70.),
             danger_fill: hsl(0., 58., 42.),
-            focus: hsl(212., 90., 72.),
-            focus_on_fill: hsl(212., 90., 80.),
+            focus: hsl(213., 70., 72.),
+            focus_on_fill: hsl(213., 70., 82.),
             scrollbar: hsla(220. / 360., 0.03, 0.40, 0.8),
-            selection: hsl(214., 55., 32.),
+            selection: hsl(214., 42., 33.),
             on_accent: hsl(0., 0., 100.),
             on_accent_muted: hsla(0., 0., 1., 0.85),
             on_accent_match: hsl(45., 95., 75.),
@@ -104,7 +108,8 @@ impl Palette {
 
     pub fn light() -> Self {
         Self {
-            tab_strip: hsl(220., 4., 89.),
+            tab_strip: hsl(220., 4., 86.),
+            tab_hover: hsl(220., 4., 93.),
             bg: hsl(220., 4., 96.),
             surface: hsl(0., 0., 100.),
             raised: hsl(0., 0., 100.),
@@ -113,18 +118,18 @@ impl Palette {
             border: hsl(220., 4., 87.),
             border_strong: hsl(220., 3., 76.),
             text: hsl(220., 4., 13.),
-            text_muted: hsl(220., 3., 38.),
+            text_muted: hsl(220., 3., 36.),
             text_faint: hsl(220., 3., 42.),
-            accent: hsl(214., 80., 38.),
-            accent_fill: hsl(214., 72., 40.),
+            accent: hsl(214., 65., 38.),
+            accent_fill: hsl(214., 58., 40.),
             selected_inactive: hsl(220., 4., 88.),
-            highlight: hsl(214., 80., 89.),
+            highlight: hsl(214., 60., 89.),
             danger: hsl(0., 65., 45.),
             danger_fill: hsl(0., 65., 42.),
-            focus: hsl(214., 80., 45.),
-            focus_on_fill: hsl(214., 90., 82.),
+            focus: hsl(214., 65., 45.),
+            focus_on_fill: hsl(214., 75., 82.),
             scrollbar: hsla(220. / 360., 0.03, 0.55, 0.7),
-            selection: hsl(214., 80., 85.),
+            selection: hsl(214., 65., 85.),
             on_accent: hsl(0., 0., 100.),
             on_accent_muted: hsla(0., 0., 1., 0.85),
             on_accent_match: hsl(48., 100., 80.),
@@ -270,6 +275,16 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_current_tab_outshines_the_strip_and_a_hovered_tab() {
+        for (palette, dark) in [(Palette::light(), false), (Palette::dark(), true)] {
+            // The strip is the darkest in either setting, so each step toward the current tab lightens.
+            let toward_bg = |a: Hsla, b: Hsla| b.l - a.l;
+            assert!(toward_bg(palette.tab_strip, palette.tab_hover) >= 0.029, "strip to hovered, dark: {dark}");
+            assert!(toward_bg(palette.tab_hover, palette.bg) >= 0.019, "hovered to current, dark: {dark}");
+        }
+    }
+
     /// WCAG's contrast ratio of two opaque colors.
     fn contrast(a: Hsla, b: Hsla) -> f32 {
         let luminance = |c: Hsla| {
@@ -306,6 +321,7 @@ mod tests {
                 ("a column's count", palette.text_faint, palette.surface),
                 ("faint text in home and the status bar", palette.text_faint, palette.bg),
                 ("a tab not current", palette.text_muted, palette.tab_strip),
+                ("a tab not current under the pointer", palette.text_muted, palette.tab_hover),
             ] {
                 let ratio = contrast(ink, ground);
                 assert!(ratio >= 4.5, "{what}: {ratio}, dark: {dark}");

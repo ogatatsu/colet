@@ -682,7 +682,7 @@ impl Colet {
                         .right_0()
                         .invisible()
                         .group_hover(group, |s| s.visible())
-                        .child(tab_shape(p.hover, None)),
+                        .child(tab_shape(p.tab_hover, None)),
                 )
             })
             .when(carried, |d| d.opacity(0.4))
