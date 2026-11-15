@@ -236,20 +236,20 @@ fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the
     ui.act(cx, |window, cx| {
         ui.view.update(cx, |v, cx| {
             v.show_history(true, None, window, cx);
-            v.reveal_from_history(r"D:\work\a.txt".into(), window, cx);
-            v.reveal_from_history(r"D:\work\c.txt".into(), window, cx);
+            v.history.update(cx, |history, cx| history.reveal(r"D:\work\a.txt".into(), window, cx));
+            v.history.update(cx, |history, cx| history.reveal(r"D:\work\c.txt".into(), window, cx));
             // The history stays up while the disk is asked.
-            assert!(v.history_panel.open);
+            assert!(v.overlays.is_history_open());
         });
     });
     settle(cx);
-    assert!(ui.read(cx, |v| !v.history_panel.open));
+    assert!(ui.read(cx, |v| !v.overlays.is_history_open()));
     assert_eq!(picked(cx), [r"D:\work\c.txt"]);
     // Closed before the answer came, the history has moved on from it.
     ui.act(cx, |window, cx| {
         ui.view.update(cx, |v, cx| {
             v.show_history(true, None, window, cx);
-            v.reveal_from_history(r"D:\work\b.txt".into(), window, cx);
+            v.history.update(cx, |history, cx| history.reveal(r"D:\work\b.txt".into(), window, cx));
             v.show_history(false, None, window, cx);
         });
     });
@@ -259,11 +259,11 @@ fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the
     ui.act(cx, |window, cx| {
         ui.view.update(cx, |v, cx| {
             v.show_history(true, None, window, cx);
-            v.reveal_from_history(r"D:\work\gone.txt".into(), window, cx);
+            v.history.update(cx, |history, cx| history.reveal(r"D:\work\gone.txt".into(), window, cx));
         });
     });
     settle(cx);
-    assert!(ui.read(cx, |v| v.history_panel.open));
+    assert!(ui.read(cx, |v| v.overlays.is_history_open()));
     assert!(ui.toasts(cx).iter().any(|t| t == "「gone.txt」はもうありません"), "{:?}", ui.toasts(cx));
 }
 
@@ -363,7 +363,7 @@ fn clears_the_operations_over_from_the_history(cx: &mut TestAppContext) {
     ui.click(cx, "history-button");
     ui.click(cx, "clear-history");
     assert!(ui.ops(cx, |o| o.history.entries.is_empty()));
-    assert!(ui.read(cx, |v| v.history_panel.open));
+    assert!(ui.read(cx, |v| v.overlays.is_history_open()));
 }
 
 #[gpui_kit::test]
@@ -387,13 +387,13 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     assert_eq!(ui.ops(cx, |o| o.history.unseen), 1);
     let toast = ui.read(cx, |v| v.next_toast);
     ui.click(cx, ("toast-details", toast as usize));
-    assert!(ui.read_app(cx, |v, app| v.history_panel.open && v.operations.read(app).history.unseen == 0));
+    assert!(ui.read_app(cx, |v, app| v.overlays.is_history_open() && v.operations.read(app).history.unseen == 0));
     let entry = ui.ops(cx, |o| o.history.entries[0].clone());
-    assert!(ui.read(cx, |v| v.history_panel.expanded.contains(&entry.id)));
+    assert!(ui.read_app(cx, |v, app| v.history.read(app).is_expanded(entry.id)));
     assert_eq!(entry.items[0].error.as_deref(), Some("アクセスが拒否されました。"));
     // Still there: its name opens it in the columns.
     ui.click(cx, crate::dialogs::history_item_id(entry.id, 0));
-    assert!(ui.read(cx, |v| !v.history_panel.open));
+    assert!(ui.read(cx, |v| !v.overlays.is_history_open()));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
 }
 

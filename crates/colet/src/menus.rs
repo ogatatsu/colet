@@ -583,7 +583,7 @@ impl Colet {
         if let Some(Popup::Text(menu)) = &popup {
             menu.input.update(cx, |input, cx| input.set_selection_focus(None, cx));
         }
-        let within = self.overlays.has_dialog() || self.history_panel.open;
+        let within = self.overlays.has_dialog() || self.overlays.is_history_open();
         match popup {
             Some(Popup::Text(menu)) if restore && within => menu.input.update(cx, |input, cx| input.focus(window, cx)),
             _ if restore && !within => self.restore_keys(window, cx),

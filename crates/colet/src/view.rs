@@ -481,6 +481,6 @@ impl Render for Colet {
             )
             // Over a dialog, a field's menu is drawn with it.
             .children(if !self.overlays.has_dialog() { self.render_menu(cx) } else { None })
-            .children(self.render_history(window, cx))
+            .when(self.overlays.is_history_open(), |d| d.child(deferred(self.history.clone()).with_priority(2)))
     }
 }

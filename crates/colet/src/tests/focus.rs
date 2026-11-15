@@ -39,9 +39,9 @@ fn the_history_gives_the_keys_back_to_where_they_were_as_it_opened(cx: &mut Test
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-f");
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| v.history_panel.open));
+    assert!(ui.read(cx, |v| v.overlays.is_history_open()));
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| !v.history_panel.open));
+    assert!(ui.read(cx, |v| !v.overlays.is_history_open()));
     assert!(ui.search_field_focused(cx));
 }
 
@@ -112,9 +112,9 @@ fn the_history_opened_while_typing_an_address_gives_it_back_as_typed(cx: &mut Te
     ui.press(cx, "ctrl-l");
     ui.input(cx, r"D:\wo");
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| v.history_panel.open));
+    assert!(ui.read(cx, |v| v.overlays.is_history_open()));
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| !v.history_panel.open));
+    assert!(ui.read(cx, |v| !v.overlays.is_history_open()));
     assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
     assert!(ui.address_focused(cx));
 }

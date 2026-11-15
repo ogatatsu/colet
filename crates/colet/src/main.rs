@@ -7,6 +7,7 @@ mod clipboard;
 mod crumbs;
 mod dialogs;
 mod drag_out;
+mod history;
 mod icons;
 mod instance;
 mod kept_path;

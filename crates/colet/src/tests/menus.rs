@@ -551,9 +551,9 @@ fn closes_the_menus_from_the_buttons_that_opened_them(cx: &mut TestAppContext) {
     ui.press_and_release(cx, "search-filter");
     assert!(!ui.read(cx, |v| v.filter_open()));
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| v.history_panel.open));
+    assert!(ui.read(cx, |v| v.overlays.is_history_open()));
     ui.press_and_release(cx, "history-button");
-    assert!(ui.read(cx, |v| !v.history_panel.open));
+    assert!(ui.read(cx, |v| !v.overlays.is_history_open()));
     assert!(ui.columns_focused(cx));
     // Pressed once more, each opens again.
     ui.press_and_release(cx, ("column-sort", work));

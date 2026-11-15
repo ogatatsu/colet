@@ -2,7 +2,7 @@
 use colet_core::{
     entry::{Order, Sort, direction_label},
     operations::{Kind as Operation, Request},
-    paths::{ancestors, folder_name, shown},
+    paths::{ancestors, shown},
 };
 use std::{path::PathBuf, rc::Rc};
 
@@ -21,7 +21,7 @@ use crate::{
     app::Colet,
     menus::Popup,
     metrics::{self, Scale, scaled},
-    ops::{ItemStatus, Menu, Status},
+    ops::Menu,
     places::Dialog,
     search_filters::FilterEdit,
     settings::{Favorite, Theme, ZOOMS},
@@ -109,7 +109,7 @@ const TEXT_MENU_WIDTH: f32 = 200.;
 const TAB_MENU_WIDTH: f32 = 220.;
 
 /// `HH:MM`, local.
-fn clock(unix_ms: u64) -> String {
+pub(crate) fn clock(unix_ms: u64) -> String {
     colet_core::time::local(unix_ms).map_or_else(String::new, |t| format!("{:02}:{:02}", t.wHour, t.wMinute))
 }
 
@@ -145,7 +145,7 @@ fn label(p: Palette, text: &'static str) -> Div {
 }
 
 /// A dialog's button: the primary one is what Enter does.
-fn push(id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, enabled: bool) -> Button {
+pub(crate) fn push(id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, enabled: bool) -> Button {
     Button::new(id).label(text).when(primary, |b| b.primary()).disabled(!enabled)
 }
 
@@ -911,7 +911,7 @@ impl Colet {
             .map(|b| if running { b.icon(Spinner::new()) } else { b.icon(crate::view::glyph("clock")) })
             .accessibility_label(label.clone())
             // Shown only while the history is shut: open, the tip would lie over it.
-            .when(!self.history_panel.open, |b| b.tooltip(label))
+            .when(!self.overlays.is_history_open(), |b| b.tooltip(label))
             .when(unseen > 0, |d| {
                 d.child(
                     div()
@@ -931,7 +931,7 @@ impl Colet {
                 )
             })
             .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                if this.history_panel.open {
+                if this.overlays.is_history_open() {
                     this.show_history(false, None, window, cx);
                 } else if !this.pressed_shut(event) {
                     this.show_history(true, None, window, cx);
@@ -939,188 +939,6 @@ impl Colet {
             }));
         // The button takes no listener for the press, so the box round it notes it.
         let button = self.ringed(button, "history-button", RingAt::Edge, window, cx);
-        Self::opener(div().flex(), |this| this.history_panel.open, cx).child(button).into_any_element()
-    }
-
-    /// The file operations run since Colet opened, newest first.
-    pub fn render_history(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.history_panel.open {
-            return None;
-        }
-        let p = cx.palette();
-        // Each row and each item that opens a stop for Tab; the mouse leaves the keys
-        // where they are, as before.
-        let mut keys = Vec::new();
-        for entry in &self.operations.read(cx).history.entries {
-            keys.push(Stop::HistoryEntry(entry.id));
-            if self.history_panel.expanded.contains(&entry.id) {
-                keys.extend(entry.items.iter().enumerate().filter(|(_, item)| !item.gone).map(|(k, _)| Stop::HistoryItem(entry.id, k)));
-            }
-        }
-        let stops: std::collections::HashMap<Stop, FocusHandle> = keys.into_iter().map(|key| (key.clone(), self.stop(key, cx))).collect();
-        let history = &self.operations.read(cx).history;
-        let entries: Vec<AnyElement> = history
-            .entries
-            .iter()
-            .map(|entry| {
-                let id = entry.id;
-                let open = self.history_panel.expanded.contains(&id);
-                let problems = entry.has_problems();
-                div()
-                    .flex()
-                    .flex_col()
-                    .border_b_1()
-                    .border_color(p.border)
-                    .child(
-                        crate::view::keep_focus(crate::view::ring(
-                            div().id(("history-entry", id)).track_focus(&stops[&Stop::HistoryEntry(id)]),
-                            p,
-                            stops[&Stop::HistoryEntry(id)].is_focused(window),
-                            0.,
-                        ))
-                        .role(Role::Button)
-                        .aria_label(format!("{} {}", entry.request.kind.title(), entry.target()))
-                        .aria_expanded(open)
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .text_size(scaled(metrics::TEXT_BODY))
-                        .hover(|d| d.bg(p.raised_hover))
-                        .child(
-                            svg()
-                                .path(if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" })
-                                .size_3()
-                                .text_color(p.text_faint),
-                        )
-                        .child(div().text_color(p.text_faint).child(clock(entry.started)))
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(entry.request.kind.title()))
-                        .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(entry.target()))
-                        .child(div().text_color(if problems { p.danger } else { p.text_muted }).child(entry.outcome()))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.history_panel.toggle(id);
-                            cx.notify();
-                        }))
-                        .test_support(),
-                    )
-                    .when(open, |d| {
-                        d.when_some(entry.error.clone(), |d, error| {
-                            d.child(div().px_3().pb_1().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(error))
-                        })
-                        .children(entry.items.iter().enumerate().map(|(k, item)| {
-                            let path = item.path.clone();
-                            let name = shown(folder_name(&item.path));
-                            let color = match item.status {
-                                ItemStatus::Done | ItemStatus::Destroyed | ItemStatus::Handed => p.text_muted,
-                                ItemStatus::Failed => p.danger,
-                                _ => p.text_faint,
-                            };
-                            div()
-                                .px_3()
-                                .pl_8()
-                                .py(scaled(3.))
-                                .flex()
-                                .flex_col()
-                                .text_size(scaled(metrics::TEXT_BODY))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .child(if item.gone {
-                                            // Deleted, it has no place to open.
-                                            div().child(name).into_any_element()
-                                        } else {
-                                            crate::view::keep_focus(crate::view::ring(
-                                                div().id(history_item_id(id, k)).track_focus(&stops[&Stop::HistoryItem(id, k)]),
-                                                p,
-                                                stops[&Stop::HistoryItem(id, k)].is_focused(window),
-                                                4.,
-                                            ))
-                                            // Opened in Colet, not in a browser: a button, its name in the accent color.
-                                            .role(Role::Button)
-                                            .aria_label(name.clone())
-                                            .rounded(scaled(metrics::RADIUS))
-                                            .text_color(p.accent)
-                                            .hover(|d| d.bg(p.raised_hover))
-                                            .child(name)
-                                            .on_click(
-                                                cx.listener(move |this, _, window, cx| this.reveal_from_history(path.clone(), window, cx)),
-                                            )
-                                            .test_support()
-                                            .into_any_element()
-                                        })
-                                        .child(div().text_color(color).child(item.status.label())),
-                                )
-                                .child(div().truncate().text_color(p.text_faint).child(match &item.from {
-                                    Some(from) => format!("← {}", shown(from)),
-                                    None => shown(&item.path),
-                                }))
-                                .when_some(item.error.clone(), |d, error| d.child(div().text_color(p.danger).child(error)))
-                                .into_any_element()
-                        }))
-                        .when(entry.more > 0, |d| {
-                            d.child(
-                                div()
-                                    .pl_8()
-                                    .py_1()
-                                    .text_size(scaled(metrics::TEXT_BODY))
-                                    .text_color(p.text_faint)
-                                    .child(format!("ほか {} 項目", entry.more)),
-                            )
-                        })
-                    })
-                    .into_any_element()
-            })
-            .collect();
-        let clearable = history.entries.iter().any(|e| e.status != Status::Running);
-        Some(
-            deferred(
-                div()
-                    .id("history")
-                    .absolute()
-                    .right_3()
-                    .bottom_8()
-                    .w(scaled(440.))
-                    .max_h(scaled(520.))
-                    .flex()
-                    .flex_col()
-                    .bg(p.raised)
-                    .border_1()
-                    .border_color(p.border_strong)
-                    .rounded(scaled(8.))
-                    .shadow_lg()
-                    .occlude()
-                    .on_mouse_down_out(cx.listener(|this, _, window, cx| this.show_history(false, None, window, cx)))
-                    .child(
-                        div()
-                            .px_3()
-                            .h_10()
-                            .flex()
-                            .items_center()
-                            .border_b_1()
-                            .border_color(p.border)
-                            .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child("操作履歴"))
-                            .child(
-                                crate::view::keep_focus(push("clear-history", "履歴を消去", false, clearable).ghost().small()).on_click(
-                                    cx.listener(|this, _, _, cx| this.operations.update(cx, |operations, cx| operations.clear_history(cx))),
-                                ),
-                            ),
-                    )
-                    .child(if entries.is_empty() {
-                        div()
-                            .p_4()
-                            .text_size(scaled(metrics::TEXT_BODY))
-                            .text_color(p.text_muted)
-                            .child("まだファイル操作はありません")
-                            .into_any_element()
-                    } else {
-                        div().id("history-list").flex_1().overflow_y_scroll().children(entries).into_any_element()
-                    }),
-            )
-            .with_priority(2)
-            .into_any_element(),
-        )
+        Self::opener(div().flex(), |this| this.overlays.is_history_open(), cx).child(button).into_any_element()
     }
 }

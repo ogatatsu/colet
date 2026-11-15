@@ -22,6 +22,7 @@ use crate::{
     app::{Colet, Tone},
     backend::{self, PathKind},
     clipboard::{Clipboard, Paste},
+    history::HistoryEvent,
     places::Dialog,
     settings::Favorite,
     state::{Column, ColumnId, HomeKey, Kind as ColumnKind},
@@ -545,35 +546,6 @@ impl History {
     /// Lets go of the operations that are over.
     pub fn clear(&mut self) {
         self.entries.retain(|e| e.status == Status::Running);
-    }
-}
-
-/// How the window shows the history: Colet's own, as it draws it.
-#[derive(Default)]
-pub struct HistoryPanel {
-    pub open: bool,
-    /// The operations it shows opened.
-    pub expanded: HashSet<u64>,
-    /// The item last pressed in it, while the disk is asked whether it is still there.
-    pub(crate) revealing: Option<PathBuf>,
-}
-
-impl HistoryPanel {
-    /// Opened, with `entry` shown opened; closed, a lookup still out for an item pressed is over, and
-    /// opening it again does not revive it.
-    pub fn set_open(&mut self, open: bool, entry: Option<u64>) {
-        self.open = open;
-        self.expanded = entry.into_iter().collect();
-        if !open {
-            self.revealing = None;
-        }
-    }
-
-    /// Shows `entry` opened, or closed if it was.
-    pub fn toggle(&mut self, entry: u64) {
-        if !self.expanded.remove(&entry) {
-            self.expanded.insert(entry);
-        }
     }
 }
 
@@ -1276,15 +1248,19 @@ impl Colet {
         self.changed(cx);
     }
 
-    /// Opened, the history has been seen; closed, the keys go back to where they were as it opened.
+    /// Opened, the history has been seen, with `entry` shown opened; closed, the keys go back to where they
+    /// were as it opened.
     pub fn show_history(&mut self, open: bool, entry: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
-        let was_open = self.history_panel.open;
+        let was_open = self.overlays.is_history_open();
         if open && !was_open {
             self.remember_keys(window, cx);
         }
-        self.history_panel.set_open(open, entry);
+        self.overlays.set_history_open(open);
         if open {
+            self.history.update(cx, |history, cx| history.opened(entry, cx));
             self.operations.update(cx, |operations, cx| operations.mark_history_seen(cx));
+        } else {
+            self.history.update(cx, |history, _| history.closed());
         }
         if !open && was_open {
             self.restore_keys(window, cx);
@@ -1292,37 +1268,15 @@ impl Colet {
         cx.notify();
     }
 
-    /// Only what is still there: an item moved on or deleted since says so. Whether it is, is asked off the UI
-    /// thread, as a share can keep it waiting.
-    pub fn reveal_from_history(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        self.history_panel.revealing = Some(path.clone());
-        let backend = self.backend.clone();
-        let asked = {
-            let path = path.clone();
-            cx.background_executor().spawn(async move { backend.path_kind(&path) })
-        };
-        cx.spawn_in(window, async move |this, cx| {
-            let kind = asked.await;
-            this.update_in(cx, |this, window, cx| this.history_item_found(path, kind, window, cx)).ok();
-        })
-        .detach();
-    }
-
-    /// The answer for the item last pressed in the history, while the history is still open: another pressed
-    /// since, or the history closed, has moved on from it.
-    fn history_item_found(&mut self, path: PathBuf, kind: PathKind, window: &mut Window, cx: &mut Context<Self>) {
-        if self.history_panel.revealing.as_ref() != Some(&path) {
-            return;
-        }
-        self.history_panel.revealing = None;
-        if !self.history_panel.open {
-            return;
-        }
-        match kind {
-            PathKind::Gone => self.notify(format!("「{}」はもうありません", shown(folder_name(&path))), Tone::Info, cx),
-            PathKind::Folder | PathKind::File => {
+    /// What the history asks for. An item pressed in it is answered for only while it stays open, so one
+    /// still there closes it and opens in the columns.
+    pub(crate) fn on_history_event(&mut self, event: &HistoryEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            HistoryEvent::Dismiss => self.show_history(false, None, window, cx),
+            HistoryEvent::Gone(path) => self.notify(format!("「{}」はもうありません", shown(folder_name(path))), Tone::Info, cx),
+            HistoryEvent::Reveal { path, folder } => {
                 self.show_history(false, None, window, cx);
-                self.state.go_to_path(&path, kind == PathKind::Folder);
+                self.state.go_to_path(path, *folder);
                 self.sync_search_field(window, cx);
                 self.focus_active(window, cx);
             }

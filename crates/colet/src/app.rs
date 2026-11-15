@@ -31,11 +31,12 @@ use crate::{
     address::AddressBar,
     backend::{self, Search},
     crumbs::Trail,
+    history::HistoryPanel,
     icons::Icons,
     loading::Loading,
     menus::Popup,
     metrics::Scale,
-    ops::{HistoryPanel, Operations},
+    ops::Operations,
     overlays::Overlays,
     places::{Dialog, HomeDragging, home_entries, home_groups},
     scrolls::Scrolls,
@@ -368,8 +369,9 @@ pub struct Colet {
     /// The file operations, the history and the clipboard: their own entity, which Colet starts and ends
     /// operations on and hears from.
     pub operations: Entity<Operations>,
-    /// How the history of the operations shows.
-    pub history_panel: HistoryPanel,
+    /// The history of the operations as the window shows it: its own entity, which Colet opens and closes
+    /// and hears from.
+    pub history: Entity<HistoryPanel>,
     /// What QuickLook was last told to show: a preview open follows the keys from it.
     quick_looked: Option<PathBuf>,
     /// The window has come to the front and is not drawn so since: where the keys went on the way back is
@@ -418,6 +420,8 @@ impl Colet {
         // The history's button, the rows' clipboard marks and the menu's Send To are drawn from it.
         subscriptions.push(cx.observe(&operations, |_, _, cx| cx.notify()));
         subscriptions.push(cx.subscribe_in(&operations, window, |this, _, event, window, cx| this.on_operations_event(event, window, cx)));
+        let history = cx.new(|cx| HistoryPanel::new(operations.clone(), backend.clone(), cx));
+        subscriptions.push(cx.subscribe_in(&history, window, |this, _, event, window, cx| this.on_history_event(event, window, cx)));
         let mut this = Self {
             state: State::new(),
             chosen_filter: None,
@@ -443,7 +447,7 @@ impl Colet {
             overlays: Overlays::new(cx),
             key_menu: Default::default(),
             operations,
-            history_panel: HistoryPanel::default(),
+            history,
             quick_looked: None,
             came_to_front: false,
             _subscriptions: subscriptions,
@@ -657,7 +661,7 @@ impl Colet {
                         .update(cx, |this, cx| {
                             this.show_history(true, Some(entry), window, cx);
                             if event.is_keyboard() {
-                                this.stop(Stop::HistoryEntry(entry), cx).focus(window, cx);
+                                this.history.read(cx).entry_focus(entry, cx).focus(window, cx);
                             }
                         })
                         .ok();
@@ -1095,7 +1099,7 @@ impl Colet {
 
     /// A menu, dialog or the history is open, holding the keys.
     fn holds_keys(&self) -> bool {
-        self.overlays.is_open() || self.history_panel.open
+        self.overlays.is_open() || self.overlays.is_history_open()
     }
 
     /// A menu, dialog or the history opening: where the keys are now is where they go back to as it closes.

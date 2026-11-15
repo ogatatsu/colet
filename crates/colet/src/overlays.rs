@@ -1,5 +1,5 @@
-//! What stands over the window and takes the keys from it: the dialog, the one menu open at a time, and
-//! where the keys go back to as the last of them closes. Colet opens and closes them; this keeps each
+//! What stands over the window and takes the keys from it: the dialog, the one menu open at a time, the
+//! history, and where the keys go back to as the last of them closes. Colet opens and closes them; this keeps each
 //! one's parts in step, a dialog with what it listens to and a menu with the line it lights.
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::*;
@@ -18,6 +18,7 @@ pub struct Overlays {
     /// The open menu's lines, drawn and picked by the component library, its focus, and the closing it
     /// tells of.
     menu: Option<(Entity<PopupMenu>, FocusHandle, Subscription)>,
+    history_open: bool,
     /// Where the keys were as the menu, dialog or history open now was opened, the first of them when one
     /// opened another.
     keys_before: Option<WeakFocusHandle>,
@@ -34,6 +35,7 @@ impl Overlays {
             dialog_shown: false,
             popup: None,
             menu: None,
+            history_open: false,
             keys_before: None,
             pressed_open: false,
         }
@@ -149,6 +151,18 @@ impl Overlays {
     pub fn close_menu(&mut self) -> Option<Popup> {
         self.menu = None;
         self.popup.take()
+    }
+
+    // ---- The history ----
+
+    /// The history of the file operations is open; what it shows is its own (see
+    /// [`HistoryPanel`](crate::history::HistoryPanel)).
+    pub fn is_history_open(&self) -> bool {
+        self.history_open
+    }
+
+    pub fn set_history_open(&mut self, open: bool) {
+        self.history_open = open;
     }
 
     // ---- Where the keys go back to ----

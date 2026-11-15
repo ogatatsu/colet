@@ -1,0 +1,273 @@
+//! The history of the file operations as the window shows it: which operations are shown opened, the
+//! focus of each row and item Tab stops at, and the asking whether an item pressed is still there. Colet
+//! opens and closes it, as it does a menu or a dialog, and hears from it what it asks for.
+use std::{collections::HashSet, path::PathBuf};
+
+use colet_core::paths::{folder_name, shown};
+use gpui_kit::component::{Sizable, button::ButtonVariants};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+
+use crate::{
+    backend::{self, PathKind},
+    dialogs::{clock, history_item_id, push},
+    metrics::{self, scaled},
+    ops::{ItemStatus, Operations, Status},
+    stops::{Stop, Stops},
+    theme::ActivePalette,
+    view::{keep_focus, ring},
+};
+
+/// What the history asks of the window.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HistoryEvent {
+    /// Pressed outside it: it is to close.
+    Dismiss,
+    /// The item pressed is still there: it is to close, and the item to be opened in the columns.
+    Reveal { path: PathBuf, folder: bool },
+    /// The item pressed has moved on or been deleted since.
+    Gone(PathBuf),
+}
+
+pub struct HistoryPanel {
+    operations: Entity<Operations>,
+    backend: backend::Shared,
+    /// The operations shown opened.
+    expanded: HashSet<u64>,
+    /// The item last pressed, while the disk is asked whether it is still there.
+    revealing: Option<PathBuf>,
+    /// The rows and items Tab stops at, kept only while they are drawn.
+    stops: Stops,
+    _operations_changed: Subscription,
+}
+
+impl EventEmitter<HistoryEvent> for HistoryPanel {}
+
+impl HistoryPanel {
+    pub fn new(operations: Entity<Operations>, backend: backend::Shared, cx: &mut Context<Self>) -> Self {
+        let changed = cx.observe(&operations, |_, _, cx| cx.notify());
+        Self { operations, backend, expanded: HashSet::new(), revealing: None, stops: Stops::default(), _operations_changed: changed }
+    }
+
+    /// Opening, with `entry` shown opened and the rest closed.
+    pub fn opened(&mut self, entry: Option<u64>, cx: &mut Context<Self>) {
+        self.expanded = entry.into_iter().collect();
+        cx.notify();
+    }
+
+    /// Closing: an item pressed and still being asked about is let go of, and opening it again does not
+    /// revive it.
+    pub fn closed(&mut self) {
+        self.expanded.clear();
+        self.revealing = None;
+    }
+
+    pub fn is_expanded(&self, entry: u64) -> bool {
+        self.expanded.contains(&entry)
+    }
+
+    /// Shows `entry` opened, or closed if it was.
+    pub fn toggle(&mut self, entry: u64, cx: &mut Context<Self>) {
+        if !self.expanded.remove(&entry) {
+            self.expanded.insert(entry);
+        }
+        cx.notify();
+    }
+
+    /// The focus of the row of `entry`, for the keys to go to it.
+    pub fn entry_focus(&self, entry: u64, cx: &App) -> FocusHandle {
+        self.stops.get_or_make(Stop::HistoryEntry(entry), cx)
+    }
+
+    /// Asks whether `path` is still there, off the UI thread, as a share can keep it waiting; only the last
+    /// item pressed, while the history stays open, is answered for.
+    pub fn reveal(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.revealing = Some(path.clone());
+        let backend = self.backend.clone();
+        let asked = {
+            let path = path.clone();
+            cx.background_executor().spawn(async move { backend.path_kind(&path) })
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            let kind = asked.await;
+            this.update(cx, |this, cx| this.found(path, kind, cx)).ok();
+        })
+        .detach();
+    }
+
+    fn found(&mut self, path: PathBuf, kind: PathKind, cx: &mut Context<Self>) {
+        if self.revealing.as_ref() != Some(&path) {
+            return;
+        }
+        self.revealing = None;
+        cx.emit(match kind {
+            PathKind::Gone => HistoryEvent::Gone(path),
+            PathKind::Folder | PathKind::File => HistoryEvent::Reveal { path, folder: kind == PathKind::Folder },
+        });
+    }
+
+    fn render_entries(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let p = cx.palette();
+        let history = &self.operations.read(cx).history;
+        history
+            .entries
+            .iter()
+            .map(|entry| {
+                let id = entry.id;
+                let open = self.is_expanded(id);
+                let problems = entry.has_problems();
+                let focus = self.stops.get_or_make(Stop::HistoryEntry(id), cx);
+                div()
+                    .flex()
+                    .flex_col()
+                    .border_b_1()
+                    .border_color(p.border)
+                    .child(
+                        keep_focus(ring(div().id(("history-entry", id)).track_focus(&focus), p, focus.is_focused(window), 0.))
+                            .role(Role::Button)
+                            .aria_label(format!("{} {}", entry.request.kind.title(), entry.target()))
+                            .aria_expanded(open)
+                            .px_3()
+                            .py_2()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_size(scaled(metrics::TEXT_BODY))
+                            .hover(|d| d.bg(p.raised_hover))
+                            .child(
+                                svg()
+                                    .path(if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" })
+                                    .size_3()
+                                    .text_color(p.text_faint),
+                            )
+                            .child(div().text_color(p.text_faint).child(clock(entry.started)))
+                            .child(div().font_weight(FontWeight::SEMIBOLD).child(entry.request.kind.title()))
+                            .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(entry.target()))
+                            .child(div().text_color(if problems { p.danger } else { p.text_muted }).child(entry.outcome()))
+                            .on_click(cx.listener(move |this, _, _, cx| this.toggle(id, cx)))
+                            .test_support(),
+                    )
+                    .when(open, |d| {
+                        d.when_some(entry.error.clone(), |d, error| {
+                            d.child(div().px_3().pb_1().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(error))
+                        })
+                        .children(entry.items.iter().enumerate().map(|(k, item)| {
+                            let path = item.path.clone();
+                            let name = shown(folder_name(&item.path));
+                            let color = match item.status {
+                                ItemStatus::Done | ItemStatus::Destroyed | ItemStatus::Handed => p.text_muted,
+                                ItemStatus::Failed => p.danger,
+                                _ => p.text_faint,
+                            };
+                            div()
+                                .px_3()
+                                .pl_8()
+                                .py(scaled(3.))
+                                .flex()
+                                .flex_col()
+                                .text_size(scaled(metrics::TEXT_BODY))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(if item.gone {
+                                            // Deleted, it has no place to open.
+                                            div().child(name).into_any_element()
+                                        } else {
+                                            let focus = self.stops.get_or_make(Stop::HistoryItem(id, k), cx);
+                                            keep_focus(ring(
+                                                div().id(history_item_id(id, k)).track_focus(&focus),
+                                                p,
+                                                focus.is_focused(window),
+                                                4.,
+                                            ))
+                                            // Opened in Colet, not in a browser: a button, its name in the accent color.
+                                            .role(Role::Button)
+                                            .aria_label(name.clone())
+                                            .rounded(scaled(metrics::RADIUS))
+                                            .text_color(p.accent)
+                                            .hover(|d| d.bg(p.raised_hover))
+                                            .child(name)
+                                            .on_click(cx.listener(move |this, _, window, cx| this.reveal(path.clone(), window, cx)))
+                                            .test_support()
+                                            .into_any_element()
+                                        })
+                                        .child(div().text_color(color).child(item.status.label())),
+                                )
+                                .child(div().truncate().text_color(p.text_faint).child(match &item.from {
+                                    Some(from) => format!("← {}", shown(from)),
+                                    None => shown(&item.path),
+                                }))
+                                .when_some(item.error.clone(), |d, error| d.child(div().text_color(p.danger).child(error)))
+                                .into_any_element()
+                        }))
+                        .when(entry.more > 0, |d| {
+                            d.child(
+                                div()
+                                    .pl_8()
+                                    .py_1()
+                                    .text_size(scaled(metrics::TEXT_BODY))
+                                    .text_color(p.text_faint)
+                                    .child(format!("ほか {} 項目", entry.more)),
+                            )
+                        })
+                    })
+                    .into_any_element()
+            })
+            .collect()
+    }
+}
+
+impl Render for HistoryPanel {
+    /// The file operations run since Colet opened, newest first. Colet lays it over the window, deferred,
+    /// only while it is open.
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Only the stops of the rows and items drawn below stay; the mouse leaves the keys where they are.
+        self.stops.begin_frame(window);
+        let p = cx.palette();
+        let entries = self.render_entries(window, cx);
+        let clearable = self.operations.read(cx).history.entries.iter().any(|e| e.status != Status::Running);
+        div()
+            .id("history")
+            .absolute()
+            .right_3()
+            .bottom_8()
+            .w(scaled(440.))
+            .max_h(scaled(520.))
+            .flex()
+            .flex_col()
+            .bg(p.raised)
+            .border_1()
+            .border_color(p.border_strong)
+            .rounded(scaled(8.))
+            .shadow_lg()
+            .occlude()
+            .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(HistoryEvent::Dismiss)))
+            .child(
+                div()
+                    .px_3()
+                    .h_10()
+                    .flex()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(p.border)
+                    .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child("操作履歴"))
+                    .child(
+                        keep_focus(push("clear-history", "履歴を消去", false, clearable).ghost().small()).on_click(
+                            cx.listener(|this, _, _, cx| this.operations.update(cx, |operations, cx| operations.clear_history(cx))),
+                        ),
+                    ),
+            )
+            .child(if entries.is_empty() {
+                div()
+                    .p_4()
+                    .text_size(scaled(metrics::TEXT_BODY))
+                    .text_color(p.text_muted)
+                    .child("まだファイル操作はありません")
+                    .into_any_element()
+            } else {
+                div().id("history-list").flex_1().overflow_y_scroll().children(entries).into_any_element()
+            })
+    }
+}
