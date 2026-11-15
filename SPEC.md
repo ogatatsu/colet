@@ -7,7 +7,7 @@ Colet は、Everything で検索し、フォルダーをカラムでたどる Wi
 | 項目 | 内容 |
 |---|---|
 | 構成 | `colet-core`（Everything・フォルダー・ファイル操作・Shell・QuickLook。UI を知らない）と `colet`（GPUI の画面）の workspace |
-| UI | `gpui-kit = "=0.9.0"` に固定する。版を上げるときは、それだけを別のコミットにする。入力欄は `gpui_kit::base::input`、ボタン・メニュー・ダイアログの枠・通知・ツールチップは `gpui_kit::component` を使う。行・カラム・パンくず・タブなど、それ以外は自前で描く |
+| UI | `gpui-kit = "=0.9.1"` に固定する。版を上げるときは、それだけを別のコミットにする。入力欄は `gpui_kit::base::input`、ボタン・メニュー・ダイアログの枠・通知・ツールチップは `gpui_kit::component` を使う。行・カラム・パンくず・タブなど、それ以外は自前で描く |
 | 見た目 | 色は `theme::Palette`、繰り返し使う寸法とフォントは `metrics` に名前を付けて持つ。`Palette` の色は `ThemeConfig` にも渡し、gpui-kit の部品も同じ配色にする |
 | テーマ | Windows のライト／ダークに従う。設定でどちらかに固定もできる。ライトとダークのどちらでも、文字のコントラストを 4.5:1 以上に保つ（テストで確かめる） |
 | Win32 | `windows` クレート（GPUI と同じ 0.62）で呼ぶ。Everything SDK だけは C のソースを `cc` でビルドする |
