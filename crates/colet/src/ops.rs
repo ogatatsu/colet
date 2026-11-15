@@ -12,18 +12,20 @@ use std::{
 use colet_core::{
     entry::Entry,
     operations::{CANCELLED, Event, Kind, Request},
-    paths::{child, folder_name, is_server, parent_folder, path_key, shown},
+    paths::{ancestors, child, folder_name, is_server, parent_folder, path_key, shown},
     shell::{self, Dropped, SendTarget},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
     app::{Colet, Tone},
     backend::{self, PathKind},
     clipboard::{Clipboard, Paste},
+    dialogs::{Dialog, DialogParts, field, label, push},
     history::HistoryEvent,
-    places::Dialog,
+    metrics::{self, scaled},
     settings::Favorite,
     state::{Column, ColumnId, HomeKey, Kind as ColumnKind},
     theme::ActivePalette,
@@ -1297,6 +1299,78 @@ pub struct Running {
     made: Option<PathBuf>,
     /// Where its copied or moved items went.
     placed: Vec<PathBuf>,
+}
+
+impl Colet {
+    /// A new folder's name, or a rename's.
+    pub(crate) fn name_dialog(
+        &self,
+        request: &Request,
+        input: &Entity<InputState>,
+        checking: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> DialogParts {
+        let p = cx.palette();
+        let Request { kind, paths, destination, .. } = request;
+        let problem = self.name_problem(cx);
+        let empty = input.read(cx).value().trim().is_empty();
+        // Where the name goes: a rename may come from the results, far from its folder.
+        let (place, submit) = match kind {
+            Kind::NewFolder => (format!("作成先：{}", shown(destination)), "作成"),
+            _ => (
+                format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).map(shown).unwrap_or_default()),
+                "保存",
+            ),
+        };
+        let content =
+            div().flex().flex_col().gap_3().child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child(place)).child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "名前"))
+                    .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
+                    .when_some(problem, |d, problem| {
+                        d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
+                    }),
+            );
+        let buttons = vec![
+            (
+                "cancel",
+                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+            ),
+            // While the folder is asked whether the name is free, the press is in and waits.
+            (
+                "submit-name",
+                push("submit-name", if checking { "確認中…" } else { submit }, true, !empty && problem.is_none() && !checking)
+                    .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx))),
+            ),
+        ];
+        (if matches!(kind, Kind::NewFolder) { "新規フォルダー" } else { "名前を変更" }, content, buttons)
+    }
+
+    /// Whether to open `count` files together.
+    pub(crate) fn open_dialog(&mut self, count: usize, cx: &mut Context<Self>) -> DialogParts {
+        let p = cx.palette();
+        let content =
+            div().flex().flex_col().gap_2().text_size(scaled(metrics::TEXT_LARGE)).child(format!("{count} 項目を開きますか？")).child(
+                div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"),
+            );
+        let buttons = vec![
+            (
+                "cancel",
+                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+            ),
+            // It takes the keys as the dialog opens, so Enter goes on as it was pressed to open them; its
+            // stop is the one opening the dialog sends them to.
+            (
+                "confirm-open",
+                push("confirm-open", "開く", true, true).on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx))),
+            ),
+        ];
+        ("開く", content, buttons)
+    }
 }
 
 #[cfg(test)]

@@ -66,7 +66,7 @@ fn keeps_a_folder_narrowed_as_a_favorite_of_its_own_and_opens_it_narrowed(cx: &m
     // F2 there edits it, rather than renaming its folder.
     ui.press(cx, "f2");
     let fields = ui.read(cx, |v| match v.overlays.dialog() {
-        Some(crate::places::Dialog::EditFavorite { name, narrow, .. }) => Some((name.clone(), narrow.clone())),
+        Some(crate::dialogs::Dialog::EditFavorite { name, narrow, .. }) => Some((name.clone(), narrow.clone())),
         _ => None,
     });
     let (name, narrow) = fields.expect("the favorite's edit");
@@ -166,7 +166,7 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     ui.click(cx, row(HomeKey::search("ext:pdf", None, None, Order::default()).key()));
     ui.press(cx, "f2");
     let (name, query) = ui.read(cx, |v| match v.overlays.dialog() {
-        Some(crate::places::Dialog::EditSearch { name, query, .. }) => (name.clone(), query.clone()),
+        Some(crate::dialogs::Dialog::EditSearch { name, query, .. }) => (name.clone(), query.clone()),
         _ => panic!("no dialog"),
     });
     // A query already saved cannot be taken.
@@ -471,7 +471,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     let fake = Arc::new(with_filters(Fake::default().with_results(vec![file(r"D:\cat.jpg")])));
     let ui = open(cx, fake.clone());
     ui.click(cx, "search-filter");
-    ui.click(cx, crate::dialogs::filter_tool_id("filter", "画像"));
+    ui.click(cx, crate::search_filters::filter_tool_id("filter", "画像"));
     ui.press(cx, "ctrl-f");
     ui.input(cx, "cat");
     ui.press(cx, "ctrl-d");
@@ -514,7 +514,7 @@ fn changes_the_filter_a_saved_search_runs_within_from_its_edit(cx: &mut TestAppC
     let ui = open(cx, fake.clone());
     ui.click(cx, row(HomeKey::search("cat", Some("画像"), None, Order::default()).key()));
     ui.press(cx, "f2");
-    ui.click(cx, crate::dialogs::filter_tool_id("edit-search-filter", "動画"));
+    ui.click(cx, crate::search_filters::filter_tool_id("edit-search-filter", "動画"));
     ui.click(cx, "save-search");
     assert_eq!(fake.settings.lock().unwrap().saved_searches[0].filter.as_deref(), Some("動画"));
     // The search showing stays within the filter it ran within.

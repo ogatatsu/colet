@@ -42,7 +42,7 @@ fn acts_from_the_menu_on_the_row_right_clicked_over_the_selection_or_none(cx: &m
     let (fake, ui) = in_work(cx);
     let dialog_paths = |ui: &Ui, cx: &mut TestAppContext| {
         ui.read(cx, |v| match v.overlays.dialog() {
-            Some(crate::places::Dialog::Name { request: Request { paths, .. }, .. }) => texts(paths),
+            Some(crate::dialogs::Dialog::Name { request: Request { paths, .. }, .. }) => texts(paths),
             _ => Vec::new(),
         })
     };

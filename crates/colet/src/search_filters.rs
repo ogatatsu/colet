@@ -3,7 +3,22 @@
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 
-use crate::{app::Colet, places::Dialog, settings::SearchFilter, state::HomeKey, theme::ActivePalette};
+use gpui_kit::component::{
+    Disableable, Sizable,
+    button::{Button, ButtonVariants},
+};
+use gpui_kit::prelude::FluentBuilder;
+
+use crate::{
+    app::Colet,
+    dialogs::{Dialog, DialogParts, field, label, push},
+    metrics::{self, scaled},
+    settings::SearchFilter,
+    state::HomeKey,
+    stops::{FilterTool, Stop},
+    theme::ActivePalette,
+    view::RingAt,
+};
 
 /// A filter being added, or edited, found by the name it had as the edit began.
 pub struct FilterEdit {
@@ -175,5 +190,233 @@ impl Colet {
             return;
         }
         self.update_settings(|s| s.filters.swap(at, to as usize), cx);
+    }
+}
+
+/// A small button with a glyph, for each filter in the list.
+fn tool(id: ElementId, glyph: &'static str, label: String, enabled: bool) -> Button {
+    Button::new(id).ghost().small().icon(crate::view::glyph(glyph)).accessibility_label(label.clone()).tooltip(label).disabled(!enabled)
+}
+
+/// The tool `tool` on the search filter `name`: named after the filter, not its place, so it goes with the
+/// filter as the list is put in another order, as its stop does.
+pub(crate) fn filter_tool_id(tool: &'static str, name: &str) -> ElementId {
+    ElementId::NamedChild(std::sync::Arc::new(tool.into()), SharedString::from(name.to_owned()))
+}
+
+impl Colet {
+    /// A search filter added or edited.
+    pub(crate) fn filter_edit_dialog(&self, edit: &FilterEdit, window: &Window, cx: &mut Context<Self>) -> DialogParts {
+        let p = cx.palette();
+        let FilterEdit { name, query, .. } = edit;
+        let problem = self.filter_problem(cx);
+        let content =
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(label(p, "名前"))
+                        .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                        .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
+                            d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(label(p, "検索文字列"))
+                        .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
+                        .child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child(
+                            "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
+                        )),
+                );
+        let buttons = vec![
+            (
+                "cancel",
+                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
+            ),
+            (
+                "save-filter",
+                push("save-filter", "保存", true, problem.is_none())
+                    .on_click(cx.listener(|this, _, window, cx| this.submit_filter(window, cx))),
+            ),
+        ];
+        (if edit.original.is_none() { "フィルターを追加" } else { "フィルターを編集" }, content, buttons)
+    }
+
+    /// Whether the search filter `name` is to go.
+    pub(crate) fn filter_delete_dialog(&self, name: &str, cx: &mut Context<Self>) -> DialogParts {
+        let p = cx.palette();
+        let users = self.filter_users(name);
+        let content =
+            div().flex().flex_col().gap_2().text_size(scaled(metrics::TEXT_LARGE)).child(format!("「{name}」を削除しますか？")).when(
+                users > 0,
+                |d| {
+                    d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_muted).child(format!(
+                        "このフィルターを使う保存した検索が{users}件あります。削除すると、それらはフィルターなしで検索します。"
+                    )))
+                },
+            );
+        let buttons = vec![
+            (
+                "cancel",
+                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
+            ),
+            (
+                "delete-filter",
+                // Destructive: drawn as danger, not as the primary commit.
+                push("delete-filter", "削除", false, true)
+                    .danger()
+                    .on_click(cx.listener(|this, _, window, cx| this.delete_filter(window, cx))),
+            ),
+        ];
+        ("フィルターを削除", content, buttons)
+    }
+
+    /// The search filters, in their order.
+    pub(crate) fn filters_dialog(&self, window: &Window, cx: &mut Context<Self>) -> DialogParts {
+        let p = cx.palette();
+        let filters = self.stored.settings().filters.clone();
+        let default = self.default_filter();
+        let last = filters.len().saturating_sub(1);
+        let rows: Vec<AnyElement> = filters
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let name = f.name.clone();
+                let (up_name, down_name, edit_name, default_name) = (name.clone(), name.clone(), name.clone(), name.clone());
+                let is_default = default.as_deref() == Some(f.name.as_str());
+                let (default_glyph, default_label) = if is_default {
+                    ("circle-check", format!("「{}」を既定から外す", f.name))
+                } else {
+                    ("circle", format!("「{}」を既定にする", f.name))
+                };
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .py_1()
+                    .border_b_1()
+                    .border_color(p.border)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_baseline()
+                                    .gap_2()
+                                    .min_w_0()
+                                    .child(div().truncate().text_size(scaled(metrics::TEXT_LARGE)).child(f.name.clone()))
+                                    .when(is_default, |d| {
+                                        d.child(
+                                            div().flex_none().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_muted).child("既定"),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(scaled(metrics::TEXT_BODY))
+                                    .text_color(p.text_muted)
+                                    .font_family(metrics::FONT_CODE)
+                                    .child(f.query.clone()),
+                            ),
+                    )
+                    // Their stops named after the filter, to go with it.
+                    .child(
+                        self.ringed(
+                            tool(filter_tool_id("filter-default", &f.name), default_glyph, default_label, true)
+                                .on_click(cx.listener(move |this, _, _, cx| this.toggle_default_filter(&default_name, cx))),
+                            Stop::Filter(FilterTool::Default, f.name.clone()),
+                            RingAt::Edge,
+                            window,
+                            cx,
+                        ),
+                    )
+                    .child(
+                        self.ringed(
+                            tool(filter_tool_id("filter-up", &f.name), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
+                                .when(i > 0, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&up_name, -1, cx)))),
+                            Stop::Filter(FilterTool::Up, f.name.clone()),
+                            RingAt::Edge,
+                            window,
+                            cx,
+                        ),
+                    )
+                    .child(
+                        self.ringed(
+                            tool(filter_tool_id("filter-down", &f.name), "arrow-down", format!("「{}」を下へ", f.name), i < last)
+                                .when(i < last, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&down_name, 1, cx)))),
+                            Stop::Filter(FilterTool::Down, f.name.clone()),
+                            RingAt::Edge,
+                            window,
+                            cx,
+                        ),
+                    )
+                    .child(
+                        self.ringed(
+                            tool(filter_tool_id("filter-edit", &f.name), "pencil-line", format!("「{}」を編集", f.name), true)
+                                .on_click(cx.listener(move |this, _, window, cx| this.edit_filter(Some(edit_name.clone()), window, cx))),
+                            Stop::Filter(FilterTool::Edit, f.name.clone()),
+                            RingAt::Edge,
+                            window,
+                            cx,
+                        ),
+                    )
+                    .child(
+                        self.ringed(
+                            tool(filter_tool_id("filter-delete", &f.name), "trash", format!("「{}」を削除", f.name), true)
+                                .on_click(cx.listener(move |this, _, window, cx| this.ask_delete_filter(name.clone(), window, cx))),
+                            Stop::Filter(FilterTool::Delete, f.name.clone()),
+                            RingAt::Edge,
+                            window,
+                            cx,
+                        ),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_size(scaled(metrics::TEXT_BODY))
+                    .text_color(p.text_muted)
+                    .child("検索に加えるEverythingの検索式を登録し、検索欄の左のボタン（Ctrl+Shift+F）で1つ選んで使います。"),
+            )
+            .child(if rows.is_empty() {
+                div()
+                    .py_2()
+                    .text_size(scaled(metrics::TEXT_BODY))
+                    .text_color(p.text_faint)
+                    .child("フィルターはまだありません")
+                    .into_any_element()
+            } else {
+                div().flex().flex_col().children(rows).into_any_element()
+            });
+        let buttons = vec![
+            (
+                "add-filter",
+                push("add-filter", "追加", false, true).on_click(cx.listener(|this, _, window, cx| this.edit_filter(None, window, cx))),
+            ),
+            (
+                "close-filters",
+                push("close-filters", "閉じる", true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+            ),
+        ];
+        ("検索フィルター", content, buttons)
     }
 }

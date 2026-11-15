@@ -180,7 +180,7 @@ fn searches_within_the_filter_chosen_only_once_something_is_typed(cx: &mut TestA
     let asked = fake.queries().len();
     ui.click(cx, "search-filter");
     assert!(ui.read(cx, |v| v.filter_open()));
-    ui.click(cx, crate::dialogs::filter_tool_id("filter", "画像"));
+    ui.click(cx, crate::search_filters::filter_tool_id("filter", "画像"));
     assert!(!ui.read(cx, |v| v.filter_open()));
     assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
     // Chosen with nothing typed, it asks nothing, and home stays alone.
@@ -304,7 +304,7 @@ fn adds_edits_and_deletes_filters_with_what_names_them_following(cx: &mut TestAp
     ui.click(cx, "close-filters");
     // Chosen, saved with a search, and shown.
     ui.click(cx, "search-filter");
-    ui.click(cx, crate::dialogs::filter_tool_id("filter", "画像"));
+    ui.click(cx, crate::search_filters::filter_tool_id("filter", "画像"));
     ui.press(cx, "ctrl-f");
     ui.input(cx, "cat");
     ui.press(cx, "ctrl-d");

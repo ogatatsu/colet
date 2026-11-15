@@ -14,18 +14,21 @@ use std::{
 };
 
 use colet_core::{
-    entry::{Entry, Order},
+    entry::{Entry, Order, Sort, direction_label},
     paths::{folder_name, shown},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
     app::{Colet, Tone},
-    metrics::Scale,
-    places::Dialog,
+    dialogs::{Choice, Dialog, DialogParts, Pick, field, label, push},
+    metrics::{self, Scale, scaled},
+    search_filters::filter_tool_id,
     settings::{Favorite, SavedSearch, Settings},
     state::{HomeKey, Kind, narrowing},
+    stops::{OrderChoice, Stop},
     theme::ActivePalette,
 };
 
@@ -566,6 +569,176 @@ impl Colet {
             cx,
         );
         self.close_dialog(window, cx);
+    }
+}
+
+impl Colet {
+    /// The field for what a favorite or saved search opens narrowed to, and why it cannot be kept, if it
+    /// cannot.
+    fn narrow_field(&self, input: &Entity<InputState>, problem: Option<&'static str>, window: &Window, cx: &mut Context<Self>) -> Div {
+        let p = cx.palette();
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(label(p, "絞り込み"))
+            .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
+            .child(match problem {
+                Some(problem) => div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem),
+                None => {
+                    div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child("開いたとき、この文字で名前を絞り込みます")
+                }
+            })
+    }
+
+    /// The order a saved search lists its results in: what it sorts by, the way it runs, and whether folders
+    /// come first, each a row of choices as the sort order's menu has them.
+    fn order_field(&self, order: Order, window: &Window, cx: &mut Context<Self>) -> Div {
+        let p = cx.palette();
+        let mut row = |id: &'static str, label: &'static str, choices: Vec<(OrderChoice, &'static str)>| {
+            let choices = choices
+                .into_iter()
+                .map(|(choice, text)| {
+                    let pick: Pick = Rc::new(move |this, _, cx| this.change_edit_order(|order| choice.apply(order), cx));
+                    let item = ElementId::NamedChild(std::sync::Arc::new(id.into()), SharedString::from(text));
+                    Choice::new(item, text, Stop::EditSearchOrder(choice), choice.is_in(order), pick)
+                })
+                .collect();
+            self.radio_group(id, label, choices, window, cx)
+        };
+        let by = Sort::ALL.into_iter().map(|by| (OrderChoice::By(by), by.label())).collect();
+        let direction = [false, true].into_iter().map(|d| (OrderChoice::Descending(d), direction_label(d))).collect();
+        let folders = vec![(OrderChoice::FoldersFirst(true), "フォルダを先に"), (OrderChoice::FoldersFirst(false), "混在")];
+        let (by, direction, folders) = (
+            row("edit-search-sort", "並べ替え", by),
+            row("edit-search-direction", "向き", direction),
+            row("edit-search-folders", "フォルダ", folders),
+        );
+        div().flex().flex_col().gap_1().child(label(p, "並び順")).child(by).child(direction).child(folders)
+    }
+
+    /// A favorite's name and narrowing.
+    pub(crate) fn favorite_dialog(
+        &self,
+        original: &Favorite,
+        name: &Entity<InputState>,
+        narrow: &Entity<InputState>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> DialogParts {
+        let p = cx.palette();
+        let problem = self.favorite_edit_problem(cx);
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .text_size(scaled(metrics::TEXT_BODY))
+                    .text_color(p.text_faint)
+                    .child(format!("フォルダー：{}", shown(&original.path))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "名前"))
+                    .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                    .child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
+            )
+            .child(self.narrow_field(narrow, problem, window, cx));
+        let buttons = vec![
+            (
+                "cancel",
+                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+            ),
+            (
+                "save-favorite",
+                push("save-favorite", "保存", true, problem.is_none())
+                    .on_click(cx.listener(|this, _, window, cx| this.submit_favorite_edit(window, cx))),
+            ),
+        ];
+        ("お気に入りを編集", content, buttons)
+    }
+
+    /// A saved search's name, query, filter, narrowing and order.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn search_dialog(
+        &self,
+        name: &Entity<InputState>,
+        query: &Entity<InputState>,
+        filter: &Option<String>,
+        narrow: &Entity<InputState>,
+        order: Order,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> DialogParts {
+        let p = cx.palette();
+        // The saved search's choice of filter, none first.
+        let choices: Vec<Option<String>> =
+            std::iter::once(None).chain(self.stored.settings().filters.iter().map(|f| Some(f.name.clone()))).collect();
+        let problem = self.edit_problem(cx);
+        let chosen = filter.clone();
+        let filters = choices
+            .into_iter()
+            .map(|choice| {
+                let text = choice.clone().unwrap_or_else(|| "なし".into());
+                let id = match &choice {
+                    Some(name) => filter_tool_id("edit-search-filter", name),
+                    None => "edit-search-filter-none".into(),
+                };
+                let picked = choice.clone();
+                let pick: Pick = Rc::new(move |this, _, cx| this.pick_edit_filter(picked.clone(), cx));
+                let is_chosen = choice == chosen;
+                Choice::new(id, text, Stop::EditSearchFilter(choice), is_chosen, pick)
+            })
+            .collect();
+        let filters = self.radio_group("edit-search-filters", "検索フィルター", filters, window, cx);
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "名前"))
+                    .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                    .child(
+                        div()
+                            .text_size(scaled(metrics::TEXT_BODY))
+                            .text_color(p.text_faint)
+                            .child("空欄なら検索文字列をそのまま表示します"),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, "検索文字列"))
+                    .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
+                    .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
+                        d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
+                    }),
+            )
+            .child(div().flex().flex_col().gap_1().child(label(p, "検索フィルター")).child(filters))
+            .child(self.narrow_field(narrow, None, window, cx))
+            .child(self.order_field(order, window, cx));
+        let buttons = vec![
+            (
+                "cancel",
+                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+            ),
+            (
+                "save-search",
+                push("save-search", "保存", true, problem.is_none())
+                    .on_click(cx.listener(|this, _, window, cx| this.submit_edit(window, cx))),
+            ),
+        ];
+        ("保存した検索を編集", content, buttons)
     }
 }
 

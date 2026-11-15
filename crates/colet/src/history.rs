@@ -4,18 +4,23 @@
 use std::{collections::HashSet, path::PathBuf};
 
 use colet_core::paths::{folder_name, shown};
-use gpui_kit::component::{Sizable, button::ButtonVariants};
+use gpui_kit::component::{
+    Sizable,
+    button::{Button, ButtonVariants},
+    spinner::Spinner,
+};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
+    app::Colet,
     backend::{self, PathKind},
-    dialogs::{clock, history_item_id, push},
+    dialogs::push,
     metrics::{self, scaled},
     ops::{ItemStatus, Operations, Status},
     stops::{Stop, Stops},
     theme::ActivePalette,
-    view::{keep_focus, ring},
+    view::{RingAt, keep_focus, ring},
 };
 
 /// What the history asks of the window.
@@ -269,5 +274,61 @@ impl Render for HistoryPanel {
             } else {
                 div().id("history-list").flex_1().overflow_y_scroll().children(entries).into_any_element()
             })
+    }
+}
+
+/// `HH:MM`, local.
+pub(crate) fn clock(unix_ms: u64) -> String {
+    colet_core::time::local(unix_ms).map_or_else(String::new, |t| format!("{:02}:{:02}", t.wHour, t.wMinute))
+}
+
+/// The item at `k` of the step `entry` in the history.
+pub(crate) fn history_item_id(entry: u64, k: usize) -> ElementId {
+    ElementId::NamedChild(std::sync::Arc::new(("history-item", entry).into()), SharedString::from(k.to_string()))
+}
+
+impl Colet {
+    /// The history's button in the status bar: turning while an operation runs, with the count of those
+    /// with problems not seen yet.
+    pub fn history_button(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = cx.palette();
+        let operations = self.operations.read(cx);
+        let (unseen, running) = (operations.history.unseen, operations.is_running());
+        let label = if unseen > 0 { format!("操作履歴（問題のある操作 {unseen} 件）") } else { "操作履歴".to_owned() };
+        let button = Button::new("history-button")
+            .ghost()
+            .xsmall()
+            .map(|b| if running { b.icon(Spinner::new()) } else { b.icon(crate::view::glyph("clock")) })
+            .accessibility_label(label.clone())
+            // Shown only while the history is shut: open, the tip would lie over it.
+            .when(!self.overlays.is_history_open(), |b| b.tooltip(label))
+            .when(unseen > 0, |d| {
+                d.child(
+                    div()
+                        .min_w_3p5()
+                        .h_3p5()
+                        .px(scaled(3.))
+                        .rounded_full()
+                        // White on the deep red: past 4.5:1 in either theme.
+                        .bg(p.danger_fill)
+                        .text_color(p.on_accent)
+                        .text_size(scaled(metrics::TEXT_TINY))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(unseen.to_string()),
+                )
+            })
+            .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                if this.overlays.is_history_open() {
+                    this.show_history(false, None, window, cx);
+                } else if !this.pressed_shut(event) {
+                    this.show_history(true, None, window, cx);
+                }
+            }));
+        // The button takes no listener for the press, so the box round it notes it.
+        let button = self.ringed(button, "history-button", RingAt::Edge, window, cx);
+        Self::opener(div().flex(), |this| this.overlays.is_history_open(), cx).child(button).into_any_element()
     }
 }

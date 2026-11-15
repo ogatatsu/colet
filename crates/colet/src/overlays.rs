@@ -4,7 +4,7 @@
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::*;
 
-use crate::{menus::Popup, ops::Menu, places::Dialog};
+use crate::{dialogs::Dialog, menus::Popup, ops::Menu};
 
 pub struct Overlays {
     dialog: Option<Dialog>,

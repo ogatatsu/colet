@@ -154,7 +154,7 @@ fn renames_from_f2_refusing_a_name_windows_would_reject(cx: &mut TestAppContext)
     let (fake, ui) = in_work(cx);
     ui.press(cx, "f2");
     let input = ui.read(cx, |v| match v.overlays.dialog() {
-        Some(crate::places::Dialog::Name { input, .. }) => input.clone(),
+        Some(crate::dialogs::Dialog::Name { input, .. }) => input.clone(),
         _ => panic!("no dialog"),
     });
     ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("a:b", window, cx)));
@@ -174,7 +174,7 @@ fn refuses_a_rename_to_a_name_its_folder_has_but_not_its_own_in_another_case(cx:
     let (fake, ui) = in_work(cx);
     ui.press(cx, "f2");
     let input = ui.read(cx, |v| match v.overlays.dialog() {
-        Some(crate::places::Dialog::Name { input, .. }) => input.clone(),
+        Some(crate::dialogs::Dialog::Name { input, .. }) => input.clone(),
         _ => panic!("no dialog"),
     });
     ui.act(cx, |window, cx| input.update(cx, |input, cx| input.set_value("b.txt", window, cx)));
@@ -392,7 +392,7 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     assert!(ui.read_app(cx, |v, app| v.history.read(app).is_expanded(entry.id)));
     assert_eq!(entry.items[0].error.as_deref(), Some("アクセスが拒否されました。"));
     // Still there: its name opens it in the columns.
-    ui.click(cx, crate::dialogs::history_item_id(entry.id, 0));
+    ui.click(cx, crate::history::history_item_id(entry.id, 0));
     assert!(ui.read(cx, |v| !v.overlays.is_history_open()));
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
 }

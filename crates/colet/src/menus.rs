@@ -13,8 +13,9 @@ use gpui_kit::*;
 
 use crate::{
     app::Colet,
+    dialogs::Dialog,
+    metrics::scaled,
     ops::{Menu, NEEDS_FILE, NEEDS_FOLDER, ONE_ITEM, Reasons},
-    places::Dialog,
     state::{ColumnId, HomeKey, Kind},
     tabs::TabId,
     theme::ActivePalette,
@@ -333,7 +334,7 @@ impl Colet {
             lines.extend(self.stored.settings().filters.iter().map(|f| Line {
                 hint: (default == Some(f.name.as_str())).then_some("既定"),
                 ..choice(
-                    crate::dialogs::filter_tool_id("filter", &f.name),
+                    crate::search_filters::filter_tool_id("filter", &f.name),
                     f.name.clone(),
                     Command::SearchFilter(Some(f.name.clone())),
                     chosen == Some(f.name.as_str()),
@@ -748,6 +749,62 @@ impl Colet {
                 .on_action(cx.listener(|this, _: &crate::app::CloseMenu, window, cx| this.close_menus(true, window, cx)))
                 .child(menu.clone())
                 .into_any_element(),
+        )
+    }
+}
+
+/// The least width of the file menu, whose lines carry their keys beside them.
+const FILE_MENU_WIDTH: f32 = 240.;
+/// The least width of a text field's menu, whose lines are short.
+const TEXT_MENU_WIDTH: f32 = 200.;
+/// The least width of a tab's menu.
+const TAB_MENU_WIDTH: f32 = 220.;
+
+impl Colet {
+    /// Opens the file menu on `paths` (`None` for the selection, empty for the folder itself) in the
+    /// column at `index`, at `at` in the window. The keys stay where they were, as the selection does.
+    pub fn open_menu(&mut self, index: usize, paths: Option<Vec<PathBuf>>, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.overlays.has_dialog() {
+            return;
+        }
+        let Some(c) = self.state.columns.get(index) else { return };
+        // Home has nothing to offer but on its rows.
+        if c.kind == Kind::Home && paths.as_ref().map_or_else(|| c.shown_selected().is_empty(), Vec::is_empty) {
+            return;
+        }
+        let column = c.id;
+        self.state.set_active(index);
+        self.column_focus(index).focus(window, cx);
+        let scale = window.scale_factor();
+        let mut point = windows::Win32::Foundation::POINT { x: (f32::from(at.x) * scale) as i32, y: (f32::from(at.y) * scale) as i32 };
+        let _ =
+            unsafe { windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point) };
+        self.overlays.set_popup(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
+        self.show_menu(window, cx);
+        // Read afresh for each menu, so one added since is there.
+        self.operations.update(cx, |operations, cx| operations.load_send_targets(cx));
+    }
+
+    /// The file menu, or a text field's, where it was opened; over a dialog too, for its fields'. GPUI
+    /// paints every deferred draw in the order of its priority, nested or not, so the menu takes one over
+    /// the dialog's (ten and up) to be drawn in front of it as it is clicked in front of it.
+    pub fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (at, id, label, width) = match self.overlays.popup()? {
+            Popup::File(menu) => (menu.at, "menu", "ファイル操作", FILE_MENU_WIDTH),
+            Popup::Text(menu) => (menu.at, "text-menu", "編集", TEXT_MENU_WIDTH),
+            Popup::Tab { at, .. } => (*at, "tab-menu", "タブ", TAB_MENU_WIDTH),
+            _ => return None,
+        };
+        let menu = self.menu_element(id, label, cx)?;
+        Some(
+            deferred(
+                anchored()
+                    .position(at)
+                    .snap_to_window_with_margin(self.scale().px(crate::view::MENU_MARGIN))
+                    .child(div().min_w(scaled(width)).child(menu)),
+            )
+            .with_priority(gpui_kit::base::POPUP_PRIORITY)
+            .into_any_element(),
         )
     }
 }

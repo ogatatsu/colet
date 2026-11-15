@@ -29,10 +29,10 @@ use gpui_kit::{
 use crate::{
     app::Colet,
     backend::{Backend, Found, PathKind, Search},
-    dialogs::filter_tool_id,
+    dialogs::Dialog,
     loading::Engine,
     ops::ItemStatus,
-    places::Dialog,
+    search_filters::filter_tool_id,
     settings::{LoadError, Loaded, SavedSearch, SearchFilter, Settings, Theme},
     sorts::Sorts,
     state::{ColumnId, HomeKey, Kind},

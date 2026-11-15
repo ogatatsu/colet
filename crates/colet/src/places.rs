@@ -1,63 +1,14 @@
 //! What Colet keeps between starts and how it is written: the settings and the columns' orders, the widths
-//! and the window, the theme and the zoom; and the window's dialog, which Colet opens and closes.
-use std::{path::PathBuf, time::Duration};
+//! and where the window was left.
+use std::time::Duration;
 
-use colet_core::entry::Order;
-use gpui_kit::base::input::InputState;
-use gpui_kit::component::WindowExt;
 use gpui_kit::*;
 
 use crate::{
     app::{Colet, Tone, Widths},
-    search_filters::FilterEdit,
-    settings::{Favorite, Placement, Queued, SavedSearch, Settings, Theme},
+    settings::{Placement, Queued, Settings},
     sorts::Sorts,
-    stops::Stop,
 };
-
-pub enum Dialog {
-    /// A rename's new name, or a new folder's: the request it sends, its name taken from `input`. `taken`: the
-    /// name tried last that the rename's folder already has. `checking`: the name tried whose folder is being
-    /// asked, off the UI thread, whether it has it already; typing lets go of it.
-    Name {
-        request: colet_core::operations::Request,
-        input: Entity<InputState>,
-        tried: bool,
-        taken: Option<String>,
-        checking: Option<String>,
-    },
-    /// A saved search's name, query, filter, narrowing and order, found by those it had as the dialog opened.
-    EditSearch {
-        original: SavedSearch,
-        name: Entity<InputState>,
-        query: Entity<InputState>,
-        filter: Option<String>,
-        narrow: Entity<InputState>,
-        order: Order,
-    },
-    /// A favorite's name and narrowing, found by those it had as the dialog opened; its folder stays.
-    EditFavorite { original: Favorite, name: Entity<InputState>, narrow: Entity<InputState> },
-    /// The search filters, to add to, put in order, edit or delete: one at a time, in `edit`, or the one
-    /// asked about before it goes.
-    Filters { edit: Option<FilterEdit>, deleting: Option<String> },
-    /// The theme, the display, and the keys.
-    Preferences,
-    /// The files to open together, asked about first when they are many.
-    Open { paths: Vec<PathBuf> },
-}
-
-impl Dialog {
-    /// Its text fields, in their order.
-    pub fn fields(&self) -> Vec<Entity<InputState>> {
-        match self {
-            Dialog::Name { input, .. } => vec![input.clone()],
-            Dialog::EditSearch { name, query, narrow, .. } => vec![name.clone(), query.clone(), narrow.clone()],
-            Dialog::EditFavorite { name, narrow, .. } => vec![name.clone(), narrow.clone()],
-            Dialog::Filters { edit: Some(edit), .. } => vec![edit.name.clone(), edit.query.clone()],
-            Dialog::Filters { .. } | Dialog::Preferences | Dialog::Open { .. } => Vec::new(),
-        }
-    }
-}
 
 /// Where the window opens again: on the display holding the middle of where it was left, which the window
 /// must name or it opens on the primary one; otherwise centered on `primary`, as after that display was
@@ -166,62 +117,6 @@ impl Colet {
             },
             cx,
         );
-    }
-
-    pub fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.begin_dialog(window, cx);
-        // The theme now chosen takes the keys, as a radio group's checked one does.
-        self.stop(Stop::Theme(self.stored.settings().theme), cx).focus(window, cx);
-        self.overlays.set_dialog(Dialog::Preferences);
-        cx.notify();
-    }
-
-    /// Takes `theme`'s colors at once, and keeps it.
-    pub fn set_theme(&mut self, theme: Theme, window: &mut Window, cx: &mut Context<Self>) {
-        self.update_settings(|s| s.theme = theme, cx);
-        self.apply_theme(window, cx);
-    }
-
-    /// Draws everything at `zoom` percent at once, and keeps it. The columns are brought to rest again
-    /// at their new widths as the window is next laid out.
-    pub fn set_zoom(&mut self, zoom: u16, cx: &mut Context<Self>) {
-        self.update_settings(|s| s.zoom = zoom, cx);
-        crate::theme::set_zoom(zoom, cx);
-        cx.notify();
-    }
-
-    /// Lets go of what the dialog before listened to. Called first by whatever opens one, before it makes
-    /// the fields the new dialog listens to, and before the keys go into it: where they are is where they go
-    /// back to as it closes.
-    pub(crate) fn begin_dialog(&mut self, window: &Window, cx: &App) {
-        self.remember_keys(window, cx);
-        self.overlays.forget_dialog_listeners();
-    }
-
-    /// The keys go back to where they were as the dialog opened, or the menu that opened it.
-    pub fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.overlays.close_dialog();
-        self.restore_keys(window, cx);
-        cx.notify();
-    }
-
-    /// Opens the window's dialog as [`Overlays::dialog`](crate::overlays::Overlays::dialog) comes, and closes it as that goes; the keys stay where
-    /// Colet put them, in a field of the dialog or back in the columns.
-    pub fn sync_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(open) = self.overlays.take_dialog_change() else { return };
-        let focused = window.focused(cx);
-        if open {
-            let colet = cx.weak_entity();
-            window.open_dialog(cx, move |dialog, window, cx| match colet.upgrade() {
-                Some(colet) => colet.update(cx, |this, cx| this.dialog_frame(dialog, window, cx)),
-                None => dialog,
-            });
-        } else {
-            window.close_dialog(cx);
-        }
-        if let Some(focused) = focused {
-            focused.focus(window, cx);
-        }
     }
 }
 

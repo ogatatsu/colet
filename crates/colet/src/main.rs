@@ -19,6 +19,7 @@ mod metrics;
 mod ops;
 mod overlays;
 mod places;
+mod preferences;
 mod reveal;
 mod scrolls;
 mod search_bar;
