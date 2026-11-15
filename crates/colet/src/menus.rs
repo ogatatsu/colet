@@ -1,111 +1,72 @@
-//! The menus, the file menu, a text field's, a column's sort order's and the search filters', as lines that the
-//! mouse and the keys pick alike: ↑↓ move, Enter picks, Esc closes, and the keys go back to where they were.
-use std::path::PathBuf;
-
-use colet_core::{
-    entry::{Order, Sort, direction_label},
-    shell::IconSource,
-};
-use gpui_kit::base::input::{self, InputState};
+//! The menus, as lines that the mouse and the keys pick alike: ↑↓ move, Enter picks, Esc closes, and the
+//! keys go back to where they were. One is open at a time ([`Popup`]). Each feature draws its own menu's
+//! lines and does what they say: the file menu and home's, a column's order's, the search filters', a
+//! tab's and a text field's; the folders folded off the trail are a menu of the trail's own.
+use colet_core::shell::IconSource;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
     app::Colet,
-    dialogs::Dialog,
+    column_order::OrderCommand,
+    file_menu::FileCommand,
+    home::HomeCommand,
     metrics::scaled,
-    ops::{Menu, NEEDS_FILE, NEEDS_FOLDER, ONE_ITEM, Reasons},
-    state::{ColumnId, HomeKey, Kind},
-    tabs::TabId,
+    ops::Menu,
+    search_filters::FilterCommand,
+    state::ColumnId,
+    tabs::{TabCommand, TabId},
+    text_menu::{Edit, TextMenu},
     theme::ActivePalette,
-    view::TipExt,
 };
 
-/// What a line of a menu does.
+/// What a line of a menu does, by the feature whose menu it is.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
-    Open,
-    /// The row picked opens in a tab of its own, behind this one.
-    OpenInTab(std::path::PathBuf),
-    Explorer,
-    Copy,
-    Cut,
-    Paste,
-    CopyPath,
-    Properties,
-    Rename,
-    NewFolder,
-    Recycle,
-    /// "ごみ箱へ移動" picked with Shift held, as Explorer's Delete deletes outright then.
-    Delete,
-    Favorite(std::path::PathBuf),
-    /// What is picked, sent to the item of Windows' Send To at `target`: moved when `shift` is held as it
-    /// is picked.
-    SendTo {
-        target: std::path::PathBuf,
-        shift: bool,
-    },
-    /// A row of home, pinned or put back.
-    Pin(std::path::PathBuf),
-    Windows,
-    /// A saved search, by its row's key.
-    EditSearch(std::path::PathBuf),
-    Unsave(std::path::PathBuf),
-    /// A sort for the column.
-    Sort(ColumnId, Sort),
-    Direction(ColumnId, bool),
-    /// Folders before files, or mixed in with them.
-    FoldersFirst(ColumnId, bool),
-    /// The column goes back to the default order.
-    Unsort(ColumnId),
-    /// The search filter to search within, or none.
-    SearchFilter(Option<String>),
-    EditFilters,
+    File(FileCommand),
+    Home(HomeCommand),
+    Order(OrderCommand),
+    Filter(FilterCommand),
+    Tab(TabCommand),
     /// An edit of a text field's text.
     Edit(Edit),
-    CloseTab(TabId),
-    /// Every tab but this one, or those right of it.
-    CloseOtherTabs(TabId),
-    CloseTabsRight(TabId),
-    DuplicateTab(TabId),
-    ReopenTab,
 }
 
-/// What a text field's menu does to its text, as the field's own keys do.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Edit {
-    Undo,
-    Cut,
-    Copy,
-    Paste,
-    Delete,
-    SelectAll,
-}
-
-impl Edit {
-    fn action(self) -> Box<dyn Action> {
-        match self {
-            Edit::Undo => Box::new(input::Undo),
-            Edit::Cut => Box::new(input::Cut),
-            Edit::Copy => Box::new(input::Copy),
-            Edit::Paste => Box::new(input::Paste),
-            Edit::Delete => Box::new(input::Delete),
-            Edit::SelectAll => Box::new(input::SelectAll),
-        }
+impl From<FileCommand> for Command {
+    fn from(command: FileCommand) -> Self {
+        Command::File(command)
     }
 }
 
-/// A text field's menu: the field, where it opened, and what its text allowed as it did.
-pub struct TextMenu {
-    pub input: Entity<InputState>,
-    pub at: Point<Pixels>,
-    editable: bool,
-    selection: bool,
-    copyable: bool,
-    /// The clipboard held text.
-    paste: bool,
-    empty: bool,
+impl From<HomeCommand> for Command {
+    fn from(command: HomeCommand) -> Self {
+        Command::Home(command)
+    }
+}
+
+impl From<OrderCommand> for Command {
+    fn from(command: OrderCommand) -> Self {
+        Command::Order(command)
+    }
+}
+
+impl From<FilterCommand> for Command {
+    fn from(command: FilterCommand) -> Self {
+        Command::Filter(command)
+    }
+}
+
+impl From<TabCommand> for Command {
+    fn from(command: TabCommand) -> Self {
+        Command::Tab(command)
+    }
+}
+
+impl From<Edit> for Command {
+    fn from(edit: Edit) -> Self {
+        Command::Edit(edit)
+    }
 }
 
 pub struct Line {
@@ -127,19 +88,39 @@ pub struct Line {
     pub sub: Option<Vec<Line>>,
 }
 
-fn line(
+impl Line {
+    /// With a rule above it, starting a group.
+    pub(crate) fn grouped(mut self) -> Self {
+        self.group = true;
+        self
+    }
+}
+
+/// A line with a glyph, the key that does the same, and why it is off, if it is.
+pub(crate) fn line(
     id: &'static str,
     glyph: &'static str,
     text: &'static str,
     hint: Option<&'static str>,
     off: Option<&'static str>,
-    command: Command,
+    command: impl Into<Command>,
 ) -> Line {
-    Line { id: id.into(), glyph: Some(glyph), picture: None, text: text.into(), hint, off, command, group: false, chosen: false, sub: None }
+    Line {
+        id: id.into(),
+        glyph: Some(glyph),
+        picture: None,
+        text: text.into(),
+        hint,
+        off,
+        command: command.into(),
+        group: false,
+        chosen: false,
+        sub: None,
+    }
 }
 
 /// A line with no glyph, off without a word unless `on`.
-fn plain(id: &'static str, text: &'static str, hint: &'static str, on: bool, command: Command) -> Line {
+pub(crate) fn plain(id: &'static str, text: &'static str, hint: &'static str, on: bool, command: impl Into<Command>) -> Line {
     Line {
         id: id.into(),
         glyph: None,
@@ -147,7 +128,7 @@ fn plain(id: &'static str, text: &'static str, hint: &'static str, on: bool, com
         text: text.into(),
         hint: Some(hint),
         off: (!on).then_some(""),
-        command,
+        command: command.into(),
         group: false,
         chosen: false,
         sub: None,
@@ -155,19 +136,18 @@ fn plain(id: &'static str, text: &'static str, hint: &'static str, on: bool, com
 }
 
 /// A line to choose, checked when it is the one in use.
-fn choice(id: impl Into<ElementId>, text: impl Into<SharedString>, command: Command, chosen: bool) -> Line {
-    Line { id: id.into(), glyph: None, picture: None, text: text.into(), hint: None, off: None, command, group: false, chosen, sub: None }
-}
-
-/// The item of Windows' Send To for `target`: named after its path, not its place in the folder.
-pub(crate) fn send_to_id(target: &std::path::Path) -> ElementId {
-    ElementId::NamedChild(std::sync::Arc::new("send-to".into()), SharedString::from(target.to_string_lossy().into_owned()))
-}
-
-impl Line {
-    fn grouped(mut self) -> Self {
-        self.group = true;
-        self
+pub(crate) fn choice(id: impl Into<ElementId>, text: impl Into<SharedString>, command: impl Into<Command>, chosen: bool) -> Line {
+    Line {
+        id: id.into(),
+        glyph: None,
+        picture: None,
+        text: text.into(),
+        hint: None,
+        off: None,
+        command: command.into(),
+        group: false,
+        chosen,
+        sub: None,
     }
 }
 
@@ -189,337 +169,28 @@ pub enum Popup {
 }
 
 impl Colet {
-    /// The file menu, while it is open.
-    pub fn menu(&self) -> Option<&Menu> {
-        match self.overlays.popup() {
-            Some(Popup::File(menu)) => Some(menu),
-            _ => None,
-        }
-    }
-
-    /// Closes the file menu, giving back what it was opened on; any other menu stays.
-    pub fn take_menu(&mut self) -> Option<Menu> {
-        self.overlays.take_file_menu()
-    }
-
-    /// The text field's menu, while it is open.
-    pub fn text_menu(&self) -> Option<&TextMenu> {
-        match self.overlays.popup() {
-            Some(Popup::Text(menu)) => Some(menu),
-            _ => None,
-        }
-    }
-
-    /// The field has the keys, or its menu has them for it.
-    pub fn has_keys(&self, input: &Entity<InputState>, window: &Window, cx: &App) -> bool {
-        input.read(cx).focus_handle(cx).is_focused(window) || self.text_menu().is_some_and(|menu| menu.input == *input)
-    }
-
-    /// For the element round `input`, ahead of the field: a right press opens its menu with the keys in it,
-    /// leaving what is picked and where the caret is, as Windows' own fields do. The field never sees the
-    /// press, which would move its caret there. The menu key opens it through [`Colet::open_focused_text_menu`].
-    pub fn right_press_menu(input: &Entity<InputState>, cx: &Context<Self>) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
-        let field = input.downgrade();
-        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-            if event.button != MouseButton::Right {
-                return;
-            }
-            let Some(input) = field.upgrade() else { return };
-            cx.stop_propagation();
-            input.update(cx, |input, cx| input.focus(window, cx));
-            this.open_text_menu(input, event.position, window, cx);
-        })
-    }
-
-    /// Opens `input`'s menu at `at`. The text picked stays lit while the menu has the keys.
-    pub fn open_text_menu(&mut self, input: Entity<InputState>, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        let paste = cx.read_from_clipboard().and_then(|item| item.text()).is_some_and(|text| !text.is_empty());
-        let menu = {
-            let field = input.read(cx);
-            let can = field.context_menu_capabilities();
-            TextMenu {
-                input: input.clone(),
-                at,
-                editable: can.is_editable(),
-                selection: can.has_selection(),
-                copyable: can.is_copyable(),
-                paste,
-                empty: field.value().is_empty(),
-            }
-        };
-        self.overlays.set_popup(Popup::Text(menu));
-        self.show_menu(window, cx);
-        let focus = self.overlays.menu_focus().cloned();
-        input.update(cx, |input, cx| input.set_selection_focus(focus, cx));
-    }
-
-    /// The menu key in a text field opens its menu under the caret.
-    pub fn open_focused_text_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(input) = self.text_fields(cx).into_iter().find(|input| input.read(cx).focus_handle(cx).is_focused(window)) else {
-            return;
-        };
-        let at = {
-            let field = input.read(cx);
-            field.cursor_layout().map_or_else(|| field.input_bounds().bottom_left(), |(caret, _)| caret.bottom_left())
-        };
-        self.open_text_menu(input, at, window, cx);
-    }
-
-    /// The text fields there are: the search's, the address bar's, the columns' filters', and the open
-    /// dialog's.
-    fn text_fields(&self, cx: &App) -> Vec<Entity<InputState>> {
-        let mut fields = vec![self.search_field(cx), self.address.read(cx).field().clone()];
-        fields.extend(self.narrow_fields.values().map(|field| field.input.clone()));
-        fields.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
-        fields
-    }
-
-    /// The column whose own order's menu is open, if one is.
-    pub fn column_sort_open(&self) -> Option<ColumnId> {
-        match self.overlays.popup() {
-            Some(Popup::ColumnSort(id)) => Some(*id),
-            _ => None,
-        }
-    }
-
-    pub fn filter_open(&self) -> bool {
-        matches!(self.overlays.popup(), Some(Popup::Filters { .. }))
-    }
-
-    pub fn crumbs_open(&self) -> bool {
-        matches!(self.overlays.popup(), Some(Popup::Crumbs))
-    }
-
-    /// The lines of the open menu: a text field's, the sort order's, the search filters', or the file menu's.
+    /// The lines of the open menu, as the feature whose menu it is draws them. The trail's menu is built of
+    /// its own items, not of lines.
     pub fn menu_lines(&self, cx: &App) -> Vec<Line> {
-        if let Some(menu) = self.text_menu() {
-            let edit = menu.editable;
-            return vec![
-                plain("text-undo", "元に戻す", "Ctrl+Z", edit, Command::Edit(Edit::Undo)),
-                plain("text-cut", "切り取り", "Ctrl+X", edit && menu.copyable, Command::Edit(Edit::Cut)).grouped(),
-                plain("text-copy", "コピー", "Ctrl+C", menu.copyable, Command::Edit(Edit::Copy)),
-                plain("text-paste", "貼り付け", "Ctrl+V", edit && menu.paste, Command::Edit(Edit::Paste)),
-                plain("text-delete", "削除", "Delete", edit && menu.selection, Command::Edit(Edit::Delete)),
-                plain("text-select-all", "すべて選択", "Ctrl+A", !menu.empty, Command::Edit(Edit::SelectAll)).grouped(),
-            ];
+        match self.overlays.popup() {
+            Some(Popup::Text(menu)) => menu.lines(),
+            Some(Popup::ColumnSort(id)) => self.order_lines(*id),
+            Some(Popup::Filters { .. }) => self.filter_lines(cx),
+            Some(Popup::Tab { tab, .. }) => self.tab_lines(*tab),
+            Some(Popup::File(_)) => self.file_lines(cx),
+            Some(Popup::Crumbs) | None => Vec::new(),
         }
-        if let Some(column) = self.column_sort_open().and_then(|id| self.state.index_of(id)).map(|i| &self.state.columns[i]) {
-            let target = column.id;
-            let sort = self.order_of(column);
-            // By location only the search results, whose items are in all sorts of folders.
-            let search = column.kind == Kind::Search;
-            let mut lines: Vec<Line> = Sort::ALL
-                .into_iter()
-                .filter(|by| search || by.for_folders())
-                .map(|by| choice(by.label(), by.label(), Command::Sort(target, by), by == sort.by))
-                .collect();
-            let sorts = lines.len();
-            lines.extend([false, true].map(|descending| {
-                let label = direction_label(descending);
-                choice(label, label, Command::Direction(target, descending), descending == sort.descending)
-            }));
-            lines[sorts].group = true;
-            let first = sort.folders_first;
-            lines.push(choice("folders-first", "フォルダを先に表示", Command::FoldersFirst(target, !first), first).grouped());
-            // A column given its own order goes back to the default from here.
-            let own = self.own_order(column).is_some();
-            lines.push(Line { off: (!own).then_some(""), ..choice("unsort", "既定に戻す", Command::Unsort(target), false) }.grouped());
-            return lines;
-        }
-        if self.filter_open() {
-            let chosen = self.chosen_filter(cx);
-            let chosen = chosen.as_deref();
-            let mut lines = vec![choice("filter-none", "なし", Command::SearchFilter(None), chosen.is_none())];
-            let default = self.stored.settings().default_filter.as_deref();
-            lines.extend(self.stored.settings().filters.iter().map(|f| Line {
-                hint: (default == Some(f.name.as_str())).then_some("既定"),
-                ..choice(
-                    crate::search_filters::filter_tool_id("filter", &f.name),
-                    f.name.clone(),
-                    Command::SearchFilter(Some(f.name.clone())),
-                    chosen == Some(f.name.as_str()),
-                )
-            }));
-            lines.push(line("edit-filters", "pencil-line", "フィルターを編集…", None, None, Command::EditFilters).grouped());
-            return lines;
-        }
-        if let Some(&Popup::Tab { tab, .. }) = self.overlays.popup() {
-            let at = self.tabs.position(tab).unwrap_or_default();
-            let count = self.tabs.len();
-            let reopen = self.can_reopen_tab();
-            return vec![
-                line("tab-close", "x", "閉じる", Some("Ctrl+W"), None, Command::CloseTab(tab)),
-                plain("tab-close-others", "他のタブを閉じる", "", count > 1, Command::CloseOtherTabs(tab)),
-                plain("tab-close-right", "右のタブを閉じる", "", at + 1 < count, Command::CloseTabsRight(tab)),
-                line("tab-duplicate", "copy", "複製", None, None, Command::DuplicateTab(tab)).grouped(),
-                Line {
-                    off: (!reopen).then_some(""),
-                    ..line("tab-reopen", "rotate-ccw", "閉じたタブを開き直す", Some("Ctrl+Shift+T"), None, Command::ReopenTab)
-                },
-            ];
-        }
-        if self.menu().is_none() {
-            return Vec::new();
-        }
-        let reasons = self.reasons(cx);
-        let picked = self.picked();
-        if self.menu().and_then(|m| self.state.index_of(m.column)).is_some_and(|i| self.state.columns[i].kind == Kind::Home) {
-            return self.home_lines(&picked, &reasons);
-        }
-        let entries = self.picked_entries();
-        let one = entries.len() == 1;
-        // From empty space nothing is picked, and the actions on items need no word.
-        let some = !picked.is_empty();
-        let quiet = |reason: Option<&'static str>| if some { reason } else { reason.map(|_| "") };
-        // Several open as files in their apps, the folders among them passed over.
-        let open_off = match entries.len() {
-            0 => quiet(Some(ONE_ITEM)),
-            1 => None,
-            _ => entries.iter().all(|e| e.directory).then_some(NEEDS_FILE),
-        };
-        // From empty space, the folder column's own folder, narrowed as it is.
-        let in_tab = match (entries.as_slice(), self.folder_here().filter(|_| !some)) {
-            ([entry], _) => {
-                line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(entry.path.clone()))
-            }
-            (_, Some(folder)) => {
-                line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(folder))
-            }
-            _ => {
-                let off = if some { ONE_ITEM } else { NEEDS_FOLDER };
-                line(
-                    "menu-open-tab",
-                    "app-window",
-                    "新しいタブで開く",
-                    Some("Ctrl+Enter"),
-                    Some(off),
-                    Command::OpenInTab(Default::default()),
-                )
-            }
-        };
-        // Each item of Windows' Send To, by the shell's icon for it.
-        let targets = self.operations.read(cx).send_targets().iter().map(|target| {
-            let command = Command::SendTo { target: target.path.clone(), shift: false };
-            Line {
-                picture: Some(IconSource::Item(target.path.clone())),
-                ..choice(send_to_id(&target.path), target.name.clone(), command, false)
-            }
-        });
-        let send_to = Line {
-            sub: Some(targets.collect()),
-            ..line("menu-send-to", "send", "送る", None, quiet(reasons.send_to), Command::SendTo { target: PathBuf::new(), shift: false })
-        }
-        .grouped();
-        let mut lines = vec![
-            line("menu-open", "external-link", "開く", Some("Enter"), open_off, Command::Open),
-            in_tab,
-            line("menu-explorer", "folder-open", "エクスプローラーで表示", None, reasons.explorer, Command::Explorer),
-            send_to,
-            line("menu-copy", "copy", "コピー", Some("Ctrl+C"), quiet(reasons.copy), Command::Copy).grouped(),
-            line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), Command::Cut),
-            line("menu-paste", "clipboard-paste", "貼り付け", Some("Ctrl+V"), reasons.paste, Command::Paste),
-            line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, Command::CopyPath),
-            line("menu-rename", "pencil-line", "名前を変更", Some("F2"), quiet(reasons.rename), Command::Rename).grouped(),
-            line("menu-new-folder", "folder-plus", "新規フォルダー", Some("Ctrl+Shift+N"), reasons.paste, Command::NewFolder),
-            line("menu-recycle", "trash", "ごみ箱へ移動", Some("Delete"), quiet(reasons.delete), Command::Recycle),
-        ];
-        if one && entries[0].directory {
-            let path = entries[0].path.clone();
-            let favorite = self.stored.settings().is_favorite(&path);
-            lines.push(
-                line(
-                    "menu-favorite",
-                    if favorite { "star-fill" } else { "star" },
-                    if favorite { "お気に入りを解除" } else { "お気に入りに追加" },
-                    Some("Ctrl+D"),
-                    None,
-                    Command::Favorite(path),
-                )
-                .grouped(),
-            );
-        }
-        lines.push(
-            line("menu-properties", "info", "プロパティ", Some("Alt+Enter"), quiet(reasons.properties), Command::Properties).grouped(),
-        );
-        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows));
-        lines
     }
 
-    /// The menu of rows of home: opening them, their paths, and keeping them there. What home never does,
-    /// as copying, cutting, pasting or deleting, is not offered. Home picks one row at a time.
-    fn home_lines(&self, picked: &[PathBuf], reasons: &Reasons) -> Vec<Line> {
-        let [path] = picked else { return Vec::new() };
-        let path = path.clone();
-        // A row of home is pinned above the rest, or put back.
-        let pin = if self.stored.settings().is_pinned(&path) {
-            line("menu-unpin", "pin-off", "ピン留めを外す", None, None, Command::Pin(path.clone()))
-        } else {
-            line("menu-pin", "pin", "ピン留め", None, None, Command::Pin(path.clone()))
-        };
-        let in_tab = line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, Command::OpenInTab(path.clone()));
-        if HomeKey::of(&path).is_search() {
-            return vec![
-                line("menu-open", "external-link", "開く", Some("Enter"), None, Command::Open),
-                in_tab,
-                line("menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None, Command::CopyPath).grouped(),
-                line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, Command::EditSearch(path.clone())).grouped(),
-                pin,
-                line("menu-unsave", "star", "保存した検索を解除", None, None, Command::Unsave(path)),
-            ];
-        }
-        let mut lines = vec![
-            line("menu-open", "external-link", "開く", Some("Enter"), None, Command::Open),
-            in_tab,
-            line("menu-explorer", "folder-open", "エクスプローラーで表示", None, reasons.explorer, Command::Explorer),
-            line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, Command::CopyPath).grouped(),
-        ];
-        // F2 on a favorite edits it: a place has nothing to edit, and its folder is not renamed from here.
-        let favorite = self.stored.settings().is_favorite(&path);
-        if favorite {
-            lines.push(line("menu-edit-favorite", "pencil-line", "編集", Some("F2"), None, Command::Rename));
-        }
-        lines.push(pin);
-        lines.push(line(
-            "menu-favorite",
-            if favorite { "star-fill" } else { "star" },
-            if favorite { "お気に入りを解除" } else { "お気に入りに追加" },
-            Some("Ctrl+D"),
-            None,
-            Command::Favorite(path),
-        ));
-        lines[4].group = true;
-        lines.push(line("menu-properties", "info", "プロパティ", Some("Alt+Enter"), reasons.properties, Command::Properties).grouped());
-        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, Command::Windows));
-        lines
-    }
-
+    /// Does what the line picked says, by the feature whose menu it is, and closes the menu.
     pub fn run_command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
-        // Done by the field itself, with the keys back in it.
-        if let Command::Edit(edit) = command {
-            self.close_menus(true, window, cx);
-            window.dispatch_action(edit.action(), cx);
-            return;
+        match command {
+            // Each closes the menu itself first.
+            Command::Edit(edit) => return self.run_edit(edit, window, cx),
+            Command::Tab(command) => return self.run_tab_command(command, window, cx),
+            _ => {}
         }
-        // A tab's: the menu goes first, as it holds the tabs where they are.
-        if let Some(tab) = match &command {
-            Command::CloseTab(tab) | Command::CloseOtherTabs(tab) | Command::CloseTabsRight(tab) | Command::DuplicateTab(tab) => {
-                Some(Some(*tab))
-            }
-            Command::ReopenTab => Some(None),
-            _ => None,
-        } {
-            self.close_menus(true, window, cx);
-            let index = tab.and_then(|tab| self.tabs.position(tab));
-            match (command, index) {
-                (Command::CloseTab(_), Some(index)) => self.close_tab(index, window, cx),
-                (Command::CloseOtherTabs(_), Some(index)) => self.close_tabs_but(index, false, window, cx),
-                (Command::CloseTabsRight(_), Some(index)) => self.close_tabs_but(index, true, window, cx),
-                (Command::DuplicateTab(_), Some(index)) => self.duplicate_tab(index, window, cx),
-                (Command::ReopenTab, _) => self.reopen_tab(window, cx),
-                _ => {}
-            }
-            return;
-        }
+        // The file menu's and home's act in the column it was opened in.
         if let Some(column) = self.menu().map(|menu| menu.column) {
             let Some(index) = self.state.index_of(column) else {
                 self.close_menus(true, window, cx);
@@ -527,55 +198,27 @@ impl Colet {
             };
             self.state.set_active(index);
         }
-        match command {
-            Command::Open => self.open_picked(window, cx),
-            Command::OpenInTab(path) => {
-                let index = self.state.active;
-                self.open_in_tab(index, &path, cx);
+        let close = match command {
+            Command::File(command) => self.run_file_command(command, window, cx),
+            Command::Home(command) => {
+                self.run_home_command(command, window, cx);
+                true
             }
-            Command::Explorer => self.reveal_in_explorer(cx),
-            Command::Copy => self.copy(false, cx),
-            Command::Cut => self.copy(true, cx),
-            Command::Paste => self.paste(cx),
-            Command::CopyPath => self.copy_paths(cx),
-            Command::Properties => self.show_properties(cx),
-            Command::Rename => self.ask_rename(window, cx),
-            Command::NewFolder => self.ask_new_folder(window, cx),
-            Command::Recycle => self.delete_picked(false, cx),
-            Command::Delete => self.delete_picked(true, cx),
-            Command::Favorite(path) => {
-                self.toggle_favorite(&path, cx);
+            Command::Order(command) => {
+                self.run_order_command(command, cx);
+                true
             }
-            Command::SendTo { target, shift } => self.send_to(target, shift, cx),
-            Command::Pin(path) => self.toggle_pin(&path, cx),
-            Command::Windows => {
-                self.show_shell_menu(window, cx);
-                return;
+            Command::Filter(command) => {
+                self.run_filter_command(command, window, cx);
+                true
             }
-            Command::EditSearch(key) => self.open_edit(&key, window, cx),
-            Command::Unsave(key) => {
-                if let HomeKey::Search { query, filter, narrow, order } = HomeKey::of(&key) {
-                    self.toggle_saved(query, filter.map(str::to_owned), narrow.map(str::to_owned), order, cx);
-                }
-            }
-            Command::Sort(target, by) => self.set_sort(target, by, cx),
-            Command::Direction(target, descending) => self.set_direction(target, descending, cx),
-            Command::FoldersFirst(target, first) => self.set_folders_first(target, first, cx),
-            Command::Unsort(id) => self.set_order(id, Order::default(), cx),
-            Command::SearchFilter(name) => self.choose_filter(name, cx),
-            Command::EditFilters => self.open_filters(window, cx),
-            Command::Edit(_) => unreachable!("a field's edit is done above"),
-            Command::CloseTab(_)
-            | Command::CloseOtherTabs(_)
-            | Command::CloseTabsRight(_)
-            | Command::DuplicateTab(_)
-            | Command::ReopenTab => {
-                unreachable!("a tab's is done above")
-            }
+            Command::Edit(_) | Command::Tab(_) => unreachable!("done above"),
+        };
+        if close {
+            // What the line opened, a dialog, takes the keys; otherwise they go back to the column.
+            let to_column = !self.overlays.has_dialog();
+            self.close_menus(to_column, window, cx);
         }
-        // What the line opened, a dialog, takes the keys; otherwise they go back to the column.
-        let to_column = !self.overlays.has_dialog();
-        self.close_menus(to_column, window, cx);
     }
 
     /// Closes whichever menu is open, handing the keys back when `restore`: to where they were as it opened,
@@ -592,61 +235,6 @@ impl Colet {
             _ => {}
         }
         cx.notify();
-    }
-
-    /// Opens the menu of the folders folded off the trail, as it was last drawn.
-    pub fn open_crumb_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.overlays.set_popup(Popup::Crumbs);
-        let active = self.state.columns.get(self.state.active).map(|c| c.id);
-        let colet = cx.weak_entity();
-        let items = self
-            .crumbs
-            .folded
-            .iter()
-            .map(|crumb| {
-                let (id, label, path) = (crumb.column, crumb.name.clone(), crumb.path.clone());
-                let colet = colet.clone();
-                PopupMenuItem::element(move |_, _| div().id(("crumb-item", id)).test_support().tip(path.clone()).child(label.clone()))
-                    .icon(crate::view::glyph("folder"))
-                    .checked(Some(id) == active)
-                    .on_click(move |_, window, cx| {
-                        colet
-                            .update(cx, |this, cx| {
-                                this.close_crumb_menu(false, window, cx);
-                                this.go_to_column(id, window, cx);
-                            })
-                            .ok();
-                    })
-            })
-            .collect();
-        self.show_items(items, window, cx);
-    }
-
-    /// Closes the trail's menu; `to_button` hands the keys back to the button that opened it.
-    pub fn close_crumb_menu(&mut self, to_button: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.crumbs_open() {
-            self.overlays.close_menu();
-        }
-        if to_button {
-            self.stop("crumb-fold", cx).focus(window, cx);
-        }
-        cx.notify();
-    }
-
-    /// Opens the menu of the column `id`'s own order.
-    pub fn open_column_sort(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
-        self.overlays.set_popup(Popup::ColumnSort(id));
-        self.show_menu(window, cx);
-    }
-
-    /// Opens the search filters' menu.
-    pub fn open_filter_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let from_search = match self.overlays.popup() {
-            Some(&Popup::Filters { from_search }) => from_search,
-            _ => self.search_has_keys(window, cx),
-        };
-        self.overlays.set_popup(Popup::Filters { from_search });
-        self.show_menu(window, cx);
     }
 
     /// Builds the open menu's lines into the component library's menu and gives it the keys: ↑↓ move,
@@ -703,11 +291,9 @@ impl Colet {
             .disabled(off.is_some())
             .checked(chosen)
             .on_click(move |event: &ClickEvent, window, cx| {
+                // Shift held changes what some of the file menu's lines do, as in Explorer.
                 let command = match &command {
-                    // "ごみ箱へ移動" with Shift held deletes outright, as Explorer's Delete does.
-                    Command::Recycle if event.modifiers().shift => Command::Delete,
-                    // Sent with Shift held moves, as Explorer's Send To does.
-                    Command::SendTo { target, .. } => Command::SendTo { target: target.clone(), shift: event.modifiers().shift },
+                    Command::File(command) => Command::File(command.shifted(event.modifiers().shift)),
                     command => command.clone(),
                 };
                 colet.update(cx, |this, cx| this.run_command(command, window, cx)).ok();
@@ -761,30 +347,6 @@ const TEXT_MENU_WIDTH: f32 = 200.;
 const TAB_MENU_WIDTH: f32 = 220.;
 
 impl Colet {
-    /// Opens the file menu on `paths` (`None` for the selection, empty for the folder itself) in the
-    /// column at `index`, at `at` in the window. The keys stay where they were, as the selection does.
-    pub fn open_menu(&mut self, index: usize, paths: Option<Vec<PathBuf>>, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.overlays.has_dialog() {
-            return;
-        }
-        let Some(c) = self.state.columns.get(index) else { return };
-        // Home has nothing to offer but on its rows.
-        if c.kind == Kind::Home && paths.as_ref().map_or_else(|| c.shown_selected().is_empty(), Vec::is_empty) {
-            return;
-        }
-        let column = c.id;
-        self.state.set_active(index);
-        self.column_focus(index).focus(window, cx);
-        let scale = window.scale_factor();
-        let mut point = windows::Win32::Foundation::POINT { x: (f32::from(at.x) * scale) as i32, y: (f32::from(at.y) * scale) as i32 };
-        let _ =
-            unsafe { windows::Win32::Graphics::Gdi::ClientToScreen(windows::Win32::Foundation::HWND(self.owner as *mut _), &mut point) };
-        self.overlays.set_popup(Popup::File(Menu { column, paths, at, screen: (point.x, point.y) }));
-        self.show_menu(window, cx);
-        // Read afresh for each menu, so one added since is there.
-        self.operations.update(cx, |operations, cx| operations.load_send_targets(cx));
-    }
-
     /// The file menu, or a text field's, where it was opened; over a dialog too, for its fields'. GPUI
     /// paints every deferred draw in the order of its priority, nested or not, so the menu takes one over
     /// the dialog's (ten and up) to be drawn in front of it as it is clicked in front of it.

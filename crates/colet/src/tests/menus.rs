@@ -192,7 +192,7 @@ fn opens_nothing_beside_send_to_pointed_at_while_it_is_off(cx: &mut TestAppConte
     ui.act(cx, |window, cx| window.hover("menu-send-to", cx));
     settle(cx);
     assert!(ui.act(cx, |window, _| {
-        window.try_find(crate::menus::send_to_id(Path::new(r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget"))).is_none()
+        window.try_find(crate::file_menu::send_to_id(Path::new(r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget"))).is_none()
     }));
     ui.press(cx, "escape");
     // On, pointed at, it opens its menu beside it.
@@ -204,7 +204,7 @@ fn opens_nothing_beside_send_to_pointed_at_while_it_is_off(cx: &mut TestAppConte
     ui.act(cx, |window, cx| window.within("menu").hover(send, cx));
     settle(cx);
     assert!(ui.act(cx, |window, _| {
-        window.try_find(crate::menus::send_to_id(Path::new(r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget"))).is_some()
+        window.try_find(crate::file_menu::send_to_id(Path::new(r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget"))).is_some()
     }));
 }
 
@@ -275,7 +275,7 @@ fn sends_results_from_several_folders_moved_with_shift(cx: &mut TestAppContext) 
     ui.press(cx, "down");
     ui.press(cx, "right");
     settle(cx);
-    ui.click_with(cx, crate::menus::send_to_id(Path::new(r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget")), Modifiers::shift());
+    ui.click_with(cx, crate::file_menu::send_to_id(Path::new(r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget")), Modifiers::shift());
     let sent = fake.sent.lock().unwrap().clone();
     let all = vec![r"D:\a\x.txt".to_owned(), r"D:\b\y.txt".to_owned()];
     assert_eq!(sent, [(r"C:\SendTo\Compressed (zipped) Folder.ZFSendToTarget".to_owned(), all, true)]);

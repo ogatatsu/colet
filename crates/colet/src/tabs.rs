@@ -8,10 +8,22 @@ use gpui_kit::*;
 
 use crate::{
     app::Colet,
-    menus::Popup,
+    menus::{Line, Popup, line, plain},
     settings::{KeptTab, Settings},
     state::{ColumnId, HomeKey, Kind, State},
 };
+
+/// What a line of a tab's menu does.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TabCommand {
+    Close(TabId),
+    /// Every tab but this one.
+    CloseOthers(TabId),
+    /// The tabs right of this one.
+    CloseRight(TabId),
+    Duplicate(TabId),
+    Reopen,
+}
 
 mod list;
 mod strip;
@@ -370,6 +382,53 @@ impl Colet {
         }
         self.overlays.set_popup(Popup::Tab { tab: id, at });
         self.show_menu(window, cx);
+    }
+
+    /// The lines of the tab `tab`'s menu.
+    pub(crate) fn tab_lines(&self, tab: TabId) -> Vec<Line> {
+        let at = self.tabs.position(tab).unwrap_or_default();
+        let count = self.tabs.len();
+        let reopen = self.can_reopen_tab();
+        vec![
+            line("tab-close", "x", "閉じる", Some("Ctrl+W"), None, TabCommand::Close(tab)),
+            plain("tab-close-others", "他のタブを閉じる", "", count > 1, TabCommand::CloseOthers(tab)),
+            plain("tab-close-right", "右のタブを閉じる", "", at + 1 < count, TabCommand::CloseRight(tab)),
+            line("tab-duplicate", "copy", "複製", None, None, TabCommand::Duplicate(tab)).grouped(),
+            Line {
+                off: (!reopen).then_some(""),
+                ..line("tab-reopen", "rotate-ccw", "閉じたタブを開き直す", Some("Ctrl+Shift+T"), None, TabCommand::Reopen)
+            },
+        ]
+    }
+
+    /// Does what the line picked in a tab's menu says. The menu goes first, as it holds the tabs where
+    /// they are.
+    pub(crate) fn run_tab_command(&mut self, command: TabCommand, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_menus(true, window, cx);
+        let index = |this: &Self, tab: TabId| this.tabs.position(tab);
+        match command {
+            TabCommand::Close(tab) => {
+                if let Some(index) = index(self, tab) {
+                    self.close_tab(index, window, cx);
+                }
+            }
+            TabCommand::CloseOthers(tab) => {
+                if let Some(index) = index(self, tab) {
+                    self.close_tabs_but(index, false, window, cx);
+                }
+            }
+            TabCommand::CloseRight(tab) => {
+                if let Some(index) = index(self, tab) {
+                    self.close_tabs_but(index, true, window, cx);
+                }
+            }
+            TabCommand::Duplicate(tab) => {
+                if let Some(index) = index(self, tab) {
+                    self.duplicate_tab(index, window, cx);
+                }
+            }
+            TabCommand::Reopen => self.reopen_tab(window, cx),
+        }
     }
 
     // ---- The strip ----

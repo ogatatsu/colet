@@ -87,7 +87,9 @@ fn shows_the_properties_of_a_drive_or_folder_in_home_but_not_of_a_saved_search(c
     // A saved search has none: not in its menu, and off by the keys.
     ui.act(cx, |window, cx| window.within("home").right_click(row("search:one"), cx));
     settle(cx);
-    assert!(!ui.read_app(cx, |v, app| v.menu_lines(app).iter().any(|l| l.command == crate::menus::Command::Properties)));
+    assert!(!ui.read_app(cx, |v, app| {
+        v.menu_lines(app).iter().any(|l| l.command == crate::menus::Command::File(crate::file_menu::FileCommand::Properties))
+    }));
     assert_eq!(ui.read_app(cx, |v, app| v.reasons(app).properties), Some("保存した検索には使えません"));
     ui.press(cx, "escape");
     ui.click(cx, row("search:one"));

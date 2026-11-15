@@ -361,7 +361,9 @@ fn pins_rows_of_any_kind_above_the_rest_and_puts_them_in_order(cx: &mut TestAppC
     pin(&ui, cx, r"D:\b", "menu-favorite");
     pin(&ui, cx, "search:two", "menu-unsave");
     assert!(fake.settings.lock().unwrap().pinned.is_empty());
-    assert!(!ui.read_app(cx, |v, app| v.menu_lines(app).iter().any(|l| matches!(l.command, crate::menus::Command::Pin(_)))));
+    assert!(!ui.read_app(cx, |v, app| {
+        v.menu_lines(app).iter().any(|l| matches!(l.command, crate::menus::Command::Home(crate::home::HomeCommand::Pin(_))))
+    }));
 }
 
 #[gpui_kit::test]

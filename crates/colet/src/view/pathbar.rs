@@ -1,5 +1,8 @@
 //! The trail of folders above the columns, and the address field typed in in its place.
 use super::*;
+use gpui_kit::component::menu::PopupMenuItem;
+
+use crate::menus::Popup;
 
 impl Colet {
     /// The bar under the crumbs of the columns on screen, cut where the edges cut the columns; only while
@@ -283,5 +286,50 @@ impl Colet {
                     .on_click(cx.listener(move |this, _, window, cx| this.go_to_column(id, window, cx)))
                     .test_support(),
             )
+    }
+}
+
+impl Colet {
+    pub fn crumbs_open(&self) -> bool {
+        matches!(self.overlays.popup(), Some(Popup::Crumbs))
+    }
+
+    /// Opens the menu of the folders folded off the trail, as it was last drawn.
+    pub fn open_crumb_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.overlays.set_popup(Popup::Crumbs);
+        let active = self.state.columns.get(self.state.active).map(|c| c.id);
+        let colet = cx.weak_entity();
+        let items = self
+            .crumbs
+            .folded
+            .iter()
+            .map(|crumb| {
+                let (id, label, path) = (crumb.column, crumb.name.clone(), crumb.path.clone());
+                let colet = colet.clone();
+                PopupMenuItem::element(move |_, _| div().id(("crumb-item", id)).test_support().tip(path.clone()).child(label.clone()))
+                    .icon(crate::view::glyph("folder"))
+                    .checked(Some(id) == active)
+                    .on_click(move |_, window, cx| {
+                        colet
+                            .update(cx, |this, cx| {
+                                this.close_crumb_menu(false, window, cx);
+                                this.go_to_column(id, window, cx);
+                            })
+                            .ok();
+                    })
+            })
+            .collect();
+        self.show_items(items, window, cx);
+    }
+
+    /// Closes the trail's menu; `to_button` hands the keys back to the button that opened it.
+    pub fn close_crumb_menu(&mut self, to_button: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.crumbs_open() {
+            self.overlays.close_menu();
+        }
+        if to_button {
+            self.stop("crumb-fold", cx).focus(window, cx);
+        }
+        cx.notify();
     }
 }

@@ -24,7 +24,10 @@ use gpui_kit::*;
 use crate::{
     app::{Colet, Tone},
     dialogs::{Choice, Dialog, DialogParts, Pick, field, label, push},
+    file_menu::FileCommand,
+    menus::{Line, line},
     metrics::{self, Scale, scaled},
+    ops::Reasons,
     search_filters::filter_tool_id,
     settings::{Favorite, SavedSearch, Settings},
     state::{HomeKey, Kind, narrowing},
@@ -739,6 +742,80 @@ impl Colet {
             ),
         ];
         ("保存した検索を編集", content, buttons)
+    }
+}
+
+/// What a line of home's menu does that the file menu does not.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HomeCommand {
+    /// A row of home, pinned or put back.
+    Pin(PathBuf),
+    /// A saved search, by its row's key.
+    EditSearch(PathBuf),
+    Unsave(PathBuf),
+}
+
+impl Colet {
+    /// The menu of rows of home: opening them, their paths, and keeping them there. What home never does,
+    /// as copying, cutting, pasting or deleting, is not offered. Home picks one row at a time.
+    pub(crate) fn home_lines(&self, picked: &[PathBuf], reasons: &Reasons) -> Vec<Line> {
+        let [path] = picked else { return Vec::new() };
+        let path = path.clone();
+        // A row of home is pinned above the rest, or put back.
+        let pin = if self.stored.settings().is_pinned(&path) {
+            line("menu-unpin", "pin-off", "ピン留めを外す", None, None, HomeCommand::Pin(path.clone()))
+        } else {
+            line("menu-pin", "pin", "ピン留め", None, None, HomeCommand::Pin(path.clone()))
+        };
+        let in_tab =
+            line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, FileCommand::OpenInTab(path.clone()));
+        if HomeKey::of(&path).is_search() {
+            return vec![
+                line("menu-open", "external-link", "開く", Some("Enter"), None, FileCommand::Open),
+                in_tab,
+                line("menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None, FileCommand::CopyPath).grouped(),
+                line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, HomeCommand::EditSearch(path.clone())).grouped(),
+                pin,
+                line("menu-unsave", "star", "保存した検索を解除", None, None, HomeCommand::Unsave(path)),
+            ];
+        }
+        let mut lines = vec![
+            line("menu-open", "external-link", "開く", Some("Enter"), None, FileCommand::Open),
+            in_tab,
+            line("menu-explorer", "folder-open", "エクスプローラーで表示", None, reasons.explorer, FileCommand::Explorer),
+            line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath).grouped(),
+        ];
+        // F2 on a favorite edits it: a place has nothing to edit, and its folder is not renamed from here.
+        let favorite = self.stored.settings().is_favorite(&path);
+        if favorite {
+            lines.push(line("menu-edit-favorite", "pencil-line", "編集", Some("F2"), None, FileCommand::Rename));
+        }
+        lines.push(pin);
+        lines.push(line(
+            "menu-favorite",
+            if favorite { "star-fill" } else { "star" },
+            if favorite { "お気に入りを解除" } else { "お気に入りに追加" },
+            Some("Ctrl+D"),
+            None,
+            FileCommand::Favorite(path),
+        ));
+        lines[4].group = true;
+        lines.push(line("menu-properties", "info", "プロパティ", Some("Alt+Enter"), reasons.properties, FileCommand::Properties).grouped());
+        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, FileCommand::Windows));
+        lines
+    }
+
+    /// Does what the line picked in home's menu says.
+    pub(crate) fn run_home_command(&mut self, command: HomeCommand, window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            HomeCommand::Pin(path) => self.toggle_pin(&path, cx),
+            HomeCommand::EditSearch(key) => self.open_edit(&key, window, cx),
+            HomeCommand::Unsave(key) => {
+                if let HomeKey::Search { query, filter, narrow, order } = HomeKey::of(&key) {
+                    self.toggle_saved(query, filter.map(str::to_owned), narrow.map(str::to_owned), order, cx);
+                }
+            }
+        }
     }
 }
 

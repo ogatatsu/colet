@@ -12,6 +12,7 @@ use gpui_kit::prelude::FluentBuilder;
 use crate::{
     app::Colet,
     dialogs::{Dialog, DialogParts, field, label, push},
+    menus::{Line, Popup, choice, line},
     metrics::{self, scaled},
     settings::SearchFilter,
     state::HomeKey,
@@ -418,5 +419,57 @@ impl Colet {
             ),
         ];
         ("検索フィルター", content, buttons)
+    }
+}
+
+/// What a line of the search filters' menu does.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FilterCommand {
+    /// The search filter to search within, or none.
+    Choose(Option<String>),
+    /// The dialog of the filters opens.
+    Edit,
+}
+
+impl Colet {
+    pub fn filter_open(&self) -> bool {
+        matches!(self.overlays.popup(), Some(Popup::Filters { .. }))
+    }
+
+    /// Opens the search filters' menu.
+    pub fn open_filter_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let from_search = match self.overlays.popup() {
+            Some(&Popup::Filters { from_search }) => from_search,
+            _ => self.search_has_keys(window, cx),
+        };
+        self.overlays.set_popup(Popup::Filters { from_search });
+        self.show_menu(window, cx);
+    }
+
+    /// The search filters' menu: none, each filter, the default marked, and editing them.
+    pub(crate) fn filter_lines(&self, cx: &App) -> Vec<Line> {
+        let chosen = self.chosen_filter(cx);
+        let chosen = chosen.as_deref();
+        let mut lines = vec![choice("filter-none", "なし", FilterCommand::Choose(None), chosen.is_none())];
+        let default = self.stored.settings().default_filter.as_deref();
+        lines.extend(self.stored.settings().filters.iter().map(|f| Line {
+            hint: (default == Some(f.name.as_str())).then_some("既定"),
+            ..choice(
+                filter_tool_id("filter", &f.name),
+                f.name.clone(),
+                FilterCommand::Choose(Some(f.name.clone())),
+                chosen == Some(f.name.as_str()),
+            )
+        }));
+        lines.push(line("edit-filters", "pencil-line", "フィルターを編集…", None, None, FilterCommand::Edit).grouped());
+        lines
+    }
+
+    /// Does what the line picked in the search filters' menu says.
+    pub(crate) fn run_filter_command(&mut self, command: FilterCommand, window: &mut Window, cx: &mut Context<Self>) {
+        match command {
+            FilterCommand::Choose(name) => self.choose_filter(name, cx),
+            FilterCommand::Edit => self.open_filters(window, cx),
+        }
     }
 }
