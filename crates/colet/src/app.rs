@@ -45,7 +45,7 @@ use crate::{
     state::{Column, ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
     stops::{Stop, Stops},
     stored::Stored,
-    tabs::Tabs,
+    tabs::{TabStrip, Tabs},
     theme::ActivePalette,
 };
 
@@ -335,6 +335,9 @@ pub struct Colet {
     /// The filter the next search in the tab in front is narrowed by, by name.
     pub chosen_filter: Option<String>,
     pub tabs: Tabs,
+    /// The strip the tabs are drawn on: its own entity, which keeps where it is scrolled and the tab carried
+    /// along it, and which Colet hears from.
+    pub tab_strip: Entity<TabStrip>,
     pub widths: Widths,
     pub search: Entity<InputState>,
     /// The address bar's field and the asking whether what is typed there is: its own entity, which Colet
@@ -420,12 +423,15 @@ impl Colet {
         // The history's button, the rows' clipboard marks and the menu's Send To are drawn from it.
         subscriptions.push(cx.observe(&operations, |_, _, cx| cx.notify()));
         subscriptions.push(cx.subscribe_in(&operations, window, |this, _, event, window, cx| this.on_operations_event(event, window, cx)));
+        let tab_strip = cx.new(|_| TabStrip::default());
+        subscriptions.push(cx.subscribe_in(&tab_strip, window, |this, _, event, window, cx| this.on_tab_strip_event(event, window, cx)));
         let history = cx.new(|cx| HistoryPanel::new(operations.clone(), backend.clone(), cx));
         subscriptions.push(cx.subscribe_in(&history, window, |this, _, event, window, cx| this.on_history_event(event, window, cx)));
         let mut this = Self {
             state: State::new(),
             chosen_filter: None,
             tabs: Tabs::default(),
+            tab_strip,
             widths: Widths::new(settings.sidebar_width, settings.search_width, settings.column_width, settings.search_field_width),
             search,
             address,

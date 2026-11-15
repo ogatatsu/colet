@@ -1,9 +1,7 @@
-//! The tabs on the strip, in order: which is in front, the others parked as they were, the ones closed
-//! to bring back, and a tab carried along the strip. Colet swaps a tab's state in and out of its own
-//! fields; this keeps the list, the front and the closed ones in step as it does.
+//! The tabs on the strip, in order: which is in front, the others parked as they were, and the ones
+//! closed to bring back. Colet swaps a tab's state in and out of its own fields; this keeps the list, the
+//! front and the closed ones in step as it does.
 use std::collections::HashMap;
-
-use gpui_kit::ScrollHandle;
 
 use crate::{
     app::NarrowField,
@@ -89,18 +87,6 @@ pub struct Tabs {
     next_id: TabId,
     /// The tabs closed, the latest last, each with where it stood.
     closed: Vec<(usize, Tab)>,
-    scroll: ScrollHandle,
-    /// The tab in front is to be brought in sight on the strip.
-    reveal: bool,
-    drag: TabDrag,
-}
-
-/// A tab carried along the strip, and the gap between tabs it would land in.
-#[derive(Default)]
-struct TabDrag {
-    carried: Option<TabId>,
-    /// 0 before the first tab, up to the count after the last; none while the pointer is off the strip.
-    gap: Option<usize>,
 }
 
 impl Tabs {
@@ -172,10 +158,9 @@ impl Tabs {
         }
     }
 
-    /// The tab at `index` is in front, as the tabs were kept, and is brought in sight.
+    /// The tab at `index` is in front, as the tabs were kept; the strip brings it in sight.
     pub fn set_front(&mut self, index: usize) {
         self.current = index;
-        self.reveal = true;
     }
 
     /// Takes the tab at `index` to bring it to the front; none for the one in front already, or none there.
@@ -236,59 +221,6 @@ impl Tabs {
         for parked in self.list.iter_mut().chain(closed).filter_map(|tab| tab.parked.as_mut()) {
             parked.rename_filter(from, to);
         }
-    }
-
-    // ---- The strip ----
-
-    pub fn scroll(&self) -> &ScrollHandle {
-        &self.scroll
-    }
-
-    /// Brings the tab in front in sight on the strip if it is to be; false while the strip is not laid out
-    /// yet to scroll, to be tried again on the next frame.
-    pub fn bring_front_in_sight(&mut self) -> bool {
-        if !self.reveal {
-            return true;
-        }
-        // Before the first prepaint the handle does not yet know that it scrolls horizontally;
-        // scroll_to_item would consume the request without moving it.
-        if self.scroll.bounds().size.width <= gpui_kit::px(0.) {
-            return false;
-        }
-        self.reveal = false;
-        self.scroll.scroll_to_item(self.current);
-        true
-    }
-
-    // ---- A tab carried along the strip ----
-
-    /// The tab `id` is picked up.
-    pub fn start_drag(&mut self, id: TabId) {
-        self.drag = TabDrag { carried: Some(id), gap: None };
-    }
-
-    /// The tab carried, if one is.
-    pub fn carried(&self) -> Option<TabId> {
-        self.drag.carried
-    }
-
-    /// The gap the tab carried would land in.
-    pub fn gap(&self) -> Option<usize> {
-        self.drag.gap.filter(|_| self.drag.carried.is_some())
-    }
-
-    /// The tab carried would land in `gap` now; true when that moved.
-    pub fn aim(&mut self, gap: Option<usize>) -> bool {
-        if self.drag.carried.is_none() || self.drag.gap == gap {
-            return false;
-        }
-        self.drag.gap = gap;
-        true
-    }
-
-    /// The tab carried is put down: the gap it would have landed in.
-    pub fn end_drag(&mut self) -> Option<usize> {
-        std::mem::take(&mut self.drag).gap
     }
 }
 
@@ -379,18 +311,5 @@ mod tests {
         assert!(tabs.is_front(next) && !tabs.is_front(was));
         assert_eq!(tabs.get(1).unwrap().parked().map(|p| p.keys.clone()), Some(Keys::Search));
         assert!(tabs.parked_mut(next).is_none());
-    }
-
-    #[test]
-    fn carries_a_tab_and_puts_it_down_with_the_gap_it_was_over() {
-        let mut tabs = four();
-        assert!(!tabs.aim(Some(1)), "nothing carried");
-        let id = tabs.get(0).unwrap().id();
-        tabs.start_drag(id);
-        assert_eq!((tabs.carried(), tabs.gap()), (Some(id), None));
-        assert!(tabs.aim(Some(3)));
-        assert!(!tabs.aim(Some(3)));
-        assert_eq!(tabs.end_drag(), Some(3));
-        assert_eq!((tabs.carried(), tabs.gap()), (None, None));
     }
 }

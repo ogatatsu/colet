@@ -23,7 +23,7 @@ fn reveals_the_restored_tab_and_its_curves_at_either_end_of_the_strip(cx: &mut T
     let assert_revealed = |cx: &mut TestAppContext| {
         let id = ui.read(cx, |v| v.current_tab());
         let tab = ui.act(cx, |window, _| window.find(("tab", id as usize)).bounds());
-        let viewport = ui.read(cx, |v| v.tabs.scroll().bounds());
+        let viewport = ui.read_app(cx, |v, app| v.tab_strip.read(app).scroll().bounds());
         assert!(tab.left() - px(8.) >= viewport.left() - px(0.5), "{tab:?} in {viewport:?}");
         assert!(tab.right() + px(8.) <= viewport.right() + px(0.5), "{tab:?} in {viewport:?}");
     };
@@ -320,7 +320,7 @@ impl Ui {
     }
 
     fn tab_drag(&self, cx: &mut TestAppContext) -> (Option<crate::tabs::TabId>, Option<usize>) {
-        self.read(cx, |v| (v.tabs.carried(), v.tabs.gap()))
+        self.read_app(cx, |v, app| (v.tab_strip.read(app).carried(), v.tab_strip.read(app).gap()))
     }
 }
 

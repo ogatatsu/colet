@@ -345,7 +345,7 @@ impl Colet {
     /// lands, off the window too. Drawn first, so it hears the press let go of after every place the drag
     /// can land; a landing puts the drag down itself and keeps it from hearing it.
     fn drag_let_go(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.home_drag.carried.is_none() && self.tabs.carried().is_none() {
+        if self.home_drag.carried.is_none() && self.tab_strip.read(cx).carried().is_none() {
             return None;
         }
         let view = cx.entity().downgrade();
@@ -362,9 +362,9 @@ impl Colet {
 
     /// The drag in home or of a tab is let go of where it does not land: nothing has moved.
     fn let_go_of_drags(&mut self, cx: &mut Context<Self>) {
-        if self.home_drag.carried.is_some() || self.tabs.carried().is_some() {
+        if self.home_drag.carried.is_some() || self.tab_strip.read(cx).carried().is_some() {
             self.end_home_drag();
-            self.end_tab_drag();
+            self.end_tab_drag(cx);
             cx.notify();
         }
     }
@@ -389,7 +389,7 @@ impl Render for Colet {
         // It never notifies; it asks for another frame only while a slide is under way.
         self.reveal(window);
         let p = cx.palette();
-        let tabbar = self.render_tabbar(window, cx);
+        let tabbar = self.tab_bar();
         let sidebar = self.render_sidebar(window, cx);
         let toolbar = self.render_toolbar(window, cx);
         let main = self.render_main(window, cx);
