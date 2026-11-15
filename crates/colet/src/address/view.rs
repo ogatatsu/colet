@@ -95,7 +95,7 @@ impl Colet {
                     underline: None,
                     strikethrough: None,
                 };
-                let shaped = window.text_system().shape_line(label.clone().into(), scale.px(metrics::TEXT_LARGE), &[run], None);
+                let shaped = window.text_system().shape_line(label.clone().into(), scale.px(metrics::TEXT_SM), &[run], None);
                 // The first stands at the bar's start, with no chevron or gap before it.
                 let before = if k == 0 { 0. } else { crate::crumbs::SEPARATOR + crate::crumbs::GAP };
                 scale.down(f32::from(shaped.width)).ceil() + 12. + before
@@ -194,7 +194,7 @@ impl Colet {
             .flex_1()
             .min_w(scaled(ADDRESS_MIN))
             .m(scaled(-RING_ROOM))
-            .text_size(scaled(metrics::TEXT_BODY))
+            .text_xs()
             .child(
                 div()
                     .id("address")
@@ -268,7 +268,7 @@ impl Colet {
             .items_center()
             .gap_0p5()
             // As large as the rows' names, though the bar's buttons stay smaller.
-            .text_size(scaled(metrics::TEXT_LARGE))
+            .text_sm()
             .when_some(max_width, |d, width| d.min_w_0().max_w(scaled(width)))
             .when(max_width.is_none(), |d| d.flex_none())
             .when(chevron, |d| d.child(icon("chevron-right", 13., p.text_faint)))

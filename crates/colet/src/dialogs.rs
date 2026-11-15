@@ -101,7 +101,7 @@ pub(crate) type DialogParts = (&'static str, Div, Buttons);
 
 /// The name over a field or a group of choices.
 pub(crate) fn label(p: Palette, text: &'static str) -> Div {
-    div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_muted).child(text)
+    div().text_xs().text_color(p.text_muted).child(text)
 }
 
 /// A dialog's button: the primary one is what Enter does.
@@ -276,7 +276,7 @@ impl Colet {
                 cx.propagate();
                 false
             })
-            .title(div().text_size(scaled(metrics::TEXT_TITLE)).font_weight(FontWeight::SEMIBOLD).child(title))
+            .title(div().text_base().font_weight(FontWeight::SEMIBOLD).child(title))
             .child(
                 div()
                     .id("dialog-content")

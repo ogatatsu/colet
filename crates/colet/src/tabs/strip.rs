@@ -424,7 +424,7 @@ impl Render for DraggedTab {
             .child(div().min_w_0().truncate().child(self.name.clone()))
             .opacity(0.5)
             .font_family(metrics::FONT_UI)
-            .text_size(scaled(metrics::TEXT_LARGE))
+            .text_sm()
             .text_color(p.text)
     }
 }

@@ -66,10 +66,13 @@ impl Colet {
     /// Whether to open `count` files together.
     pub(crate) fn open_dialog(&mut self, count: usize, cx: &mut Context<Self>) -> DialogParts {
         let p = cx.palette();
-        let content =
-            div().flex().flex_col().gap_2().text_size(scaled(metrics::TEXT_LARGE)).child(format!("{count} 項目を開きますか？")).child(
-                div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"),
-            );
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .text_sm()
+            .child(format!("{count} 項目を開きますか？"))
+            .child(div().text_xs().text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"));
         let buttons = vec![
             (
                 "cancel",

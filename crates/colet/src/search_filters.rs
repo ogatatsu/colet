@@ -13,7 +13,7 @@ use crate::{
     app::Colet,
     dialogs::{Dialog, DialogParts, field, label, push},
     menus::{Line, Popup, choice, line},
-    metrics::{self, scaled},
+    metrics,
     settings::SearchFilter,
     state::HomeKey,
     stops::{FilterTool, Stop},
@@ -225,7 +225,7 @@ impl Colet {
                         .child(label(p, "名前"))
                         .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
                         .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                            d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
+                            d.child(div().text_xs().text_color(p.danger).child(problem))
                         }),
                 )
                 .child(
@@ -235,7 +235,7 @@ impl Colet {
                         .gap_1()
                         .child(label(p, "検索文字列"))
                         .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
-                        .child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child(
+                        .child(div().text_xs().text_color(p.text_faint).child(
                             "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
                         )),
                 );
@@ -258,14 +258,11 @@ impl Colet {
         let p = cx.palette();
         let users = self.filter_users(name);
         let content =
-            div().flex().flex_col().gap_2().text_size(scaled(metrics::TEXT_LARGE)).child(format!("「{name}」を削除しますか？")).when(
-                users > 0,
-                |d| {
-                    d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_muted).child(format!(
-                        "このフィルターを使う保存した検索が{users}件あります。削除すると、それらはフィルターなしで検索します。"
-                    )))
-                },
-            );
+            div().flex().flex_col().gap_2().text_sm().child(format!("「{name}」を削除しますか？")).when(users > 0, |d| {
+                d.child(div().text_xs().text_color(p.text_muted).child(format!(
+                    "このフィルターを使う保存した検索が{users}件あります。削除すると、それらはフィルターなしで検索します。"
+                )))
+            });
         let buttons = vec![
             (
                 "cancel",
@@ -319,20 +316,11 @@ impl Colet {
                                     .items_baseline()
                                     .gap_2()
                                     .min_w_0()
-                                    .child(div().truncate().text_size(scaled(metrics::TEXT_LARGE)).child(f.name.clone()))
-                                    .when(is_default, |d| {
-                                        d.child(
-                                            div().flex_none().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_muted).child("既定"),
-                                        )
-                                    }),
+                                    .child(div().truncate().text_sm().child(f.name.clone()))
+                                    .when(is_default, |d| d.child(div().flex_none().text_xs().text_color(p.text_muted).child("既定"))),
                             )
                             .child(
-                                div()
-                                    .truncate()
-                                    .text_size(scaled(metrics::TEXT_BODY))
-                                    .text_color(p.text_muted)
-                                    .font_family(metrics::FONT_CODE)
-                                    .child(f.query.clone()),
+                                div().truncate().text_xs().text_color(p.text_muted).font_family(metrics::FONT_CODE).child(f.query.clone()),
                             ),
                     )
                     // Their stops named after the filter, to go with it.
@@ -395,17 +383,12 @@ impl Colet {
             .gap_2()
             .child(
                 div()
-                    .text_size(scaled(metrics::TEXT_BODY))
+                    .text_xs()
                     .text_color(p.text_muted)
                     .child("検索に加えるEverythingの検索式を登録し、検索欄の左のボタン（Ctrl+Shift+F）で1つ選んで使います。"),
             )
             .child(if rows.is_empty() {
-                div()
-                    .py_2()
-                    .text_size(scaled(metrics::TEXT_BODY))
-                    .text_color(p.text_faint)
-                    .child("フィルターはまだありません")
-                    .into_any_element()
+                div().py_2().text_xs().text_color(p.text_faint).child("フィルターはまだありません").into_any_element()
             } else {
                 div().flex().flex_col().children(rows).into_any_element()
             });

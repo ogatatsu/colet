@@ -78,7 +78,7 @@ impl Colet {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(scaled(metrics::TEXT_BODY))
+                            .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
                             .child("ホーム"),
@@ -148,7 +148,7 @@ impl Render for HomeGhost {
             // Faint enough that the landing line it passes over still shows through.
             .opacity(0.5)
             .font_family(metrics::FONT_UI)
-            .text_size(scaled(metrics::TEXT_LARGE))
+            .text_sm()
             .text_color(p.text)
             .child(picture)
             .child(div().min_w_0().truncate().child(self.name.clone()))
@@ -194,7 +194,7 @@ impl Colet {
                     .pb_1p5()
                     .flex()
                     .items_end()
-                    .text_size(scaled(metrics::TEXT_BODY))
+                    .text_xs()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(p.text_muted)
                     .child(title),

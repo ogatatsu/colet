@@ -47,16 +47,12 @@ impl Scale {
     }
 }
 
-/// A dialog's title.
-pub const TEXT_TITLE: f32 = 15.;
-/// The window's own size, which text takes unless it sets one: a dialog's message, a tab's title, a crumb.
-pub const TEXT_LARGE: f32 = 13.;
-/// Set on most of the window's text: rows, headings, fields and buttons.
-pub const TEXT_BODY: f32 = 12.;
-/// The second line of a row and other secondary text.
-pub const TEXT_SMALL: f32 = 11.;
-/// The count on the history's button.
-pub const TEXT_TINY: f32 = 10.;
+// Text takes GPUI's own steps, which are rems and so follow the zoom: `text_base()` for a dialog's title,
+// `text_sm()` for the window's own size (a dialog's message, a tab's title, a crumb), `text_xs()` for the
+// rest (rows, headings, fields, buttons, a row's second line). What is secondary is told by its color.
+
+/// What `text_sm()` draws at 100%, for measuring text drawn with it.
+pub const TEXT_SM: f32 = 14.;
 
 /// The heading of each column, of home's pane and of the folded columns' strip, which stand level with
 /// one another.

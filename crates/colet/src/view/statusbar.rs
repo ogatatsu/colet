@@ -43,7 +43,7 @@ impl Colet {
             .flex_none()
             .px_3()
             .gap_4()
-            .text_size(scaled(metrics::TEXT_BODY))
+            .text_xs()
             .child(
                 div()
                     .id("place")

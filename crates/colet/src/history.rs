@@ -138,7 +138,7 @@ impl HistoryPanel {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .text_size(scaled(metrics::TEXT_BODY))
+                            .text_xs()
                             .hover(|d| d.bg(p.raised_hover))
                             .child(
                                 svg()
@@ -155,7 +155,7 @@ impl HistoryPanel {
                     )
                     .when(open, |d| {
                         d.when_some(entry.error.clone(), |d, error| {
-                            d.child(div().px_3().pb_1().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(error))
+                            d.child(div().px_3().pb_1().text_xs().text_color(p.danger).child(error))
                         })
                         .children(entry.items.iter().enumerate().map(|(k, item)| {
                             let path = item.path.clone();
@@ -171,7 +171,7 @@ impl HistoryPanel {
                                 .py(scaled(3.))
                                 .flex()
                                 .flex_col()
-                                .text_size(scaled(metrics::TEXT_BODY))
+                                .text_xs()
                                 .child(
                                     div()
                                         .flex()
@@ -209,14 +209,7 @@ impl HistoryPanel {
                                 .into_any_element()
                         }))
                         .when(entry.more > 0, |d| {
-                            d.child(
-                                div()
-                                    .pl_8()
-                                    .py_1()
-                                    .text_size(scaled(metrics::TEXT_BODY))
-                                    .text_color(p.text_faint)
-                                    .child(format!("ほか {} 項目", entry.more)),
-                            )
+                            d.child(div().pl_8().py_1().text_xs().text_color(p.text_faint).child(format!("ほか {} 項目", entry.more)))
                         })
                     })
                     .into_any_element()
@@ -267,12 +260,7 @@ impl Render for HistoryPanel {
                     ),
             )
             .child(if entries.is_empty() {
-                div()
-                    .p_4()
-                    .text_size(scaled(metrics::TEXT_BODY))
-                    .text_color(p.text_muted)
-                    .child("まだファイル操作はありません")
-                    .into_any_element()
+                div().p_4().text_xs().text_color(p.text_muted).child("まだファイル操作はありません").into_any_element()
             } else {
                 div().id("history-list").flex_1().overflow_y_scroll().children(entries).into_any_element()
             })
@@ -307,14 +295,14 @@ impl Colet {
             .when(unseen > 0, |d| {
                 d.child(
                     div()
-                        .min_w_3p5()
-                        .h_3p5()
+                        .min_w_4()
+                        .h_4()
                         .px(scaled(3.))
                         .rounded(cx.theme().radius_full())
                         // White on the deep red: past 4.5:1 in either theme.
                         .bg(p.danger_fill)
                         .text_color(p.on_accent)
-                        .text_size(scaled(metrics::TEXT_TINY))
+                        .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
                         .flex()
                         .items_center()

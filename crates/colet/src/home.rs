@@ -26,7 +26,7 @@ use crate::{
     dialogs::{Choice, Dialog, DialogParts, Pick, field, label, push},
     file_menu::FileCommand,
     menus::{Line, line},
-    metrics::{self, Scale, scaled},
+    metrics::{self, Scale},
     ops::Reasons,
     search_filters::filter_tool_id,
     settings::{Favorite, SavedSearch, Settings},
@@ -592,10 +592,8 @@ impl Colet {
             .child(label(p, "絞り込み"))
             .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
             .child(match problem {
-                Some(problem) => div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem),
-                None => {
-                    div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child("開いたとき、この文字で名前を絞り込みます")
-                }
+                Some(problem) => div().text_xs().text_color(p.danger).child(problem),
+                None => div().text_xs().text_color(p.text_faint).child("開いたとき、この文字で名前を絞り込みます"),
             })
     }
 
@@ -641,12 +639,7 @@ impl Colet {
             .flex()
             .flex_col()
             .gap_3()
-            .child(
-                div()
-                    .text_size(scaled(metrics::TEXT_BODY))
-                    .text_color(p.text_faint)
-                    .child(format!("フォルダー：{}", shown(&original.path))),
-            )
+            .child(div().text_xs().text_color(p.text_faint).child(format!("フォルダー：{}", shown(&original.path))))
             .child(
                 div()
                     .flex()
@@ -654,7 +647,7 @@ impl Colet {
                     .gap_1()
                     .child(label(p, "名前"))
                     .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
-                    .child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
+                    .child(div().text_xs().text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
             )
             .child(self.narrow_field(narrow, problem, window, cx));
         let buttons = vec![
@@ -716,12 +709,7 @@ impl Colet {
                     .gap_1()
                     .child(label(p, "名前"))
                     .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
-                    .child(
-                        div()
-                            .text_size(scaled(metrics::TEXT_BODY))
-                            .text_color(p.text_faint)
-                            .child("空欄なら検索文字列をそのまま表示します"),
-                    ),
+                    .child(div().text_xs().text_color(p.text_faint).child("空欄なら検索文字列をそのまま表示します")),
             )
             .child(
                 div()
@@ -731,7 +719,7 @@ impl Colet {
                     .child(label(p, "検索文字列"))
                     .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
                     .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                        d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
+                        d.child(div().text_xs().text_color(p.danger).child(problem))
                     }),
             )
             .child(div().flex().flex_col().gap_1().child(label(p, "検索フィルター")).child(filters))

@@ -192,7 +192,7 @@ impl Colet {
             .gap_3()
             .px_4()
             .py_8()
-            .text_size(scaled(metrics::TEXT_BODY))
+            .text_xs()
             .text_color(p.text_muted)
             .child(icon(icon_name, 28., p.text_faint))
             .child(div().text_center().child(text))
@@ -206,7 +206,7 @@ impl Colet {
             .gap_2()
             .px_4()
             .py_3()
-            .text_size(scaled(metrics::TEXT_BODY))
+            .text_xs()
             .text_color(p.text_muted)
             .child(Spinner::new().icon(glyph("loader-circle")).color(p.text_muted).with_size(self.scale().px(metrics::GLYPH)))
             .child("読み込み中…")
@@ -363,13 +363,13 @@ impl Colet {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(scaled(metrics::TEXT_BODY))
+                            .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
                             .when(!path.is_empty(), |d| d.tip(path))
                             .child(header_title),
                     )
-                    .child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child(count))
+                    .child(div().text_xs().text_color(p.text_faint).child(count))
                     .child(sort_button)
                     .child(star)
                     .when(index == self.state.active, |d| {
@@ -522,7 +522,7 @@ impl Colet {
             .items_center()
             .border_b_1()
             .border_color(p.border)
-            .text_size(scaled(metrics::TEXT_SMALL))
+            .text_xs()
             .children(check_all)
             // The search results' items are in all sorts of folders, shown under their names: they sort by
             // those too, from a heading beside the name's, the rest of the room left bare.

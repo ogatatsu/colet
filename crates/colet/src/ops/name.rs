@@ -164,18 +164,15 @@ impl Colet {
                 "保存",
             ),
         };
-        let content =
-            div().flex().flex_col().gap_3().child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child(place)).child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(label(p, "名前"))
-                    .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
-                    .when_some(problem, |d, problem| {
-                        d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
-                    }),
-            );
+        let content = div().flex().flex_col().gap_3().child(div().text_xs().text_color(p.text_faint).child(place)).child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(label(p, "名前"))
+                .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
+                .when_some(problem, |d, problem| d.child(div().text_xs().text_color(p.danger).child(problem))),
+        );
         let buttons = vec![
             (
                 "cancel",

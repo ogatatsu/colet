@@ -403,7 +403,7 @@ impl Colet {
                                 .border_color(ink.opacity(0.3))
                                 .bg(ink.opacity(0.1))
                                 .truncate()
-                                .text_size(scaled(metrics::TEXT_SMALL))
+                                .text_xs()
                                 .line_height(scaled(16.))
                                 .text_color(ink)
                                 .child(filter),
@@ -420,7 +420,7 @@ impl Colet {
                                 .gap_0p5()
                                 .tip(format!("絞り込み：{narrow}"))
                                 .child(icon("funnel", 11., muted))
-                                .child(div().min_w_0().truncate().text_size(scaled(metrics::TEXT_SMALL)).text_color(muted).child(narrow)),
+                                .child(div().min_w_0().truncate().text_xs().text_color(muted).child(narrow)),
                         )
                     }),
             )
@@ -431,7 +431,7 @@ impl Colet {
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis_start()
-                        .text_size(scaled(metrics::TEXT_BODY))
+                        .text_xs()
                         .text_color(muted)
                         .child(with_marks(&row.entry.parent, &row.entry.marks.parent, mark)),
                 )
@@ -445,15 +445,7 @@ impl Colet {
         let size = if entry.directory { String::new() } else { time::size(entry.size) };
         let modified = entry.modified.and_then(time::date_minute).unwrap_or_else(|| "—".into());
         let cell = |width: f32, text: String| {
-            div()
-                .flex_none()
-                .w(scaled(width))
-                .flex()
-                .whitespace_nowrap()
-                .text_size(scaled(metrics::TEXT_BODY))
-                .text_color(muted)
-                .child(text)
-                .into_any_element()
+            div().flex_none().w(scaled(width)).flex().whitespace_nowrap().text_xs().text_color(muted).child(text).into_any_element()
         };
         let chevron = if entry.directory {
             icon("chevron-right", CHEVRON, if lit { p.on_accent_muted } else { p.text_faint }).into_any_element()

@@ -303,7 +303,7 @@ impl Render for Colet {
             .bg(p.bg)
             .text_color(p.text)
             .font_family(metrics::FONT_UI)
-            .text_size(scaled(metrics::TEXT_LARGE))
+            .text_sm()
             // The window's keys. None of them needs to check for a dialog: the window draws its dialog
             // outside Colet's elements, and the dialog keeps the keys in itself, so while one is open these
             // are never on the way of a key (see `tests::window::leaves_the_window_keys_alone_in_a_dialog`).

@@ -30,7 +30,7 @@ use crate::{
     backend::{self, PathKind},
     clipboard::{Clipboard, Paste},
     dialogs::{Dialog, DialogParts, field, label, push},
-    metrics::{self, scaled},
+    metrics,
     settings::Favorite,
     state::{Column, HomeKey, Kind as ColumnKind},
     theme::ActivePalette,

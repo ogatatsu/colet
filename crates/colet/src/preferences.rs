@@ -8,7 +8,7 @@ use gpui_kit::*;
 use crate::{
     app::Colet,
     dialogs::{Choice, Dialog, DialogParts, Pick, label, push},
-    metrics::{self, scaled},
+    metrics::scaled,
     settings::{Theme, ZOOMS},
     stops::Stop,
     theme::ActivePalette,
@@ -160,21 +160,19 @@ impl Colet {
                         ),
                     )
             })
-            .child(div().pt_1().text_size(scaled(metrics::TEXT_LARGE)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
+            .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
             // One by one: an array of them all would lie whole on the stack, past what a debug build has.
-            .child(div().flex().flex_col().gap_3().text_size(scaled(metrics::TEXT_BODY)).children(SHORTCUTS.iter().map(
-                |&(heading, keys)| {
-                    div().flex().flex_col().gap_1().child(label(p, heading)).children(keys.iter().map(|&(key, what)| {
-                        div()
-                            .flex()
-                            .gap_3()
-                            // As wide as the longest key, so none wraps.
-                            .child(div().w(scaled(KEYS_WIDTH)).flex_none().text_color(p.text).child(key))
-                            // Wrapped in the room left, rather than cut at the dialog's edge.
-                            .child(div().flex_1().min_w_0().text_color(p.text_muted).child(what))
-                    }))
-                },
-            )));
+            .child(div().flex().flex_col().gap_3().text_xs().children(SHORTCUTS.iter().map(|&(heading, keys)| {
+                div().flex().flex_col().gap_1().child(label(p, heading)).children(keys.iter().map(|&(key, what)| {
+                    div()
+                        .flex()
+                        .gap_3()
+                        // As wide as the longest key, so none wraps.
+                        .child(div().w(scaled(KEYS_WIDTH)).flex_none().text_color(p.text).child(key))
+                        // Wrapped in the room left, rather than cut at the dialog's edge.
+                        .child(div().flex_1().min_w_0().text_color(p.text_muted).child(what))
+                }))
+            })));
         let buttons = vec![(
             "close-preferences",
             push("close-preferences", "閉じる", true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),

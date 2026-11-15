@@ -138,7 +138,7 @@ impl Colet {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .text_size(scaled(metrics::TEXT_BODY))
+                    .text_xs()
                     .text_color(p.text_muted)
                     .child(away.to_string())
                     .child("階")
