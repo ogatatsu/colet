@@ -340,6 +340,10 @@ impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Only the stops asked for over the last frame stay: those of buttons gone go with them.
         self.stops.begin_frame(window);
+        // The first frame drawn in front: the keys left the address field on the way, if they did, unheard of.
+        if std::mem::take(&mut self.came_to_front) && window.is_window_active() {
+            cx.defer_in(window, |this, window, cx| this.follow_address(window, cx));
+        }
         // The zoom this frame is drawn at: the widths and the scrolling are reckoned at 100% (see
         // `metrics`), and what layout measures is read through it. Read before anything below reckons.
         self.scrolls.sideways.rescale(Scale::of(window));

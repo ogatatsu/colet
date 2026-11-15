@@ -120,6 +120,31 @@ fn the_history_opened_while_typing_an_address_gives_it_back_as_typed(cx: &mut Te
 }
 
 #[gpui_kit::test]
+fn the_address_field_stays_open_over_a_trip_to_another_window_and_a_click_coming_back_closes_it(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "ctrl-l");
+    ui.input(cx, r"D:\wo");
+    gpui_kit::VisualTestContext::from_window(ui.window, cx).deactivate_window();
+    ui.act(cx, |_, _| ());
+    // Back with nothing clicked, the field is as it was left.
+    ui.act(cx, |window, _| window.activate_window());
+    settle(cx);
+    assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
+    assert!(ui.address_focused(cx));
+    // Away again, and back by a click on a row: it lands before the window is drawn active.
+    gpui_kit::VisualTestContext::from_window(ui.window, cx).deactivate_window();
+    ui.act(cx, |_, _| ());
+    cx.update_window(ui.window, |_, window, cx| {
+        window.activate_window();
+        window.click(row(r"D:\work\b.txt"), cx);
+    })
+    .unwrap();
+    settle(cx);
+    assert_eq!(ui.typed_address(cx), None);
+    assert!(ui.columns_focused(cx));
+}
+
+#[gpui_kit::test]
 fn the_column_worked_in_is_marked_only_while_the_keys_are_in_the_columns_or_go_back_there(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.click(cx, row(r"D:\work\b.txt"));

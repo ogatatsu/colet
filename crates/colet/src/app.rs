@@ -374,6 +374,9 @@ pub struct Colet {
     pub history_panel: HistoryPanel,
     /// What QuickLook was last told to show: a preview open follows the keys from it.
     quick_looked: Option<PathBuf>,
+    /// The window has come to the front and is not drawn so since: where the keys went on the way back is
+    /// heard of nowhere else (see [`Colet::follow_address`]).
+    pub(crate) came_to_front: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -444,6 +447,7 @@ impl Colet {
             operations,
             history_panel: HistoryPanel::default(),
             quick_looked: None,
+            came_to_front: false,
             _subscriptions: subscriptions,
         };
         for problem in [problem, sorts_problem].into_iter().flatten() {
@@ -471,6 +475,11 @@ impl Colet {
         // The keys leaving the open address field close it.
         let address = this.address.read(cx).field().read(cx).focus_handle(cx);
         this._subscriptions.push(cx.on_focus_out(&address, window, |this, _, window, cx| this.follow_address(window, cx)));
+        // Nor is it told of the keys leaving it in the click that brings the window back to the front: the first
+        // frame drawn there looks at them again.
+        this._subscriptions.push(cx.observe_window_activation(window, |this, window, _| {
+            this.came_to_front |= window.is_window_active();
+        }));
         this.sync_narrow_fields(window, cx);
         this.scroll_rows();
         crate::theme::set_zoom(this.stored.settings().zoom, cx);
