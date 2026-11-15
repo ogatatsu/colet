@@ -209,6 +209,7 @@ impl Colet {
     /// A search filter added or edited.
     pub(crate) fn filter_edit_dialog(&self, edit: &FilterEdit, window: &Window, cx: &mut Context<Self>) -> DialogParts {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let FilterEdit { name, query, .. } = edit;
         let problem = self.filter_problem(cx);
         let content =
@@ -222,7 +223,7 @@ impl Colet {
                         .flex_col()
                         .gap_1()
                         .child(label(p, "名前"))
-                        .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                        .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
                         .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                             d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
                         }),
@@ -233,7 +234,7 @@ impl Colet {
                         .flex_col()
                         .gap_1()
                         .child(label(p, "検索文字列"))
-                        .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
+                        .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
                         .child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child(
                             "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
                         )),

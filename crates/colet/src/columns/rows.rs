@@ -32,11 +32,13 @@ pub(crate) fn row_part_id(row: &std::sync::Arc<ElementId>, part: &'static str) -
     ElementId::NamedChild(row.clone(), part.into())
 }
 
-/// A row being drawn: its item, and its id, which its parts' ids are made from.
+/// A row being drawn: its item, its id, which its parts' ids are made from, and the theme's corners its
+/// parts round with.
 #[derive(Clone, Copy)]
 pub(crate) struct DrawnRow<'a> {
     entry: &'a Entry,
     id: &'a std::sync::Arc<ElementId>,
+    radii: metrics::Radii,
 }
 
 pub(crate) fn row_height(kind: Kind) -> f32 {
@@ -143,6 +145,7 @@ impl Colet {
 
     pub(crate) fn row(&mut self, index: usize, entry: &Entry, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
+        let radii = self.radii(cx);
         let RowLook { selected, highlighted, barred, lit, focused, target, aside, held, cut, faded, dragged, within, narrow } =
             self.row_look(index, entry, marked, keys, cx);
         let c = &self.state.columns[index];
@@ -182,7 +185,7 @@ impl Colet {
         let focused_row = (marked && c.focused.as_ref() == Some(&entry.path)).then(|| self.key_menu.row.clone());
         // Built once a row: its parts take it as their parent's rather than each writing out the path.
         let id = std::sync::Arc::new(row_id(&entry.path));
-        let drawn = DrawnRow { entry, id: &id };
+        let drawn = DrawnRow { entry, id: &id, radii };
         div()
             .id(ElementId::clone(&id))
             // Like Finder, the selection stays: the menu acts on the row clicked, or the whole selection if
@@ -242,7 +245,7 @@ impl Colet {
             .flex()
             .items_center()
             .gap_2()
-            .rounded(scaled(metrics::RADIUS))
+            .rounded(scaled(radii.sm))
             .role(Role::ListBoxOption)
             .aria_label(entry.name.clone())
             .aria_selected(selected)
@@ -250,7 +253,7 @@ impl Colet {
             .border_color(transparent_black())
             .when(focused, |r| r.border_color(if lit { p.focus_on_fill } else { p.focus }))
             .when(target, |r| r.border_color(p.accent).bg(p.highlight))
-            .when(barred, |r| r.child(div().absolute().left_0().top_0().bottom_0().w(scaled(3.)).rounded_l(scaled(4.)).bg(p.accent)))
+            .when(barred, |r| r.child(div().absolute().left_0().top_0().bottom_0().w(scaled(3.)).rounded_l(scaled(radii.sm)).bg(p.accent)))
             .when(selected, |r| r.bg(if marked && !aside { p.accent_fill } else { p.selected_inactive }))
             .when(lit, |r| r.text_color(p.on_accent))
             .when(barred, |r| r.bg(p.highlight))
@@ -307,7 +310,7 @@ impl Colet {
         let (fill, mark) = if lit { (p.on_accent, p.accent_fill) } else { (p.accent_fill, p.on_accent) };
         let check = div()
             .size_3p5()
-            .rounded(scaled(3.))
+            .rounded(scaled(row.radii.sm))
             .flex()
             .items_center()
             .justify_center()
@@ -395,7 +398,7 @@ impl Colet {
                                 .flex_shrink_0()
                                 .max_w_24()
                                 .px_1p5()
-                                .rounded(scaled(metrics::RADIUS))
+                                .rounded(scaled(row.radii.sm))
                                 .border_1()
                                 .border_color(ink.opacity(0.3))
                                 .bg(ink.opacity(0.1))

@@ -202,8 +202,8 @@ impl Colet {
         let p = cx.palette();
         let focus = self.stop(key, cx);
         let shown = focus.is_focused(window);
-        // The library's corners stay as many pixels at any zoom: the ring's are given at 100%.
-        let radius = Scale::of(window).down(f32::from(cx.theme().radius));
+        // The library's own corners, as the ring takes them.
+        let radius = metrics::Radii::of(window, cx).md;
         let button = button.track_focus(&focus).focus_ring(false);
         match at {
             RingAt::Edge => ring(div().flex().flex_none().relative().child(button), p, shown, radius),
@@ -228,6 +228,11 @@ impl Colet {
     /// The zoom this frame is drawn at, as [`Render::render`] reads it before anything is drawn.
     pub(crate) fn scale(&self) -> Scale {
         self.scrolls.sideways.scale
+    }
+
+    /// The theme's corners at the zoom this frame is drawn at.
+    pub(crate) fn radii(&self, cx: &App) -> metrics::Radii {
+        metrics::Radii::at(self.scale(), cx)
     }
 
     /// The keys are in home's pane.

@@ -5,7 +5,7 @@ use std::{collections::HashSet, path::PathBuf};
 
 use colet_core::paths::{folder_name, shown};
 use gpui_kit::component::{
-    Sizable,
+    ActiveTheme as _, Sizable,
     button::{Button, ButtonVariants},
     spinner::Spinner,
 };
@@ -113,6 +113,7 @@ impl HistoryPanel {
 
     fn render_entries(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let history = &self.operations.read(cx).history;
         history
             .entries
@@ -190,7 +191,7 @@ impl HistoryPanel {
                                             // Opened in Colet, not in a browser: a button, its name in the accent color.
                                             .role(Role::Button)
                                             .aria_label(name.clone())
-                                            .rounded(scaled(metrics::RADIUS))
+                                            .rounded(scaled(radii.sm))
                                             .text_color(p.accent)
                                             .hover(|d| d.bg(p.raised_hover))
                                             .child(name)
@@ -231,6 +232,7 @@ impl Render for HistoryPanel {
         // Only the stops of the rows and items drawn below stay; the mouse leaves the keys where they are.
         self.stops.begin_frame(window);
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let entries = self.render_entries(window, cx);
         let clearable = self.operations.read(cx).history.entries.iter().any(|e| e.status != Status::Running);
         div()
@@ -245,7 +247,7 @@ impl Render for HistoryPanel {
             .bg(p.raised)
             .border_1()
             .border_color(p.border_strong)
-            .rounded(scaled(8.))
+            .rounded(scaled(radii.lg))
             .shadow_lg()
             .occlude()
             .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(HistoryEvent::Dismiss)))
@@ -308,7 +310,7 @@ impl Colet {
                         .min_w_3p5()
                         .h_3p5()
                         .px(scaled(3.))
-                        .rounded_full()
+                        .rounded(cx.theme().radius_full())
                         // White on the deep red: past 4.5:1 in either theme.
                         .bg(p.danger_fill)
                         .text_color(p.on_accent)

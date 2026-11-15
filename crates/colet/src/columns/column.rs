@@ -504,7 +504,7 @@ impl Colet {
                 .flex()
                 .items_center()
                 .gap_0p5()
-                .rounded(scaled(metrics::RADIUS))
+                .rounded(scaled(self.radii(cx).sm))
                 .hover(|d| d.bg(p.hover))
                 .text_color(if chosen { p.text } else { p.text_muted })
                 .child(by.label())
@@ -583,6 +583,7 @@ impl Colet {
         cx: &mut Context<Self>,
     ) -> Div {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let focused = self.has_keys(input, window, cx);
         let has_text = !input.read(cx).value().is_empty();
         let clear = has_text.then(|| {
@@ -605,7 +606,7 @@ impl Colet {
             self.ringed(clear, Stop::ClearFilter(id), RingAt::Edge, window, cx)
         });
         // Ringed as the search field is; the ring lies over the gaps around.
-        frame(p, focused, metrics::FIELD_RADIUS).m(scaled(-RING_ROOM)).child(
+        frame(p, focused, radii.md).m(scaled(-RING_ROOM)).child(
             div()
                 .id(("filter", id))
                 .w_full()
@@ -618,7 +619,7 @@ impl Colet {
                 .bg(p.surface)
                 .border_1()
                 .border_color(p.border_strong)
-                .rounded(scaled(metrics::FIELD_RADIUS))
+                .rounded(scaled(radii.md))
                 // Accented while it has the keys, or narrows the rows from out of them.
                 .child(icon("funnel", 13., if focused || narrowed { p.accent } else { p.text_muted }))
                 .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(input, cx)).child(Input::new(input)))

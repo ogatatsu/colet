@@ -5,7 +5,8 @@
 //! theme's base font at [`BASE`]. Drawn, it goes through [`scaled`], a length in rems, so it follows the
 //! zoom the settings choose along with the text; reckoned against what layout measured, it goes through
 //! [`Scale`], which knows how many pixels it is drawn as.
-use gpui_kit::{Pixels, Rems, Window, px, rems};
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::{App, Pixels, Rems, Window, px, rems};
 
 /// The theme's base font at 100%: the rem the sizes here are given against.
 pub const BASE: f32 = 16.;
@@ -69,11 +70,31 @@ pub const ICON_BUTTON: f32 = 24.;
 /// The status bar along the bottom; the notices stand clear of it.
 pub const STATUS_BAR_HEIGHT: f32 = 26.;
 
-/// The corners of a row, a crumb, a tab and a quiet button. A ring drawn round one takes the same, so the
-/// two stay concentric.
-pub const RADIUS: f32 = 4.;
-/// The corners of a field and of a bordered control beside one; the frame that rings it takes the same.
-pub const FIELD_RADIUS: f32 = 6.;
+/// The theme's corners by tier, given at 100% as [`scaled`], `ring` and `frame` take sizes. Drawn, they
+/// come back to the theme's own pixels at any zoom, so Colet's parts round as the library's do. A ring
+/// drawn round a part takes the part's tier, so the two stay concentric.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Radii {
+    /// A row, a crumb, a tab, a badge and a quiet button.
+    pub sm: f32,
+    /// A field and a bordered control beside one, as the library's own controls.
+    pub md: f32,
+    /// A raised surface: the history.
+    pub lg: f32,
+}
+
+impl Radii {
+    pub fn of(window: &Window, cx: &App) -> Self {
+        Self::at(Scale::of(window), cx)
+    }
+
+    /// The tiers for a window drawn at `scale`.
+    pub fn at(scale: Scale, cx: &App) -> Self {
+        let tiers = cx.theme().radius_tokens();
+        let down = |radius: Pixels| scale.down(f32::from(radius));
+        Self { sm: down(tiers.sm), md: down(tiers.md), lg: down(tiers.lg) }
+    }
+}
 
 /// An item's own picture, as the shell draws it: in the rows, the menus and a row dragged in home.
 pub const ICON: f32 = 16.;

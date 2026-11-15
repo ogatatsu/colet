@@ -3,7 +3,7 @@
 //! tabs Colet hands it each frame and tells it, through a [`TabStripEvent`], what was asked for. Which tabs
 //! there are, and what each holds, stay Colet's.
 use gpui_kit::component::{
-    Sizable,
+    ActiveTheme as _, Sizable,
     button::{Button, ButtonVariants},
 };
 use gpui_kit::prelude::FluentBuilder;
@@ -160,6 +160,7 @@ impl RenderOnce for TabBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = cx.palette();
         let scale = Scale::of(window);
+        let radius = cx.theme().radius_tokens().sm;
         let Self { strip, tabs, current } = self;
         let count = tabs.len();
         // The tabs share the room there is, down to their least; past that the strip scrolls.
@@ -176,7 +177,7 @@ impl RenderOnce for TabBar {
         };
         let dragging = carried.is_some();
         let tab = |ix: usize, look: &TabLook| -> Stateful<Div> {
-            Tab { strip: &strip, look, ix, count, current: ix == current, width, carried, p, scale }.render()
+            Tab { strip: &strip, look, ix, count, current: ix == current, width, carried, p, radius }.render()
         };
         let mut cells = Vec::with_capacity(count * 2);
         for (ix, look) in tabs.iter().enumerate() {
@@ -232,6 +233,7 @@ impl RenderOnce for TabBar {
                     .top(scaled(TAB_TOP))
                     .w_0p5()
                     .h(scaled(TAB_HEIGHT))
+                    // A line two pixels wide, not a surface: its ends round off by half its width, not by a tier.
                     .rounded(scaled(1.))
                     .bg(p.accent)
                     .test_support()
@@ -284,7 +286,7 @@ impl RenderOnce for TabBar {
                     .children(cells),
             )
             .child(
-                tab_button(p, scale, "new-tab", "plus", "新しいタブ", "新しいタブ（Ctrl+T）")
+                tab_button(p, radius, "new-tab", "plus", "新しいタブ", "新しいタブ（Ctrl+T）")
                     .small()
                     .size(scaled(NEW_TAB_BUTTON))
                     .on_click(move |_, _, cx| ask(&new, TabStripEvent::New, cx)),
@@ -315,12 +317,13 @@ struct Tab<'a> {
     width: f32,
     carried: Option<TabId>,
     p: Palette,
-    scale: Scale,
+    /// The corners of its close button: the theme's.
+    radius: Pixels,
 }
 
 impl Tab<'_> {
     fn render(self) -> Stateful<Div> {
-        let Self { strip, look, ix, count, current, width, carried, p, scale } = self;
+        let Self { strip, look, ix, count, current, width, carried, p, radius } = self;
         let id = look.id;
         let Title { glyph, name, tip } = &look.title;
         let group = SharedString::from(format!("tab-{id}"));
@@ -367,7 +370,7 @@ impl Tab<'_> {
                 p.text_muted
             }))
             .child(div().flex_1().min_w_0().truncate().child(name.clone()))
-            .child(tab_button(p, scale, ("tab-close", id as usize), "x", "タブを閉じる", "タブを閉じる（Ctrl+W）").xsmall().on_click(
+            .child(tab_button(p, radius, ("tab-close", id as usize), "x", "タブを閉じる", "タブを閉じる（Ctrl+W）").xsmall().on_click(
                 move |_, _, cx| {
                     cx.stop_propagation();
                     ask(&closing, TabStripEvent::Close(id), cx);
@@ -427,10 +430,10 @@ impl Render for DraggedTab {
 }
 
 /// A small button with a glyph on the tab bar, which the mouse alone presses: Tab passes it by.
-fn tab_button(p: Palette, scale: Scale, id: impl Into<ElementId>, glyph: &str, label: &'static str, tip: &'static str) -> Button {
+fn tab_button(p: Palette, radius: Pixels, id: impl Into<ElementId>, glyph: &str, label: &'static str, tip: &'static str) -> Button {
     Button::new(id)
         .ghost()
-        .rounded(scale.px(metrics::RADIUS))
+        .rounded(radius)
         .icon(crate::view::glyph(glyph))
         .accessibility_label(label)
         .tooltip(tip)

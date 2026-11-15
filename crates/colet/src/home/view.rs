@@ -1,6 +1,7 @@
 //! Home's pane on the left: its heading, its rows under the headings of their kinds, the line where a row
 //! dragged among them would land, and the row that follows the pointer.
 
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -125,8 +126,9 @@ impl HomeGhost {
 }
 
 impl Render for HomeGhost {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let picture = match (self.search, self.image.clone()) {
             (true, _) => icon("search", 16., p.text_muted).into_any_element(),
             (false, Some(image)) => img(image).size(scaled(metrics::ICON)).flex_none().into_any_element(),
@@ -139,7 +141,7 @@ impl Render for HomeGhost {
             .flex()
             .items_center()
             .gap_2()
-            .rounded(scaled(metrics::RADIUS))
+            .rounded(scaled(radii.sm))
             .border_1()
             .border_color(p.border_strong)
             .bg(p.raised)
@@ -209,7 +211,7 @@ impl Colet {
                             .left_1p5()
                             .right_1p5()
                             .h(scaled(LANDING_LINE))
-                            .rounded_full()
+                            .rounded(cx.theme().radius_full())
                             .bg(p.accent)
                             .when(above, |l| l.top(scaled(-LANDING_LINE / 2.)))
                             .when(!above, |l| l.bottom(scaled(-LANDING_LINE / 2.))),

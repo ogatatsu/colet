@@ -584,12 +584,13 @@ impl Colet {
     /// cannot.
     fn narrow_field(&self, input: &Entity<InputState>, problem: Option<&'static str>, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         div()
             .flex()
             .flex_col()
             .gap_1()
             .child(label(p, "絞り込み"))
-            .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
+            .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
             .child(match problem {
                 Some(problem) => div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem),
                 None => {
@@ -634,6 +635,7 @@ impl Colet {
         cx: &mut Context<Self>,
     ) -> DialogParts {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let problem = self.favorite_edit_problem(cx);
         let content = div()
             .flex()
@@ -651,7 +653,7 @@ impl Colet {
                     .flex_col()
                     .gap_1()
                     .child(label(p, "名前"))
-                    .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                    .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
                     .child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
             )
             .child(self.narrow_field(narrow, problem, window, cx));
@@ -682,6 +684,7 @@ impl Colet {
         cx: &mut Context<Self>,
     ) -> DialogParts {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         // The saved search's choice of filter, none first.
         let choices: Vec<Option<String>> =
             std::iter::once(None).chain(self.stored.settings().filters.iter().map(|f| Some(f.name.clone()))).collect();
@@ -712,7 +715,7 @@ impl Colet {
                     .flex_col()
                     .gap_1()
                     .child(label(p, "名前"))
-                    .child(field(p, name, self.has_keys(name, window, cx), Self::right_press_menu(name, cx)))
+                    .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
                     .child(
                         div()
                             .text_size(scaled(metrics::TEXT_BODY))
@@ -726,7 +729,7 @@ impl Colet {
                     .flex_col()
                     .gap_1()
                     .child(label(p, "検索文字列"))
-                    .child(field(p, query, self.has_keys(query, window, cx), Self::right_press_menu(query, cx)))
+                    .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
                     .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                         d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
                     }),

@@ -53,6 +53,7 @@ impl Colet {
                                     point(scale.px(start), row.bottom() - scale.px(2.)),
                                     size(scale.px((end - start).max(0.)), scale.px(2.)),
                                 );
+                                // A bar two pixels high, not a surface: its ends round off by half its height, not by a tier.
                                 window.paint_quad(fill(at, color).corner_radii(scale.px(1.)));
                             }
                         },
@@ -105,6 +106,7 @@ impl Colet {
     /// The address beside the search field: the trail of crumbs, or the field to type a path in.
     pub(crate) fn render_address(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let crumbs = self.trail();
         let widths = self.crumb_widths(&crumbs, window);
         // The room the bar was last drawn with; before the first frame, a guess at what the toolbar leaves it.
@@ -188,7 +190,7 @@ impl Colet {
             .child(Input::new(&address_field));
         // Ringed as the search field is while it takes the keys; the ring lies over the gaps around. It gives
         // way first in a narrow window, folding its crumbs.
-        frame(p, editing, metrics::FIELD_RADIUS)
+        frame(p, editing, radii.md)
             .flex_1()
             .min_w(scaled(ADDRESS_MIN))
             .m(scaled(-RING_ROOM))
@@ -205,7 +207,7 @@ impl Colet {
                     .bg(p.surface)
                     .border_1()
                     .border_color(p.border_strong)
-                    .rounded(scaled(metrics::FIELD_RADIUS))
+                    .rounded(scaled(radii.md))
                     .when(editing, |d| d.child(field))
                     .when(!editing, |d| d.child(trail))
                     .test_support(),
@@ -217,13 +219,14 @@ impl Colet {
     /// `current` while the column worked in is among them.
     fn crumb_fold(&mut self, current: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let open = self.crumbs_open();
         let menu = if open { self.menu_element("crumb-menu", "上の階層", cx) } else { None };
         let focus = self.stop("crumb-fold", cx);
         div()
             .relative()
             .child(
-                ring(crate::view::keep_focus(div().id("crumb-fold")).track_focus(&focus), p, focus.is_focused(window), metrics::RADIUS)
+                ring(crate::view::keep_focus(div().id("crumb-fold")).track_focus(&focus), p, focus.is_focused(window), radii.sm)
                     .role(Role::Button)
                     .aria_label("上の階層")
                     .aria_expanded(open)
@@ -231,7 +234,7 @@ impl Colet {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(scaled(metrics::RADIUS))
+                    .rounded(scaled(radii.sm))
                     .hover(|d| d.bg(p.hover))
                     .tip_while_shut(open, "上の階層")
                     .child(icon("ellipsis", 15., if current { p.text } else { p.text_muted }))
@@ -253,6 +256,7 @@ impl Colet {
     /// `max_width`, the others keep their whole names.
     pub(crate) fn crumb(&self, crumb: Crumb, chevron: bool, max_width: Option<f32>, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let Crumb { column: id, name: label, path } = crumb;
         let current = self.state.index_of(id) == Some(self.state.active);
         let stop = self.stops.get(&Stop::Crumb(id));
@@ -270,7 +274,7 @@ impl Colet {
             .when(chevron, |d| d.child(icon("chevron-right", 13., p.text_faint)))
             .child(
                 // The mouse leaves the keys where they are; the column it goes to takes them.
-                ring(crate::view::keep_focus(div().id(("crumb", id))).track_focus(&focus), p, ringed, metrics::RADIUS)
+                ring(crate::view::keep_focus(div().id(("crumb", id))).track_focus(&focus), p, ringed, radii.sm)
                     .role(Role::Button)
                     .aria_label(label.clone())
                     .relative()
@@ -291,7 +295,7 @@ impl Colet {
                     .items_center()
                     .gap_1()
                     .min_w_0()
-                    .rounded(scaled(metrics::RADIUS))
+                    .rounded(scaled(radii.sm))
                     .text_color(if current { p.text } else { p.text_muted })
                     .hover(|d| d.bg(p.hover))
                     .tip(path)

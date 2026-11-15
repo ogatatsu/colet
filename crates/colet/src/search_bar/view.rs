@@ -4,7 +4,7 @@
 
 use gpui_kit::base::input::{self, Input};
 use gpui_kit::component::{
-    Sizable,
+    ActiveTheme as _, Sizable,
     button::{Button, ButtonVariants},
 };
 use gpui_kit::prelude::FluentBuilder;
@@ -22,6 +22,7 @@ impl Colet {
     /// The search field, ringed while it has the keys, as wide as the drag left it.
     pub(crate) fn render_search_box(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let focused = self.search_has_keys(window, cx);
         let search = self.search_field(cx);
         let has_query = !self.state.query.is_empty();
@@ -40,7 +41,7 @@ impl Colet {
         });
         // Ringed as a dialog's field is; the ring lies over the gaps around, not in the row. It keeps its
         // width while the address beside it gives way, then narrows, keeping room to type in.
-        frame(p, focused, metrics::FIELD_RADIUS)
+        frame(p, focused, radii.md)
             .flex_none()
             .w(scaled(self.widths.field))
             .flex_shrink(1.)
@@ -59,7 +60,7 @@ impl Colet {
                     .bg(p.surface)
                     .border_1()
                     .border_color(p.border_strong)
-                    .rounded(scaled(metrics::FIELD_RADIUS))
+                    .rounded(scaled(radii.md))
                     .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
                     .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(&search, cx)).child(Input::new(&search)))
                     // ↓ goes into the results, as from a search field in Explorer; Esc clears the search.
@@ -103,7 +104,7 @@ impl Colet {
                     div()
                         .w_0p5()
                         .h_4()
-                        .rounded_full()
+                        .rounded(cx.theme().radius_full())
                         .bg(if dragging { p.accent } else { p.border_strong })
                         .group_hover(ID, |s| s.bg(p.accent)),
                 ),
@@ -123,6 +124,7 @@ impl Colet {
     /// The search filters' button beside the field, naming the one chosen in the accent color, and its menu.
     pub(crate) fn filter_button(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let focus = self.stop("search-filter", cx);
         let chosen = self.chosen_filter(cx);
         let on = chosen.is_some();
@@ -137,7 +139,7 @@ impl Colet {
             // the sort order's.
             .min_w(scaled(60.))
             .child(
-                frame(p, focus.is_focused(window), metrics::FIELD_RADIUS).min_w_0().m(scaled(-RING_ROOM)).child(
+                frame(p, focus.is_focused(window), radii.md).min_w_0().m(scaled(-RING_ROOM)).child(
                     crate::view::keep_focus(div().id("search-filter"))
                         .test_support()
                         .track_focus(&focus)
@@ -158,7 +160,7 @@ impl Colet {
                         .bg(p.surface)
                         .border_1()
                         .border_color(if on { p.accent } else { p.border_strong })
-                        .rounded(scaled(metrics::FIELD_RADIUS))
+                        .rounded(scaled(radii.md))
                         .hover(|d| d.bg(p.hover))
                         .tip_while_shut(self.filter_open(), format!("{label}（Ctrl+Shift+F）"))
                         .child(icon("funnel", metrics::GLYPH, if on { p.accent } else { p.text_muted }))

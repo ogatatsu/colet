@@ -152,6 +152,7 @@ impl Colet {
         cx: &mut Context<Self>,
     ) -> DialogParts {
         let p = cx.palette();
+        let radii = metrics::Radii::of(window, cx);
         let Request { kind, paths, destination, .. } = request;
         let problem = self.name_problem(cx);
         let empty = input.read(cx).value().trim().is_empty();
@@ -170,7 +171,7 @@ impl Colet {
                     .flex_col()
                     .gap_1()
                     .child(label(p, "名前"))
-                    .child(field(p, input, self.has_keys(input, window, cx), Self::right_press_menu(input, cx)))
+                    .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
                     .when_some(problem, |d, problem| {
                         d.child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.danger).child(problem))
                     }),

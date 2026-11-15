@@ -68,7 +68,12 @@ impl Colet {
                     .text_color(color)
                     .tip(title)
                     .child(
-                        div().size_1p5().rounded_full().border_1().border_color(dot.unwrap_or(p.text_faint)).when_some(dot, |d, c| d.bg(c)),
+                        div()
+                            .size_1p5()
+                            .rounded(cx.theme().radius_full())
+                            .border_1()
+                            .border_color(dot.unwrap_or(p.text_faint))
+                            .when_some(dot, |d, c| d.bg(c)),
                     )
                     .child(div().truncate().child(name)),
             )

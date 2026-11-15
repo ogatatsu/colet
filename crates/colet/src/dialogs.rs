@@ -71,10 +71,12 @@ pub(crate) fn field(
     p: Palette,
     input: &Entity<InputState>,
     focused: bool,
+    // The field's corners at 100%: the theme's `md`, from `metrics::Radii`.
+    radius: f32,
     menu: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
     // The ring, two pixels in the focus color a pixel off the field.
-    crate::view::frame(p, focused, metrics::FIELD_RADIUS).child(
+    crate::view::frame(p, focused, radius).child(
         div()
             .h(scaled(metrics::CONTROL_HEIGHT))
             .px_2p5()
@@ -83,7 +85,7 @@ pub(crate) fn field(
             .bg(p.surface)
             .border_1()
             .border_color(p.border_strong)
-            .rounded(scaled(metrics::FIELD_RADIUS))
+            .rounded(scaled(radius))
             // Its padding too, round the text.
             .capture_any_mouse_down(menu)
             .child(div().flex_1().min_w_0().child(Input::new(input))),
