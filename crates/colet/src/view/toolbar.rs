@@ -9,6 +9,7 @@ impl Colet {
     pub(super) fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let focused = self.search_has_keys(window, cx);
+        let search = self.search_field(cx);
         let has_query = !self.state.query.is_empty();
         let field_width = self.widths.field;
         let (back, forward) = (self.state.can_go_back(), self.state.can_go_forward());
@@ -36,7 +37,7 @@ impl Colet {
                 .tooltip("検索をクリア（Esc）")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.clear_search(window, cx);
-                    this.search.update(cx, |input, cx| input.focus(window, cx));
+                    this.focus_search(window, cx);
                 }));
             self.ringed(clear, "clear-search", RingAt::Edge, window, cx)
         });
@@ -79,8 +80,8 @@ impl Colet {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .capture_any_mouse_down(Self::right_press_menu(&self.search, cx))
-                                    .child(Input::new(&self.search)),
+                                    .capture_any_mouse_down(Self::right_press_menu(&search, cx))
+                                    .child(Input::new(&search)),
                             )
                             // ↓ goes into the results, as from a search field in Explorer; Esc clears the search.
                             .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {
@@ -148,7 +149,7 @@ impl Colet {
     fn filter_button(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let focus = self.stop("search-filter", cx);
-        let chosen = self.chosen_filter.clone();
+        let chosen = self.chosen_filter(cx);
         let on = chosen.is_some();
         let label = format!("検索フィルター: {}", chosen.as_deref().unwrap_or("なし"));
         // In a narrow window its name gives way to the search field, down to the funnel and the chevron;

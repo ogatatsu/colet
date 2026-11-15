@@ -13,15 +13,6 @@ pub struct FilterEdit {
 }
 
 impl Colet {
-    /// Searches within `name`, or none, from now on: what is typed is searched again within it; with
-    /// nothing typed home stays as it is, the filter waiting for the first key.
-    pub fn choose_filter(&mut self, name: Option<String>, cx: &mut Context<Self>) {
-        self.chosen_filter = name.clone();
-        let query = self.state.query.clone();
-        self.state.set_search(&query, name);
-        self.changed(cx);
-    }
-
     /// The filter a tab opened afresh starts with.
     pub fn default_filter(&self) -> Option<String> {
         self.stored.settings().default_filter.clone()
@@ -135,7 +126,7 @@ impl Colet {
         );
         if let Some(from) = &original {
             if *from != name {
-                self.rename_filter_in_tabs(from, Some(&name));
+                self.rename_filter_in_tabs(from, Some(&name), cx);
             }
             if before.as_deref() != Some(query.as_str()) && self.state.search_filter.as_deref() == Some(name.as_str()) {
                 self.state.reset_search();
@@ -171,7 +162,7 @@ impl Colet {
             },
             cx,
         );
-        self.rename_filter_in_tabs(&name, None);
+        self.rename_filter_in_tabs(&name, None, cx);
         self.changed(cx);
         self.back_to_filters(window, cx);
     }

@@ -329,7 +329,7 @@ impl Colet {
                             .child(div().text_color(p.accent).font_family(metrics::FONT_CODE).child(query))
                             .child(label)
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                let filter = this.chosen_filter.clone();
+                                let filter = this.chosen_filter(cx);
                                 this.search_for(query, filter, window, cx)
                             }));
                         self.ringed(button, Stop::Hint(query.to_string()), RingAt::Round, window, cx)
@@ -406,12 +406,7 @@ impl Render for Colet {
             // The window's keys. None of them needs to check for a dialog: the window draws its dialog
             // outside Colet's elements, and the dialog keeps the keys in itself, so while one is open these
             // are never on the way of a key (see `tests::window::leaves_the_window_keys_alone_in_a_dialog`).
-            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
-                this.search.update(cx, |input, cx| {
-                    input.focus(window, cx);
-                    input.select_all(window, cx);
-                });
-            }))
+            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| this.search.update(cx, |search, cx| search.focus_all(window, cx))))
             .on_action(cx.listener(|this, _: &FocusAddress, window, cx| this.open_address(window, cx)))
             .on_action(cx.listener(|this, _: &OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| this.open_filter_menu(window, cx)))

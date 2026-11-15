@@ -267,7 +267,7 @@ impl Colet {
     /// The text fields there are: the search's, the address bar's, the columns' filters', and the open
     /// dialog's.
     fn text_fields(&self, cx: &App) -> Vec<Entity<InputState>> {
-        let mut fields = vec![self.search.clone(), self.address.read(cx).field().clone()];
+        let mut fields = vec![self.search_field(cx), self.address.read(cx).field().clone()];
         fields.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         fields.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
         fields
@@ -326,7 +326,8 @@ impl Colet {
             return lines;
         }
         if self.filter_open() {
-            let chosen = self.chosen_filter.as_deref();
+            let chosen = self.chosen_filter(cx);
+            let chosen = chosen.as_deref();
             let mut lines = vec![choice("filter-none", "なし", Command::SearchFilter(None), chosen.is_none())];
             let default = self.stored.settings().default_filter.as_deref();
             lines.extend(self.stored.settings().filters.iter().map(|f| Line {

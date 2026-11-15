@@ -368,10 +368,13 @@ fn dismissing_a_removed_columns_menu_keeps_focus_given_to_a_field(cx: &mut TestA
         ui.view.update(cx, |v, cx| {
             v.state.select(1, vec![r"D:\other".into()]);
             v.changed(cx);
-            v.search.update(cx, |input, cx| input.focus(window, cx));
+            v.focus_search(window, cx);
         })
     });
-    assert!(cx.update_window(ui.window, |_, window, cx| { ui.view.read(cx).search.read(cx).focus_handle(cx).is_focused(window) }).unwrap());
+    assert!(
+        cx.update_window(ui.window, |_, window, cx| { ui.view.read(cx).search_field(cx).read(cx).focus_handle(cx).is_focused(window) })
+            .unwrap()
+    );
     assert!(ui.read(cx, |v| v.menu().is_none()));
 }
 
@@ -406,7 +409,7 @@ fn showing_the_shell_menu_directly_returns_the_keys_to_its_column(cx: &mut TestA
 #[gpui_kit::test]
 fn edits_the_search_field_from_its_menu(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(Fake::default().with_results(vec![])));
-    let search = ui.read(cx, |v| v.search.clone());
+    let search = ui.read_app(cx, |v, cx| v.search_field(cx));
     // Empty, and nothing on the clipboard: only undoing is on. Esc gives the keys back to the field.
     ui.right_click_field(cx, &search);
     assert!(ui.read(cx, |v| v.text_menu().is_some()));
@@ -438,7 +441,7 @@ fn edits_the_search_field_from_its_menu(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn opens_a_fields_menu_from_the_keys(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(Fake::default().with_results(vec![])));
-    let search = ui.read(cx, |v| v.search.clone());
+    let search = ui.read_app(cx, |v, cx| v.search_field(cx));
     ui.input(cx, "cat");
     ui.press(cx, "shift-f10");
     assert!(ui.read(cx, |v| v.text_menu().is_some()));
@@ -482,7 +485,7 @@ fn copies_from_a_dialogs_field_with_its_menu_over_the_dialog(cx: &mut TestAppCon
 #[gpui_kit::test]
 fn keeps_what_is_picked_in_a_field_and_its_caret_on_a_right_click_anywhere_in_it(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(Fake::default().with_results(vec![])));
-    let search = ui.read(cx, |v| v.search.clone());
+    let search = ui.read_app(cx, |v, cx| v.search_field(cx));
     ui.input(cx, "cat");
     ui.press(cx, "home");
     ui.press(cx, "shift-right");
@@ -504,7 +507,7 @@ fn keeps_what_is_picked_in_a_field_and_its_caret_on_a_right_click_anywhere_in_it
 #[gpui_kit::test]
 fn takes_the_keys_into_a_field_right_clicked_from_elsewhere_with_what_it_had_picked(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
-    let search = ui.read(cx, |v| v.search.clone());
+    let search = ui.read_app(cx, |v, cx| v.search_field(cx));
     ui.press(cx, "ctrl-f");
     ui.input(cx, "cat");
     ui.act(cx, |window, cx| search.update(cx, |input, cx| input.select_all(window, cx)));

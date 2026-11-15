@@ -239,7 +239,7 @@ fn opens_a_tab_afresh_within_the_default_filter_leaving_those_open_as_they_are(c
     }));
     fake.settings.lock().unwrap().default_filter = Some("動画".into());
     let default = |fake: &Fake| fake.settings.lock().unwrap().default_filter.clone();
-    let chosen = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.chosen_filter.clone());
+    let chosen = |ui: &Ui, cx: &mut TestAppContext| ui.read_app(cx, |v, cx| v.chosen_filter(cx));
     // With no tab kept, the first opens within it.
     let ui = open(cx, fake.clone());
     assert_eq!(chosen(&ui, cx).as_deref(), Some("動画"));

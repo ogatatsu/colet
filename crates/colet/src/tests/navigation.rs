@@ -175,7 +175,7 @@ fn leaves_the_search_for_a_place_picked_in_home_clearing_the_field(cx: &mut Test
     ui.input(cx, "x");
     ui.click(cx, row(r"D:\"));
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "");
-    let field = ui.view.read_with(cx, |v, _| v.search.clone());
+    let field = ui.view.read_with(cx, |v, cx| v.search_field(cx));
     assert_eq!(field.read_with(cx, |input, _| input.value().to_string()), "");
     // One step back returns to the results, and the field says so.
     ui.press(cx, "alt-left");
@@ -416,7 +416,7 @@ fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppC
     ui.press(cx, "down");
     assert_eq!(ui.selected(cx, 2), [r"D:\work\b.txt"]);
     // From the search field too.
-    let search = ui.read(cx, |v| v.search.clone());
+    let search = ui.read_app(cx, |v, cx| v.search_field(cx));
     ui.act(cx, |window, cx| search.update(cx, |input, cx| input.focus(window, cx)));
     ui.click(cx, "refresh");
     assert!(ui.act(cx, |window, cx| search.read(cx).focus_handle(cx).is_focused(window)));

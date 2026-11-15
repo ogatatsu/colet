@@ -90,24 +90,28 @@ impl Colet {
     pub(crate) fn restore_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (kept, front) = self.stored.take_kept_tabs();
         let front = front.min(kept.len().saturating_sub(1));
+        let mut chosen = None;
         for (i, KeptTab { place, filter }) in kept.into_iter().enumerate() {
             let state = State::from_kept(place);
             if i == front {
                 self.state = state;
-                self.chosen_filter = filter;
+                chosen = filter;
                 self.tabs.push(None);
             } else {
                 self.tabs.push(Some(Parked::new(state, filter, Keys::Column)));
             }
         }
         if self.tabs.is_empty() {
-            self.chosen_filter = self.default_filter();
+            chosen = self.default_filter();
             self.tabs.push(None);
         }
         self.state.set_showing(self.showing());
         self.tabs.set_front(front);
         let query = self.state.query.clone();
-        self.search.update(cx, |input, cx| input.set_value(query, window, cx));
+        self.search.update(cx, |search, cx| {
+            search.set_filter(chosen, cx);
+            search.show(&query, window, cx);
+        });
         self.keep_tabs(cx);
     }
 
@@ -116,12 +120,13 @@ impl Colet {
         if self.tabs.is_empty() {
             return;
         }
+        let chosen = self.chosen_filter(cx);
         let tabs: Vec<KeptTab> = self
             .tabs
             .iter()
             .map(|tab| match tab.parked() {
                 Some(Parked { front, .. }) => KeptTab { place: front.state.kept(), filter: front.filter.clone() },
-                None => KeptTab { place: self.state.kept(), filter: self.chosen_filter.clone() },
+                None => KeptTab { place: self.state.kept(), filter: chosen.clone() },
             })
             .collect();
         let current = self.tabs.current();
@@ -163,12 +168,12 @@ impl Colet {
     }
 
     /// Puts `incoming` in front, handing back what was there.
-    fn swap_in(&mut self, mut incoming: Front) -> Front {
+    fn swap_in(&mut self, mut incoming: Front, cx: &mut Context<Self>) -> Front {
         // Shown or not while it was parked, the hidden items follow the setting now.
         incoming.state.set_showing(self.showing());
         Front {
             state: std::mem::replace(&mut self.state, incoming.state),
-            filter: std::mem::replace(&mut self.chosen_filter, incoming.filter),
+            filter: self.search.update(cx, |search, cx| search.set_filter(incoming.filter, cx)),
             narrow_fields: std::mem::replace(&mut self.narrow_fields, incoming.narrow_fields),
             scrolls: std::mem::replace(&mut self.scrolls, incoming.scrolls),
         }
@@ -182,14 +187,14 @@ impl Colet {
         }
         let Some(Parked { front: incoming, keys }) = self.tabs.take_parked(index) else { return };
         let left = self.keys(window, cx);
-        let outgoing = self.swap_in(incoming);
+        let outgoing = self.swap_in(incoming, cx);
         self.tabs.bring_to_front(index, Parked { front: outgoing, keys: left });
         let query = self.state.query.clone();
-        self.search.update(cx, |input, cx| input.set_value(query, window, cx));
+        self.search.update(cx, |search, cx| search.show(&query, window, cx));
         self.relist(cx);
         match keys {
             Keys::Search => {
-                self.search.update(cx, |input, cx| input.focus(window, cx));
+                self.focus_search(window, cx);
                 self.changed(cx);
             }
             Keys::Column => self.focus_active(window, cx),
@@ -338,7 +343,7 @@ impl Colet {
         let Some(tab) = self.tabs.get(index) else { return };
         let (state, filter) = match tab.parked() {
             Some(Parked { front, .. }) => (front.state.clone(), front.filter.clone()),
-            None => (self.state.clone(), self.chosen_filter.clone()),
+            None => (self.state.clone(), self.chosen_filter(cx)),
         };
         let at = self.tabs.insert(index + 1, Parked::new(state, filter, Keys::Column));
         self.switch_tab(at, window, cx);
@@ -353,11 +358,9 @@ impl Colet {
     }
 
     /// The search filter `from` is named `to` now, or is gone: every tab follows it, closed ones too.
-    pub fn rename_filter_in_tabs(&mut self, from: &str, to: Option<&str>) {
+    pub fn rename_filter_in_tabs(&mut self, from: &str, to: Option<&str>, cx: &mut Context<Self>) {
         self.state.rename_search_filter(from, to);
-        if self.chosen_filter.as_deref() == Some(from) {
-            self.chosen_filter = to.map(Into::into);
-        }
+        self.search.update(cx, |search, cx| search.rename_filter(from, to, cx));
         self.tabs.rename_filter(from, to);
     }
 

@@ -581,7 +581,7 @@ impl Ui {
     }
 
     fn field(&self, cx: &mut TestAppContext) -> String {
-        let field = self.view.read_with(cx, |v, _| v.search.clone());
+        let field = self.view.read_with(cx, |v, cx| v.search_field(cx));
         field.read_with(cx, |input, _| input.value().to_string())
     }
 
@@ -817,7 +817,7 @@ fn with_filters(fake: Fake) -> Fake {
 impl Ui {
     fn search_field_focused(&self, cx: &mut TestAppContext) -> bool {
         let view = self.view.clone();
-        self.act(cx, |window, cx| view.read(cx).search.read(cx).focus_handle(cx).is_focused(window))
+        self.act(cx, |window, cx| view.read(cx).search_field(cx).read(cx).focus_handle(cx).is_focused(window))
     }
 
     /// Types into the fields of the filter being added or edited.

@@ -40,6 +40,7 @@ use crate::{
     overlays::Overlays,
     places::{Dialog, HomeDragging, home_entries, home_groups},
     scrolls::Scrolls,
+    search_bar::SearchBar,
     settings::{self, File, Loaded, Saves, Settings, everything_query, narrowed_query},
     sorts::Sorts,
     state::{Column, ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
@@ -332,14 +333,14 @@ pub struct NarrowField {
 pub struct Colet {
     /// The tab in front's; the other tabs are parked in `tabs`, with the fields below kept for each.
     pub state: State,
-    /// The filter the next search in the tab in front is narrowed by, by name.
-    pub chosen_filter: Option<String>,
     pub tabs: Tabs,
     /// The strip the tabs are drawn on: its own entity, which keeps where it is scrolled and the tab carried
     /// along it, and which Colet hears from.
     pub tab_strip: Entity<TabStrip>,
     pub widths: Widths,
-    pub search: Entity<InputState>,
+    /// The search field and the filter chosen for it, which the tab in front's next search is narrowed by:
+    /// its own entity, which Colet fills and hears from.
+    pub search: Entity<SearchBar>,
     /// The address bar's field and the asking whether what is typed there is: its own entity, which Colet
     /// opens and closes and hears from.
     pub address: Entity<AddressBar>,
@@ -393,10 +394,12 @@ impl Colet {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let (search, typed) = Self::search_field(window, cx);
+        let search = cx.new(|cx| SearchBar::new(window, cx));
         let address = cx.new(|cx| AddressBar::new(backend.clone(), window, cx));
         let mut subscriptions = vec![
-            typed,
+            // The ring around the field and the filter's button follow it.
+            cx.observe(&search, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&search, window, |this, _, event, window, cx| this.on_search_event(event, window, cx)),
             // The field opening and closing redraws the trail in its place.
             cx.observe(&address, |_, _, cx| cx.notify()),
             cx.subscribe_in(&address, window, |this, _, event, window, cx| this.on_address_event(event, window, cx)),
@@ -429,7 +432,6 @@ impl Colet {
         subscriptions.push(cx.subscribe_in(&history, window, |this, _, event, window, cx| this.on_history_event(event, window, cx)));
         let mut this = Self {
             state: State::new(),
-            chosen_filter: None,
             tabs: Tabs::default(),
             tab_strip,
             widths: Widths::new(settings.sidebar_width, settings.search_width, settings.column_width, settings.search_field_width),
@@ -463,7 +465,7 @@ impl Colet {
         }
         // The library draws in the theme kept before anything takes its colors from it.
         crate::theme::apply(window, this.stored.settings().theme, cx);
-        cx.palette().style_input(&this.search, cx);
+        cx.palette().style_input(&this.search_field(cx), cx);
         let address = this.address.read(cx).field().clone();
         cx.palette().style_input(&address, cx);
         this.restore_tabs(window, cx);
@@ -491,26 +493,10 @@ impl Colet {
         this.sync_narrow_fields(window, cx);
         this.scroll_rows();
         crate::theme::set_zoom(this.stored.settings().zoom, cx);
-        this.search.update(cx, |input, cx| input.focus(window, cx));
+        this.focus_search(window, cx);
         this.sync(cx);
         this.poll(cx);
         this
-    }
-
-    /// The search field, and what it tells: what is typed is searched within the filter chosen; an empty
-    /// field searches for nothing. Enter leaves it for the results.
-    fn search_field(window: &mut Window, cx: &mut Context<Self>) -> (Entity<InputState>, Subscription) {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Everythingで検索（Ctrl+F）"));
-        let typed = cx.subscribe_in(&search, window, |this: &mut Self, input, event, window, cx| match event {
-            InputEvent::Change => {
-                let query = input.read(cx).value().to_string();
-                this.state.set_search(&query, this.chosen_filter.clone());
-                this.changed(cx);
-            }
-            InputEvent::PressEnter { .. } => this.leave_search(window, cx),
-            InputEvent::Focus | InputEvent::Blur => cx.notify(),
-        });
-        (search, typed)
     }
 
     /// Whether the window may close: not while a file operation or a send runs. The settings are written at once,
@@ -540,7 +526,7 @@ impl Colet {
     /// Takes the colors the theme now gives, in the fields too, the dialog's among them.
     pub fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
         crate::theme::apply(window, self.stored.settings().theme, cx);
-        let mut inputs = vec![self.search.clone(), self.address.read(cx).field().clone()];
+        let mut inputs = vec![self.search_field(cx), self.address.read(cx).field().clone()];
         inputs.extend(self.narrow_fields.values().map(|field| field.input.clone()));
         inputs.extend(self.overlays.dialog().into_iter().flat_map(Dialog::fields));
         for input in &inputs {
@@ -1076,11 +1062,6 @@ impl Colet {
         if index == 0 { &self.home_focus } else { &self.columns_focus }
     }
 
-    /// The search field has the keys, or its menu has them for it: no column is marked as worked in.
-    pub fn search_has_keys(&self, window: &Window, cx: &App) -> bool {
-        self.has_keys(&self.search, window, cx)
-    }
-
     /// The keys are in home's pane or the columns: the column worked in rings its focused row.
     pub fn keys_in_column(&self, window: &Window) -> bool {
         self.home_focus.is_focused(window) || self.columns_focus.is_focused(window)
@@ -1129,38 +1110,6 @@ impl Colet {
     pub fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.column_focus(self.state.active).focus(window, cx);
         self.state.enter();
-        self.changed(cx);
-    }
-
-    /// Into the results, as from a search field in Explorer, or home with nothing searched, picking the
-    /// row the keys land on there too unless it already is.
-    pub fn leave_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let pinned = self.state.pinned();
-        self.state.set_active(if pinned { 1 } else { 0 });
-        self.focus_active(window, cx);
-        let home = &self.state.columns[0];
-        if !pinned && let Some(path) = home.focused.clone().filter(|path| !home.selected.contains(path)) {
-            self.state.select(0, vec![path]);
-            // A saved search picked runs, which the field shows.
-            self.sync_search_field(window, cx);
-        }
-    }
-
-    /// Empties the field, and home shows alone; the filter chosen stays for the next search.
-    pub fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search.update(cx, |input, cx| input.set_value("", window, cx));
-        self.state.set_search("", self.chosen_filter.clone());
-        self.changed(cx);
-    }
-
-    /// Searches for `query` within `filter`, which becomes the one chosen.
-    pub fn search_for(&mut self, query: &str, filter: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
-        self.search.update(cx, |input, cx| {
-            input.set_value(query.to_owned(), window, cx);
-            input.focus(window, cx);
-        });
-        self.state.set_search(query, filter);
-        self.adopt_filter();
         self.changed(cx);
     }
 
@@ -1429,24 +1378,6 @@ impl Colet {
     pub fn forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state.forward();
         self.sync_search_field(window, cx);
-    }
-
-    /// Going back or forward can bring another query, and another filter; the field shows the one, and
-    /// the other becomes the one chosen.
-    pub(crate) fn sync_search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let query = self.state.query.clone();
-        if self.search.read(cx).value().as_ref() != query {
-            self.search.update(cx, |input, cx| input.set_value(query, window, cx));
-        }
-        self.adopt_filter();
-        self.changed(cx);
-    }
-
-    /// The results shown, a saved search's or those gone back to, choose their filter for the next search.
-    fn adopt_filter(&mut self) {
-        if self.state.pinned() && self.state.search_filter != self.chosen_filter {
-            self.chosen_filter = self.state.search_filter.clone();
-        }
     }
 
     // ---- Scrolling ----
