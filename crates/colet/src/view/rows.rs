@@ -201,7 +201,7 @@ impl Colet {
         let menu_path = entry.path.clone();
         let tab_path = entry.path.clone();
         let press_path = entry.path.clone();
-        let focused_row = (marked && c.focused.as_ref() == Some(&entry.path)).then(|| self.focused_row.clone());
+        let focused_row = (marked && c.focused.as_ref() == Some(&entry.path)).then(|| self.key_menu.row.clone());
         // Built once a row: its parts take it as their parent's rather than each writing out the path.
         let id = std::sync::Arc::new(row_id(&entry.path));
         let drawn = DrawnRow { entry, id: &id };
@@ -243,11 +243,12 @@ impl Colet {
                 r.child(canvas(move |bounds, _, _| drawn.borrow_mut().push((path.clone(), bounds)), |_, _, _, _| {}).absolute().size_full())
                     .on_drag(drag, move |drag, _, window, cx| {
                         view.update(cx, |this, cx| this.start_home_drag(drag, cx)).ok();
-                        let width = rows
-                            .borrow()
-                            .iter()
-                            .find(|(path, _)| *path == drag.path)
-                            .map_or(Scale::of(window).px(200.), |(_, b)| b.size.width);
+                        // As wide as the row was drawn; not drawn yet, as wide as home's pane it lies in.
+                        let drawn = rows.borrow().iter().find(|(path, _)| *path == drag.path).map(|(_, b)| b.size.width);
+                        let width = drawn.unwrap_or_else(|| {
+                            let pane = view.read_with(cx, |this, _| this.sidebar_width(window)).unwrap_or_default();
+                            Scale::of(window).px(pane)
+                        });
                         let (name, search, image) = (name.clone(), HomeKey::of(&drag.path).is_search(), image.clone());
                         cx.new(|_| HomeGhost { name, search, image, width })
                     })

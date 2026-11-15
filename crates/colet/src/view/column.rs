@@ -107,10 +107,8 @@ impl Colet {
             }))
             .on_action(cx.listener(|this, _: &OpenMenu, window, cx| {
                 // Under the focused row, as from the keyboard; or the column's top.
-                let at = match this.focused_row.get() {
-                    Some(row) => point(row.left() + this.scale().px(16.), row.bottom()),
-                    None => point(this.scale().px(this.sidebar_width(window) + 24.), this.scale().px(140.)),
-                };
+                // Neither drawn only before the first frame: the window's corner, which the menu is kept in from.
+                let at = this.key_menu.at(this.scale()).unwrap_or_default();
                 this.open_menu(this.state.active, None, at, window, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenItem, window, cx| {
@@ -185,7 +183,7 @@ impl Colet {
             .py_3()
             .text_size(scaled(metrics::TEXT_BODY))
             .text_color(p.text_muted)
-            .child(Spinner::new().icon(glyph("loader-circle")).color(p.text_muted).with_size(self.scale().px(15.)))
+            .child(Spinner::new().icon(glyph("loader-circle")).color(p.text_muted).with_size(self.scale().px(metrics::GLYPH)))
             .child("読み込み中…")
     }
 
@@ -349,6 +347,10 @@ impl Colet {
                     .child(div().text_size(scaled(metrics::TEXT_BODY)).text_color(p.text_faint).child(count))
                     .child(sort_button)
                     .child(star)
+                    .when(index == self.state.active, |d| {
+                        let cell = self.key_menu.heading.clone();
+                        d.relative().child(canvas(move |bounds, _, _| cell.set(Some(bounds)), |_, _, _, _| {}).absolute().size_full())
+                    })
                     .test_support(),
             )
             .when_some(field, |d, input| {

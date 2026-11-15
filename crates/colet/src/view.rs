@@ -74,7 +74,13 @@ pub fn glyph(name: &str) -> gpui_kit::component::Icon {
 pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette, scale: Scale) -> gpui_kit::base::Scrollbar {
     bar.mode(gpui_kit::base::ScrollbarMode::Always).styles(|s| {
         s.track(|t| t.bg(transparent_black()).border_color(transparent_black()).width(scale.px(SCROLLBAR_WIDTH)))
-            .thumb(|t| t.bg(p.scrollbar).width(scale.px(6.)).inset(scale.px(1.)).radius(scale.px(3.)))
+            .thumb(|t| {
+                t.bg(p.scrollbar)
+                    .width(scale.px(SCROLLBAR_THUMB))
+                    // Centered in the track, and round at its ends.
+                    .inset(scale.px((SCROLLBAR_WIDTH - SCROLLBAR_THUMB) / 2.))
+                    .radius(scale.px(SCROLLBAR_THUMB / 2.))
+            })
             .thumb_hover(|t| t.bg(p.text_muted))
             .thumb_active(|t| t.bg(p.text_muted))
     })
@@ -84,6 +90,8 @@ pub fn scrollbar(bar: gpui_kit::base::Scrollbar, p: crate::theme::Palette, scale
 const RESIZER_WIDTH: f32 = 6.;
 /// How thick a scrollbar's track is.
 pub(crate) const SCROLLBAR_WIDTH: f32 = 8.;
+/// How thick a scrollbar's thumb is, within its track.
+const SCROLLBAR_THUMB: f32 = 6.;
 
 /// How far a ring laid round what it rings stands out: a pixel's gap and its two pixels.
 pub const RING_ROOM: f32 = 3.;
@@ -126,6 +134,32 @@ fn active_frame(p: crate::theme::Palette) -> Div {
 
 /// How far in from the window's edges a menu is kept.
 pub const MENU_MARGIN: f32 = 8.;
+/// How far in from the left of the row, or of the column's heading, the menu opened from the keyboard
+/// starts: past the row's own picture, so the menu does not hide what it acts on.
+const KEY_MENU_INSET: f32 = 16.;
+
+/// Where the active column's focused row and its heading were drawn in the last frame: the menu opened
+/// from the keyboard drops from under the row, or from under the heading when no row has the keys. Both
+/// are measured afresh each frame, so a row or column gone leaves nothing behind.
+#[derive(Clone, Default)]
+pub struct KeyMenuAnchor {
+    pub row: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    pub heading: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+}
+
+impl KeyMenuAnchor {
+    /// Forgets the last frame's: only what this frame draws is measured.
+    pub fn begin_frame(&self) {
+        self.row.set(None);
+        self.heading.set(None);
+    }
+
+    /// Where the menu drops from, at the zoom `scale` gives; `None` when neither was drawn.
+    pub fn at(&self, scale: Scale) -> Option<Point<Pixels>> {
+        let under = self.row.get().or(self.heading.get())?;
+        Some(point(under.left() + scale.px(KEY_MENU_INSET), under.bottom()))
+    }
+}
 /// The room between a button and the menu dropped from it.
 const MENU_GAP: f32 = 4.;
 
@@ -340,6 +374,7 @@ impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Only the stops asked for over the last frame stay: those of buttons gone go with them.
         self.stops.begin_frame(window);
+        self.key_menu.begin_frame();
         // The first frame drawn in front: the keys left the address field on the way, if they did, unheard of.
         if std::mem::take(&mut self.came_to_front) && window.is_window_active() {
             cx.defer_in(window, |this, window, cx| this.follow_address(window, cx));

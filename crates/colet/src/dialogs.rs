@@ -99,6 +99,15 @@ const SHORTCUTS: [(&str, &[(&str, &str)]); 6] = [
 /// How wide the keys' side of the list is: room for the longest, "Ctrl+Shift+↑↓ / Ctrl+Shift+クリック".
 const KEYS_WIDTH: f32 = 240.;
 
+/// How wide every dialog is: room for a filter's name and search side by side, and for the keys' list.
+const DIALOG_WIDTH: f32 = 640.;
+/// The least width of the file menu, whose lines carry their keys beside them.
+const FILE_MENU_WIDTH: f32 = 240.;
+/// The least width of a text field's menu, whose lines are short.
+const TEXT_MENU_WIDTH: f32 = 200.;
+/// The least width of a tab's menu.
+const TAB_MENU_WIDTH: f32 = 220.;
+
 /// `HH:MM`, local.
 fn clock(unix_ms: u64) -> String {
     colet_core::time::local(unix_ms).map_or_else(String::new, |t| format!("{:02}:{:02}", t.wHour, t.wMinute))
@@ -814,7 +823,7 @@ impl Colet {
             buttons.into_iter().map(|(key, button)| self.ringed(button, key, RingAt::Round, window, cx).m(scaled(-RING_ROOM))).collect();
         let colet = cx.weak_entity();
         dialog
-            .w(Scale::of(window).px(640.))
+            .w(Scale::of(window).px(DIALOG_WIDTH))
             .close_button(false)
             .overlay_closable(false)
             .on_cancel(move |_, window, cx| {
@@ -871,9 +880,9 @@ impl Colet {
     /// the dialog's (ten and up) to be drawn in front of it as it is clicked in front of it.
     pub fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (at, id, label, width) = match self.overlays.popup()? {
-            Popup::File(menu) => (menu.at, "menu", "ファイル操作", 240.),
-            Popup::Text(menu) => (menu.at, "text-menu", "編集", 200.),
-            Popup::Tab { at, .. } => (*at, "tab-menu", "タブ", 220.),
+            Popup::File(menu) => (menu.at, "menu", "ファイル操作", FILE_MENU_WIDTH),
+            Popup::Text(menu) => (menu.at, "text-menu", "編集", TEXT_MENU_WIDTH),
+            Popup::Tab { at, .. } => (*at, "tab-menu", "タブ", TAB_MENU_WIDTH),
             _ => return None,
         };
         let menu = self.menu_element(id, label, cx)?;

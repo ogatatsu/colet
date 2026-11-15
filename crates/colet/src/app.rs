@@ -2,12 +2,10 @@
 //! folders, and takes the keys. `view.rs` draws it.
 use std::{
     borrow::Cow,
-    cell::Cell,
     collections::{HashMap, HashSet},
     ffi::OsString,
     ops::Range,
     path::{Path, PathBuf},
-    rc::Rc,
     sync::mpsc,
     time::Duration,
 };
@@ -365,8 +363,8 @@ pub struct Colet {
     /// The dialog and the menu open, and where the keys go back to as they close.
     pub overlays: Overlays,
     pub crumbs: Trail,
-    /// Where the focused row of the active column was drawn, for the menu key.
-    pub focused_row: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Where the menu key's menu drops from, as the last frame drew it.
+    pub key_menu: crate::view::KeyMenuAnchor,
     /// The file operations, the history and the clipboard: their own entity, which Colet starts and ends
     /// operations on and hears from.
     pub operations: Entity<Operations>,
@@ -443,7 +441,7 @@ impl Colet {
             stops: Stops::default(),
             crumbs: Trail::default(),
             overlays: Overlays::new(cx),
-            focused_row: Default::default(),
+            key_menu: Default::default(),
             operations,
             history_panel: HistoryPanel::default(),
             quick_looked: None,

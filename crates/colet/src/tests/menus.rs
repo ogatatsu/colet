@@ -304,6 +304,35 @@ fn opens_the_file_menu_on_the_menu_key_and_closes_it_on_either_menu_key(cx: &mut
 }
 
 #[gpui_kit::test]
+fn drops_the_menu_keys_menu_from_under_the_focused_row_or_else_the_heading(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    let drawn = |cx: &mut TestAppContext, id: ElementId| ui.act(cx, |window, _| window.find(id).bounds());
+    let at = |cx: &mut TestAppContext| ui.read(cx, |v| v.menu().map(|menu| menu.at)).unwrap();
+    // Dropped from the lower edge of `under`, a little in from its left: what is said to be under it.
+    let drops_from = |at: gpui_kit::Point<gpui_kit::Pixels>, under: Bounds<gpui_kit::Pixels>| {
+        at.x > under.left() && at.x < under.right() && at.y > under.center().y && at.y <= under.bottom()
+    };
+    // Under the row with the keys.
+    let a = drawn(cx, row(r"D:\work\a.txt"));
+    ui.press(cx, "menu");
+    let under_row = at(cx);
+    assert!(drops_from(under_row, a), "{under_row:?} under {a:?}");
+    ui.press(cx, "escape");
+    // An empty folder has no row with the keys: under its heading, not under the row left behind.
+    ui.press(cx, "left");
+    ui.press(cx, "up");
+    ui.press(cx, "right");
+    let other = ui.read(cx, |v| {
+        assert_eq!(v.state.columns[v.state.active].path, Path::new(r"D:\other"));
+        v.state.columns[v.state.active].id
+    });
+    let heading = drawn(cx, ("head", other).into());
+    ui.press(cx, "menu");
+    let under_heading = at(cx);
+    assert!(drops_from(under_heading, heading), "{under_heading:?} under {heading:?}");
+}
+
+#[gpui_kit::test]
 fn closes_the_menu_and_returns_the_keys_when_its_column_vanishes(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "shift-f10");
