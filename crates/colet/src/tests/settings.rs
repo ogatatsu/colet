@@ -165,8 +165,8 @@ fn opens_at_the_size_kept(cx: &mut TestAppContext) {
     fake.settings.lock().unwrap().zoom = 125;
     let ui = open(cx, fake);
     assert_eq!(ui.act(cx, |window, _| window.rem_size()), px(20.));
-    // The notices keep clear of the status bar as it grows.
-    assert_eq!(cx.read(|cx| gpui_kit::component::Theme::global(cx).notification.margins.bottom), px(45.));
+    // The notices keep clear of the status bar as it grows: (26 + 12) at 125%.
+    assert_eq!(cx.read(|cx| gpui_kit::component::Theme::global(cx).notification.margins.bottom), px(47.5));
 }
 
 #[gpui_kit::test]

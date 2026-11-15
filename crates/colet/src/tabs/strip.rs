@@ -209,7 +209,7 @@ impl RenderOnce for TabBar {
                     .h(scaled(TAB_HEIGHT))
                     // While a tab is carried, only the line tells where it goes.
                     .when(!dragging, |d| d.hover(|s| s.opacity(0.)))
-                    .child(div().absolute().left(scaled(width)).ml(px(-1.)).top_2().w(px(1.)).h_4().bg(p.border))
+                    .child(div().absolute().left(scaled(width)).ml(-metrics::HAIRLINE).top_2().w(metrics::HAIRLINE).h_4().bg(p.border))
                     .into_any_element(),
             );
         }
@@ -272,7 +272,7 @@ impl RenderOnce for TabBar {
             .role(Role::TabList)
             .aria_label("タブ")
             // The selected tab paints over this line to join the toolbar below.
-            .child(div().absolute().left_0().right_0().bottom_0().h(px(1.)).bg(p.border))
+            .child(div().absolute().left_0().right_0().bottom_0().h(metrics::HAIRLINE).bg(p.border))
             .child(
                 div()
                     .id("tab-strip")
@@ -455,7 +455,7 @@ fn tab_shape(background: Hsla, border: Option<Hsla>) -> impl IntoElement {
                 window.paint_path(path, background);
             }
             if let Some(border) = border {
-                let mut outline = PathBuilder::stroke(px(1.));
+                let mut outline = PathBuilder::stroke(metrics::HAIRLINE);
                 trace_tab(&mut outline, bounds, curve);
                 // Leave the bottom open to the toolbar.
                 if let Ok(path) = outline.build() {
@@ -473,9 +473,9 @@ fn tab_shape(background: Hsla, border: Option<Hsla>) -> impl IntoElement {
 
 fn trace_tab(path: &mut PathBuilder, bounds: Bounds<Pixels>, curve: Pixels) {
     // Keep the one-pixel outline inside the canvas, including at the scroll viewport's ends.
-    let left = bounds.left() + px(0.5);
-    let right = bounds.right() - px(0.5);
-    let top = bounds.top() + px(0.5);
+    let left = bounds.left() + metrics::HAIRLINE / 2.;
+    let right = bounds.right() - metrics::HAIRLINE / 2.;
+    let top = bounds.top() + metrics::HAIRLINE / 2.;
     let bottom = bounds.bottom();
     let tab_left = left + curve;
     let tab_right = right - curve;

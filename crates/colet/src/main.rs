@@ -110,7 +110,7 @@ fn main() {
                 let (display, bounds) = places::restore_bounds(w, &displays, primary);
                 (display, if w.maximized { WindowBounds::Maximized(bounds) } else { WindowBounds::Windowed(bounds) })
             }
-            None => (None, WindowBounds::Windowed(Bounds::centered(None, size(px(1200.), px(780.)), cx))),
+            None => (None, WindowBounds::Windowed(Bounds::centered(None, size(px(app::FIRST_WINDOW.0), px(app::FIRST_WINDOW.1)), cx))),
         };
         open_window(
             WindowOptions {

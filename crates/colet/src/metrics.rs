@@ -65,6 +65,13 @@ pub const SMALL_CONTROL_HEIGHT: f32 = 28.;
 pub const ICON_BUTTON: f32 = 24.;
 /// The status bar along the bottom; the notices stand clear of it.
 pub const STATUS_BAR_HEIGHT: f32 = 26.;
+/// How far the notices stand in from the window's right edge and up off the status bar.
+pub const NOTICE_MARGIN: f32 = 12.;
+
+/// A line one pixel wide, as `border_1()` draws: a boundary, which stays one pixel at any zoom (the Design
+/// Guides' physical exception), not a size that follows the rem. A line laid over a neighbour's stands out
+/// by one of these to fall on it.
+pub const HAIRLINE: Pixels = px(1.);
 
 /// The theme's corners by tier, given at 100% as [`scaled`], `ring` and `frame` take sizes. Drawn, they
 /// come back to the theme's own pixels at any zoom, so Colet's parts round as the library's do. A ring

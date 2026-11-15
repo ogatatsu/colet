@@ -111,7 +111,8 @@ pub fn frame(p: crate::theme::Palette, shown: bool, radius: f32) -> Div {
 /// The frame round the column worked in, laid over it on the lines round it: from the path bar's line
 /// above to its own on the right; the caller sets its left and bottom.
 pub(crate) fn active_frame(p: crate::theme::Palette) -> Div {
-    div().absolute().top(px(-1.)).right_0().border_1().border_color(p.accent)
+    // Out by a line, so its top falls on the path bar's.
+    div().absolute().top(-metrics::HAIRLINE).right_0().border_1().border_color(p.accent)
 }
 
 /// How far in from the window's edges a menu is kept.

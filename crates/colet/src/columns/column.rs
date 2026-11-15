@@ -396,7 +396,8 @@ impl Colet {
                 d.child(self.resizer(if kind == Kind::Search { "search-resizer" } else { "column-resizer" }, of, width, cx))
             })
             // The scrolling columns' frame is drawn over their scroll, which would cut this one's edges.
-            .when(marked && kind == Kind::Search, |d| d.child(on_top(active_frame(p).left(px(-1.)).bottom(px(-1.)))))
+            // Out by a line on the left and below, so it falls on the lines there.
+            .when(marked && kind == Kind::Search, |d| d.child(on_top(active_frame(p).left(-metrics::HAIRLINE).bottom(-metrics::HAIRLINE))))
             .test_support()
             .into_any_element()
     }

@@ -258,9 +258,9 @@ impl Colet {
             )
             .absolute()
             // A pixel's line, which stays one at any zoom.
-            .top(px(-1.))
-            .bottom(px(-1.))
-            .left(px(-1.))
+            .top(-metrics::HAIRLINE)
+            .bottom(-metrics::HAIRLINE)
+            .left(-metrics::HAIRLINE)
             .right_0(),
         )
     }

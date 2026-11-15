@@ -254,6 +254,8 @@ pub const FOLD_WIDTH: f32 = 28.;
 /// What home's pane leaves beside it, narrowing in a narrow window to do so: the toolbar with the search
 /// field at its least, the trail's buttons, and the pinned results with a fold strip.
 pub const MAIN_MIN: f32 = 480.;
+/// The window's size the first time it opens, centered on the screen.
+pub const FIRST_WINDOW: (f32, f32) = (1200., 780.);
 /// The smallest the window goes: home's pane at its usual width, and the rest.
 pub const MIN_WINDOW: (f32, f32) = (240. + MAIN_MIN, 480.);
 /// The search field's width at first, and the bounds a drag keeps it in. In a narrow window it narrows to
