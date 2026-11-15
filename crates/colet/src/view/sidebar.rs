@@ -29,7 +29,7 @@ impl Colet {
             .relative()
             .flex()
             .flex_col()
-            .bg(p.sidebar)
+            .bg(p.bg)
             .border_r_1()
             .border_color(p.border)
             // A press anywhere in it works in home, as one in a column works there: its field keeps the

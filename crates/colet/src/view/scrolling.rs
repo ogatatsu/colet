@@ -98,7 +98,7 @@ impl Colet {
             .flex()
             .flex_col()
             .items_center()
-            .bg(p.sidebar)
+            .bg(p.bg)
             .border_r_1()
             .border_color(p.border)
             .hover(|d| d.bg(p.hover))

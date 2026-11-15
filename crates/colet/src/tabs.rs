@@ -603,7 +603,7 @@ impl Colet {
             .flex()
             .items_center()
             .gap_1()
-            .bg(p.sidebar)
+            .bg(p.tab_strip)
             .role(Role::TabList)
             .aria_label("タブ")
             // The selected tab paints over this line to join the toolbar below.
