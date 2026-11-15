@@ -226,6 +226,26 @@ impl Colet {
         self.overlays.take_pressed_open() && !event.is_keyboard()
     }
 
+    /// Readies what lives for a frame only, before the frame is drawn. The one thing Colet changes in
+    /// [`Render::render`], and on purpose: it never touches what the window shows of the app's state, and
+    /// it never notifies (a slide under way asks for its next frame, and nothing more).
+    ///
+    /// - The stops asked for over the last frame stay, and those of buttons gone go. Colet keeps them, not
+    ///   GPUI's keyed state, as the keys are sent to some from outside drawing (see [`crate::stops`]).
+    /// - Where the menu key's menu drops from is measured afresh.
+    /// - The zoom this frame is drawn at is read: the widths and the scrolling are reckoned at 100% (see
+    ///   [`metrics`]), and what layout measures is read through it. Read before anything below reckons.
+    /// - The columns slide a frame toward where the last frame's layout says they rest. Stepped here, not
+    ///   in prepaint or a next-frame callback: the trail of folders and the edges' shades are built from
+    ///   the offset this sets, so they move with the columns in the same frame, and folders coming out of
+    ///   a fold are shifted in the frame they first appear in.
+    fn begin_frame(&mut self, window: &mut Window) {
+        self.stops.begin_frame(window);
+        self.key_menu.begin_frame();
+        self.scrolls.sideways.rescale(Scale::of(window));
+        self.reveal(window);
+    }
+
     /// The zoom this frame is drawn at, as [`Render::render`] reads it before anything is drawn.
     pub(crate) fn scale(&self) -> Scale {
         self.scrolls.sideways.scale
@@ -274,22 +294,7 @@ impl Colet {
 
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Only the stops asked for over the last frame stay: those of buttons gone go with them.
-        self.stops.begin_frame(window);
-        self.key_menu.begin_frame();
-        // The first frame drawn in front: the keys left the address field on the way, if they did, unheard of.
-        if std::mem::take(&mut self.came_to_front) && window.is_window_active() {
-            cx.defer_in(window, |this, window, cx| this.follow_address(window, cx));
-        }
-        // The zoom this frame is drawn at: the widths and the scrolling are reckoned at 100% (see
-        // `metrics`), and what layout measures is read through it. Read before anything below reckons.
-        self.scrolls.sideways.rescale(Scale::of(window));
-        // The columns slide a frame at a time toward where the last frame's layout says they rest.
-        // Stepped here, not in prepaint or a next-frame callback, on purpose: the trail of folders and the
-        // edges' shades are built below from the offset this sets, so they move with the columns in the
-        // same frame, and folders coming out of a fold are shifted in the frame they first appear in.
-        // It never notifies; it asks for another frame only while a slide is under way.
-        self.reveal(window);
+        self.begin_frame(window);
         let p = cx.palette();
         let tabbar = self.tab_bar();
         let sidebar = self.render_sidebar(window, cx);

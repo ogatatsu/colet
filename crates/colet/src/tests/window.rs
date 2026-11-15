@@ -99,3 +99,16 @@ fn leaves_the_window_keys_alone_in_a_dialog(cx: &mut TestAppContext) {
         assert!(!ui.columns_focused(cx) && !ui.home_focused(cx) && !ui.search_focused(cx), "{key} left the dialog");
     }
 }
+
+#[gpui_kit::test]
+fn a_frame_drawn_at_rest_asks_for_no_other(cx: &mut TestAppContext) {
+    // Drawing readies only what lives for a frame (see `Colet::begin_frame`); only a slide under way asks
+    // for the next one. Each act draws a frame first; what it asked for after it is counted here.
+    let ui = open(cx, Arc::new(drive_d()));
+    let asked = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, cx| window.simulate_next_frame(cx));
+    // What opening set going comes to rest.
+    assert!((0..5).any(|_| asked(&ui, cx) == 0));
+    ui.act(cx, |window, _| window.refresh());
+    assert_eq!(asked(&ui, cx), 0);
+    assert_eq!(asked(&ui, cx), 0);
+}

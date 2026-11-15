@@ -223,6 +223,7 @@ impl Render for HistoryPanel {
     /// only while it is open.
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Only the stops of the rows and items drawn below stay; the mouse leaves the keys where they are.
+        // Frame bookkeeping, as Colet's own (see `Colet::begin_frame`): it never notifies.
         self.stops.begin_frame(window);
         let p = cx.palette();
         let radii = metrics::Radii::of(window, cx);

@@ -129,6 +129,9 @@ fn the_address_field_stays_open_over_a_trip_to_another_window_and_a_click_coming
     // Back with nothing clicked, the field is as it was left.
     ui.act(cx, |window, _| window.activate_window());
     settle(cx);
+    // The first frame drawn in front, and what is run after it, as the platform has them.
+    ui.act(cx, |window, cx| window.simulate_next_frame(cx));
+    settle(cx);
     assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
     assert!(ui.address_focused(cx));
     // Away again, and back by a click on a row: it lands before the window is drawn active.
@@ -139,6 +142,8 @@ fn the_address_field_stays_open_over_a_trip_to_another_window_and_a_click_coming
         window.click(row(r"D:\work\b.txt"), cx);
     })
     .unwrap();
+    settle(cx);
+    ui.act(cx, |window, cx| window.simulate_next_frame(cx));
     settle(cx);
     assert_eq!(ui.typed_address(cx), None);
     assert!(ui.columns_focused(cx));
