@@ -357,7 +357,6 @@ impl Render for Colet {
         let tabbar = self.render_tabbar(window, cx);
         let sidebar = self.render_sidebar(window, cx);
         let toolbar = self.render_toolbar(window, cx);
-        let pathbar = self.render_pathbar(window, cx);
         let main = self.render_main(window, cx);
         div()
             .id("colet")
@@ -436,7 +435,6 @@ impl Render for Colet {
             .children(self.press_listener(cx))
             .child(tabbar)
             .child(toolbar)
-            .child(pathbar)
             .child(
                 div()
                     .flex_1()

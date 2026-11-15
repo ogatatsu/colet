@@ -1,4 +1,4 @@
-//! The hidden and system items: left out of the folders until asked for, by Ctrl+H or the toolbar.
+//! The hidden and system items: left out of the folders until asked for, by Ctrl+H or the preferences.
 use super::*;
 
 fn with_hidden() -> Arc<Fake> {
@@ -24,7 +24,8 @@ fn leaves_the_hidden_items_out_until_shown_and_keeps_the_choice(cx: &mut TestApp
     assert_eq!(listed(&ui, cx), [r"D:\work", r"D:\.git", r"D:\desktop.ini"]);
     settle(cx);
     assert!(fake.settings.lock().unwrap().show_hidden);
-    // The toolbar's button puts them away again.
+    // The preferences' checkbox puts them away again.
+    ui.click(cx, "preferences");
     ui.click(cx, "show-hidden");
     assert_eq!(listed(&ui, cx), [r"D:\work"]);
     settle(cx);
@@ -72,4 +73,9 @@ fn shows_the_protected_files_once_asked_for_in_the_preferences_along_with_the_hi
     ui.press(cx, "escape");
     ui.press(cx, "ctrl-h");
     assert_eq!(listed(&ui, cx), [r"D:\work"]);
+    // Their checkbox is off meanwhile, keeping what was chosen.
+    ui.click(cx, "preferences");
+    ui.click(cx, "show-protected");
+    settle(cx);
+    assert!(fake.settings.lock().unwrap().show_protected);
 }

@@ -86,25 +86,6 @@ impl Colet {
             .collect()
     }
 
-    /// The row under the toolbar: the file actions, and at its end how the columns show their items.
-    pub(super) fn render_pathbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = cx.palette();
-        let controls = self.view_controls(window, cx);
-        div()
-            .h_10()
-            .flex_none()
-            .px_3()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_4()
-            .border_b_1()
-            .border_color(p.border)
-            .child(self.render_actions(window, cx))
-            .child(controls)
-            .into_any_element()
-    }
-
     /// The address beside the search field: the trail of crumbs, or the field to type a path in.
     pub(super) fn render_address(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();

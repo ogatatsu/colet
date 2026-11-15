@@ -408,10 +408,7 @@ fn picks_every_row_or_none_with_the_checkbox_from_the_keys(cx: &mut TestAppConte
 
 #[gpui_kit::test]
 fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppContext) {
-    let (fake, ui) = in_work(cx);
-    assert!(ui.columns_focused(cx));
-    ui.click(cx, "copy");
-    assert_eq!(texts(&fake.clipboard.lock().unwrap().paths), [r"D:\work\a.txt"]);
+    let (_, ui) = in_work(cx);
     assert!(ui.columns_focused(cx));
     ui.click(cx, "refresh");
     assert!(ui.columns_focused(cx));
@@ -421,34 +418,26 @@ fn the_buttons_done_on_the_spot_leave_the_keys_where_they_were(cx: &mut TestAppC
     // From the search field too.
     let search = ui.read(cx, |v| v.search.clone());
     ui.act(cx, |window, cx| search.update(cx, |input, cx| input.focus(window, cx)));
-    ui.click(cx, "cut");
-    assert!(ui.ops(cx, |o| o.clipboard.files.cut && texts(&o.clipboard.files.paths) == [r"D:\work\b.txt"]));
+    ui.click(cx, "refresh");
     assert!(ui.act(cx, |window, cx| search.read(cx).focus_handle(cx).is_focused(window)));
 }
 
 #[gpui_kit::test]
 fn tab_passes_the_buttons_that_are_off_and_a_press_on_one_leaves_the_keys(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
-    // Three picked: one name cannot be changed for them all.
-    ui.press(cx, "ctrl-a");
-    // Into the file actions from the trail's last crumb, past the preferences' button.
-    let crumb = ui.read(cx, |v| v.stops.get(&Stop::Crumb(v.state.columns.last().unwrap().id)).unwrap());
-    ui.act(cx, |window, cx| crumb.focus(window, cx));
-    for _ in 0..5 {
-        ui.press(cx, "tab");
-    }
-    assert!(ui.has_keys(cx, "copy-path"));
+    // Folders opened, none gone back from: nothing to go forward to.
+    assert!(ui.read(cx, |v| v.state.can_go_back() && !v.state.can_go_forward()));
+    ui.tab_to(cx, "back");
     ui.press(cx, "tab");
-    assert!(ui.has_keys(cx, "new-folder"));
+    assert!(ui.has_keys(cx, "refresh"), "Tab goes past forward to the one after");
     ui.press(cx, "shift-tab");
-    assert!(ui.has_keys(cx, "copy-path"), "Shift+Tab goes past rename to the one before");
-    ui.press(cx, "tab");
-    assert!(ui.has_keys(cx, "new-folder"), "and Tab back past it");
+    assert!(ui.has_keys(cx, "back"), "and Shift+Tab back past it");
     // Pressed by the mouse, it does nothing and takes nothing.
     let view = ui.view.clone();
     ui.act(cx, |window, cx| view.read(cx).columns_focus.clone().focus(window, cx));
-    ui.click(cx, "rename");
-    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
+    let columns = ui.read(cx, |v| v.state.columns.len());
+    ui.click(cx, "forward");
+    assert_eq!(ui.read(cx, |v| v.state.columns.len()), columns);
     assert!(ui.columns_focused(cx));
 }
 

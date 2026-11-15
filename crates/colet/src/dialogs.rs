@@ -732,27 +732,31 @@ impl Colet {
             // Taken at once as one is picked, and kept.
             .child(div().flex().flex_col().gap_1().child(label(p, "テーマ")).child(themes))
             .child(div().flex().flex_col().gap_1().child(label(p, "表示サイズ")).child(zooms))
-            // Taken at once, as the theme is. It counts only while the hidden items show, but is set at any time.
+            // Taken at once, as the theme is. The protected items hang off the hidden ones: they count only
+            // while those show, so they are set only then, and keep what was chosen meanwhile.
             .child({
-                let colet = cx.entity().downgrade();
+                let (hidden, protected) = (cx.entity().downgrade(), cx.entity().downgrade());
+                let settings = self.stored.settings();
                 div()
                     .flex()
                     .flex_col()
                     .gap_1()
                     .child(label(p, "表示"))
+                    .child(Checkbox::new("show-hidden").label("隠しファイルを表示する").checked(settings.show_hidden).on_click(
+                        move |_, _, cx| {
+                            hidden.update(cx, |this, cx| this.toggle_hidden(cx)).ok();
+                        },
+                    ))
                     .child(
-                        Checkbox::new("show-protected")
-                            .label("保護されたシステムファイルも表示する")
-                            .checked(self.stored.settings().show_protected)
-                            .on_click(move |_, _, cx| {
-                                colet.update(cx, |this, cx| this.toggle_protected(cx)).ok();
-                            }),
-                    )
-                    .child(
-                        div()
-                            .text_size(scaled(metrics::TEXT_BODY))
-                            .text_color(p.text_muted)
-                            .child("隠しファイルを表示しているときに効きます。"),
+                        div().pl_6().child(
+                            Checkbox::new("show-protected")
+                                .label("保護されたシステムファイルも表示する")
+                                .checked(settings.show_protected)
+                                .disabled(!settings.show_hidden)
+                                .on_click(move |_, _, cx| {
+                                    protected.update(cx, |this, cx| this.toggle_protected(cx)).ok();
+                                }),
+                        ),
                     )
             })
             .child(div().pt_1().text_size(scaled(metrics::TEXT_LARGE)).font_weight(FontWeight::SEMIBOLD).child("キーボード操作"))
@@ -883,103 +887,6 @@ impl Colet {
             .with_priority(gpui_kit::base::POPUP_PRIORITY)
             .into_any_element(),
         )
-    }
-
-    /// The file actions under the toolbar.
-    pub fn render_actions(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = cx.palette();
-        let reasons = self.reasons(cx);
-        let action = |id: &'static str, glyph: &'static str, label: &'static str, key: &'static str, off: Option<&'static str>| {
-            let tip = match off {
-                Some(why) => format!("{label}（{why}）"),
-                None => format!("{label}（{key}）"),
-            };
-            Button::new(id).ghost().icon(crate::view::glyph(glyph)).accessibility_label(label).tooltip(tip).disabled(off.is_some())
-        };
-        let row = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_0p5()
-            // Those done on the spot leave the keys where they were; the ones asking in a dialog take them.
-            .child(self.ringed(
-                action("copy", "copy", "コピー", "Ctrl+C", reasons.copy).on_click(cx.listener(|this, _, _, cx| this.copy(false, cx))),
-                "copy",
-                RingAt::Edge,
-                window,
-                cx,
-            ))
-            .child(self.ringed(
-                action("cut", "scissors", "切り取り", "Ctrl+X", reasons.cut).on_click(cx.listener(|this, _, _, cx| this.copy(true, cx))),
-                "cut",
-                RingAt::Edge,
-                window,
-                cx,
-            ))
-            .child(
-                self.ringed(
-                    action("paste", "clipboard-paste", "貼り付け", "Ctrl+V", reasons.paste)
-                        .on_click(cx.listener(|this, _, _, cx| this.paste(cx))),
-                    "paste",
-                    RingAt::Edge,
-                    window,
-                    cx,
-                ),
-            )
-            .child(
-                self.ringed(
-                    action("copy-path", "link", "パスをコピー", "Ctrl+Shift+C", reasons.copy_path)
-                        .on_click(cx.listener(|this, _, _, cx| this.copy_paths(cx))),
-                    "copy-path",
-                    RingAt::Edge,
-                    window,
-                    cx,
-                ),
-            )
-            .child(div().mx_1p5().w(px(1.)).h_4().bg(p.border))
-            .child(
-                self.ringed(
-                    action("rename", "pencil-line", "名前を変更", "F2", reasons.rename)
-                        .on_click(cx.listener(|this, _, window, cx| this.ask_rename(window, cx))),
-                    "rename",
-                    RingAt::Edge,
-                    window,
-                    cx,
-                ),
-            )
-            .child(
-                self.ringed(
-                    action("new-folder", "folder-plus", "新規フォルダー", "Ctrl+Shift+N", reasons.paste)
-                        .on_click(cx.listener(|this, _, window, cx| this.ask_new_folder(window, cx))),
-                    "new-folder",
-                    RingAt::Edge,
-                    window,
-                    cx,
-                ),
-            )
-            // With Shift held it deletes outright, as Explorer's Delete does.
-            .child(
-                self.ringed(
-                    action("recycle", "trash", "ごみ箱へ移動", "Delete／Shift+クリックで完全に削除", reasons.delete)
-                        .on_click(cx.listener(|this, event: &ClickEvent, _, cx| this.delete_picked(event.modifiers().shift, cx))),
-                    "recycle",
-                    RingAt::Edge,
-                    window,
-                    cx,
-                ),
-            )
-            .child(div().mx_1p5().w(px(1.)).h_4().bg(p.border))
-            .child(
-                self.ringed(
-                    action("properties", "info", "プロパティ", "Alt+Enter", reasons.properties)
-                        .on_click(cx.listener(|this, _, _, cx| this.show_properties(cx))),
-                    "properties",
-                    RingAt::Edge,
-                    window,
-                    cx,
-                ),
-            );
-        row.into_any_element()
     }
 
     /// The history's button in the status bar: turning while an operation runs, with the count of those

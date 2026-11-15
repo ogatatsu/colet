@@ -47,6 +47,8 @@ impl Colet {
             .flex()
             .items_center()
             .gap_2()
+            .border_b_1()
+            .border_color(p.border)
             .child(div().flex().flex_none().gap_0p5().child(back).child(forward).child(refresh))
             .child(filter_button)
             .child(
@@ -140,23 +142,6 @@ impl Colet {
             )
             .test_support()
             .into_any_element()
-    }
-
-    /// How the columns show their items, at the file actions' row's end: whether the hidden items show.
-    pub(super) fn view_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        // Pressed while the hidden items show.
-        let show = self.stored.settings().show_hidden;
-        let hidden = Self::icon_button(
-            "show-hidden",
-            if show { "eye" } else { "eye-off" },
-            "隠しファイルを表示",
-            "隠しファイルを表示（Ctrl+H）",
-            true,
-        )
-        .selected(show)
-        .toggled(show)
-        .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx)));
-        div().flex().flex_none().items_center().child(self.ringed(hidden, "show-hidden", RingAt::Edge, window, cx)).into_any_element()
     }
 
     /// The search filters' button beside the field, naming the one chosen in the accent color, and its menu.

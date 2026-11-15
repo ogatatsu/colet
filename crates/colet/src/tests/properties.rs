@@ -30,17 +30,13 @@ fn shows_the_properties_of_the_row_right_clicked_or_of_the_folder_from_its_empty
 }
 
 #[gpui_kit::test]
-fn shows_the_properties_of_all_picked_together_by_keys_and_the_button(cx: &mut TestAppContext) {
+fn shows_the_properties_of_all_picked_together(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "ctrl-a");
     ui.press(cx, "alt-enter");
     settle(cx);
     let all = vec![r"D:\work\a.txt".to_owned(), r"D:\work\b.txt".into(), r"D:\work\c.txt".into()];
-    assert_eq!(shown(&fake), std::slice::from_ref(&all));
-    // The button leaves the keys in the column.
-    ui.click(cx, "properties");
-    settle(cx);
-    assert_eq!(shown(&fake), [all.clone(), all]);
+    assert_eq!(shown(&fake), [all]);
     assert!(ui.columns_focused(cx));
 }
 

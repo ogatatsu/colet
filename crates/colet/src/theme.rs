@@ -35,7 +35,7 @@ pub struct Palette {
     /// A tab not current under the pointer: between `tab_strip` and `bg`, so it never outshines the
     /// current tab.
     pub tab_hover: Hsla,
-    /// The frame around the columns: the toolbar, the file actions' row, home, the fold strip and the
+    /// The frame around the columns: the toolbar, home, the fold strip and the
     /// status bar, all in one.
     pub bg: Hsla,
     pub surface: Hsla,
