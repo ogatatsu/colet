@@ -21,8 +21,8 @@ use gpui_kit::*;
 use crate::{
     app::*,
     crumbs::Crumb,
+    home::{HomeDrag, movable},
     metrics::{self, Scale, scaled},
-    places::{HomeDrag, movable},
     reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
     state::HomeKey,
     state::{Column, ColumnId, Kind},
@@ -345,7 +345,7 @@ impl Colet {
     /// lands, off the window too. Drawn first, so it hears the press let go of after every place the drag
     /// can land; a landing puts the drag down itself and keeps it from hearing it.
     fn drag_let_go(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.home_drag.carried.is_none() && self.tab_strip.read(cx).carried().is_none() {
+        if self.home_carried(cx).is_none() && self.tab_strip.read(cx).carried().is_none() {
             return None;
         }
         let view = cx.entity().downgrade();
@@ -362,8 +362,8 @@ impl Colet {
 
     /// The drag in home or of a tab is let go of where it does not land: nothing has moved.
     fn let_go_of_drags(&mut self, cx: &mut Context<Self>) {
-        if self.home_drag.carried.is_some() || self.tab_strip.read(cx).carried().is_some() {
-            self.end_home_drag();
+        if self.home_carried(cx).is_some() || self.tab_strip.read(cx).carried().is_some() {
+            self.end_home_drag(cx);
             self.end_tab_drag(cx);
             cx.notify();
         }
@@ -421,9 +421,9 @@ impl Render for Colet {
             .on_action(cx.listener(|this, _: &ToggleHidden, _, cx| this.toggle_hidden(cx)))
             // Esc puts down a drag in home, before the keys reach anything else.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.home_drag.carried.is_some() && event.keystroke.key == "escape" {
+                if this.home_carried(cx).is_some() && event.keystroke.key == "escape" {
                     cx.stop_active_drag(window);
-                    this.end_home_drag();
+                    this.end_home_drag(cx);
                     cx.notify();
                     cx.stop_propagation();
                 }

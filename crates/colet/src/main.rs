@@ -8,6 +8,7 @@ mod crumbs;
 mod dialogs;
 mod drag_out;
 mod history;
+mod home;
 mod icons;
 mod instance;
 mod kept_path;

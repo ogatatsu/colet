@@ -153,7 +153,7 @@ impl Colet {
             held,
             cut,
             faded: (entry.hidden.is_hidden() || cut) && !selected,
-            dragged: kind == Kind::Home && self.home_drag.carried.as_ref().is_some_and(|d| d.path == entry.path),
+            dragged: kind == Kind::Home && self.home_drag.read(cx).carried().is_some_and(|d| d.path == entry.path),
             // The filter a saved search runs within, faint beside its name.
             within: match &key {
                 HomeKey::Search { filter, .. } => filter.map(str::to_owned),
@@ -176,7 +176,7 @@ impl Colet {
         let kind = c.kind;
         let name_marks = c.narrow_marks(&entry.name);
         // While a row in home is carried, only the line tells where it goes.
-        let dragging = kind == Kind::Home && self.home_drag.carried.is_some();
+        let dragging = kind == Kind::Home && self.home_carried(cx).is_some();
         let key = HomeKey::of(&entry.path);
         let saved = key.is_search();
         // A narrowed favorite's is its folder's: a drive's own, say.
@@ -190,7 +190,12 @@ impl Colet {
         // Narrowed, home hides some of its kind, and where among them it would land is not to be seen.
         let drag =
             (kind == Kind::Home && c.narrow.is_none()).then(|| movable(self.stored.settings(), &entry.path)).flatten().map(|shelf| {
-                (HomeDrag { path: entry.path.clone(), shelf }, image.clone(), self.home_drag.rows.clone(), cx.entity().downgrade())
+                (
+                    HomeDrag { path: entry.path.clone(), shelf },
+                    image.clone(),
+                    self.home_drag.read(cx).rows().clone(),
+                    cx.entity().downgrade(),
+                )
             });
         let name = entry.name.clone();
         let picture = match (saved, image) {
@@ -239,19 +244,23 @@ impl Colet {
             })
             .when_some(drag, |r, (drag, image, rows, view)| {
                 let drawn = rows.clone();
-                let path = drag.path.clone();
-                r.child(canvas(move |bounds, _, _| drawn.borrow_mut().push((path.clone(), bounds)), |_, _, _, _| {}).absolute().size_full())
-                    .on_drag(drag, move |drag, _, window, cx| {
-                        view.update(cx, |this, cx| this.start_home_drag(drag, cx)).ok();
-                        // As wide as the row was drawn; not drawn yet, as wide as home's pane it lies in.
-                        let drawn = rows.borrow().iter().find(|(path, _)| *path == drag.path).map(|(_, b)| b.size.width);
-                        let width = drawn.unwrap_or_else(|| {
-                            let pane = view.read_with(cx, |this, _| this.sidebar_width(window)).unwrap_or_default();
-                            Scale::of(window).px(pane)
-                        });
-                        let (name, search, image) = (name.clone(), HomeKey::of(&drag.path).is_search(), image.clone());
-                        cx.new(|_| HomeGhost { name, search, image, width })
-                    })
+                let (path, shelf) = (drag.path.clone(), drag.shelf);
+                r.child(
+                    canvas(move |bounds, _, _| drawn.borrow_mut().push((path.clone(), shelf, bounds)), |_, _, _, _| {})
+                        .absolute()
+                        .size_full(),
+                )
+                .on_drag(drag, move |drag, _, window, cx| {
+                    view.update(cx, |this, cx| this.start_home_drag(drag, cx)).ok();
+                    // As wide as the row was drawn; not drawn yet, as wide as home's pane it lies in.
+                    let drawn = rows.borrow().iter().find(|(path, _, _)| *path == drag.path).map(|(_, _, b)| b.size.width);
+                    let width = drawn.unwrap_or_else(|| {
+                        let pane = view.read_with(cx, |this, _| this.sidebar_width(window)).unwrap_or_default();
+                        Scale::of(window).px(pane)
+                    });
+                    let (name, search, image) = (name.clone(), HomeKey::of(&drag.path).is_search(), image.clone());
+                    cx.new(|_| HomeGhost { name, search, image, width })
+                })
             })
             .when(dragged, |r| r.opacity(0.4))
             .h(scaled(row_height(kind)))
@@ -514,12 +523,14 @@ impl Colet {
     pub(super) fn home_rows(&mut self, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let entries = self.state.columns[0].entries.clone();
-        let groups = crate::places::home_groups(self.stored.settings(), &entries);
+        let groups = crate::home::home_groups(self.stored.settings(), &entries);
         // Drawn afresh below, for a drag to find its place.
-        self.home_drag.rows.borrow_mut().clear();
-        self.home_drag.headings.borrow_mut().clear();
+        let dragging = self.home_drag.read(cx);
+        dragging.rows().borrow_mut().clear();
+        dragging.headings().borrow_mut().clear();
+        let headings = dragging.headings().clone();
         // The line where a drag would land: above the row it goes before, or below its kind's last.
-        let landing = self.home_drag.carried.as_ref().zip(self.home_drag.landing.as_ref()).map(|(d, l)| (d.shelf, l.before.clone()));
+        let landing = dragging.carried().zip(dragging.landing()).map(|(d, l)| (d.shelf, l.before.clone()));
         let mut rows = div()
             .id("home-rows")
             .role(Role::ListBox)
@@ -533,7 +544,7 @@ impl Colet {
             .on_drop(cx.listener(|this, drag: &HomeDrag, _, cx| this.drop_home(drag, cx)))
             .test_support();
         for (k, (title, items)) in groups.into_iter().enumerate() {
-            let headings = self.home_drag.headings.clone();
+            let headings = headings.clone();
             rows = rows.child(
                 div()
                     // Set off from the kind above, so the kinds read apart.

@@ -291,7 +291,7 @@ fn drags_a_favorite_to_a_new_place_among_the_favorites(cx: &mut TestAppContext) 
     let (a, c) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, r"D:\c"));
     ui.hold_drag(cx, c.center(), upper(a));
     // The line goes above the row it would go before; the row carried fades.
-    assert_eq!(ui.read(cx, |v| v.home_drag.landing.clone().and_then(|l| l.before)).as_deref(), Some(Path::new(r"D:\a")));
+    assert_eq!(ui.read_app(cx, |v, cx| v.home_drag.read(cx).landing().and_then(|l| l.before.clone())).as_deref(), Some(Path::new(r"D:\a")));
     ui.let_go(cx, upper(a));
     assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\c", r"D:\a", r"D:\b"]);
     let home: Vec<String> = ui.read(cx, |v| v.state.columns[0].entries.iter().take(3).map(|e| text(&e.path)).collect());
@@ -299,7 +299,7 @@ fn drags_a_favorite_to_a_new_place_among_the_favorites(cx: &mut TestAppContext) 
     // Neither picked nor opened.
     assert!(ui.selected(cx, 0).is_empty());
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 1);
-    assert!(ui.read(cx, |v| v.home_drag.carried.is_none() && v.home_drag.landing.is_none()));
+    assert!(ui.read_app(cx, |v, cx| v.home_drag.read(cx).carried().is_none() && v.home_drag.read(cx).landing().is_none()));
 }
 
 #[gpui_kit::test]
@@ -309,14 +309,14 @@ fn drags_a_favorite_first_over_its_heading_and_last_below_its_rows(cx: &mut Test
     let (a, c) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, r"D:\c"));
     let heading = point(a.center().x, a.top() - px(10.));
     ui.hold_drag(cx, c.center(), heading);
-    assert_eq!(ui.read(cx, |v| v.home_drag.landing.clone().and_then(|l| l.before)).as_deref(), Some(Path::new(r"D:\a")));
+    assert_eq!(ui.read_app(cx, |v, cx| v.home_drag.read(cx).landing().and_then(|l| l.before.clone())).as_deref(), Some(Path::new(r"D:\a")));
     ui.let_go(cx, heading);
     assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\c", r"D:\a", r"D:\b"]);
     // In the gap below the last, before the saved searches' heading, it goes last.
     let (c, b) = (ui.home_row(cx, r"D:\c"), ui.home_row(cx, r"D:\b"));
     let gap = point(b.center().x, b.bottom() + px(4.));
     ui.hold_drag(cx, c.center(), gap);
-    assert_eq!(ui.read(cx, |v| v.home_drag.landing.clone()), Some(crate::places::Landing { before: None }));
+    assert_eq!(ui.read_app(cx, |v, cx| v.home_drag.read(cx).landing().cloned()), Some(crate::home::Landing { before: None }));
     ui.let_go(cx, gap);
     assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
 }
@@ -326,7 +326,7 @@ fn drags_a_saved_search_below_the_last_without_running_it(cx: &mut TestAppContex
     let (fake, ui) = ordered_home(cx);
     let (one, two) = (ui.home_row(cx, "search:one"), ui.home_row(cx, "search:two"));
     ui.hold_drag(cx, one.center(), lower(two));
-    assert_eq!(ui.read(cx, |v| v.home_drag.landing.clone()), Some(crate::places::Landing { before: None }));
+    assert_eq!(ui.read_app(cx, |v, cx| v.home_drag.read(cx).landing().cloned()), Some(crate::home::Landing { before: None }));
     ui.let_go(cx, lower(two));
     let queries: Vec<String> = fake.settings.lock().unwrap().saved_searches.iter().map(|s| s.query.clone()).collect();
     assert_eq!(queries, ["two", "one"]);
@@ -424,7 +424,7 @@ fn leaves_the_order_as_it_was_when_let_go_outside_its_own_kind(cx: &mut TestAppC
     let (fake, ui) = ordered_home(cx);
     let (a, one) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, "search:one"));
     ui.hold_drag(cx, a.center(), upper(one));
-    assert_eq!(ui.read(cx, |v| v.home_drag.landing.clone()), None);
+    assert_eq!(ui.read_app(cx, |v, cx| v.home_drag.read(cx).landing().cloned()), None);
     ui.let_go(cx, upper(one));
     assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
     // Nor over the columns.
@@ -432,7 +432,7 @@ fn leaves_the_order_as_it_was_when_let_go_outside_its_own_kind(cx: &mut TestAppC
     ui.hold_drag(cx, c.center(), columns);
     ui.let_go(cx, columns);
     assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
-    assert!(ui.read(cx, |v| v.home_drag.carried.is_none()));
+    assert!(ui.read_app(cx, |v, cx| v.home_drag.read(cx).carried().is_none()));
 }
 
 #[gpui_kit::test]
@@ -440,9 +440,9 @@ fn puts_down_a_drag_in_home_with_escape(cx: &mut TestAppContext) {
     let (fake, ui) = ordered_home(cx);
     let (a, c) = (ui.home_row(cx, r"D:\a"), ui.home_row(cx, r"D:\c"));
     ui.hold_drag(cx, c.center(), upper(a));
-    assert!(ui.read(cx, |v| v.home_drag.landing.is_some()));
+    assert!(ui.read_app(cx, |v, cx| v.home_drag.read(cx).landing().is_some()));
     ui.press(cx, "escape");
-    assert!(ui.read(cx, |v| v.home_drag.carried.is_none() && v.home_drag.landing.is_none()));
+    assert!(ui.read_app(cx, |v, cx| v.home_drag.read(cx).carried().is_none() && v.home_drag.read(cx).landing().is_none()));
     ui.let_go(cx, upper(a));
     assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\a", r"D:\b", r"D:\c"]);
 }

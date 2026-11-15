@@ -32,13 +32,14 @@ use crate::{
     backend::{self, Search},
     crumbs::Trail,
     history::HistoryPanel,
+    home::{HomeDragging, home_entries, home_groups},
     icons::Icons,
     loading::Loading,
     menus::Popup,
     metrics::Scale,
     ops::Operations,
     overlays::Overlays,
-    places::{Dialog, HomeDragging, home_entries, home_groups},
+    places::Dialog,
     scrolls::Scrolls,
     search_bar::SearchBar,
     settings::{self, File, Loaded, Saves, Settings, everything_query, narrowed_query},
@@ -360,7 +361,9 @@ pub struct Colet {
     pub loading: Loading,
     /// The settings and the columns' own orders, as kept between starts.
     pub stored: Stored,
-    pub home_drag: HomeDragging,
+    /// The drag putting home's rows in order: its own entity, which keeps what is carried and where it would
+    /// land, and which Colet observes.
+    pub home_drag: Entity<HomeDragging>,
     /// The row the left button is down on, until it is let go of or a drag out starts.
     pub(crate) press: Option<crate::drag_out::Press>,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
@@ -430,6 +433,9 @@ impl Colet {
         subscriptions.push(cx.subscribe_in(&tab_strip, window, |this, _, event, window, cx| this.on_tab_strip_event(event, window, cx)));
         let history = cx.new(|cx| HistoryPanel::new(operations.clone(), backend.clone(), cx));
         subscriptions.push(cx.subscribe_in(&history, window, |this, _, event, window, cx| this.on_history_event(event, window, cx)));
+        // Home's rows are drawn from it: the one carried fades, and a line shows where it would land.
+        let home_drag = cx.new(|_| HomeDragging::default());
+        subscriptions.push(cx.observe(&home_drag, |_, _, cx| cx.notify()));
         let mut this = Self {
             state: State::new(),
             tabs: Tabs::default(),
@@ -448,7 +454,7 @@ impl Colet {
             backend,
             loading: Loading::default(),
             stored: Stored::new(settings, settings_saves, sorts, sorts_saves),
-            home_drag: HomeDragging::default(),
+            home_drag,
             press: None,
             stops: Stops::default(),
             crumbs: Trail::default(),
