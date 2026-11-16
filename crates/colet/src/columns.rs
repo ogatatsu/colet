@@ -28,7 +28,6 @@ impl Colet {
         let strip = (away > 0).then(|| self.unfold_strip(away, window, cx));
         let columns: Vec<AnyElement> = (first..self.state.columns.len()).map(|i| self.render_column(i, window, cx)).collect();
         let scrolling = self.scrolling_columns(columns, window, cx);
-        let measure = cx.entity().downgrade();
         let main = div()
             .id("main")
             .track_focus(&self.columns_focus)
@@ -37,25 +36,6 @@ impl Colet {
             .flex()
             .relative()
             .bg(p.bg)
-            // How wide this side is, for the results to stretch into: a change lays it out again.
-            .child(
-                canvas(
-                    move |bounds, _, cx| {
-                        measure
-                            .update(cx, |this, cx| {
-                                let width = this.scale().down(f32::from(bounds.size.width));
-                                if (width - this.scrolls.sideways.main).abs() >= 0.5 {
-                                    this.scrolls.sideways.main = width;
-                                    cx.notify();
-                                }
-                            })
-                            .ok();
-                    },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .inset_0(),
-            )
             .child(self.takes_text(&self.columns_focus, cx))
             .children(pinned_column)
             .children(strip)

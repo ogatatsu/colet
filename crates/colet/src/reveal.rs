@@ -30,15 +30,6 @@ pub struct Sideways {
     /// The scrolling columns the columns were last brought on screen with, to tell home or the pinned
     /// results taken up again beside the same columns from a pick there opening others.
     pub revealed: Vec<ColumnId>,
-    /// How wide the columns' side of the window was last laid out: all past home's pane.
-    pub main: f32,
-    /// How wide the search results are drawn; none while there are none.
-    pub results: f32,
-    /// The results narrowing or widening toward the width the folders beside them leave them.
-    pub results_slide: Option<Slide>,
-    /// The columns' side's width the results were last drawn for: while it changes, they take their
-    /// width at once.
-    pub results_main: f32,
 }
 
 impl Sideways {
