@@ -348,6 +348,172 @@ fn slides_the_folders_brought_out_by_their_strip_in_from_the_left_as_far_as_the_
 }
 
 #[gpui_kit::test]
+fn leaves_the_columns_put_and_the_folders_out_on_the_left_with_no_room_past_the_last(cx: &mut TestAppContext) {
+    let ui = folded_deep(cx);
+    // Narrow enough that the anchor reaches past the right edge: no room past it.
+    cx.simulate_window_resize(ui.window, size(px(900.), px(800.)));
+    rest(&ui, cx);
+    assert!(room_past_last(&ui, cx) < -1., "the anchor is cut on the right");
+    let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
+    let before = column_edges(&ui, cx, anchor);
+    ui.press(cx, "ctrl-u");
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
+    assert!(ui.read(cx, |v| v.scrolls.sideways.slide.is_none()), "nothing slides");
+    let after = column_edges(&ui, cx, anchor);
+    assert!((after.0 - before.0).abs() < 1. && (after.1 - before.1).abs() < 1., "{before:?} {after:?}");
+    rest(&ui, cx);
+    assert_eq!(column_edges(&ui, cx, anchor), after);
+    assert!(ui.read(cx, |v| v.on_screen().hidden_left()), "the folders wait on the left");
+}
+
+#[gpui_kit::test]
+fn leaves_the_columns_put_to_the_pixel_at_a_zoom_that_draws_them_a_fraction_wide(cx: &mut TestAppContext) {
+    let deep = file(r"D:\a\b\c\d\zeta.txt");
+    let fake = Fake::default().with_results(vec![deep.clone()]).with_folders(&[
+        (r"D:\", vec![folder(r"D:\a")]),
+        (r"D:\a", vec![folder(r"D:\a\b")]),
+        (r"D:\a\b", vec![folder(r"D:\a\b\c")]),
+        (r"D:\a\b\c", vec![folder(r"D:\a\b\c\d")]),
+        (r"D:\a\b\c\d", vec![deep.clone()]),
+    ]);
+    // 287 at 125% is 358.75 pixels, which layout draws 358.5 wide.
+    fake.settings.lock().unwrap().zoom = 125;
+    fake.settings.lock().unwrap().column_width = 287.;
+    let ui = open(cx, Arc::new(fake));
+    cx.simulate_window_resize(ui.window, size(px(900.), px(800.)));
+    ui.input(cx, "zeta");
+    ui.click(cx, row(&deep.path));
+    rest(&ui, cx);
+    assert!(room_past_last(&ui, cx) < -1., "the anchor is cut on the right");
+    let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
+    let before = column_edges(&ui, cx, anchor);
+    ui.press(cx, "ctrl-u");
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
+    assert_eq!(column_edges(&ui, cx, anchor), before);
+    rest(&ui, cx);
+    assert_eq!(column_edges(&ui, cx, anchor), before);
+}
+
+#[gpui_kit::test]
+fn slides_the_folders_in_exactly_the_room_at_a_zoom_that_draws_the_columns_a_fraction_wide(cx: &mut TestAppContext) {
+    let deep = file(r"D:\a\b\c\d\zeta.txt");
+    let fake = Fake::default().with_results(vec![deep.clone()]).with_folders(&[
+        (r"D:\", vec![folder(r"D:\a")]),
+        (r"D:\a", vec![folder(r"D:\a\b")]),
+        (r"D:\a\b", vec![folder(r"D:\a\b\c")]),
+        (r"D:\a\b\c", vec![folder(r"D:\a\b\c\d")]),
+        (r"D:\a\b\c\d", vec![deep.clone()]),
+    ]);
+    // 287 at 90% is 258.3 pixels, which layout draws 258.5 wide.
+    fake.settings.lock().unwrap().zoom = 90;
+    fake.settings.lock().unwrap().column_width = 287.;
+    let ui = open(cx, Arc::new(fake));
+    cx.simulate_window_resize(ui.window, size(px(900.), px(800.)));
+    ui.input(cx, "zeta");
+    ui.click(cx, row(&deep.path));
+    rest(&ui, cx);
+    let room = room_past_last(&ui, cx);
+    assert!(room > 1., "{room}");
+    let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
+    let (before, _) = column_edges(&ui, cx, anchor);
+    ui.press(cx, "ctrl-u");
+    rest(&ui, cx);
+    let (after, _) = column_edges(&ui, cx, anchor);
+    assert_eq!(after - before, room);
+    assert_eq!(room_past_last(&ui, cx), 0.);
+}
+
+#[gpui_kit::test]
+fn stops_a_slide_under_way_once_the_folders_come_out_with_no_room_past_the_last(cx: &mut TestAppContext) {
+    let ui = folded_deep(cx);
+    cx.simulate_window_resize(ui.window, size(px(900.), px(800.)));
+    rest(&ui, cx);
+    assert!(room_past_last(&ui, cx) < -1., "the anchor is cut on the right");
+    let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
+    let before = column_edges(&ui, cx, anchor);
+    // The columns set sliding right, and the folders brought out before a frame of it is drawn.
+    ui.view.update(cx, |v, cx| {
+        let at = v.scrolls.sideways.offset();
+        v.scrolls.sideways.slide = Some(crate::reveal::Slide::new(at, at, at - 60., None));
+        v.state.unfold();
+        cx.notify();
+    });
+    ui.act(cx, |_, _| ());
+    assert!(ui.read(cx, |v| v.scrolls.sideways.slide.is_none()), "the slide stops");
+    rest(&ui, cx);
+    assert_eq!(column_edges(&ui, cx, anchor), before);
+}
+
+#[gpui_kit::test]
+fn keeps_the_last_column_at_the_right_edge_as_the_size_changes_with_columns_drawn_a_fraction_wide(cx: &mut TestAppContext) {
+    for width in [287., 293., 301., 311.] {
+        let (fake, chain) = deep_chain();
+        fake.settings.lock().unwrap().column_width = width;
+        let ui = open(cx, Arc::new(fake));
+        cx.simulate_window_resize(ui.window, size(px(1800.), px(900.)));
+        ui.click_in(cx, "home", row(r"D:\"));
+        for _ in 0..chain.len() {
+            ui.press(cx, "right");
+        }
+        rest(&ui, cx);
+        assert!(room_past_last(&ui, cx).abs() < 1.);
+        // Sizes that draw a column a little wider than the last one did, so the end it rested over, reckoned
+        // at the new size, would lie past where it was.
+        for zoom in [110, 90, 125, 90, 175, 150, 90] {
+            ui.view.update(cx, |v, cx| v.set_zoom(zoom, cx));
+            rest(&ui, cx);
+            let room = room_past_last(&ui, cx);
+            assert!(room.abs() < 1., "{width} at {zoom}: {room}");
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn shades_no_right_edge_as_the_folders_come_out_beside_a_last_column_flush_with_it(cx: &mut TestAppContext) {
+    let ui = folded_deep(cx);
+    // Narrowed by the room past the anchor, which then ends flush with the right edge.
+    let room = room_past_last(&ui, cx);
+    let width = ui.act(cx, |window, _| f32::from(window.viewport_size().width));
+    cx.simulate_window_resize(ui.window, size(px(width - room), px(800.)));
+    rest(&ui, cx);
+    assert!(room_past_last(&ui, cx).abs() < 1., "{}", room_past_last(&ui, cx));
+    let shaded = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, _| window.try_find("shade-right").is_some());
+    assert!(!shaded(&ui, cx));
+    // The frame the folders come out in, as it begins: built before any layout with the strip gone.
+    let first = cx
+        .update_window(ui.window, |_, window, cx| {
+            ui.view.update(cx, |v, _| {
+                v.state.unfold();
+                v.reveal(window);
+                v.on_screen().hidden_right()
+            })
+        })
+        .unwrap();
+    assert!(!first, "shaded in the frame the folders came out in");
+    settle(cx);
+    rest(&ui, cx);
+    assert_eq!(ui.read(cx, |v| v.state.folded_away()), 0);
+    assert!(!shaded(&ui, cx));
+    assert!(room_past_last(&ui, cx).abs() < 1.);
+}
+
+#[gpui_kit::test]
+fn slides_the_folders_in_only_as_far_as_the_room_past_the_last_column(cx: &mut TestAppContext) {
+    let ui = folded_deep(cx);
+    let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
+    let room = room_past_last(&ui, cx);
+    let column = ui.read(cx, |v| v.widths.column);
+    // Room for some of the four folders, not all of them.
+    assert!(room > 1. && room < 4. * column, "{room}");
+    let (before, _) = column_edges(&ui, cx, anchor);
+    ui.click(cx, "unfold");
+    rest(&ui, cx);
+    let (after, _) = column_edges(&ui, cx, anchor);
+    assert!((after - before - room).abs() < 1., "{before} {after} {room}");
+    assert!(ui.read(cx, |v| v.on_screen().hidden_left()), "the rest wait on the left");
+}
+
+#[gpui_kit::test]
 fn slides_a_folded_crumb_picked_in_from_the_left_until_it_is_on_screen(cx: &mut TestAppContext) {
     let ui = folded_deep(cx);
     let anchor = ui.read(cx, |v| v.state.columns.len() - 1);

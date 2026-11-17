@@ -242,7 +242,7 @@ impl Colet {
     fn begin_frame(&mut self, window: &mut Window) {
         self.stops.begin_frame(window);
         self.key_menu.begin_frame();
-        self.scrolls.sideways.rescale(Scale::of(window));
+        self.scrolls.sideways.rescale(Scale::of(window), window.scale_factor());
         self.reveal(window);
     }
 

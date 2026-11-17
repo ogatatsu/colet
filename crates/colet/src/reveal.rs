@@ -17,13 +17,16 @@ pub struct Sideways {
     pub scroll: ScrollHandle,
     /// The zoom the window was last drawn at, which turns the scroll handle's lengths into these.
     pub scale: Scale,
+    /// Device pixels to a pixel on the display the window was last drawn on, which layout rounds to.
+    pub device: f32,
     pub slide: Option<Slide>,
     /// Asks the next frame to bring the active column on screen, sliding there when true.
     pub pending: Option<bool>,
     /// The scroll offset the columns were last brought to, which holds their scroll width while columns
     /// beside them close and they slide back; once at rest, where they rest.
     pub hold: f32,
-    /// The view's width and the columns' that the columns were last brought to rest, or set sliding, for.
+    /// The view's width and the columns' as drawn (see [`Sideways::drawn`]) that the columns were last
+    /// brought to rest, or set sliding, for.
     pub fitted: (f32, f32),
     /// The anchor of the fold last drawn, and how many folders it held away, to tell when they come out.
     pub drawn_fold: Option<(ColumnId, usize)>,
@@ -47,14 +50,25 @@ impl Sideways {
         self.scroll.set_offset(gpui_kit::point(-self.scale.px(at), gpui_kit::px(0.)));
     }
 
-    /// The window is drawn at `scale` now: the columns stay scrolled as far at 100%, so the same of them
-    /// is on screen as the zoom changes, rather than as many pixels.
-    pub fn rescale(&mut self, scale: Scale) {
+    /// The window is drawn at `scale` now, on a display of `device` pixels to one: the columns stay
+    /// scrolled as far at 100%, so the same of them is on screen as the zoom changes, rather than as many
+    /// pixels.
+    pub fn rescale(&mut self, scale: Scale, device: f32) {
+        self.device = device;
         if scale != self.scale {
             let at = self.offset();
             self.scale = scale;
             self.set_offset(at);
         }
+    }
+
+    /// `width`, given at 100%, as layout draws it, still at 100%: rounded to a whole device pixel, a half
+    /// toward zero, as GPUI rounds a length before laying it out. A column a fraction of a pixel wide at
+    /// some zoom is drawn a little narrower or wider, and columns side by side add that up.
+    pub fn drawn(&self, width: f32) -> f32 {
+        let device = if self.device > 0. { self.device } else { 1. };
+        let dp = self.scale.up(width) * device;
+        self.scale.down((dp.abs() - 0.5).ceil().copysign(dp) / device)
     }
 
     /// How far the scroll goes at most.
@@ -66,6 +80,14 @@ impl Sideways {
     pub fn view_width(&self) -> f32 {
         self.scale.down(f32::from(self.scroll.bounds().size.width))
     }
+
+    /// How wide the columns' view will be laid out in this frame, as far as is known before layout: the
+    /// width they were last brought to rest or set sliding for, which counts the room the folders' strip
+    /// leaves as it goes, or else the last frame's. Every layout brings `fitted` to the view it laid out
+    /// (see `Colet::fit`), so it is never older than the last frame.
+    pub fn view_ahead(&self) -> f32 {
+        if self.fitted.0 > 0. { self.fitted.0 } else { self.view_width() }
+    }
 }
 
 /// The columns sliding to where they should rest; see `Colet::reveal`.
@@ -76,13 +98,14 @@ pub struct Slide {
     pub target: f32,
     pub velocity: f32,
     pub time: Option<Instant>,
-    /// Folders brought out by their strip: the column held at the right edge as they slide in.
-    pub keep: Option<usize>,
+    /// Folders brought out by their strip: where the columns stood as they came out, which they slide
+    /// in from only as far as the room past the last column takes.
+    pub uncover: Option<f32>,
 }
 
 impl Slide {
-    pub fn new(origin: f32, position: f32, target: f32, keep: Option<usize>) -> Self {
-        Self { origin, position, target, velocity: 0., time: None, keep }
+    pub fn new(origin: f32, position: f32, target: f32, uncover: Option<f32>) -> Self {
+        Self { origin, position, target, velocity: 0., time: None, uncover }
     }
 
     /// Moves all of it by `by`, as the columns under it are.
@@ -90,6 +113,9 @@ impl Slide {
         self.origin += by;
         self.position += by;
         self.target += by;
+        if let Some(uncover) = &mut self.uncover {
+            *uncover += by;
+        }
     }
 
     /// One frame's step at `now`: where the columns stand, and whether they are at rest there.
@@ -139,11 +165,12 @@ pub fn reveal_target(from: f32, view: f32, cells: &[Cell], active: Option<usize>
     flush
 }
 
-/// The scroll offset to rest at once the folders folded above a column come out by their strip: as far
-/// left as keeps column `keep` whole at the right edge, so as many of them as fit show beside it.
-pub fn uncover_target(view: f32, cells: &[Cell], keep: usize) -> f32 {
-    let Some(cell) = cells.get(keep) else { return 0. };
-    (cell.start + cell.width - view).clamp(0., cell.start)
+/// The scroll offset to rest at once the folders folded above a column come out by their strip, the
+/// columns standing at `from` as they come out: they slide right only into the room past the last column,
+/// as far as brings it to the right edge. With no room there they stay put, the folders out on the left.
+pub fn uncover_target(from: f32, view: f32, cells: &[Cell]) -> f32 {
+    let end = cells.last().map_or(0., |c| c.start + c.width);
+    from.min((end - view).max(0.))
 }
 
 /// Where columns resting at `from` go once the view or their width changes under them, as the window is
@@ -244,21 +271,18 @@ mod tests {
     }
 
     #[test]
-    fn uncovers_as_many_folders_as_fit_beside_the_column_kept_at_the_right_edge() {
-        assert_eq!(uncover_target(480., &cells(4), 3), 480.);
-        assert_eq!(uncover_target(600., &cells(4), 2), 120.);
-        // Columns past it go off on the right.
-        assert_eq!(uncover_target(480., &cells(4), 1), 0.);
+    fn uncovers_the_folders_only_as_far_as_the_room_past_the_last_column_takes() {
+        // Four columns end at 960; standing at 720 in a 480 view, 240 is left past the last.
+        assert_eq!(uncover_target(720., 480., &cells(4)), 480.);
+        // Room for more than came out: they all come in, and the room past the last stays.
+        assert_eq!(uncover_target(240., 1200., &cells(4)), 0.);
     }
 
     #[test]
-    fn uncovers_them_all_when_they_fit() {
-        assert_eq!(uncover_target(1200., &cells(4), 3), 0.);
-    }
-
-    #[test]
-    fn keeps_the_column_kept_whole_from_the_left_when_it_is_wider_than_the_view() {
-        assert_eq!(uncover_target(200., &cells(4), 3), 720.);
+    fn leaves_the_columns_where_they_stand_with_no_room_past_the_last() {
+        assert_eq!(uncover_target(480., 480., &cells(4)), 480.);
+        // The last cut by the right edge: they do not go further left to show it.
+        assert_eq!(uncover_target(360., 480., &cells(4)), 360.);
     }
 
     #[test]
