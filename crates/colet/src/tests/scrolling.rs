@@ -678,3 +678,40 @@ fn leaves_the_columns_where_they_are_as_home_comes_out_of_its_strip_and_goes_bac
     assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), at);
     assert!(room_past_last(&ui, cx).abs() < 1.);
 }
+
+#[gpui_kit::test]
+fn brings_home_out_of_its_strip_alike_whether_the_columns_still_slide_or_rest(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    fake.settings.lock().unwrap().fold_home = true;
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    // Back to the first column, the slide over, then home.
+    for _ in 1..chain.len() {
+        ui.press(cx, "left");
+    }
+    rest(&ui, cx);
+    ui.press(cx, "left");
+    assert!(ui.home_focused(cx));
+    rest(&ui, cx);
+    let after = ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x);
+    // Out to the far column again, then back and home with the columns still sliding.
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    assert_ne!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), after);
+    for _ in 1..chain.len() {
+        ui.press(cx, "left");
+    }
+    assert!(ui.read(cx, |v| v.scrolls.sideways.slide.is_some()), "still sliding");
+    ui.press(cx, "left");
+    assert!(ui.home_focused(cx));
+    rest(&ui, cx);
+    // Where they stand as home comes out the slide, not the keys going home, decides.
+    assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), after);
+    assert!(ui.act(cx, |window, _| window.try_find("sidebar").is_some()));
+}

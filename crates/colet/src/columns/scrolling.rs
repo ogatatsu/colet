@@ -348,7 +348,10 @@ impl Colet {
             return;
         }
         // Home's pane coming out of its strip, or going back in, is all that changed the view: the columns
-        // stay where they are drawn, pushed aside and cut on the right while it is out.
+        // stay where they are drawn, pushed aside and cut on the right while it is out. Sliding as the keys
+        // came home, they slide on to where they were going, and stand where they would have had the slide
+        // ended first; reckoned again with home worked in, they would make for the last column instead.
+        // Gone into a column as it folds, they are reckoned again, so the room it gives back is filled.
         let pushed = self.stored.settings().fold_home
             && self.widths.resizing() != Some(WidthOf::Sidebar)
             && (home - was_home).abs() >= 0.5
@@ -356,6 +359,7 @@ impl Colet {
         let (cells, active) = self.scrolling();
         let sideways = &mut self.scrolls.sideways;
         match &mut sideways.slide {
+            Some(_) if pushed && active.is_none() => {}
             Some(slide) => {
                 slide.target = match slide.uncover {
                     Some(at) => uncover_target(at, view, &cells),
