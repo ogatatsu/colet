@@ -589,3 +589,28 @@ fn keeps_home_out_while_its_menu_is_up_and_while_the_tab_has_nothing_else(cx: &m
     ui.press(cx, "escape");
     assert!(ui.read(cx, |v| v.menu().is_none()) && ui.home_focused(cx) && home_out(&ui, cx));
 }
+
+#[gpui_kit::test]
+fn frames_home_worked_in_whole_while_it_folds_as_while_it_is_pinned(cx: &mut TestAppContext) {
+    let fake = Arc::new(drive_d());
+    let ui = open(cx, fake.clone());
+    ui.click_in(cx, "home", row(r"D:\"));
+    ui.press(cx, "ctrl-0");
+    let frame = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, _| window.find("home-frame").bounds());
+    let pinned = frame(&ui, cx);
+    // Folding, out and at rest: framed as when pinned, its top on the path bar's line.
+    ui.click(cx, "home-fold");
+    assert!(home_out(&ui, cx));
+    assert_eq!(frame(&ui, cx), pinned);
+    // Coming out of its strip: its right on the edge it has come to.
+    ui.press(cx, "right");
+    assert!(!home_out(&ui, cx));
+    ui.press(cx, "ctrl-0");
+    assert!(ui.read(cx, |v| v.home_pane.moving()), "still coming out");
+    let (moving, out, pane) =
+        ui.act(cx, |window, _| (window.find("home-frame").bounds(), window.find("home-out").bounds(), window.find("sidebar").bounds()));
+    assert_eq!((moving.top(), moving.right()), (pinned.top(), out.right() - px(1.)));
+    assert!(moving.right() < pane.right());
+    assert!(home_out(&ui, cx));
+    assert_eq!(frame(&ui, cx), pinned);
+}

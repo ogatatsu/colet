@@ -25,19 +25,25 @@ impl Colet {
     /// drawn as wide as it stands out, cut where it ends, so its rows do not reflow as it moves.
     pub(crate) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if !self.stored.settings().fold_home {
-            return self.home_pane(window, cx);
+            return self.home_pane(true, window, cx);
         }
         if !self.home_open(window, cx) && !self.home_pane.moving() {
             return self.home_strip(window, cx);
         }
+        let p = cx.palette();
         let width = self.home_pane.width();
+        let marked = self.state.active == 0 && self.columns_marked(window);
+        // The frame is laid round what of it stands out, outside the cut: its top falls on the path bar's
+        // line above, and its right on the edge it has come to, wherever that is as it moves, a line in,
+        // where the pane's own line on the right lies once it stands.
         div()
             .id("home-out")
             .w(scaled(width))
             .flex_none()
             .h_full()
-            .overflow_hidden()
-            .child(self.home_pane(window, cx))
+            .relative()
+            .child(div().size_full().overflow_hidden().child(self.home_pane(false, window, cx)))
+            .when(marked, |d| d.child(on_top(active_frame(p).left_0().bottom_0().right(metrics::HAIRLINE).id("home-frame").test_support())))
             .test_support()
             .into_any_element()
     }
@@ -119,8 +125,9 @@ impl Colet {
         self.ringed(button, Stop::Named("home-fold"), RingAt::Edge, window, cx)
     }
 
-    /// Home's pane itself: its heading, its narrowing field and its rows.
-    fn home_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// Home's pane itself: its heading, its narrowing field and its rows, and round them the frame of the
+    /// column worked in when `framed`; folding, what holds it draws the frame instead.
+    fn home_pane(&mut self, framed: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let home = &self.state.columns[0];
         let (id, narrowed) = (home.id, home.narrow.is_some());
@@ -206,7 +213,7 @@ impl Colet {
             .child(keys)
             .child(self.resizer("sidebar-resizer", WidthOf::Sidebar, width, cx))
             // Its left and bottom are the window's edges: drawn inside them.
-            .when(marked, |d| d.child(on_top(active_frame(p).left_0().bottom_0())))
+            .when(framed && marked, |d| d.child(on_top(active_frame(p).left_0().bottom_0().id("home-frame").test_support())))
             .test_support()
             .into_any_element()
     }
