@@ -338,6 +338,7 @@ impl Colet {
         // The width as drawn, so the columns' end they rested over is the one drawn then, whatever zoom
         // they are drawn at now.
         let width = self.column_drawn();
+        let (home, was_home) = (self.home_pane.width(), std::mem::replace(&mut self.scrolls.sideways.fitted_home, self.home_pane.width()));
         if view <= 0. || ((view - was).abs() < 0.5 && was_width == width) {
             return;
         }
@@ -346,6 +347,12 @@ impl Colet {
         if was <= 0. {
             return;
         }
+        // Home's pane coming out of its strip, or going back in, is all that changed the view: the columns
+        // stay where they are drawn, pushed aside and cut on the right while it is out.
+        let pushed = self.stored.settings().fold_home
+            && self.widths.resizing() != Some(WidthOf::Sidebar)
+            && (home - was_home).abs() >= 0.5
+            && (view + home - was - was_home).abs() <= 1.;
         let (cells, active) = self.scrolling();
         let sideways = &mut self.scrolls.sideways;
         match &mut sideways.slide {
@@ -356,6 +363,7 @@ impl Colet {
                 };
                 sideways.hold = slide.target.max(slide.position);
             }
+            None if pushed => {}
             None => {
                 let target = refit(sideways.offset(), was, cells.len() as f32 * was_width, view, &cells, active);
                 sideways.set_offset(target);

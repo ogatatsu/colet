@@ -28,6 +28,9 @@ pub struct Sideways {
     /// The view's width and the columns' as drawn (see [`Sideways::drawn`]) that the columns were last
     /// brought to rest, or set sliding, for.
     pub fitted: (f32, f32),
+    /// How wide home's pane was drawn as the view was last laid out, to tell the room it takes coming out
+    /// of its strip, or gives back going in, from the window or a width changing.
+    pub fitted_home: f32,
     /// The anchor of the fold last drawn, and how many folders it held away, to tell when they come out.
     pub drawn_fold: Option<(ColumnId, usize)>,
     /// The scrolling columns the columns were last brought on screen with, to tell home or the pinned

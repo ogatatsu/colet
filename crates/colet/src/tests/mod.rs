@@ -664,13 +664,13 @@ fn deep_chain() -> (Fake, Vec<String>) {
     (fake, chain)
 }
 
-/// Frames a screen's refresh apart until the columns rest: the slide runs on the clock.
+/// Frames a screen's refresh apart until the columns and home's pane rest: the slides run on the clock.
 fn rest(ui: &Ui, cx: &mut TestAppContext) {
     for _ in 0..120 {
         std::thread::sleep(Duration::from_millis(16));
         ui.act(cx, |_, _| ());
         settle(cx);
-        if ui.read(cx, |v| v.scrolls.sideways.slide.is_none()) {
+        if ui.read(cx, |v| v.scrolls.sideways.slide.is_none() && !v.home_pane.moving()) {
             break;
         }
     }

@@ -523,3 +523,69 @@ fn changes_the_filter_a_saved_search_runs_within_from_its_edit(cx: &mut TestAppC
     assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
     assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
 }
+
+/// Home's pane out beside the columns, rather than folded into its strip.
+fn home_out(ui: &Ui, cx: &mut TestAppContext) -> bool {
+    rest(ui, cx);
+    let (pane, strip) = ui.act(cx, |window, _| (window.try_find("sidebar").is_some(), window.try_find("home-strip").is_some()));
+    assert_ne!(pane, strip, "home's pane or its strip, one at a time");
+    pane
+}
+
+#[gpui_kit::test]
+fn folds_home_with_its_pin_and_brings_it_out_while_the_keys_are_there(cx: &mut TestAppContext) {
+    let fake = Arc::new(drive_d());
+    let ui = open(cx, fake.clone());
+    ui.click_in(cx, "home", row(r"D:\"));
+    ui.press(cx, "right");
+    // Pinned out, as it starts: out with the keys elsewhere.
+    assert!(home_out(&ui, cx));
+    ui.press(cx, "ctrl-0");
+    ui.click(cx, "home-fold");
+    assert!(fake.settings.lock().unwrap().fold_home);
+    // The keys are still in it: it stays out until they leave.
+    assert!(ui.home_focused(cx) && home_out(&ui, cx));
+    ui.press(cx, "right");
+    assert!(!home_out(&ui, cx));
+    // Its strip brings the keys back, and it with them.
+    ui.click(cx, "home-strip-button");
+    assert!(ui.home_focused(cx) && home_out(&ui, cx));
+    ui.press(cx, "right");
+    assert!(!home_out(&ui, cx));
+    // ← from the first column, and Ctrl+0, as well.
+    ui.press(cx, "left");
+    assert!(ui.home_focused(cx) && home_out(&ui, cx));
+    ui.press(cx, "right");
+    assert!(!home_out(&ui, cx));
+    ui.press(cx, "ctrl-0");
+    assert!(home_out(&ui, cx));
+    // Pinned out again, it stays so with the keys gone.
+    ui.click(cx, "home-fold");
+    assert!(!fake.settings.lock().unwrap().fold_home);
+    ui.press(cx, "right");
+    assert!(home_out(&ui, cx));
+}
+
+#[gpui_kit::test]
+fn keeps_home_out_while_its_menu_is_up_and_while_the_tab_has_nothing_else(cx: &mut TestAppContext) {
+    let fake = Arc::new(drive_d().with_results(vec![file(r"D:\abc.txt")]));
+    fake.settings.lock().unwrap().fold_home = true;
+    let ui = open(cx, fake.clone());
+    // Nothing but home, the keys in the search field: out.
+    assert!(ui.search_focused(cx) && home_out(&ui, cx));
+    // Results beside it, the keys still in the field: folded.
+    ui.input(cx, "abc");
+    assert!(!home_out(&ui, cx));
+    // A new tab has nothing but home.
+    ui.press(cx, "ctrl-t");
+    assert!(home_out(&ui, cx));
+    ui.press(cx, "ctrl-shift-tab");
+    assert!(!home_out(&ui, cx));
+    // A menu opened from home gives the keys back there: out while it is up, and once it is gone.
+    ui.press(cx, "ctrl-0");
+    ui.act(cx, |window, cx| window.within("home").right_click(row(r"D:\"), cx));
+    settle(cx);
+    assert!(ui.read(cx, |v| v.menu().is_some()) && home_out(&ui, cx));
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| v.menu().is_none()) && ui.home_focused(cx) && home_out(&ui, cx));
+}

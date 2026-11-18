@@ -1,7 +1,11 @@
 //! Home's pane on the left: its heading, its rows under the headings of their kinds, the line where a row
-//! dragged among them would land, and the row that follows the pointer.
+//! dragged among them would land, and the row that follows the pointer; or, folded, the strip it comes out
+//! of.
 
-use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::{
+    ActiveTheme as _, Sizable,
+    button::{Button, ButtonVariants},
+};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -11,12 +15,112 @@ use crate::{
     home::{HomeDrag, movable},
     metrics::{self, scaled},
     state::Kind,
+    stops::Stop,
     theme::ActivePalette,
     view::*,
 };
 
 impl Colet {
+    /// Home's pane, or the strip it folds into while it is not in use. Coming out or going back in, it is
+    /// drawn as wide as it stands out, cut where it ends, so its rows do not reflow as it moves.
     pub(crate) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if !self.stored.settings().fold_home {
+            return self.home_pane(window, cx);
+        }
+        if !self.home_open(window, cx) && !self.home_pane.moving() {
+            return self.home_strip(window, cx);
+        }
+        let width = self.home_pane.width();
+        div()
+            .id("home-out")
+            .w(scaled(width))
+            .flex_none()
+            .h_full()
+            .overflow_hidden()
+            .child(self.home_pane(window, cx))
+            .test_support()
+            .into_any_element()
+    }
+
+    /// The strip home's pane folds into, which brings it out: the keys go to home, which keeps it out while
+    /// they are there.
+    fn home_strip(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = cx.palette();
+        let focus = self.stop("home-strip", cx);
+        div()
+            .id("home-strip")
+            .w(scaled(FOLD_WIDTH))
+            .h_full()
+            .flex_none()
+            .relative()
+            .flex()
+            .flex_col()
+            .items_center()
+            .bg(p.bg)
+            .border_r_1()
+            .border_color(p.border)
+            .hover(|d| d.bg(p.hover))
+            // In line with the columns' headings, as the folders' strip is, and its name written down it.
+            .child(
+                div()
+                    .h(scaled(metrics::HEADING_HEIGHT))
+                    .w_full()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .border_b_1()
+                    .border_color(p.border)
+                    .child(icon("house", metrics::GLYPH, p.text_muted)),
+            )
+            .child(
+                div()
+                    .id("home-strip-name")
+                    .pt_2()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .text_xs()
+                    .text_color(p.text_muted)
+                    .child("ホ")
+                    .child("ー")
+                    .child("ム")
+                    .test_support(),
+            )
+            // The button laid over the whole strip, as on the folders' strip.
+            .child(
+                ring(div().id("home-strip-button").track_focus(&focus), p, focus.is_focused(window), 0.)
+                    .role(Role::Button)
+                    .aria_label("ホームを表示（Ctrl+0）")
+                    .absolute()
+                    .inset_0()
+                    .tip("ホームを表示（Ctrl+0）")
+                    .on_click(cx.listener(|this, _, window, cx| this.focus_home(window, cx)))
+                    .test_support(),
+            )
+            .test_support()
+            .into_any_element()
+    }
+
+    /// The pin in home's heading: home stays out beside the columns, or folds into its strip while it is
+    /// not in use.
+    fn fold_button(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let p = cx.palette();
+        let fold = self.stored.settings().fold_home;
+        let label = if fold { "ホームを固定する" } else { "ホームを帯にたたむ" };
+        let button = Button::new("home-fold")
+            .ghost()
+            .xsmall()
+            // As it stands: pinned out, or let go of to fold.
+            .icon(if fold { glyph("pin-off").text_color(p.text_muted) } else { glyph("pin") })
+            .accessibility_label(label)
+            .tooltip(label)
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_fold_home(cx)));
+        self.ringed(button, Stop::Named("home-fold"), RingAt::Edge, window, cx)
+    }
+
+    /// Home's pane itself: its heading, its narrowing field and its rows.
+    fn home_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let home = &self.state.columns[0];
         let (id, narrowed) = (home.id, home.narrow.is_some());
@@ -24,6 +128,7 @@ impl Colet {
         let marked = self.state.active == 0 && self.columns_marked(window);
         let body = self.column_body(0, marked, window, cx);
         let width = self.sidebar_width(window);
+        let fold = self.fold_button(window, cx);
         let keys = div()
             .id("home")
             .track_focus(&self.home_focus)
@@ -82,7 +187,8 @@ impl Colet {
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
                             .child("ホーム"),
-                    ),
+                    )
+                    .child(fold),
             )
             .when_some(field, |d, input| {
                 d.child(

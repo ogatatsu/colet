@@ -235,14 +235,17 @@ impl Colet {
     /// - Where the menu key's menu drops from is measured afresh.
     /// - The zoom this frame is drawn at is read: the widths and the scrolling are reckoned at 100% (see
     ///   [`metrics`]), and what layout measures is read through it. Read before anything below reckons.
+    /// - Home's pane comes a frame further out of its strip, or back in, as the keys come to it or leave:
+    ///   before the columns, which reckon with the room it leaves them.
     /// - The columns slide a frame toward where the last frame's layout says they rest. Stepped here, not
     ///   in prepaint or a next-frame callback: the trail of folders and the edges' shades are built from
     ///   the offset this sets, so they move with the columns in the same frame, and folders coming out of
     ///   a fold are shifted in the frame they first appear in.
-    fn begin_frame(&mut self, window: &mut Window) {
+    fn begin_frame(&mut self, window: &mut Window, cx: &App) {
         self.stops.begin_frame(window);
         self.key_menu.begin_frame();
         self.scrolls.sideways.rescale(Scale::of(window), window.scale_factor());
+        self.step_home_pane(window, cx);
         self.reveal(window);
     }
 
@@ -294,7 +297,7 @@ impl Colet {
 
 impl Render for Colet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.begin_frame(window);
+        self.begin_frame(window, cx);
         let p = cx.palette();
         let tabbar = self.tab_bar();
         let sidebar = self.render_sidebar(window, cx);

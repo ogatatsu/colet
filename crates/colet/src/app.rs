@@ -33,7 +33,7 @@ use crate::{
     crumbs::Trail,
     dialogs::Dialog,
     history::HistoryPanel,
-    home::{HomeDragging, home_entries, home_groups},
+    home::{HomeDragging, HomePane, home_entries, home_groups},
     icons::Icons,
     loading::Loading,
     metrics::Scale,
@@ -365,6 +365,8 @@ pub struct Colet {
     /// The drag putting home's rows in order: its own entity, which keeps what is carried and where it would
     /// land, and which Colet observes.
     pub home_drag: Entity<HomeDragging>,
+    /// How wide home's pane is drawn, out of its strip or folded into it.
+    pub home_pane: HomePane,
     /// The row the left button is down on, until it is let go of or a drag out starts.
     pub(crate) press: Option<crate::drag_out::Press>,
     /// The buttons Tab stops at, each with the focus it keeps across frames.
@@ -453,6 +455,7 @@ impl Colet {
             loading: Loading::default(),
             stored: Stored::new(settings, settings_saves, sorts, sorts_saves),
             home_drag,
+            home_pane: HomePane::default(),
             press: None,
             stops: Stops::default(),
             crumbs: Trail::default(),

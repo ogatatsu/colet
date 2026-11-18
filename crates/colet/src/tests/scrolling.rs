@@ -649,3 +649,32 @@ fn keeps_the_last_column_at_the_right_edge_as_the_size_changes(cx: &mut TestAppC
         assert!((width - expected).abs() < 1., "{zoom}: {width} against {expected}");
     }
 }
+
+#[gpui_kit::test]
+fn leaves_the_columns_where_they_are_as_home_comes_out_of_its_strip_and_goes_back(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    fake.settings.lock().unwrap().fold_home = true;
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    // Folded, the last column flush with the right edge.
+    let at = ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x);
+    assert!(at < px(0.) && room_past_last(&ui, cx).abs() < 1.);
+    assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
+    // Out, it pushes them aside: they stay scrolled as they were, cut and shaded on the right.
+    ui.press(cx, "ctrl-0");
+    rest(&ui, cx);
+    assert!(ui.act(cx, |window, _| window.try_find("sidebar").is_some()));
+    assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), at);
+    assert!(room_past_last(&ui, cx) < -1.);
+    assert!(ui.act(cx, |window, _| window.try_find("shade-right").is_some()));
+    // Back in, they are as they were.
+    ui.press(cx, "right");
+    rest(&ui, cx);
+    assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
+    assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), at);
+    assert!(room_past_last(&ui, cx).abs() < 1.);
+}

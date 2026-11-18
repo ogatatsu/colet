@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     path::{Path, PathBuf},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use colet_core::{
@@ -22,12 +22,13 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
-    app::{Colet, Tone},
+    app::{Colet, FOLD_WIDTH, Tone, WidthOf},
     dialogs::{Choice, Dialog, DialogParts, Pick, field, label, push},
     file_menu::FileCommand,
     menus::{Line, line},
     metrics::{self, Scale},
     ops::Reasons,
+    reveal::Slide,
     search_filters::filter_tool_id,
     settings::{Favorite, SavedSearch, Settings},
     state::{HomeKey, Kind, narrowing},
@@ -293,7 +294,82 @@ fn drag_edge(at: Point<Pixels>, list: Bounds<Pixels>, scale: Scale) -> Option<f3
     }
 }
 
+/// How wide home's pane is drawn, and the spring that takes it out of its strip and back in when it folds
+/// there (see [`Colet::home_open`]).
+#[derive(Default)]
+pub struct HomePane {
+    /// At 100%; none before the first frame.
+    width: Option<f32>,
+    /// Whether it was out the last frame.
+    open: Option<bool>,
+    slide: Option<Slide>,
+}
+
+impl HomePane {
+    /// How wide it is drawn this frame, at 100%.
+    pub fn width(&self) -> f32 {
+        self.width.unwrap_or_default()
+    }
+
+    /// Coming out of its strip or going back into it.
+    pub fn moving(&self) -> bool {
+        self.slide.is_some()
+    }
+
+    /// A frame toward `target`, out of its strip when `open`: when it comes out or goes in, by `spring`,
+    /// sliding as the columns do; otherwise, as a width dragged or a window narrowed changes it, at once.
+    /// True while it is still on its way.
+    fn step(&mut self, target: f32, open: bool, spring: bool, now: Instant) -> bool {
+        let turned = self.open.replace(open).is_some_and(|was| was != open);
+        match self.width {
+            Some(width) if spring && (turned || self.slide.is_some()) => {
+                let slide = self.slide.get_or_insert_with(|| Slide::new(width, width, target, None));
+                slide.target = target;
+                let (position, done) = slide.step(now);
+                self.width = Some(position);
+                if done {
+                    self.slide = None;
+                }
+                !done
+            }
+            _ => {
+                self.width = Some(target);
+                self.slide = None;
+                false
+            }
+        }
+    }
+}
+
 impl Colet {
+    /// Whether home's pane is out: always, unless it folds into its strip; then while the keys are in it,
+    /// or a menu or dialog opened from it gives them back there, and while the tab has nothing but home.
+    pub fn home_open(&self, window: &Window, cx: &App) -> bool {
+        if !self.stored.settings().fold_home || self.state.columns.len() == 1 {
+            return true;
+        }
+        let here = |focus: &FocusHandle| focus.is_focused(window) || self.keys_go_back_to(focus);
+        let field = self.narrow_fields.get(&self.state.columns[0].id).map(|field| field.input.read(cx).focus_handle(cx));
+        here(&self.home_focus) || field.is_some_and(|field| here(&field))
+    }
+
+    /// Home's pane a frame toward the width it is to be drawn at: out as wide as dragged, or folded into
+    /// its strip. Stepped before the columns slide, so they reckon with the room it leaves them this frame.
+    pub(crate) fn step_home_pane(&mut self, window: &mut Window, cx: &App) {
+        let open = self.home_open(window, cx);
+        let target = if open { self.sidebar_width(window) } else { FOLD_WIDTH };
+        let spring = self.stored.settings().fold_home && self.widths.resizing() != Some(WidthOf::Sidebar);
+        if self.home_pane.step(target, open, spring, Instant::now()) {
+            window.request_animation_frame();
+        }
+    }
+
+    /// Home's pane folded into its strip, or out of it, as its pin is pressed.
+    pub fn toggle_fold_home(&mut self, cx: &mut Context<Self>) {
+        let fold = !self.stored.settings().fold_home;
+        self.update_settings(|s| s.fold_home = fold, cx);
+    }
+
     /// Keeps or lets go of the favorite `key` names: a folder's path, or a narrowed favorite's key.
     pub fn toggle_favorite(&mut self, key: &Path, cx: &mut Context<Self>) {
         let HomeKey::Folder { path, narrow } = HomeKey::of(key) else { return };
