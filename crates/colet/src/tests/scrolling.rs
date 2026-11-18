@@ -715,3 +715,36 @@ fn brings_home_out_of_its_strip_alike_whether_the_columns_still_slide_or_rest(cx
     assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), after);
     assert!(ui.act(cx, |window, _| window.try_find("sidebar").is_some()));
 }
+
+#[gpui_kit::test]
+fn slides_the_columns_one_way_only_as_home_folds_back_into_its_strip(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    fake.settings.lock().unwrap().fold_home = true;
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    let flush = ui.read(cx, |v| v.scrolls.sideways.offset());
+    // Home out, the last column cut on the right; back into it, home folds as they go.
+    ui.press(cx, "ctrl-0");
+    rest(&ui, cx);
+    assert!(room_past_last(&ui, cx) < -1.);
+    ui.press(cx, "right");
+    let mut seen = vec![ui.read(cx, |v| v.scrolls.sideways.offset())];
+    for _ in 0..120 {
+        std::thread::sleep(Duration::from_millis(16));
+        ui.act(cx, |_, _| ());
+        settle(cx);
+        seen.push(ui.read(cx, |v| v.scrolls.sideways.offset()));
+        if ui.read(cx, |v| v.scrolls.sideways.slide.is_none() && !v.home_pane.moving()) {
+            break;
+        }
+    }
+    let ways: Vec<f32> = seen.windows(2).map(|w| w[1] - w[0]).filter(|step| step.abs() >= 0.5).collect();
+    assert!(ways.iter().all(|&s| s > 0.) || ways.iter().all(|&s| s < 0.), "one way only: {seen:?}");
+    // Folded, the last column ends at the right edge again, where it stood before home came out.
+    assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
+    assert!((seen.last().unwrap() - flush).abs() < 0.5 && room_past_last(&ui, cx).abs() < 1.);
+}

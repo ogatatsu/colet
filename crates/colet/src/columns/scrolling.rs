@@ -281,12 +281,15 @@ impl Colet {
             let (cells, active) = self.scrolling();
             let start = self.scrolls.sideways.slide.as_ref().map_or(from, |s| s.target);
             let shown: Vec<ColumnId> = self.state.columns[self.state.columns.len() - cells.len()..].iter().map(|c| c.id).collect();
+            // Home's pane coming out of its strip or going back in: they make for where they rest once it
+            // stands, as the last layout's view leaves room for it then, so they go one way only.
+            let aim = if self.home_pane.moving() { view + self.scrolls.sideways.fitted_home - self.home_pane.target() } else { view };
             let target = match uncover {
-                Some(at) => uncover_target(at, view, &cells),
+                Some(at) => uncover_target(at, aim, &cells),
                 // Home or the pinned results taken up again beside the same columns, as ← brings the keys
                 // there, leave the columns where they are.
                 None if active.is_none() && shown == self.scrolls.sideways.revealed => start,
-                None => reveal_target(start, view, &cells, active),
+                None => reveal_target(start, aim, &cells, active),
             };
             self.scrolls.sideways.revealed = shown;
             self.scrolls.sideways.hold = target.max(from);
@@ -351,7 +354,9 @@ impl Colet {
         // stay where they are drawn, pushed aside and cut on the right while it is out. Sliding as the keys
         // came home, they slide on to where they were going, and stand where they would have had the slide
         // ended first; reckoned again with home worked in, they would make for the last column instead.
-        // Gone into a column as it folds, they are reckoned again, so the room it gives back is filled.
+        // Gone into a column as it folds, they are reckoned with the view it leaves them once it stands, the
+        // same however far it has gone, so they go one way only.
+        let aim = view + home - self.home_pane.target();
         let pushed = self.stored.settings().fold_home
             && self.widths.resizing() != Some(WidthOf::Sidebar)
             && (home - was_home).abs() >= 0.5
@@ -362,8 +367,8 @@ impl Colet {
             Some(_) if pushed && active.is_none() => {}
             Some(slide) => {
                 slide.target = match slide.uncover {
-                    Some(at) => uncover_target(at, view, &cells),
-                    None => reveal_target(slide.origin, view, &cells, active),
+                    Some(at) => uncover_target(at, aim, &cells),
+                    None => reveal_target(slide.origin, aim, &cells, active),
                 };
                 sideways.hold = slide.target.max(slide.position);
             }

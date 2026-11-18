@@ -316,6 +316,11 @@ impl HomePane {
         self.slide.is_some()
     }
 
+    /// How wide it will stand once out of its strip or back in it, at 100%.
+    pub fn target(&self) -> f32 {
+        self.slide.as_ref().map_or(self.width(), |slide| slide.target)
+    }
+
     /// A frame toward `target`, out of its strip when `open`: when it comes out or goes in, by `spring`,
     /// sliding as the columns do; otherwise, as a width dragged or a window narrowed changes it, at once.
     /// True while it is still on its way.
