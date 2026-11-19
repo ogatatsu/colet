@@ -121,8 +121,15 @@ impl Colet {
             .icon(if fold { glyph("pin-off").text_color(p.text_muted) } else { glyph("pin") })
             .accessibility_label(label)
             .tooltip(label)
-            .on_click(cx.listener(|this, _, _, cx| this.toggle_fold_home(cx)));
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.toggle_fold_home(cx);
+                // The keys go back to the column worked in, wherever it is: pressed from beside home, it
+                // folds with them there; with them in home, it stays out until they leave.
+                this.column_focus(this.state.active).focus(window, cx);
+            }));
+        // A press on it is not one in home: the column worked in stays as it was.
         self.ringed(button, Stop::Named("home-fold"), RingAt::Edge, window, cx)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
     }
 
     /// Home's pane itself: its heading, its narrowing field and its rows, and round them the frame of the

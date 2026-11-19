@@ -567,6 +567,50 @@ fn folds_home_with_its_pin_and_brings_it_out_while_the_keys_are_there(cx: &mut T
 }
 
 #[gpui_kit::test]
+fn leaves_the_keys_in_the_column_worked_in_as_home_is_let_go_of_from_beside_it(cx: &mut TestAppContext) {
+    let fake = Arc::new(drive_d());
+    let ui = open(cx, fake.clone());
+    ui.click_in(cx, "home", row(r"D:\"));
+    ui.press(cx, "right");
+    assert_eq!(ui.active(cx), 1);
+    // Its pin let go of with the keys in a column: it folds, and the keys stay where they were.
+    ui.press_and_release(cx, "home-fold");
+    assert!(fake.settings.lock().unwrap().fold_home);
+    assert!(!home_out(&ui, cx));
+    assert_eq!(ui.active(cx), 1);
+    assert_eq!(ui.column_marks(cx), (true, true));
+    // Pinned again, and let go of once more by the keys on the pin: the same.
+    ui.press(cx, "ctrl-0");
+    assert!(home_out(&ui, cx));
+    ui.click(cx, "home-fold");
+    ui.press(cx, "right");
+    assert!(home_out(&ui, cx) && !fake.settings.lock().unwrap().fold_home);
+    ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.stop(Stop::Named("home-fold"), cx).focus(window, cx)));
+    ui.press(cx, "space");
+    assert!(fake.settings.lock().unwrap().fold_home);
+    assert!(!home_out(&ui, cx));
+    assert_eq!(ui.active(cx), 1);
+    assert_eq!(ui.column_marks(cx), (true, true));
+}
+
+#[gpui_kit::test]
+fn keeps_home_out_with_the_keys_in_it_as_it_is_let_go_of_by_its_pin(cx: &mut TestAppContext) {
+    let fake = Arc::new(drive_d());
+    let ui = open(cx, fake.clone());
+    ui.click_in(cx, "home", row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "ctrl-0");
+    // Pressed as a hand does, the keys in home: it stays out with them, on their row.
+    ui.press_and_release(cx, "home-fold");
+    assert!(fake.settings.lock().unwrap().fold_home);
+    assert!(ui.home_focused(cx) && home_out(&ui, cx));
+    assert_eq!(ui.active(cx), 0);
+    // Gone from it, it folds.
+    ui.press(cx, "right");
+    assert!(!home_out(&ui, cx));
+}
+
+#[gpui_kit::test]
 fn keeps_home_out_while_its_menu_is_up_and_while_the_tab_has_nothing_else(cx: &mut TestAppContext) {
     let fake = Arc::new(drive_d().with_results(vec![file(r"D:\abc.txt")]));
     fake.settings.lock().unwrap().fold_home = true;
