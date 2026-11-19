@@ -748,3 +748,119 @@ fn slides_the_columns_one_way_only_as_home_folds_back_into_its_strip(cx: &mut Te
     assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
     assert!((seen.last().unwrap() - flush).abs() < 0.5 && room_past_last(&ui, cx).abs() < 1.);
 }
+
+/// Home out beside the last of a deep chain, the first column on screen cut on the left: its id, and a
+/// point in what is left of it on screen, `down` from its top.
+fn cut_behind_home(cx: &mut TestAppContext, down: f32) -> (Ui, ColumnId, gpui_kit::Point<gpui_kit::Pixels>) {
+    let (fake, chain) = deep_chain();
+    fake.settings.lock().unwrap().fold_home = true;
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    ui.press(cx, "ctrl-0");
+    rest(&ui, cx);
+    let ids: Vec<ColumnId> = ui.read(cx, |v| v.state.columns.iter().map(|c| c.id).collect());
+    let (id, at) = ui.act(cx, |window, _| {
+        let left = window.find("columns-scroll").bounds().left();
+        ids.iter()
+            .filter_map(|&id| Some((id, window.try_find(("column", id))?.bounds())))
+            .find(|(_, b)| b.left() < left - px(1.) && b.right() > left + px(20.))
+            .map(|(id, b)| (id, point(left + px(10.), b.top() + px(down))))
+            .expect("a column cut on the left")
+    });
+    (ui, id, at)
+}
+
+/// How far the column `id` starts past the columns' left edge: below 0, it is cut there.
+fn past_left(ui: &Ui, cx: &mut TestAppContext, id: ColumnId) -> f32 {
+    ui.act(cx, |window, _| f32::from(window.find(("column", id)).bounds().left() - window.find("columns-scroll").bounds().left()))
+}
+
+/// Frames a screen's refresh apart, `n` of them, with nothing else happening.
+fn frames(ui: &Ui, cx: &mut TestAppContext, n: usize) {
+    for _ in 0..n {
+        std::thread::sleep(Duration::from_millis(16));
+        ui.act(cx, |_, _| ());
+        cx.run_until_parked();
+    }
+}
+
+#[gpui_kit::test]
+fn keeps_home_out_under_a_press_and_brings_the_column_pressed_on_screen_as_it_is_let_go_of(cx: &mut TestAppContext) {
+    use gpui_kit::{MouseButton, test::TestEventExt};
+    let (ui, id, at) = cut_behind_home(cx, 80.);
+    let cut = past_left(&ui, cx, id);
+    assert!(cut < -1.);
+    ui.act(cx, |window, cx| {
+        window.pointer_move(at, None, cx);
+        window.pointer_down(at, MouseButton::Left, cx);
+    });
+    // Held, it is worked in, the keys gone from home: home stays out, and nothing moves under the press.
+    frames(&ui, cx, 30);
+    assert_eq!(ui.read(cx, |v| v.state.columns[v.state.active].id), id);
+    assert!(!ui.home_focused(cx));
+    assert!(ui.act(cx, |window, _| window.try_find("sidebar").is_some()));
+    assert_eq!(past_left(&ui, cx, id), cut);
+    // Let go of, home folds and the column comes on screen whole.
+    ui.act(cx, |window, cx| window.pointer_up(at, MouseButton::Left, cx));
+    settle(cx);
+    rest(&ui, cx);
+    assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
+    assert!(past_left(&ui, cx, id) >= -1.);
+}
+
+#[gpui_kit::test]
+fn brings_the_column_pressed_on_screen_as_home_folds_however_far_off_it_is_let_go_of(cx: &mut TestAppContext) {
+    use gpui_kit::{InputEvent as _, MouseButton, MouseMoveEvent, test::TestEventExt};
+    // Below its rows, where no drag out starts.
+    let (ui, id, at) = cut_behind_home(cx, 300.);
+    ui.act(cx, |window, cx| {
+        window.pointer_move(at, None, cx);
+        window.pointer_down(at, MouseButton::Left, cx);
+    });
+    frames(&ui, cx, 10);
+    let away = point(at.x + px(400.), at.y);
+    ui.act(cx, |window, cx| {
+        window.pointer_move(away, Some(MouseButton::Left), cx);
+        window.pointer_up(away, MouseButton::Left, cx);
+    });
+    settle(cx);
+    rest(&ui, cx);
+    assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
+    assert!(past_left(&ui, cx, id) >= -1.);
+    // Let go of off the window, unheard: the pointer back with the button up lets home fold all the same.
+    let (ui, id, at) = cut_behind_home(cx, 300.);
+    ui.act(cx, |window, cx| {
+        window.pointer_move(at, None, cx);
+        window.pointer_down(at, MouseButton::Left, cx);
+    });
+    frames(&ui, cx, 10);
+    ui.act(cx, |window, cx| {
+        let modifiers = window.modifiers();
+        window.dispatch_event(MouseMoveEvent { position: away, pressed_button: None, modifiers }.to_platform_input(), cx);
+    });
+    settle(cx);
+    rest(&ui, cx);
+    assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
+    assert!(past_left(&ui, cx, id) >= -1.);
+}
+
+#[gpui_kit::test]
+fn brings_the_column_on_screen_as_home_folds_for_its_menu(cx: &mut TestAppContext) {
+    use gpui_kit::{MouseButton, test::TestEventExt};
+    let (ui, id, at) = cut_behind_home(cx, 300.);
+    ui.act(cx, |window, cx| {
+        window.pointer_move(at, None, cx);
+        window.pointer_down(at, MouseButton::Right, cx);
+        window.pointer_up(at, MouseButton::Right, cx);
+    });
+    settle(cx);
+    assert!(ui.read(cx, |v| v.menu().is_some()));
+    rest(&ui, cx);
+    assert_eq!(ui.read(cx, |v| v.state.columns[v.state.active].id), id);
+    assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
+    assert!(past_left(&ui, cx, id) >= -1.);
+}

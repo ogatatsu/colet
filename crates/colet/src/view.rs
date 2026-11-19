@@ -338,6 +338,8 @@ impl Render for Colet {
                     cx.stop_propagation();
                 }
             }))
+            // Before anything pressed takes the keys from home: its pane stays out until let go of.
+            .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, cx| this.hold_home(event, cx)))
             .on_action(cx.listener(|this, _: &NewTab, window, cx| this.new_tab(window, cx)))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
                 let current = this.tabs.current();
@@ -373,6 +375,7 @@ impl Render for Colet {
             })
             .children(self.drag_let_go(cx))
             .children(self.press_listener(cx))
+            .children(self.home_hold_listener(cx))
             .child(tabbar)
             .child(toolbar)
             .child(

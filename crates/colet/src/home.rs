@@ -303,9 +303,17 @@ pub struct HomePane {
     /// Whether it was out the last frame.
     open: Option<bool>,
     slide: Option<Slide>,
+    /// The left button went down with it out, and is not yet let go of: it stays out, so nothing moves
+    /// under the press, however the keys left it.
+    held: bool,
 }
 
 impl HomePane {
+    /// Out of its strip the last frame.
+    fn out(&self) -> bool {
+        self.open == Some(true)
+    }
+
     /// How wide it is drawn this frame, at 100%.
     pub fn width(&self) -> f32 {
         self.width.unwrap_or_default()
@@ -349,8 +357,9 @@ impl HomePane {
 impl Colet {
     /// Whether home's pane is out: always, unless it folds into its strip; then while the keys are in it,
     /// or a menu or dialog opened from it gives them back there, and while the tab has nothing but home.
+    /// Out as the left button goes down, it stays out until the button is let go of.
     pub fn home_open(&self, window: &Window, cx: &App) -> bool {
-        if !self.stored.settings().fold_home || self.state.columns.len() == 1 {
+        if !self.stored.settings().fold_home || self.state.columns.len() == 1 || self.home_pane.held {
             return true;
         }
         let here = |focus: &FocusHandle| focus.is_focused(window) || self.keys_go_back_to(focus);
@@ -362,11 +371,58 @@ impl Colet {
     /// its strip. Stepped before the columns slide, so they reckon with the room it leaves them this frame.
     pub(crate) fn step_home_pane(&mut self, window: &mut Window, cx: &App) {
         let open = self.home_open(window, cx);
+        // Folding back, it brings the column worked in on screen, however the keys went there: a press let
+        // go of off it, a menu opened on it.
+        if self.home_pane.out() && !open {
+            self.scrolls.sideways.ask();
+        }
         let target = if open { self.sidebar_width(window) } else { FOLD_WIDTH };
         let spring = self.stored.settings().fold_home && self.widths.resizing() != Some(WidthOf::Sidebar);
         if self.home_pane.step(target, open, spring, Instant::now()) {
             window.request_animation_frame();
         }
+    }
+
+    /// The left button went down anywhere: with home's pane out of its strip, it stays out until the
+    /// button is let go of, so the keys leaving it fold it only then, with nothing moved under the press.
+    pub(crate) fn hold_home(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        if event.button == MouseButton::Left && self.stored.settings().fold_home && self.home_pane.out() && !self.home_pane.held {
+            self.home_pane.held = true;
+            // For the window-wide listener to be drawn.
+            cx.notify();
+        }
+    }
+
+    /// The button that held home's pane out is let go of: it folds now if the keys have left it.
+    pub(crate) fn let_go_of_home(&mut self, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.home_pane.held) {
+            cx.notify();
+        }
+    }
+
+    /// While a press holds home's pane out, hears the pointer anywhere, in or out of the window, until the
+    /// button is let go of: seen let go of, or moved with it up, as after a drag out of the window, which
+    /// Windows runs and which keeps the release from the window.
+    pub(crate) fn home_hold_listener(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.home_pane.held {
+            return None;
+        }
+        let view = cx.entity().downgrade();
+        let listen = move |_: Bounds<Pixels>, _: (), window: &mut Window, _: &mut App| {
+            let moved = view.clone();
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble && event.pressed_button != Some(MouseButton::Left) {
+                    moved.update(cx, |this, cx| this.let_go_of_home(cx)).ok();
+                }
+            });
+            let up = view.clone();
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                    up.update(cx, |this, cx| this.let_go_of_home(cx)).ok();
+                }
+            });
+        };
+        Some(canvas(|_, _, _| {}, listen).absolute().size_0().into_any_element())
     }
 
     /// Home's pane folded into its strip, or out of it, as its pin is pressed.

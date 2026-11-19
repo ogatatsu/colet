@@ -66,7 +66,10 @@ impl Colet {
         // Out of this update, on this thread: the drag runs the window's messages until it ends, and
         // they draw the window and reach the app meanwhile.
         cx.spawn(async move |this, cx| {
-            match backend.drag_out(&paths, owner) {
+            let dragged = backend.drag_out(&paths, owner);
+            // Dropped: the button is up, though Windows kept its release from the window.
+            this.update(cx, |this, cx| this.let_go_of_home(cx)).ok();
+            match dragged {
                 Ok(writing) => {
                     // An Explorer target writes them out on a thread of its own, after the drag returns.
                     while writing() {
