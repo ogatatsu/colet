@@ -14,6 +14,12 @@ gpui-kit = "=0.10.0"
 windows = "0.62"
 windows-core = "0.62"
 
+# gpui's Windows backend, patched: the pointer leaving the window clears what it hovered (see
+# `send_pointer_left` in its events.rs). On moving gpui-kit to a release with another gpui-pre-windows,
+# copy that version in afresh and carry the patch over, or cargo warns the patch went unused and drops it.
+[patch.crates-io]
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

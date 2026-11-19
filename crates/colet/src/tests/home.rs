@@ -614,3 +614,58 @@ fn frames_home_worked_in_whole_while_it_folds_as_while_it_is_pinned(cx: &mut Tes
     assert!(home_out(&ui, cx));
     assert_eq!(frame(&ui, cx), pinned);
 }
+
+#[gpui_kit::test]
+fn lets_go_of_the_strip_hovered_when_the_pointer_leaves_the_window_off_it(cx: &mut TestAppContext) {
+    use gpui_kit::{MouseExitEvent, MouseMoveEvent, PlatformInput};
+    let fake = drive_d();
+    fake.settings.lock().unwrap().fold_home = true;
+    let ui = open(cx, Arc::new(fake));
+    ui.click_in(cx, "home", row(r"D:\"));
+    ui.press(cx, "right");
+    assert!(!home_out(&ui, cx));
+    // Off the window on its left, as onto a taskbar there: what Windows' leaving now tells the window.
+    let off = point(px(-5.), px(300.));
+    let leave = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.act(cx, |window, cx| {
+            let modifiers = Modifiers::default();
+            window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: off, pressed_button: None, modifiers }), cx);
+            window.dispatch_event(PlatformInput::MouseExited(MouseExitEvent { position: off, pressed_button: None, modifiers }), cx);
+        });
+        settle(cx);
+    };
+    // Each quad drawn, as where it lies and what fills it.
+    let painted = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.act(cx, |window, cx| {
+            let scale = window.scale_factor();
+            let hover = cx.palette().hover;
+            let quads = window
+                .painted_quads()
+                .into_iter()
+                .map(|q| (q.bounds.origin.x.0 / scale, q.bounds.origin.y.0 / scale, format!("{:?}", q.background)));
+            (quads.collect::<Vec<_>>(), format!("{:?}", gpui_kit::Background::from(hover)))
+        })
+    };
+    leave(&ui, cx);
+    let (away, hover) = painted(&ui, cx);
+    let strip = ui.act(cx, |window, _| window.find("home-strip").bounds());
+    // Under the pointer: the strip lit, and its tip out beside it.
+    ui.act(cx, |window, cx| window.hover("home-strip-button", cx));
+    cx.executor().advance_clock(Duration::from_secs(1));
+    settle(cx);
+    let (over, _) = painted(&ui, cx);
+    let lit = |quads: &[(f32, f32, String)]| {
+        quads.iter().any(|(x, y, fill)| *fill == hover && *x == f32::from(strip.left()) && *y == f32::from(strip.top()))
+    };
+    // Anything else drawn that was not there away from it: the tip, which starts over the strip's edge.
+    let tip = |quads: &[(f32, f32, String)]| {
+        quads.iter().filter(|q| !away.contains(q)).any(|(x, y, _)| (*x, *y) != (f32::from(strip.left()), f32::from(strip.top())))
+    };
+    assert!(!lit(&away) && lit(&over), "the strip lit under the pointer");
+    assert!(tip(&over), "its tip out beside it");
+    // Left off it to outside the window: neither stays.
+    leave(&ui, cx);
+    let (left, _) = painted(&ui, cx);
+    assert!(!lit(&left), "the strip still lit");
+    assert!(!tip(&left), "its tip still out");
+}
