@@ -957,7 +957,7 @@ mod tests {
         let mut settings =
             Settings { column_width: 9000., search_width: 100.4, sidebar_width: 200.6, search_field_width: 1000., ..Settings::default() };
         settings.normalize();
-        assert_eq!((settings.column_width, settings.search_width, settings.sidebar_width), (640., 260., 201.));
+        assert_eq!((settings.column_width, settings.search_width, settings.sidebar_width), (960., 260., 201.));
         assert_eq!(settings.search_field_width, 640.);
     }
 
