@@ -405,3 +405,45 @@ fn leaves_the_tabs_as_they_were_let_go_of_off_the_window(cx: &mut TestAppContext
     assert_eq!(ui.tab_ids(cx), ids);
     assert_eq!(ui.tab_drag(cx), (None, None));
 }
+
+#[gpui_kit::test]
+fn leaves_the_room_beside_the_tabs_to_take_the_window_by(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    {
+        let mut settings = fake.settings.lock().unwrap();
+        settings.tabs = vec![crate::settings::KeptTab::default(); 12];
+    }
+    let ui = open(cx, fake);
+    cx.simulate_window_resize(ui.window, size(px(720.), px(480.)));
+    // Past the tabs' least width, the strip scrolls, and the room keeps its own.
+    let room = ui.act(cx, |window, _| window.find("tab-room").bounds());
+    assert!(room.size.width >= px(100.) - px(0.5), "{room:?}");
+    // A double-click there is the window's, as on a title bar: it opens no tab.
+    ui.act(cx, |window, cx| window.double_click("tab-room", cx));
+    settle(cx);
+    assert_eq!(ui.tabs(cx).0, 12);
+}
+
+#[gpui_kit::test]
+fn sets_the_window_buttons_at_the_right_end_of_the_tab_bar(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(Fake::default()));
+    let (bar, viewport) = ui.act(cx, |window, _| (window.find("tab-room").bounds(), window.viewport_size()));
+    let buttons = ["caption-minimize", "caption-maximize", "caption-close"].map(|id| {
+        ui.act(cx, |window, _| {
+            let b = window.find(id);
+            (b.bounds(), b.label().map(str::to_owned))
+        })
+    });
+    let labels = buttons.iter().map(|(_, label)| label.clone().unwrap_or_default()).collect::<Vec<_>>();
+    assert_eq!(labels, ["最小化", "最大化", "閉じる"]);
+    for (bounds, _) in &buttons {
+        assert_eq!((bounds.top(), bounds.size.height), (bar.top(), bar.size.height), "{bounds:?} in {bar:?}");
+        assert_eq!(bounds.size.width, px(46.));
+    }
+    assert_eq!(buttons[0].0.right(), buttons[1].0.left());
+    assert_eq!(buttons[1].0.right(), buttons[2].0.left());
+    assert_eq!(buttons[2].0.right(), viewport.width);
+    // Right of the button for another tab, up to the window's buttons.
+    let (new, room) = ui.act(cx, |window, _| (window.find("new-tab").bounds(), window.find("tab-room").bounds()));
+    assert_eq!((room.left(), room.right()), (new.right(), buttons[0].0.left()));
+}

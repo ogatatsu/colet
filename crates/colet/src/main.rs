@@ -3,6 +3,7 @@
 mod address;
 mod app;
 mod backend;
+mod caption;
 mod clipboard;
 mod column_order;
 mod columns;
@@ -118,7 +119,9 @@ fn main() {
                 window_bounds: Some(window_bounds),
                 window_min_size: Some(size(px(app::MIN_WINDOW.0), px(app::MIN_WINDOW.1))),
                 display_id,
-                titlebar: Some(TitlebarOptions { title: Some("Colet".into()), ..Default::default() }),
+                // The tab bar is the title bar (see `caption`): Windows keeps the frame and the title it
+                // names the window by in the taskbar, not the bar it would draw.
+                titlebar: Some(TitlebarOptions { title: Some("Colet".into()), appears_transparent: true, ..Default::default() }),
                 ..Default::default()
             },
             cx,

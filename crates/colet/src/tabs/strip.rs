@@ -11,6 +11,7 @@ use gpui_kit::*;
 
 use super::{TabId, Title};
 use crate::{
+    caption,
     metrics::{self, Scale, scaled},
     theme::{ActivePalette, Palette},
     view::TipExt,
@@ -20,13 +21,18 @@ use crate::{
 const TAB_WIDTH: f32 = 260.;
 const TAB_MIN: f32 = 100.;
 const TAB_HEIGHT: f32 = 32.;
+/// Above the tabs, while the window is not maximized: maximized, they reach the screen's top edge, where
+/// the pointer stops on them.
 const TAB_TOP: f32 = 4.;
 const TAB_CURVE: f32 = 8.;
-/// The button for another tab, square.
+/// The button for another tab, square, and the gap left of it.
 const NEW_TAB_BUTTON: f32 = 26.;
-/// What the strip leaves beside the tabs: its padding on the right, the gaps, the button for another
-/// and room to double-click, and the curves at the strip's ends.
-const BESIDE_TABS: f32 = 8. + 8. + NEW_TAB_BUTTON + 48. + TAB_CURVE * 2.;
+const NEW_TAB_GAP: f32 = 4.;
+/// The least room kept right of the tabs to take the window by, however many there are.
+const ROOM: f32 = 100.;
+/// What the bar leaves beside the tabs: the button for another, the room to take the window by, the
+/// window's own buttons and the curves at the strip's ends.
+const BESIDE_TABS: f32 = NEW_TAB_GAP + NEW_TAB_BUTTON + ROOM + caption::WIDTH + TAB_CURVE * 2.;
 
 /// What the strip asks of the window.
 #[derive(Clone, Debug, PartialEq)]
@@ -136,8 +142,8 @@ pub struct TabLook {
     pub title: Title,
 }
 
-/// The strip of tabs, drawn from `tabs` with the one at `current` in front, and room right of them to open
-/// another.
+/// The strip of tabs, drawn from `tabs` with the one at `current` in front, and right of them the button
+/// for another, room to take the window by and the window's own buttons: the window's title bar.
 #[derive(IntoElement)]
 pub struct TabBar {
     strip: Entity<TabStrip>,
@@ -163,6 +169,7 @@ impl RenderOnce for TabBar {
         let radius = cx.theme().radius_tokens().sm;
         let Self { strip, tabs, current } = self;
         let count = tabs.len();
+        let top = if window.is_maximized() { 0. } else { TAB_TOP };
         // The tabs share the room there is, down to their least; past that the strip scrolls.
         let room = scale.down(f32::from(window.viewport_size().width)) - BESIDE_TABS;
         let width = (room / count.max(1) as f32).clamp(TAB_MIN, TAB_WIDTH);
@@ -187,7 +194,7 @@ impl RenderOnce for TabBar {
                 .flex_none()
                 .w(scaled(width + TAB_CURVE * 2.))
                 .h_full()
-                .pt(scaled(TAB_TOP))
+                .pt(scaled(top))
                 .px(scaled(TAB_CURVE))
                 .when(ix + 1 < count, |d| d.mr(scaled(-TAB_CURVE * 2.)))
                 .when(ix != current, |d| d.child(tab(ix, look).test_support()));
@@ -204,7 +211,7 @@ impl RenderOnce for TabBar {
                     .id(("tab-separator", look.id as usize))
                     .absolute()
                     .left(scaled(ix as f32 * width + TAB_CURVE))
-                    .top(scaled(TAB_TOP))
+                    .top(scaled(top))
                     .w(scaled(width * 2.))
                     .h(scaled(TAB_HEIGHT))
                     // While a tab is carried, only the line tells where it goes.
@@ -218,7 +225,7 @@ impl RenderOnce for TabBar {
                 tab(current, look)
                     .absolute()
                     .left(scaled(current as f32 * width + TAB_CURVE))
-                    .top(scaled(TAB_TOP))
+                    .top(scaled(top))
                     .test_support()
                     .into_any_element(),
             );
@@ -230,7 +237,7 @@ impl RenderOnce for TabBar {
                     .id("tab-landing")
                     .absolute()
                     .left(scaled(TAB_CURVE + gap as f32 * width - 1.))
-                    .top(scaled(TAB_TOP))
+                    .top(scaled(top))
                     .w_0p5()
                     .h(scaled(TAB_HEIGHT))
                     // A line two pixels wide, not a surface: its ends round off by half its width, not by a tier.
@@ -241,7 +248,7 @@ impl RenderOnce for TabBar {
             );
         }
         let scroll = strip.read(cx).scroll().clone();
-        let (aiming, landing, new, room_new) = (strip.clone(), strip.clone(), strip.clone(), strip.clone());
+        let (aiming, landing, new) = (strip.clone(), strip.clone(), strip.clone());
         div()
             .id("tabbar")
             .on_drag_move(move |event: &DragMoveEvent<DraggedTab>, window, cx| {
@@ -260,14 +267,12 @@ impl RenderOnce for TabBar {
                     cx.notify();
                 });
             })
-            .h(scaled(TAB_HEIGHT + TAB_TOP))
+            .h(scaled(TAB_HEIGHT + top))
             .flex_none()
             .w_full()
             .relative()
-            .pr_2()
             .flex()
             .items_center()
-            .gap_1()
             .bg(p.tab_strip)
             .role(Role::TabList)
             .aria_label("タブ")
@@ -288,22 +293,19 @@ impl RenderOnce for TabBar {
             .child(
                 tab_button(p, radius, "new-tab", "plus", "新しいタブ", "新しいタブ（Ctrl+T）")
                     .small()
+                    .ml(scaled(NEW_TAB_GAP))
                     .size(scaled(NEW_TAB_BUTTON))
                     .on_click(move |_, _, cx| ask(&new, TabStripEvent::New, cx)),
             )
-            // A double-click in the room left opens another, as in a browser.
-            .child(
-                div()
-                    .id("tab-room")
-                    .flex_1()
-                    .h_full()
-                    .on_click(move |event: &ClickEvent, _, cx| {
-                        if event.click_count() == 2 {
-                            ask(&room_new, TabStripEvent::New, cx);
-                        }
-                    })
-                    .test_support(),
-            )
+            // The room left takes the window, as a title bar would.
+            .child(caption::takes_the_window(div().id("tab-room").flex_1().min_w(scaled(ROOM)).h_full()).test_support())
+            .child(caption::buttons(window, cx))
+            // So does the gap above the tabs, up to the window's buttons.
+            .when(top > 0., |d| {
+                d.child(caption::takes_the_window(
+                    div().id("tab-top").absolute().top_0().left_0().right(scaled(caption::WIDTH)).h(scaled(top)),
+                ))
+            })
     }
 }
 
