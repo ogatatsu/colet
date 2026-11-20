@@ -1,3 +1,4 @@
+// Modified by Longbridge for gpui-fast.
 use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
 
 use anyhow::Context as _;
@@ -36,6 +37,7 @@ const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 /// because the coordination is inherently cross-window: while window A is
 /// drawing, a re-entrant paint request for window B must be deferred.
 pub(crate) struct DrawCoordinator {
+    pub(crate) fast_frame_wake: std::sync::Arc<crate::fast::frame_schedule::FrameWake>,
     /// Whether some window is currently inside `draw_window`. Win32 can
     /// re-enter the window procedure while a draw is in progress (e.g.
     /// cross-thread `SendMessage` dispatch during message pumping, or modal
@@ -48,6 +50,7 @@ pub(crate) struct DrawCoordinator {
 impl DrawCoordinator {
     pub(crate) fn new() -> Self {
         Self {
+            fast_frame_wake: Default::default(),
             drawing: Cell::new(false),
         }
     }
@@ -169,7 +172,7 @@ impl WindowsWindowInner {
         }
     }
 
-    fn handle_move_msg(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
+    fn handle_move_msg(self: &Rc<Self>, handle: HWND, lparam: LPARAM) -> Option<isize> {
         let origin = logical_point(
             lparam.signed_loword() as f32,
             lparam.signed_hiword() as f32,
@@ -260,13 +263,8 @@ impl WindowsWindowInner {
         let new_logical_size = device_size.to_pixels(scale_factor);
 
         self.state.logical_size.set(new_logical_size);
-        if should_resize_renderer
-            && let Err(e) = self.state.renderer.borrow_mut().resize(device_size)
-        {
-            log::error!("Failed to resize renderer, invalidating devices: {}", e);
-            self.state
-                .invalidate_devices
-                .store(true, std::sync::atomic::Ordering::Release);
+        if should_resize_renderer {
+            crate::fast::device_recovery::resize(self, device_size);
         }
         if let Some(mut callback) = self.state.callbacks.resize.take() {
             callback(new_logical_size, scale_factor);
@@ -884,6 +882,7 @@ impl WindowsWindowInner {
         let is_maximized = self.state.is_maximized();
         let new_scale_factor = new_dpi / USER_DEFAULT_SCREEN_DPI as f32;
         self.state.scale_factor.set(new_scale_factor);
+        crate::fast::layers::release_tiles(&mut self.state.renderer.borrow_mut());
         self.state.border_offset.update(handle).log_err();
 
         self.state
@@ -947,7 +946,7 @@ impl WindowsWindowInner {
         Some(0)
     }
 
-    fn handle_display_change_msg(&self, handle: HWND) -> Option<isize> {
+    fn handle_display_change_msg(self: &Rc<Self>, handle: HWND) -> Option<isize> {
         let new_monitor = unsafe { MonitorFromWindow(handle, MONITOR_DEFAULTTONULL) };
         if new_monitor.is_invalid() {
             log::error!("No monitor detected!");
@@ -958,12 +957,20 @@ impl WindowsWindowInner {
         Some(0)
     }
 
-    fn set_display(&self, display: WindowsDisplay) {
+    // Windows can deliver `WM_DISPLAYCHANGE` and `WM_MOVE` while GPUI is
+    // updating a window (e.g. a clipboard read during a draw pumps sent
+    // messages), so report the change after that update completes.
+    fn set_display(self: &Rc<Self>, display: WindowsDisplay) {
         self.state.display.set(display);
-        if let Some(mut callback) = self.state.callbacks.display_changed.take() {
-            callback();
-            self.state.callbacks.display_changed.set(Some(callback));
-        }
+        let this = self.clone();
+        self.executor
+            .spawn(async move {
+                if let Some(mut callback) = this.state.callbacks.display_changed.take() {
+                    callback();
+                    this.state.callbacks.display_changed.set(Some(callback));
+                }
+            })
+            .detach();
     }
 
     fn handle_hit_test_msg(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
@@ -1331,19 +1338,16 @@ impl WindowsWindowInner {
         }
         let devices = lparam.0 as *const DirectXDevices;
         let devices = unsafe { &*devices };
-        if let Err(err) = self
-            .state
-            .renderer
-            .borrow_mut()
-            .handle_device_lost(&devices)
-        {
-            panic!("Device lost: {err}");
+        if !crate::fast::device_recovery::recover(self, devices) {
+            return Some(0);
         }
         // Make sure the first `draw_window` after recovery (whether it comes
         // from the forced WM_GPUI_FORCE_UPDATE_WINDOW or a stray WM_PAINT in
         // between) is treated as a forced render so it both clears
         // `skip_draws` and bypasses the view cache.
         self.state.force_render_pending.set(true);
+        #[cfg(test)]
+        crate::fast::native_tests::recovered();
         Some(0)
     }
 
@@ -1359,16 +1363,14 @@ impl WindowsWindowInner {
             if force_render {
                 self.state.force_render_pending.set(true);
             }
-            // Validate the region so a nested message pump doesn't keep
-            // re-dispatching WM_PAINT for the still-invalid region in a busy
-            // loop until the in-progress draw unwinds. The vsync thread
-            // re-invalidates every window on each vsync (see
-            // `begin_vsync_thread`), so the deferred frame still gets drawn,
-            // at most one vsync late.
-            unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+            crate::fast::frame_schedule::defer_draw(self, handle);
             return Some(0);
         };
         let mut request_frame = self.state.callbacks.request_frame.take()?;
+        crate::fast::frame_schedule::validate_current_paint(handle);
+        crate::fast::device_recovery::retry_resize(self);
+        #[cfg(test)]
+        crate::fast::native_tests::paint_started(handle);
 
         self.state.direct_manipulation.update();
 
@@ -1401,7 +1403,8 @@ impl WindowsWindowInner {
 
         self.state.callbacks.request_frame.set(Some(request_frame));
         self.update_ime_enabled(handle);
-        unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+        #[cfg(test)]
+        crate::fast::native_tests::paint_done(handle);
 
         Some(0)
     }

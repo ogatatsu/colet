@@ -8,17 +8,18 @@ version = "0.1.0"
 publish = false
 
 [workspace.dependencies]
-gpui-kit = "=0.10.0"
+# Built on GPUI Fast rather than upstream GPUI; imports stay `gpui_kit::*` either way.
+gpui-kit = { version = "=0.10.0", features = ["gpui-fast"] }
 # Kept on the version gpui's Windows backend uses, so Colet shares its copy
 # (gpui-base and gpui-component still pull in an older windows of their own).
 windows = "0.62"
 windows-core = "0.62"
 
-# gpui's Windows backend, patched: the pointer leaving the window clears what it hovered (see
-# `send_pointer_left` in its events.rs). On moving gpui-kit to a release with another gpui-pre-windows,
+# GPUI Fast's Windows backend, patched: the pointer leaving the window clears what it hovered (see
+# `send_pointer_left` in its events.rs). On moving gpui-kit to a release with another gpui-fast-windows,
 # copy that version in afresh and carry the patch over, or cargo warns the patch went unused and drops it.
 [patch.crates-io]
-gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
+gpui-fast-windows = { path = "vendor/gpui-fast-windows" }
 
 [profile.release]
 lto = "thin"

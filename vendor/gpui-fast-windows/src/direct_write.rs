@@ -1,3 +1,4 @@
+// Modified by Longbridge for gpui-fast.
 use std::{
     borrow::Cow,
     ffi::{c_uint, c_void},
@@ -25,12 +26,12 @@ use crate::*;
 use gpui::*;
 
 #[derive(Debug)]
-struct FontInfo {
-    font_family_h: HSTRING,
-    font_face: IDWriteFontFace3,
-    features: IDWriteTypography,
-    fallbacks: Option<IDWriteFontFallback>,
-    font_collection: IDWriteFontCollection1,
+pub(crate) struct FontInfo {
+    pub(crate) font_family_h: HSTRING,
+    pub(crate) font_face: IDWriteFontFace3,
+    pub(crate) features: IDWriteTypography,
+    pub(crate) fallbacks: Option<IDWriteFontFallback>,
+    pub(crate) font_collection: IDWriteFontCollection1,
 }
 
 pub(crate) struct DirectWriteTextSystem {
@@ -38,13 +39,13 @@ pub(crate) struct DirectWriteTextSystem {
     state: RwLock<DirectWriteState>,
 }
 
-struct DirectWriteComponents {
+pub(crate) struct DirectWriteComponents {
     locale: HSTRING,
-    factory: IDWriteFactory5,
+    pub(crate) factory: IDWriteFactory5,
     in_memory_loader: IDWriteInMemoryFontFileLoader,
     builder: IDWriteFontSetBuilder1,
     text_renderer: TextRendererWrapper,
-    system_ui_font_name: SharedString,
+    pub(crate) system_ui_font_name: SharedString,
     system_subpixel_rendering: bool,
 }
 
@@ -58,9 +59,9 @@ impl Drop for DirectWriteComponents {
     }
 }
 
-struct DirectWriteState {
-    system_font_collection: IDWriteFontCollection1,
-    custom_font_collection: IDWriteFontCollection1,
+pub(crate) struct DirectWriteState {
+    pub(crate) system_font_collection: IDWriteFontCollection1,
+    pub(crate) custom_font_collection: IDWriteFontCollection1,
     fonts: Vec<FontInfo>,
     font_to_font_id: HashMap<Font, FontId>,
     font_info_cache: HashMap<usize, FontId>,
@@ -215,7 +216,8 @@ impl DirectWriteState {
                         &this.system_font_collection,
                         &components.system_ui_font_name,
                     )
-                })?;
+                })
+                .or_else(|| crate::fast::font_fallback::font_info(this, components, font))?;
 
             let font_id = FontId(this.fonts.len());
             let font_face_key = info.font_face.cast::<IUnknown>().unwrap().as_raw().addr();
@@ -283,7 +285,7 @@ impl DirectWriteState {
         Ok(())
     }
 
-    fn generate_font_fallbacks(
+    pub(crate) fn generate_font_fallbacks(
         fallbacks: &FontFallbacks,
         factory: &IDWriteFactory5,
         system_font_collection: &IDWriteFontCollection1,
@@ -1561,7 +1563,7 @@ impl<'a> StringIndexConverter<'a> {
     }
 }
 
-fn font_style_to_dwrite(style: FontStyle) -> DWRITE_FONT_STYLE {
+pub(crate) fn font_style_to_dwrite(style: FontStyle) -> DWRITE_FONT_STYLE {
     match style {
         FontStyle::Normal => DWRITE_FONT_STYLE_NORMAL,
         FontStyle::Italic => DWRITE_FONT_STYLE_ITALIC,
@@ -1578,7 +1580,7 @@ fn font_style_from_dwrite(value: DWRITE_FONT_STYLE) -> FontStyle {
     }
 }
 
-fn font_weight_to_dwrite(weight: FontWeight) -> DWRITE_FONT_WEIGHT {
+pub(crate) fn font_weight_to_dwrite(weight: FontWeight) -> DWRITE_FONT_WEIGHT {
     DWRITE_FONT_WEIGHT(weight.0 as i32)
 }
 
@@ -1625,7 +1627,7 @@ fn font_face_to_font(font_face: &IDWriteFontFace3, locale: &HSTRING) -> Option<F
 }
 
 // https://learn.microsoft.com/en-us/windows/win32/api/dwrite/ne-dwrite-dwrite_font_feature_tag
-fn apply_font_features(
+pub(crate) fn apply_font_features(
     direct_write_features: &IDWriteTypography,
     features: &FontFeatures,
 ) -> Result<()> {

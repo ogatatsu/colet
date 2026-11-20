@@ -59,14 +59,6 @@ impl Element for OnTop {
     }
 }
 
-impl IntoElement for OnTop {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 /// What [`OnTop`] defers: GPUI clips a deferred draw's paint, but not the hit areas laid out ahead of it.
 struct Clipped {
     clip: Rc<std::cell::Cell<Option<ContentMask<Pixels>>>>,
@@ -118,13 +110,5 @@ impl Element for Clipped {
         cx: &mut App,
     ) {
         window.with_content_mask(self.clip.get(), |window| self.child.paint(window, cx));
-    }
-}
-
-impl IntoElement for Clipped {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
     }
 }
