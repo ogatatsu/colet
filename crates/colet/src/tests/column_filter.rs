@@ -104,8 +104,8 @@ fn hands_what_an_ime_composes_in_the_rows_on_to_their_field(cx: &mut TestAppCont
     let view = ui.view.clone();
     // The IME shows its panel at the column's own field, not home's beside it.
     let at = ui.act(cx, |window, cx| view.update(cx, |v, cx| v.bounds_for_range(0..0, Bounds::default(), window, cx)));
-    let sidebar = ui.act(cx, |window, cx| view.read(cx).sidebar_width(window));
-    assert!(at.expect("the field's caret").origin.x > px(sidebar));
+    let column = ui.act(cx, |window, _| window.find(("column", id)).bounds());
+    assert!(at.expect("the field's caret").origin.x > column.left());
     ui.act(cx, |window, cx| view.update(cx, |v, cx| v.replace_and_mark_text_in_range(None, "しゃ", Some(2..2), window, cx)));
     settle(cx);
     assert!(!ui.columns_focused(cx));

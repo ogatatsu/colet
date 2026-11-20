@@ -552,6 +552,16 @@ impl Ui {
         settle(cx);
     }
 
+    /// Brings home's pane out of its strip, as a hand does, pressing the strip, and lets it come to rest.
+    fn show_home(&self, cx: &mut TestAppContext) {
+        // Still folding, it is no strip yet to press.
+        rest(self, cx);
+        if self.act(cx, |window, _| window.try_find("home-strip-button").is_some()) {
+            self.click(cx, "home-strip-button");
+        }
+        rest(self, cx);
+    }
+
     fn read<R>(&self, cx: &mut TestAppContext, f: impl FnOnce(&Colet) -> R) -> R {
         self.view.read_with(cx, |view, _| f(view))
     }

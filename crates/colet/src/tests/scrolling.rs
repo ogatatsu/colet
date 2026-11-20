@@ -68,6 +68,7 @@ fn widens_a_column_by_an_edge_astride_its_border_even_past_it(cx: &mut TestAppCo
     ui.click(cx, row(r"D:\"));
     ui.press(cx, "right");
     ui.press(cx, "right");
+    rest(&ui, cx);
     let drive = ui.read(cx, |v| v.state.columns[1].id);
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3, "a column past the drive's");
     let before = ui.read(cx, |v| v.widths.column);
@@ -87,7 +88,7 @@ fn widens_a_column_by_an_edge_astride_its_border_even_past_it(cx: &mut TestAppCo
 fn leaves_the_edge_of_a_column_scrolled_out_of_view_unpressable(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
     // A width the view holds no whole number of, so an edge falls past its left.
-    fake.settings.lock().unwrap().column_width = 288.;
+    fake.settings.lock().unwrap().column_width = 296.;
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {
@@ -139,6 +140,7 @@ fn leaves_no_room_to_scroll_once_the_columns_slide_back(cx: &mut TestAppContext)
     }
     rest(&ui, cx);
     assert!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x) < px(0.), "the chain scrolls the columns");
+    ui.show_home(cx);
     ui.click_in(cx, "home", row(r"D:\fav"));
     rest(&ui, cx);
     ui.act(cx, |_, _| ());
@@ -181,6 +183,7 @@ fn turns_the_wheel_down_a_column_without_moving_the_columns_or_shading_their_edg
         assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), at);
     }
     // An offset past the bounds, as a wheel leaves it until the next layout, reads as where it will be drawn.
+    ui.show_home(cx);
     ui.click_in(cx, "home", row(r"D:\"));
     rest(&ui, cx);
     ui.act(cx, |_, _| ());
@@ -218,7 +221,7 @@ fn leaves_the_columns_where_they_are_once_left_brings_the_keys_back_home(cx: &mu
 fn slides_a_column_on_screen_once_a_press_in_its_header_or_its_empty_room_is_let_go(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
     // A width the view holds no whole number of, so the right edge cuts a column.
-    fake.settings.lock().unwrap().column_width = 288.;
+    fake.settings.lock().unwrap().column_width = 296.;
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {
@@ -292,14 +295,12 @@ fn keeps_the_last_column_at_the_right_edge_as_a_width_is_dragged(cx: &mut TestAp
     }
     rest(&ui, cx);
     let last = ui.read(cx, |v| v.state.columns.last().unwrap().id);
-    // The columns' width, then home's both ways, which changes the columns' view.
-    for (resizer, by) in [("column-resizer", 60.), ("sidebar-resizer", 120.), ("sidebar-resizer", -120.)] {
-        let edge = ui.act(cx, |window, _| {
-            if resizer == "column-resizer" { window.within(("column", last)).find(resizer) } else { window.find(resizer) }.bounds().center()
-        });
+    // The columns' width, both ways. Home's edge is there only while it is out, pushing the columns aside.
+    for by in [60., -60.] {
+        let edge = ui.act(cx, |window, _| window.within(("column", last)).find("column-resizer").bounds().center());
         ui.act(cx, |window, cx| window.drag(edge, point(edge.x + px(by), edge.y), cx));
         let room = room_past_last(&ui, cx);
-        assert!(room.abs() < 1., "{resizer} {by}: {room}");
+        assert!(room.abs() < 1., "{by}: {room}");
         settle(cx);
     }
 }
@@ -351,7 +352,7 @@ fn slides_the_folders_brought_out_by_their_strip_in_from_the_left_as_far_as_the_
 fn leaves_the_columns_put_and_the_folders_out_on_the_left_with_no_room_past_the_last(cx: &mut TestAppContext) {
     let ui = folded_deep(cx);
     // Narrow enough that the anchor reaches past the right edge: no room past it.
-    cx.simulate_window_resize(ui.window, size(px(900.), px(800.)));
+    cx.simulate_window_resize(ui.window, size(px(688.), px(800.)));
     rest(&ui, cx);
     assert!(room_past_last(&ui, cx) < -1., "the anchor is cut on the right");
     let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
@@ -380,7 +381,7 @@ fn leaves_the_columns_put_to_the_pixel_at_a_zoom_that_draws_them_a_fraction_wide
     fake.settings.lock().unwrap().zoom = 125;
     fake.settings.lock().unwrap().column_width = 287.;
     let ui = open(cx, Arc::new(fake));
-    cx.simulate_window_resize(ui.window, size(px(900.), px(800.)));
+    cx.simulate_window_resize(ui.window, size(px(635.), px(800.)));
     ui.input(cx, "zeta");
     ui.click(cx, row(&deep.path));
     rest(&ui, cx);
@@ -426,7 +427,7 @@ fn slides_the_folders_in_exactly_the_room_at_a_zoom_that_draws_the_columns_a_fra
 #[gpui_kit::test]
 fn stops_a_slide_under_way_once_the_folders_come_out_with_no_room_past_the_last(cx: &mut TestAppContext) {
     let ui = folded_deep(cx);
-    cx.simulate_window_resize(ui.window, size(px(900.), px(800.)));
+    cx.simulate_window_resize(ui.window, size(px(688.), px(800.)));
     rest(&ui, cx);
     assert!(room_past_last(&ui, cx) < -1., "the anchor is cut on the right");
     let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
@@ -653,7 +654,6 @@ fn keeps_the_last_column_at_the_right_edge_as_the_size_changes(cx: &mut TestAppC
 #[gpui_kit::test]
 fn leaves_the_columns_where_they_are_as_home_comes_out_of_its_strip_and_goes_back(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
-    fake.settings.lock().unwrap().fold_home = true;
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {
@@ -682,7 +682,6 @@ fn leaves_the_columns_where_they_are_as_home_comes_out_of_its_strip_and_goes_bac
 #[gpui_kit::test]
 fn brings_home_out_of_its_strip_alike_whether_the_columns_still_slide_or_rest(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
-    fake.settings.lock().unwrap().fold_home = true;
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {
@@ -719,7 +718,6 @@ fn brings_home_out_of_its_strip_alike_whether_the_columns_still_slide_or_rest(cx
 #[gpui_kit::test]
 fn slides_the_columns_one_way_only_as_home_folds_back_into_its_strip(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
-    fake.settings.lock().unwrap().fold_home = true;
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {
@@ -753,7 +751,6 @@ fn slides_the_columns_one_way_only_as_home_folds_back_into_its_strip(cx: &mut Te
 /// point in what is left of it on screen, `down` from its top.
 fn cut_behind_home(cx: &mut TestAppContext, down: f32) -> (Ui, ColumnId, gpui_kit::Point<gpui_kit::Pixels>) {
     let (fake, chain) = deep_chain();
-    fake.settings.lock().unwrap().fold_home = true;
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {

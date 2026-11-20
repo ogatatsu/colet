@@ -2,10 +2,7 @@
 //! dragged among them would land, and the row that follows the pointer; or, folded, the strip it comes out
 //! of.
 
-use gpui_kit::component::{
-    ActiveTheme as _, Sizable,
-    button::{Button, ButtonVariants},
-};
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -15,7 +12,6 @@ use crate::{
     home::{HomeDrag, movable},
     metrics::{self, scaled},
     state::Kind,
-    stops::Stop,
     theme::ActivePalette,
     view::*,
 };
@@ -24,9 +20,6 @@ impl Colet {
     /// Home's pane, or the strip it folds into while it is not in use. Coming out or going back in, it is
     /// drawn as wide as it stands out, cut where it ends, so its rows do not reflow as it moves.
     pub(crate) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if !self.stored.settings().fold_home {
-            return self.home_pane(true, window, cx);
-        }
         if !self.home_open(window, cx) && !self.home_pane.moving() {
             return self.home_strip(window, cx);
         }
@@ -42,7 +35,7 @@ impl Colet {
             .flex_none()
             .h_full()
             .relative()
-            .child(div().size_full().overflow_hidden().child(self.home_pane(false, window, cx)))
+            .child(div().size_full().overflow_hidden().child(self.home_pane(window, cx)))
             .when(marked, |d| d.child(on_top(active_frame(p).left_0().bottom_0().right(metrics::HAIRLINE).id("home-frame").test_support())))
             .test_support()
             .into_any_element()
@@ -108,33 +101,9 @@ impl Colet {
             .into_any_element()
     }
 
-    /// The pin in home's heading: home stays out beside the columns, or folds into its strip while it is
-    /// not in use.
-    fn fold_button(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = cx.palette();
-        let fold = self.stored.settings().fold_home;
-        let label = if fold { "ホームを固定する" } else { "ホームを帯にたたむ" };
-        let button = Button::new("home-fold")
-            .ghost()
-            .xsmall()
-            // As it stands: pinned out, or let go of to fold.
-            .icon(if fold { glyph("pin-off").text_color(p.text_muted) } else { glyph("pin") })
-            .accessibility_label(label)
-            .tooltip(label)
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.toggle_fold_home(cx);
-                // The keys go back to the column worked in, wherever it is: pressed from beside home, it
-                // folds with them there; with them in home, it stays out until they leave.
-                this.column_focus(this.state.active).focus(window, cx);
-            }));
-        // A press on it is not one in home: the column worked in stays as it was.
-        self.ringed(button, Stop::Named("home-fold"), RingAt::Edge, window, cx)
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-    }
-
-    /// Home's pane itself: its heading, its narrowing field and its rows, and round them the frame of the
-    /// column worked in when `framed`; folding, what holds it draws the frame instead.
-    fn home_pane(&mut self, framed: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// Home's pane itself: its heading, its narrowing field and its rows; what holds it draws the frame of
+    /// the column worked in.
+    fn home_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let home = &self.state.columns[0];
         let (id, narrowed) = (home.id, home.narrow.is_some());
@@ -142,7 +111,6 @@ impl Colet {
         let marked = self.state.active == 0 && self.columns_marked(window);
         let body = self.column_body(0, marked, window, cx);
         let width = self.sidebar_width(window);
-        let fold = self.fold_button(window, cx);
         let keys = div()
             .id("home")
             .track_focus(&self.home_focus)
@@ -201,8 +169,7 @@ impl Colet {
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
                             .child("ホーム"),
-                    )
-                    .child(fold),
+                    ),
             )
             .when_some(field, |d, input| {
                 d.child(
@@ -219,8 +186,6 @@ impl Colet {
             })
             .child(keys)
             .child(self.resizer("sidebar-resizer", WidthOf::Sidebar, width, cx))
-            // Its left and bottom are the window's edges: drawn inside them.
-            .when(framed && marked, |d| d.child(on_top(active_frame(p).left_0().bottom_0().id("home-frame").test_support())))
             .test_support()
             .into_any_element()
     }

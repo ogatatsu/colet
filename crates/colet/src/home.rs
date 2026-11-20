@@ -355,11 +355,11 @@ impl HomePane {
 }
 
 impl Colet {
-    /// Whether home's pane is out: always, unless it folds into its strip; then while the keys are in it,
-    /// or a menu or dialog opened from it gives them back there, and while the tab has nothing but home.
-    /// Out as the left button goes down, it stays out until the button is let go of.
+    /// Whether home's pane is out of its strip: while the keys are in it, or a menu or dialog opened from it
+    /// gives them back there, and while the tab has nothing but home. Out as the left button goes down, it
+    /// stays out until the button is let go of.
     pub fn home_open(&self, window: &Window, cx: &App) -> bool {
-        if !self.stored.settings().fold_home || self.state.columns.len() == 1 || self.home_pane.held {
+        if self.state.columns.len() == 1 || self.home_pane.held {
             return true;
         }
         let here = |focus: &FocusHandle| focus.is_focused(window) || self.keys_go_back_to(focus);
@@ -377,7 +377,7 @@ impl Colet {
             self.scrolls.sideways.ask();
         }
         let target = if open { self.sidebar_width(window) } else { FOLD_WIDTH };
-        let spring = self.stored.settings().fold_home && self.widths.resizing() != Some(WidthOf::Sidebar);
+        let spring = self.widths.resizing() != Some(WidthOf::Sidebar);
         if self.home_pane.step(target, open, spring, Instant::now()) {
             window.request_animation_frame();
         }
@@ -386,7 +386,7 @@ impl Colet {
     /// The left button went down anywhere: with home's pane out of its strip, it stays out until the
     /// button is let go of, so the keys leaving it fold it only then, with nothing moved under the press.
     pub(crate) fn hold_home(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
-        if event.button == MouseButton::Left && self.stored.settings().fold_home && self.home_pane.out() && !self.home_pane.held {
+        if event.button == MouseButton::Left && self.home_pane.out() && !self.home_pane.held {
             self.home_pane.held = true;
             // For the window-wide listener to be drawn.
             cx.notify();
@@ -423,12 +423,6 @@ impl Colet {
             });
         };
         Some(canvas(|_, _, _| {}, listen).absolute().size_0().into_any_element())
-    }
-
-    /// Home's pane folded into its strip, or out of it, as its pin is pressed.
-    pub fn toggle_fold_home(&mut self, cx: &mut Context<Self>) {
-        let fold = !self.stored.settings().fold_home;
-        self.update_settings(|s| s.fold_home = fold, cx);
     }
 
     /// Keeps or lets go of the favorite `key` names: a folder's path, or a narrowed favorite's key.

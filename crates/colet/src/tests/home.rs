@@ -18,6 +18,7 @@ fn makes_a_folder_a_favorite_with_its_star_and_ctrl_d_and_lists_it_at_home(cx: &
     ui.press(cx, "ctrl-d");
     assert_eq!(favorite_texts(&fake.settings.lock().unwrap().favorites), [r"D:\work"]);
     // Taken off from its menu in home.
+    ui.show_home(cx);
     ui.act(cx, |window, cx| window.within("home").right_click(row(r"D:\work"), cx));
     settle(cx);
     ui.click(cx, "menu-favorite");
@@ -59,6 +60,7 @@ fn keeps_a_folder_narrowed_as_a_favorite_of_its_own_and_opens_it_narrowed(cx: &m
         });
         (shown, ui.view.read_with(cx, |v, cx| v.narrow_fields[&id].input.read(cx).value().to_string()))
     };
+    ui.show_home(cx);
     ui.click_in(cx, "home", row(r"D:\work"));
     assert_eq!(opened(&ui, cx), (vec![r"D:\work\a.pdf".to_owned(), r"D:\work\b.txt".to_owned()], String::new()));
     ui.click_in(cx, "home", row(&key));
@@ -85,6 +87,7 @@ fn keeps_a_folder_narrowed_as_a_favorite_of_its_own_and_opens_it_narrowed(cx: &m
     assert_eq!(fake.settings.lock().unwrap().favorites, [Favorite::new(r"D:\work"), edited]);
     // Taken off, its name and narrowing go too, and it says so.
     let key = HomeKey::favorite(Path::new(r"D:\work"), Some("txt")).key();
+    ui.show_home(cx);
     ui.act(cx, |window, cx| window.within("home").right_click(row(&key), cx));
     settle(cx);
     ui.click(cx, "menu-favorite");
@@ -97,6 +100,7 @@ fn saves_a_search_narrowed_apart_and_runs_it_narrowed(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf"), file(r"D:\b.pdf")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "ext:pdf");
+    rest(&ui, cx);
     ui.press(cx, "down");
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.input(cx, "a");
@@ -108,6 +112,7 @@ fn saves_a_search_narrowed_apart_and_runs_it_narrowed(cx: &mut TestAppContext) {
     );
     // Run from home, the results are narrowed as they were kept.
     ui.press(cx, "escape");
+    ui.show_home(cx);
     ui.click_in(cx, "home", row(HomeKey::search("ext:pdf", None, Some("a"), Order::default()).key()));
     let (narrowing, id) = ui.read(cx, |v| (v.state.search_narrowing(), v.state.columns[1].id));
     assert_eq!(narrowing.as_deref(), Some("a"));
@@ -119,6 +124,7 @@ fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppC
     let fake = Arc::new(Fake { roots: vec![Entry::folder(r"D:\", "D:")], ..Fake::default() }.with_results(vec![file(r"D:\a.pdf")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "ext:pdf");
+    rest(&ui, cx);
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.click(cx, ("star", results));
     assert_eq!(
@@ -128,6 +134,7 @@ fn saves_a_search_and_runs_it_from_home_keeping_the_keys_there(cx: &mut TestAppC
     ui.press(cx, "ctrl-f");
     ui.press(cx, "escape");
     assert_eq!(ui.field(cx), "");
+    ui.show_home(cx);
     ui.click(cx, row(HomeKey::search("ext:pdf", None, None, Order::default()).key()));
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
     assert_eq!(ui.field(cx), "ext:pdf");
@@ -493,6 +500,7 @@ fn saves_a_search_with_its_filter_and_runs_it_within_it(cx: &mut TestAppContext)
     ui.press(cx, "ctrl-d");
     assert_eq!(fake.settings.lock().unwrap().saved_searches, [saved(Some("画像")), saved(None)]);
     // Run from home, it chooses its filter again.
+    ui.show_home(cx);
     ui.click(cx, row(HomeKey::search("cat", Some("画像"), None, Order::default()).key()));
     assert_eq!(fake.settings.lock().unwrap().tabs[0].filter.as_deref(), Some("画像"));
     assert_eq!(last_query(&fake), "<ext:jpg;png> <cat>");
@@ -533,18 +541,13 @@ fn home_out(ui: &Ui, cx: &mut TestAppContext) -> bool {
 }
 
 #[gpui_kit::test]
-fn folds_home_with_its_pin_and_brings_it_out_while_the_keys_are_there(cx: &mut TestAppContext) {
+fn folds_home_into_its_strip_and_brings_it_out_while_the_keys_are_there(cx: &mut TestAppContext) {
     let fake = Arc::new(drive_d());
     let ui = open(cx, fake.clone());
     ui.click_in(cx, "home", row(r"D:\"));
-    ui.press(cx, "right");
-    // Pinned out, as it starts: out with the keys elsewhere.
-    assert!(home_out(&ui, cx));
-    ui.press(cx, "ctrl-0");
-    ui.click(cx, "home-fold");
-    assert!(fake.settings.lock().unwrap().fold_home);
-    // The keys are still in it: it stays out until they leave.
+    // The keys in it: out.
     assert!(ui.home_focused(cx) && home_out(&ui, cx));
+    // Gone from it, it folds.
     ui.press(cx, "right");
     assert!(!home_out(&ui, cx));
     // Its strip brings the keys back, and it with them.
@@ -559,61 +562,11 @@ fn folds_home_with_its_pin_and_brings_it_out_while_the_keys_are_there(cx: &mut T
     assert!(!home_out(&ui, cx));
     ui.press(cx, "ctrl-0");
     assert!(home_out(&ui, cx));
-    // Pinned out again, it stays so with the keys gone.
-    ui.click(cx, "home-fold");
-    assert!(!fake.settings.lock().unwrap().fold_home);
-    ui.press(cx, "right");
-    assert!(home_out(&ui, cx));
-}
-
-#[gpui_kit::test]
-fn leaves_the_keys_in_the_column_worked_in_as_home_is_let_go_of_from_beside_it(cx: &mut TestAppContext) {
-    let fake = Arc::new(drive_d());
-    let ui = open(cx, fake.clone());
-    ui.click_in(cx, "home", row(r"D:\"));
-    ui.press(cx, "right");
-    assert_eq!(ui.active(cx), 1);
-    // Its pin let go of with the keys in a column: it folds, and the keys stay where they were.
-    ui.press_and_release(cx, "home-fold");
-    assert!(fake.settings.lock().unwrap().fold_home);
-    assert!(!home_out(&ui, cx));
-    assert_eq!(ui.active(cx), 1);
-    assert_eq!(ui.column_marks(cx), (true, true));
-    // Pinned again, and let go of once more by the keys on the pin: the same.
-    ui.press(cx, "ctrl-0");
-    assert!(home_out(&ui, cx));
-    ui.click(cx, "home-fold");
-    ui.press(cx, "right");
-    assert!(home_out(&ui, cx) && !fake.settings.lock().unwrap().fold_home);
-    ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.stop(Stop::Named("home-fold"), cx).focus(window, cx)));
-    ui.press(cx, "space");
-    assert!(fake.settings.lock().unwrap().fold_home);
-    assert!(!home_out(&ui, cx));
-    assert_eq!(ui.active(cx), 1);
-    assert_eq!(ui.column_marks(cx), (true, true));
-}
-
-#[gpui_kit::test]
-fn keeps_home_out_with_the_keys_in_it_as_it_is_let_go_of_by_its_pin(cx: &mut TestAppContext) {
-    let fake = Arc::new(drive_d());
-    let ui = open(cx, fake.clone());
-    ui.click_in(cx, "home", row(r"D:\"));
-    ui.press(cx, "right");
-    ui.press(cx, "ctrl-0");
-    // Pressed as a hand does, the keys in home: it stays out with them, on their row.
-    ui.press_and_release(cx, "home-fold");
-    assert!(fake.settings.lock().unwrap().fold_home);
-    assert!(ui.home_focused(cx) && home_out(&ui, cx));
-    assert_eq!(ui.active(cx), 0);
-    // Gone from it, it folds.
-    ui.press(cx, "right");
-    assert!(!home_out(&ui, cx));
 }
 
 #[gpui_kit::test]
 fn keeps_home_out_while_its_menu_is_up_and_while_the_tab_has_nothing_else(cx: &mut TestAppContext) {
     let fake = Arc::new(drive_d().with_results(vec![file(r"D:\abc.txt")]));
-    fake.settings.lock().unwrap().fold_home = true;
     let ui = open(cx, fake.clone());
     // Nothing but home, the keys in the search field: out.
     assert!(ui.search_focused(cx) && home_out(&ui, cx));
@@ -635,17 +588,15 @@ fn keeps_home_out_while_its_menu_is_up_and_while_the_tab_has_nothing_else(cx: &m
 }
 
 #[gpui_kit::test]
-fn frames_home_worked_in_whole_while_it_folds_as_while_it_is_pinned(cx: &mut TestAppContext) {
+fn frames_home_worked_in_whole_at_rest_and_as_it_comes_out(cx: &mut TestAppContext) {
     let fake = Arc::new(drive_d());
     let ui = open(cx, fake.clone());
     ui.click_in(cx, "home", row(r"D:\"));
     ui.press(cx, "ctrl-0");
     let frame = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, _| window.find("home-frame").bounds());
-    let pinned = frame(&ui, cx);
-    // Folding, out and at rest: framed as when pinned, its top on the path bar's line.
-    ui.click(cx, "home-fold");
+    // Out and at rest: its top on the path bar's line.
     assert!(home_out(&ui, cx));
-    assert_eq!(frame(&ui, cx), pinned);
+    let rested = frame(&ui, cx);
     // Coming out of its strip: its right on the edge it has come to.
     ui.press(cx, "right");
     assert!(!home_out(&ui, cx));
@@ -653,17 +604,16 @@ fn frames_home_worked_in_whole_while_it_folds_as_while_it_is_pinned(cx: &mut Tes
     assert!(ui.read(cx, |v| v.home_pane.moving()), "still coming out");
     let (moving, out, pane) =
         ui.act(cx, |window, _| (window.find("home-frame").bounds(), window.find("home-out").bounds(), window.find("sidebar").bounds()));
-    assert_eq!((moving.top(), moving.right()), (pinned.top(), out.right() - px(1.)));
+    assert_eq!((moving.top(), moving.right()), (rested.top(), out.right() - px(1.)));
     assert!(moving.right() < pane.right());
     assert!(home_out(&ui, cx));
-    assert_eq!(frame(&ui, cx), pinned);
+    assert_eq!(frame(&ui, cx), rested);
 }
 
 #[gpui_kit::test]
 fn lets_go_of_the_strip_hovered_when_the_pointer_leaves_the_window_off_it(cx: &mut TestAppContext) {
     use gpui_kit::{MouseExitEvent, MouseMoveEvent, PlatformInput};
     let fake = drive_d();
-    fake.settings.lock().unwrap().fold_home = true;
     let ui = open(cx, Arc::new(fake));
     ui.click_in(cx, "home", row(r"D:\"));
     ui.press(cx, "right");

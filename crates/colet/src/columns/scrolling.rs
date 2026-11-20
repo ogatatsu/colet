@@ -357,8 +357,7 @@ impl Colet {
         // Gone into a column as it folds, they are reckoned with the view it leaves them once it stands, the
         // same however far it has gone, so they go one way only.
         let aim = view + home - self.home_pane.target();
-        let pushed = self.stored.settings().fold_home
-            && self.widths.resizing() != Some(WidthOf::Sidebar)
+        let pushed = self.widths.resizing() != Some(WidthOf::Sidebar)
             && (home - was_home).abs() >= 0.5
             && (view + home - was - was_home).abs() <= 1.;
         let (cells, active) = self.scrolling();

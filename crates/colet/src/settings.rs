@@ -191,9 +191,6 @@ pub struct Settings {
     pub search_width: f32,
     /// Home's pane on the left.
     pub sidebar_width: f32,
-    /// Home's pane folded into a strip at the left, out only while the keys are in it or the tab has
-    /// nothing else; otherwise it stays out beside the columns.
-    pub fold_home: bool,
     /// The search field in the toolbar.
     pub search_field_width: f32,
     pub favorites: Vec<Favorite>,
@@ -225,7 +222,6 @@ impl Default for Settings {
             column_width: 320.,
             search_width: 320.,
             sidebar_width: 240.,
-            fold_home: false,
             search_field_width: SEARCH_FIELD_WIDTH,
             favorites: Vec::new(),
             saved_searches: Vec::new(),
@@ -359,7 +355,6 @@ impl Lenient for Settings {
             column_width: fields.one("column_width").unwrap_or(d.column_width),
             search_width: fields.one("search_width").unwrap_or(d.search_width),
             sidebar_width: fields.one("sidebar_width").unwrap_or(d.sidebar_width),
-            fold_home: fields.one("fold_home").unwrap_or(d.fold_home),
             search_field_width: fields.one("search_field_width").unwrap_or(d.search_field_width),
             favorites: fields.many("favorites"),
             saved_searches: fields.many("saved_searches"),

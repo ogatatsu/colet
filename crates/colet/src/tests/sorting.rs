@@ -7,6 +7,7 @@ fn sorts_the_results_from_their_menu_reloading_them(cx: &mut TestAppContext) {
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
     let results = ui.read(cx, |v| v.state.columns[1].id);
+    rest(&ui, cx);
     let before = fake.queries().len();
     ui.click(cx, ("column-sort", results));
     ui.click(cx, "サイズ");
@@ -21,6 +22,7 @@ fn turns_the_results_round_from_their_menu_and_keeps_it_for_another_sort(cx: &mu
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
+    rest(&ui, cx);
     let results = ui.read(cx, |v| v.state.columns[1].id);
     let before = fake.queries().len();
     ui.click(cx, ("column-sort", results));
@@ -156,6 +158,7 @@ fn sorts_only_the_search_results_by_location_from_a_first_then_turned_round(cx: 
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
+    rest(&ui, cx);
     let results = ui.read(cx, |v| v.state.columns[1].id);
     // A location starts from A, as a name does; the heading again turns it round.
     ui.click(cx, ("sort-by-location", results));
@@ -244,6 +247,7 @@ fn saves_a_search_with_its_order_and_runs_it_in_that_order(cx: &mut TestAppConte
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
+    rest(&ui, cx);
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.click(cx, ("sort-by-size", results));
     let size = Order { by: Sort::Size, descending: true, ..Order::default() };
@@ -255,6 +259,7 @@ fn saves_a_search_with_its_order_and_runs_it_in_that_order(cx: &mut TestAppConte
     assert!(!kept);
     // Run from home, it lists in its own order again.
     ui.press(cx, "escape");
+    ui.show_home(cx);
     ui.click(cx, row(HomeKey::search("x", None, None, size).key()));
     assert_eq!(ui.read(cx, |v| v.state.search_order), size);
     assert_eq!(fake.orders.lock().unwrap().last(), Some(&size));

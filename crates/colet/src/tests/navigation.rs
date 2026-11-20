@@ -173,6 +173,7 @@ fn leaves_the_search_for_a_place_picked_in_home_clearing_the_field(cx: &mut Test
     });
     let ui = open(cx, fake);
     ui.input(cx, "x");
+    ui.show_home(cx);
     ui.click(cx, row(r"D:\"));
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "");
     let field = ui.view.read_with(cx, |v, cx| v.search_field(cx));
@@ -245,12 +246,11 @@ fn takes_the_keys_to_home_from_a_press_in_its_head_its_field_s_room_or_its_empty
     let ui = open(cx, Arc::new(fake));
     let home = ui.read(cx, |v| v.state.columns[0].id);
     let field = ui.view.read_with(cx, |v, _| v.narrow_fields[&home].input.clone());
-    // Each from the column beside home, its rows having the keys.
+    // Each from the search field, home out beside it as the tab has nothing else.
     let away = |ui: &Ui, cx: &mut TestAppContext| {
-        ui.click_in(cx, "home", row(r"D:\"));
-        ui.press(cx, "right");
-        assert_eq!(ui.active(cx), 1);
-        assert!(ui.columns_focused(cx));
+        ui.press(cx, "ctrl-f");
+        assert!(ui.search_focused(cx) && !ui.home_focused(cx));
+        assert_eq!(ui.read(cx, |v| v.state.columns.len()), 1);
     };
     // A press in the sidebar at `y` down the window, its offset from the sidebar's corner.
     let press_at = |ui: &Ui, cx: &mut TestAppContext, y: fn(&mut Window) -> gpui::Pixels| {

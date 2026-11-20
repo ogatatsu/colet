@@ -85,6 +85,7 @@ fn drags_out_search_results_from_several_folders(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn keeps_home_rows_in_the_window(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
+    ui.show_home(cx);
     let at = ui.press_and_move(cx, row(r"D:\"), far());
     ui.let_go(cx, at);
     assert!(fake.dragged.lock().unwrap().is_empty());
