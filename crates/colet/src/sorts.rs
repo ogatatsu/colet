@@ -10,7 +10,7 @@ use std::{
 use colet_core::{entry::Order, paths::path_key};
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{self, Fields, File, Lenient, Loaded};
+use crate::kept_file::{self, Fields, File, Lenient, Loaded};
 
 pub const SORTS: File =
     File { stem: "sort", what: "カラムの並び順", file: "カラムの並び順のファイル", fallback: "既定の並び順" };
@@ -72,7 +72,7 @@ impl Lenient for Sorts {
 
 impl<'de> Deserialize<'de> for Sorts {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        settings::lenient(deserializer)
+        kept_file::lenient(deserializer)
     }
 }
 
@@ -84,18 +84,18 @@ impl From<Sorts> for SortsFile {
 
 /// `%APPDATA%\Colet\sort.json`.
 pub fn path() -> Option<PathBuf> {
-    settings::kept_path("sort.json")
+    kept_file::kept_path("sort.json")
 }
 
 /// The orders kept, or none when there are none yet.
 pub fn load() -> Loaded<Sorts> {
     let Some(path) = path() else { return Loaded::read(Sorts::default()) };
-    settings::read(&path, &SORTS)
+    kept_file::read(&path, &SORTS)
 }
 
 pub fn save(sorts: &Sorts) -> Result<(), String> {
     let path = path().ok_or("カラムの並び順の保存先がわかりません")?;
-    settings::write(sorts, &path, &SORTS)
+    kept_file::write(sorts, &path, &SORTS)
 }
 
 #[cfg(test)]
@@ -181,7 +181,7 @@ mod tests {
         let path = dir.path().join("sort.json");
         std::fs::write(&path, r#"{"folders":[{"path":"D:\\a","order":{"by":"size","descending":true}},{"path":"D:\\b","order":5}]}"#)
             .unwrap();
-        let loaded = settings::read::<Sorts>(&path, &SORTS);
+        let loaded = kept_file::read::<Sorts>(&path, &SORTS);
         assert!(loaded.value.folder(Path::new(r"D:\a")).is_some());
         let problem = loaded.problem.unwrap();
         assert!(problem.message.starts_with("カラムの並び順のファイルの読めない項目を1件飛ばしました"), "{}", problem.message);
@@ -193,14 +193,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sort.json");
         std::fs::write(&path, "{").unwrap();
-        let error = settings::read::<Sorts>(&path, &SORTS).unwrap_err();
+        let error = kept_file::read::<Sorts>(&path, &SORTS).unwrap_err();
         assert!(!error.kept, "{error:?}");
         assert!(error.message.starts_with("カラムの並び順のファイルが壊れていたため、既定の並び順で始めました"), "{}", error.message);
         assert!(!path.exists());
-        assert_eq!(settings::read::<Sorts>(&path, &SORTS).unwrap(), Sorts::default());
+        assert_eq!(kept_file::read::<Sorts>(&path, &SORTS).unwrap(), Sorts::default());
         let mut sorts = Sorts::default();
         sorts.set_folder(Path::new(r"D:\a"), Some(Order { by: Sort::Size, descending: true, ..Order::default() }));
-        settings::write(&sorts, &path, &SORTS).unwrap();
-        assert_eq!(settings::read::<Sorts>(&path, &SORTS).unwrap(), sorts);
+        kept_file::write(&sorts, &path, &SORTS).unwrap();
+        assert_eq!(kept_file::read::<Sorts>(&path, &SORTS).unwrap(), sorts);
     }
 }

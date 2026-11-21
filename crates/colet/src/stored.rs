@@ -2,7 +2,8 @@
 //! default, each in a file of its own. Colet changes them through here, which counts the changes so only
 //! the last of a burst is written, and writes both at once as the window closes.
 use crate::{
-    settings::{KeptTab, Queued, Saves, Settings},
+    kept_file::{Queued, Saves},
+    settings::{KeptTab, Settings},
     sorts::Sorts,
 };
 

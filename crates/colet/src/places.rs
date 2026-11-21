@@ -6,7 +6,8 @@ use gpui_kit::*;
 
 use crate::{
     app::{Colet, Tone, Widths},
-    settings::{Placement, Queued, Settings},
+    kept_file::Queued,
+    settings::{Placement, Settings},
     sorts::Sorts,
 };
 

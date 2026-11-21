@@ -9,7 +9,8 @@ use std::sync::{
 };
 
 use crate::{
-    settings::{self, Loaded, Settings},
+    kept_file::Loaded,
+    settings::{self, Settings},
     sorts::{self, Sorts},
 };
 use colet_core::{
@@ -289,7 +290,7 @@ pub type Shared = Arc<dyn Backend>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::narrowed_query;
+    use crate::search_query::narrowed_query;
     use std::time::{Duration, Instant};
 
     #[test]
