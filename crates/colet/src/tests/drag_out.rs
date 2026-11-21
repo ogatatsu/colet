@@ -39,7 +39,7 @@ fn drags_out_the_whole_selection_from_a_row_in_it(cx: &mut TestAppContext) {
 fn lets_go_of_what_it_drags_until_the_app_dropped_in_is_done_with_it(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     fake.drag_writing.store(true, Ordering::Relaxed);
-    let carried = |cx: &mut TestAppContext| ui.read(cx, |v| v.loading.watching.carried.values().flatten().cloned().collect::<Vec<_>>());
+    let carried = |cx: &mut TestAppContext| ui.read(cx, |v| v.watching.carried.values().flatten().cloned().collect::<Vec<_>>());
     ui.press_and_move(cx, row(r"D:\work\b.txt"), far());
     assert_eq!(fake.dragged.lock().unwrap().len(), 1);
     // Still written out on the target's own thread, after the drag returned.

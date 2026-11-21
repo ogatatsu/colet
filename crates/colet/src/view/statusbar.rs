@@ -33,8 +33,9 @@ impl Colet {
             }
             _ => String::new(),
         };
-        let (name, title) = self.loading.engine().describe();
-        let (color, dot) = match self.loading.engine() {
+        let engine = self.loading.read(cx).engine();
+        let (name, title) = engine.describe();
+        let (color, dot) = match engine {
             Engine::Unknown | Engine::Connecting => (p.text_faint, None),
             Engine::Connected(_) => (p.text_faint, Some(p.accent)),
             Engine::Failed(_) => (p.danger, Some(p.danger)),

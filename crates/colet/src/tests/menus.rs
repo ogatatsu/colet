@@ -245,7 +245,7 @@ fn keeps_the_window_while_a_send_runs(cx: &mut TestAppContext) {
 fn lets_go_of_what_a_send_with_shift_may_move_until_it_returns(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     send_targets(&fake);
-    let carried = |cx: &mut TestAppContext| ui.read(cx, |v| v.loading.watching.carried.values().flatten().cloned().collect::<Vec<_>>());
+    let carried = |cx: &mut TestAppContext| ui.read(cx, |v| v.watching.carried.values().flatten().cloned().collect::<Vec<_>>());
     ui.view.update(cx, |v, cx| {
         v.operations.update(cx, |operations, _| operations.set_send_targets(fake.send_targets()));
         v.send_to(r"C:\SendTo\USB.lnk".into(), true, cx);

@@ -81,7 +81,7 @@ impl Colet {
                     },
                     Kind::NewFolder => &[],
                 };
-                this.loading.watching.released = leaving.iter().map(|p| path_key(p)).collect();
+                this.watching.released = leaving.iter().map(|p| path_key(p)).collect();
                 this.watch(cx)
             }) else {
                 return;
@@ -150,7 +150,7 @@ impl Colet {
             return;
         };
         // Watched again by the refresh below, which lists what changed while they were not.
-        self.loading.watching.released.clear();
+        self.watching.released.clear();
         let Request { kind, paths, destination, name } = request;
         let (cancelled, problem) = match &result {
             Ok(()) => (false, None),

@@ -529,7 +529,7 @@ fn settle(cx: &mut TestAppContext) {
 impl Ui {
     /// The folder watcher adds `changes` to its batch and tells the window, as its thread does.
     fn folders_changed(&self, cx: &mut TestAppContext, changes: Changes) {
-        let (changed, wake) = self.read(cx, |v| (v.loading.watching.changed.clone(), v.wake.clone()));
+        let (changed, wake) = self.read(cx, |v| (v.watching.changed.clone(), v.wake.clone()));
         *changed.lock().unwrap() = changes;
         wake.wake();
     }

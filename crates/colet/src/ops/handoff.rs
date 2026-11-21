@@ -111,14 +111,14 @@ impl Colet {
     /// Lets go of the watches on the folders at or inside `paths`, which a send or a drag may move, until
     /// [`put_down`](Self::put_down) is told the number; what hears once they are let go of.
     pub(crate) fn carry(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) -> Carried {
-        let id = self.loading.watching.carry(paths);
+        let id = self.watching.carry(paths);
         Carried { id, released: self.watch(cx) }
     }
 
     /// What [`carry`](Self::carry) let go of is watched again, by the refresh this makes, which lists what
     /// changed while it was not; folders moved away meanwhile are closed rather than watched.
     pub(crate) fn put_down(&mut self, carry: u64, cx: &mut Context<Self>) {
-        self.loading.watching.put_down(carry);
+        self.watching.put_down(carry);
         self.refresh(cx);
     }
 }

@@ -117,10 +117,10 @@ fn lets_go_of_what_a_paste_moves_as_the_clipboard_holds_it_not_as_last_seen(cx: 
     while fake.operations.lock().unwrap().is_empty() {
         assert!(cx.executor().tick(), "the paste never ran");
     }
-    let released = ui.read(cx, |v| v.loading.watching.released.clone());
+    let released = ui.read(cx, |v| v.watching.released.clone());
     assert_eq!(released, HashSet::from([colet_core::paths::path_key(Path::new(r"D:\other"))]));
     settle(cx);
-    assert!(ui.read_app(cx, |v, app| !v.operations.read(app).is_running() && v.loading.watching.released.is_empty()));
+    assert!(ui.read_app(cx, |v, app| !v.operations.read(app).is_running() && v.watching.released.is_empty()));
 }
 
 #[gpui_kit::test]

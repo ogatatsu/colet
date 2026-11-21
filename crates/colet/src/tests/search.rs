@@ -78,12 +78,12 @@ fn reports_a_failed_search_as_one_and_retries(cx: &mut TestAppContext) {
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
     assert!(ui.read(cx, |v| v.state.columns[1].error.is_some()));
-    assert!(ui.read(cx, |v| matches!(v.loading.engine(), Engine::Failed(_))));
+    assert!(ui.read_app(cx, |v, app| matches!(v.loading.read(app).engine(), Engine::Failed(_))));
     *fake.failing.lock().unwrap() = None;
     let id = ui.read(cx, |v| v.state.columns[1].id);
     ui.click(cx, ("retry", id));
     assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 1);
-    assert!(ui.read(cx, |v| matches!(v.loading.engine(), Engine::Connected(_))));
+    assert!(ui.read_app(cx, |v, app| matches!(v.loading.read(app).engine(), Engine::Connected(_))));
 }
 
 #[gpui_kit::test]

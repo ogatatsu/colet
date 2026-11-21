@@ -1,7 +1,6 @@
-//! What the columns are listed from and kept fresh by: the listings out for each column, the search's
-//! reloads for what Everything reports, the watch on the folders shown, and how the search engine
-//! answers. Colet asks for listings and takes their answers through here, which tells a late answer
-//! from the latest.
+//! What the columns are listed from: the listings out for each column, the search's reloads for what
+//! Everything reports, and how the search engine answers. Its own entity: Colet says what to list, as a
+//! [`Job`], and hears each answer as a [`LoadingEvent`], which tells a late answer from the latest.
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
@@ -15,30 +14,33 @@ use std::{
 };
 
 use colet_core::{
-    entry::Entry,
+    entry::{Entry, Order},
     everything::PAGE,
     paths::{path_key, shown},
+    shell::Owner,
     watch::Changes,
 };
-use gpui_kit::{Context, Task};
+use gpui_kit::{Context, EventEmitter, Task};
 
 use crate::words;
 use crate::{
     app::{Colet, Tone},
-    backend::Search,
+    backend::{self, Search},
     columns::PAGE_AHEAD,
     home::home_entries,
     search_query::{everything_query, narrowed_query},
+    settings::Settings,
     state::{ColumnId, Kind},
     wake::Woken,
-    watching::Watching,
 };
 
 /// How long what changes is gathered, from the first change told, before it is taken in together.
 const GATHER: Duration = Duration::from_millis(200);
 
-#[derive(Default)]
 pub struct Loading {
+    backend: backend::Shared,
+    /// The window a folder's listing asks for a password over.
+    owner: Owner,
     last_request: u64,
     /// The columns listed at least once.
     listed: HashSet<ColumnId>,
@@ -47,13 +49,85 @@ pub struct Loading {
     /// What stops each folder's listing still out.
     cancels: HashMap<ColumnId, Arc<AtomicBool>>,
     pub search_refresh: SearchRefresh,
-    pub watching: Watching,
     engine: Engine,
     /// A search was sent since the last was let go of: Everything watches it until it is.
     searched: bool,
+    /// The answers come and not yet taken: each the latest for its column or one overtaken, which the
+    /// columns tell apart by its request, as a search's warning is said even when it went stale. The
+    /// engine has taken in what they say of Everything already.
+    answers: Vec<(Asked, Listing)>,
 }
 
+/// What to list for a column.
+pub enum Job {
+    /// Home's rows, from the settings as they are and the drives.
+    Home(Settings),
+    /// A page of the search; narrowed, `whole` is the query without the narrowing, counted along with the
+    /// first page.
+    Search { search: Search, whole: Option<String> },
+    /// A folder, whole, in `sort`.
+    Folder { path: PathBuf, sort: Order },
+}
+
+/// What a listing was asked for: the column, from where, and the request it went out as.
+#[derive(Clone, Copy)]
+pub struct Asked {
+    pub id: ColumnId,
+    pub kind: Kind,
+    pub request: u64,
+    pub offset: usize,
+}
+
+/// What a listing came back with.
+pub struct Listed {
+    pub entries: Vec<Entry>,
+    /// How many in all, loaded or not.
+    pub total: usize,
+    /// For a search, what to warn of the Everything that answered it, once for each connection to it.
+    pub warning: Option<String>,
+    /// For a narrowed search's first page, how many it finds without the filter.
+    pub whole: Option<usize>,
+    /// For a search, the Everything that answered it: the engine takes it in before Colet hears.
+    connection: Option<String>,
+}
+
+impl Listed {
+    /// A listing loaded whole at once, as home's and a folder's are.
+    fn all(entries: Vec<Entry>) -> Self {
+        Listed { total: entries.len(), entries, connection: None, warning: None, whole: None }
+    }
+}
+
+pub type Listing = Result<Listed, String>;
+
+pub enum LoadingEvent {
+    /// Answers came, to [`take`](Loading::take_answers) without copying what they list.
+    Answered,
+}
+
+impl EventEmitter<LoadingEvent> for Loading {}
+
 impl Loading {
+    pub fn new(backend: backend::Shared, owner: Owner) -> Self {
+        Self {
+            backend,
+            owner,
+            last_request: 0,
+            listed: HashSet::new(),
+            pending: HashMap::new(),
+            cancels: HashMap::new(),
+            search_refresh: SearchRefresh::default(),
+            engine: Engine::default(),
+            searched: false,
+            answers: Vec::new(),
+        }
+    }
+
+    /// The answers come since last taken, in the order they came.
+    pub fn take_answers(&mut self) -> Vec<(Asked, Listing)> {
+        std::mem::take(&mut self.answers)
+    }
+
     // ---- The listings: each answer is told apart from those it was overtaken by ----
 
     /// True the first time `id` is asked about: it is to be listed.
@@ -66,7 +140,7 @@ impl Loading {
         self.pending.contains_key(&id)
     }
 
-    /// A listing of `id`, overtaking any still out: its number.
+    /// A listing of `id`, overtaking any still out: its number, to [`run`](Self::run) it by.
     pub fn start(&mut self, id: ColumnId) -> u64 {
         let request = self.next();
         self.pending.insert(id, request);
@@ -79,8 +153,56 @@ impl Loading {
         self.last_request
     }
 
+    /// Lists `job` off the window's thread, as [`start`](Self::start) numbered it, and tells its answer.
+    pub fn run(&mut self, asked: Asked, job: Job, cx: &mut Context<Self>) {
+        let backend = self.backend.clone();
+        let task: Task<Listing> = match job {
+            Job::Home(settings) => cx.background_executor().spawn(async move { Ok(Listed::all(home_entries(&settings, backend.roots()))) }),
+            Job::Search { search, whole } => {
+                self.searching();
+                cx.background_executor().spawn(async move {
+                    let found = backend.search(search).map_err(|error| words::search::error(&error))?;
+                    let found = found.ok_or_else(|| words::search::STALE.to_string())?;
+                    let whole = whole.and_then(|query| backend.count(&query).ok());
+                    Ok(Listed {
+                        entries: found.page.entries,
+                        total: found.page.total,
+                        connection: found.connection.as_ref().map(words::status::connection),
+                        warning: found.warning.as_ref().map(words::search::slow),
+                        whole,
+                    })
+                })
+            }
+            Job::Folder { path, sort } => {
+                let (cancelled, owner) = (self.cancel_before(asked.id), self.owner);
+                cx.background_executor().spawn(async move {
+                    let entries = backend.list(&path, sort, &cancelled, owner).map_err(|error| words::column::list_error(&error))?;
+                    Ok(Listed::all(entries))
+                })
+            }
+        };
+        cx.spawn(async move |this, cx| {
+            let listing = task.await;
+            this.update(cx, |this, cx| this.listed(asked, listing, cx)).ok();
+        })
+        .detach();
+    }
+
+    /// The answer to `asked` came: the engine takes in what it says of Everything, and Colet hears it.
+    fn listed(&mut self, asked: Asked, mut listing: Listing, cx: &mut Context<Self>) {
+        let current = self.answered(asked.id, asked.request);
+        match &mut listing {
+            Ok(listed) => self.search_answered(listed.connection.take(), current),
+            Err(error) if asked.kind == Kind::Search && current => self.search_failed(error.clone()),
+            Err(_) => {}
+        }
+        self.answers.push((asked, listing));
+        cx.emit(LoadingEvent::Answered);
+        cx.notify();
+    }
+
     /// What stops the folder listing of `id` just started; the one before it is stopped.
-    pub fn cancel_before(&mut self, id: ColumnId) -> Arc<AtomicBool> {
+    fn cancel_before(&mut self, id: ColumnId) -> Arc<AtomicBool> {
         let cancelled = Arc::new(AtomicBool::new(false));
         if let Some(previous) = self.cancels.insert(id, cancelled.clone()) {
             previous.store(true, Ordering::Relaxed);
@@ -89,7 +211,7 @@ impl Loading {
     }
 
     /// The answer to `request` came: true when it is the latest for `id`, which is then no longer out.
-    pub fn answered(&mut self, id: ColumnId, request: u64) -> bool {
+    fn answered(&mut self, id: ColumnId, request: u64) -> bool {
         let current = self.pending.get(&id) == Some(&request);
         if current {
             self.pending.remove(&id);
@@ -125,22 +247,27 @@ impl Loading {
     }
 
     /// A search is on its way: connecting, unless already connected.
-    pub fn searching(&mut self) {
+    fn searching(&mut self) {
         self.searched = true;
         if !matches!(self.engine, Engine::Connected(_)) {
             self.engine = Engine::Connecting;
         }
     }
 
-    /// No search is in front: the request number to let go of the last one sent with, so a search
-    /// asked before it is not run; none when there is none to let go of.
-    pub fn stop_searching(&mut self) -> Option<u64> {
-        std::mem::take(&mut self.searched).then(|| self.next())
+    /// No search is in front: Everything stops watching the last one sent, and a search asked before
+    /// this is not run. It comes back with the next.
+    pub fn stop_searching(&mut self, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.searched) {
+            return;
+        }
+        let request = self.next();
+        let backend = self.backend.clone();
+        cx.background_executor().spawn(async move { backend.stop_search(request) }).detach();
     }
 
     /// A search answered through `connection`, `current` when it is the latest for its column: one left
     /// behind still ends the wait for the connection.
-    pub fn search_answered(&mut self, connection: Option<String>, current: bool) {
+    fn search_answered(&mut self, connection: Option<String>, current: bool) {
         if let Some(name) = connection.filter(|_| current || matches!(self.engine, Engine::Connecting)) {
             self.engine = Engine::Connected(name);
         }
@@ -232,54 +359,19 @@ pub fn reread_count(loaded: usize, last_kept: Option<usize>, in_sight: usize) ->
 
 // ---- What Colet does with them: asks for the listings, takes their answers, and follows the watches ----
 
-/// What a listing came back with.
-struct Listed {
-    entries: Vec<Entry>,
-    /// How many in all, loaded or not.
-    total: usize,
-    /// For a search, the Everything that answered it.
-    connection: Option<String>,
-    /// For a search, what to warn of that Everything, once for each connection to it.
-    warning: Option<String>,
-    /// For a narrowed search's first page, how many it finds without the filter.
-    whole: Option<usize>,
-}
-
-impl Listed {
-    /// A listing loaded whole at once, as home's and a folder's are.
-    fn all(entries: Vec<Entry>) -> Self {
-        Listed { total: entries.len(), entries, connection: None, warning: None, whole: None }
-    }
-}
-
-type Listing = Result<Listed, String>;
-
-/// What a listing was asked for: the column, from where, and the request it went out as.
-#[derive(Clone, Copy)]
-struct Asked {
-    id: ColumnId,
-    kind: Kind,
-    request: u64,
-    offset: usize,
-}
-
 impl Colet {
     /// Lists the column `id` from `offset` on; `quiet` keeps what it shows meanwhile.
     pub fn load(&mut self, id: ColumnId, offset: usize, quiet: bool, cx: &mut Context<Self>) {
         let Some(index) = self.state.index_of(id) else { return };
-        if offset > 0 && self.loading.is_loading(id) {
+        if offset > 0 && self.loading.read(cx).is_loading(id) {
             return;
         }
-        let request = self.loading.start(id);
+        let request = self.loading.update(cx, |loading, _| loading.start(id));
         self.state.load(id, request, quiet);
         let c = &self.state.columns[index];
         let sort = self.order_of(c);
-        let backend = self.backend.clone();
-        let task: Task<Listing> = match c.kind {
-            Kind::Home => {
-                let settings = self.stored.settings().clone();
-                cx.background_executor().spawn(async move { Ok(Listed::all(home_entries(&settings, backend.roots()))) })
-            }
+        let job = match c.kind {
+            Kind::Home => Job::Home(self.stored.settings().clone()),
             Kind::Search => {
                 let filter = self.state.search_filter.as_deref().and_then(|name| self.stored.settings().filter_query(name));
                 let whole = everything_query(&self.state.query, filter);
@@ -296,46 +388,32 @@ impl Colet {
                     let in_sight = crate::columns::rows_in_sight(self.scrolls.rows.handle(id), c.entries.len()).unwrap_or(0);
                     let keep: HashSet<&Path> = c.selected.iter().chain(&c.focused).chain(&c.highlight).map(PathBuf::as_path).collect();
                     let last_kept = c.entries.iter().rposition(|e| keep.contains(e.path.as_path()));
-                    crate::loading::reread_count(c.entries.len(), last_kept, in_sight)
+                    reread_count(c.entries.len(), last_kept, in_sight)
                 };
-                self.loading.searching();
-                let search = Search { query, sort, offset, count, refresh: offset == 0, request };
-                cx.background_executor().spawn(async move {
-                    let found = backend.search(search).map_err(|error| words::search::error(&error))?;
-                    let found = found.ok_or_else(|| words::search::STALE.to_string())?;
-                    let whole = whole.and_then(|query| backend.count(&query).ok());
-                    Ok(Listed {
-                        entries: found.page.entries,
-                        total: found.page.total,
-                        connection: found.connection.as_ref().map(words::status::connection),
-                        warning: found.warning.as_ref().map(words::search::slow),
-                        whole,
-                    })
-                })
+                Job::Search { search: Search { query, sort, offset, count, refresh: offset == 0, request }, whole }
             }
-            Kind::Folder => {
-                let path = c.path.clone();
-                let (cancelled, owner) = (self.loading.cancel_before(id), self.owner);
-                cx.background_executor().spawn(async move {
-                    let entries = backend.list(&path, sort, &cancelled, owner).map_err(|error| words::column::list_error(&error))?;
-                    Ok(Listed::all(entries))
-                })
-            }
+            Kind::Folder => Job::Folder { path: c.path.clone(), sort },
         };
         let asked = Asked { id, kind: c.kind, request, offset };
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            this.update(cx, |this, cx| this.listed(asked, result, cx)).ok();
-        })
-        .detach();
+        self.loading.update(cx, |loading, cx| loading.run(asked, job, cx));
+    }
+
+    /// What the listings tell.
+    pub(crate) fn on_loading_event(&mut self, event: &LoadingEvent, cx: &mut Context<Self>) {
+        match event {
+            LoadingEvent::Answered => {
+                for (asked, listing) in self.loading.update(cx, |loading, _| loading.take_answers()) {
+                    self.listed(asked, listing, cx);
+                }
+            }
+        }
     }
 
     /// The answer to `asked` came.
-    fn listed(&mut self, asked: Asked, result: Listing, cx: &mut Context<Self>) {
-        let Asked { id, kind, request, offset } = asked;
-        let current = self.loading.answered(id, request);
-        match result {
-            Ok(Listed { entries, total, connection, warning, whole }) => {
+    fn listed(&mut self, asked: Asked, listing: Listing, cx: &mut Context<Self>) {
+        let Asked { id, request, offset, .. } = asked;
+        match listing {
+            Ok(Listed { entries, total, warning, whole, .. }) => {
                 // Told even of a search gone stale: it is the connection's, said once.
                 if let Some(warning) = warning {
                     self.notify(warning, Tone::Warning, cx);
@@ -349,14 +427,8 @@ impl Colet {
                 for (from, to) in std::mem::take(&mut self.state.respelled) {
                     self.follow_move(&from, &to, cx);
                 }
-                self.loading.search_answered(connection, current);
             }
-            Err(error) => {
-                if kind == Kind::Search && current {
-                    self.loading.search_failed(error.clone());
-                }
-                self.state.error(id, request, error);
-            }
+            Err(error) => self.state.error(id, request, error),
         }
         self.changed(cx);
     }
@@ -364,10 +436,14 @@ impl Colet {
     /// The tab come to the front lists all its columns again: what it showed stays meanwhile, and what it
     /// never listed shows as loading. What the tab before it still had out is let go of.
     pub(crate) fn relist(&mut self, cx: &mut Context<Self>) {
-        self.loading.let_go();
         let columns: Vec<(ColumnId, bool)> = self.state.columns.iter().map(|c| (c.id, c.request != 0)).collect();
+        self.loading.update(cx, |loading, _| {
+            loading.let_go();
+            for (id, _) in &columns {
+                loading.first(*id);
+            }
+        });
         for (id, listed) in columns {
-            self.loading.first(id);
             self.load(id, 0, listed, cx);
         }
     }
@@ -395,6 +471,8 @@ impl Colet {
 
     /// Watches the folders the columns could read, one level deep, as [`Watching::set`] does; a server's
     /// shares, which no change tells of, are read again with F5 only.
+    ///
+    /// [`Watching::set`]: crate::watching::Watching::set
     pub(crate) fn watch(&mut self, cx: &mut Context<Self>) -> Option<mpsc::Receiver<()>> {
         let paths: Vec<PathBuf> = self
             .state
@@ -403,7 +481,7 @@ impl Colet {
             .filter(|c| c.kind == Kind::Folder && c.error.is_none() && !colet_core::paths::is_server(&c.path))
             .map(|c| c.path.clone())
             .collect();
-        self.loading.watching.set(paths, &self.wake).unwrap_or_else(|error| {
+        self.watching.set(paths, &self.wake).unwrap_or_else(|error| {
             self.notify(words::window::cannot_start_watching(&error), Tone::Error, cx);
             None
         })
@@ -415,9 +493,7 @@ impl Colet {
         if self.searches() {
             return;
         }
-        let Some(request) = self.loading.stop_searching() else { return };
-        let backend = self.backend.clone();
-        cx.background_executor().spawn(async move { backend.stop_search(request) }).detach();
+        self.loading.update(cx, |loading, cx| loading.stop_searching(cx));
     }
 
     /// The tab in front has a search.
@@ -427,7 +503,7 @@ impl Colet {
 
     /// Says which folders the watcher could list but not watch, each once.
     fn take_missed(&mut self, cx: &mut Context<Self>) {
-        let fresh = self.loading.watching.take_missed();
+        let fresh = self.watching.take_missed();
         if !fresh.is_empty() {
             let names: String = fresh.iter().map(|p| words::quoted(shown(colet_core::paths::folder_name(p)))).collect();
             self.notify(words::window::cannot_watch(names), Tone::Error, cx);
@@ -438,7 +514,7 @@ impl Colet {
     /// columns showing them, and what the watch on Everything heard of the results. What comes within
     /// [`GATHER`] of the first is taken in with it, so a burst reloads once.
     pub(crate) fn listen(&mut self, woken: Woken, cx: &mut Context<Self>) {
-        let changed = self.loading.watching.changed.clone();
+        let changed = self.watching.changed.clone();
         let backend = self.backend.clone();
         cx.spawn(async move |this, cx| {
             // Asked again without being told, while a search held the watch on it.
@@ -467,7 +543,10 @@ impl Colet {
                         Err(_) if !this.searches() => {}
                         Err(error) => {
                             let error = words::search::error(&error);
-                            this.loading.search_failed(error.clone());
+                            this.loading.update(cx, |loading, cx| {
+                                loading.search_failed(error.clone());
+                                cx.notify();
+                            });
                             this.notify(error, Tone::Error, cx);
                         }
                     })
@@ -508,7 +587,7 @@ impl Colet {
     /// A busy disk reports changes each second: the first reloads at once, then at most one every couple
     /// of seconds. One met by a reload in flight waits for it, as it may have read the results before.
     fn search_changed(&mut self, cx: &mut Context<Self>) {
-        let Some((reload, wait)) = self.loading.search_refresh.wait() else {
+        let Some((reload, wait)) = self.loading.update(cx, |loading, _| loading.search_refresh.wait()) else {
             return;
         };
         cx.spawn(async move |this, cx| {
@@ -518,17 +597,17 @@ impl Colet {
                     .update(cx, |this, cx| {
                         // Cancelled while it waited: the search in front now is another tab's, read afresh
                         // as it came to the front.
-                        if !this.loading.search_refresh.is_waiting(reload) {
+                        if !this.loading.read(cx).search_refresh.is_waiting(reload) {
                             return false;
                         }
                         let Some(search) = this.state.columns.iter().find(|c| c.kind == Kind::Search).map(|c| c.id) else {
-                            this.loading.search_refresh.cancel();
+                            this.loading.update(cx, |loading, _| loading.search_refresh.cancel());
                             return false;
                         };
-                        if this.loading.is_loading(search) {
+                        if this.loading.read(cx).is_loading(search) {
                             return true;
                         }
-                        this.loading.search_refresh.went();
+                        this.loading.update(cx, |loading, _| loading.search_refresh.went());
                         this.load(search, 0, true, cx);
                         false
                     })

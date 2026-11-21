@@ -43,6 +43,7 @@ use crate::{
     tabs::{TabStrip, Tabs},
     theme::ActivePalette,
     wake::Wake,
+    watching::Watching,
 };
 
 actions!(
@@ -323,8 +324,11 @@ pub struct Colet {
     pub scrolls: Scrolls,
     pub(crate) owner: shell::Owner,
     pub(crate) backend: backend::Shared,
-    /// The listings out, the search's reloads, the watch on the folders and the search engine.
-    pub loading: Loading,
+    /// The listings out, the search's reloads and the search engine: its own entity, which Colet says what to
+    /// list and hears the answers from.
+    pub loading: Entity<Loading>,
+    /// The watch on the folders the columns show.
+    pub watching: Watching,
     /// The settings and the columns' own orders, as kept between starts.
     pub stored: Stored,
     /// The drag putting home's rows in order: its own entity, which keeps what is carried and where it would
@@ -400,6 +404,10 @@ impl Colet {
         // The history's button, the rows' clipboard marks and the menu's Send To are drawn from it.
         subscriptions.push(cx.observe(&operations, |_, _, cx| cx.notify()));
         subscriptions.push(cx.subscribe_in(&operations, window, |this, _, event, window, cx| this.on_operations_event(event, window, cx)));
+        // The status bar draws how the search engine answers from it.
+        let loading = cx.new(|_| Loading::new(backend.clone(), owner));
+        subscriptions.push(cx.observe(&loading, |_, _, cx| cx.notify()));
+        subscriptions.push(cx.subscribe(&loading, |this, _, event, cx| this.on_loading_event(event, cx)));
         let tab_strip = cx.new(|_| TabStrip::default());
         subscriptions.push(cx.subscribe_in(&tab_strip, window, |this, _, event, window, cx| this.on_tab_strip_event(event, window, cx)));
         let history = cx.new(|cx| HistoryPanel::new(operations.clone(), backend.clone(), cx));
@@ -423,7 +431,8 @@ impl Colet {
             scrolls: Scrolls::default(),
             owner,
             backend,
-            loading: Loading::default(),
+            loading,
+            watching: Watching::default(),
             stored: Stored::new(settings, settings_saves, sorts, sorts_saves),
             home_drag,
             home_pane: HomePane::default(),
@@ -573,10 +582,12 @@ impl Colet {
                 });
             });
         }
-        self.loading.keep(&live);
+        self.loading.update(cx, |loading, _| loading.keep(&live));
         self.stop_search_out_of_sight(cx);
         self.scrolls.rows.keep(&live);
-        let fresh: Vec<(ColumnId, Kind)> = self.state.columns.iter().filter(|c| self.loading.first(c.id)).map(|c| (c.id, c.kind)).collect();
+        let fresh: Vec<(ColumnId, Kind)> = self
+            .loading
+            .update(cx, |loading, _| self.state.columns.iter().filter(|c| loading.first(c.id)).map(|c| (c.id, c.kind)).collect());
         for (id, kind) in fresh {
             if kind == Kind::Search {
                 // Typing makes a new search per key; only the one still there after a pause runs.
