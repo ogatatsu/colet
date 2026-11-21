@@ -207,15 +207,20 @@ fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_she
     fake.settings.lock().unwrap().saved_searches =
         vec![SavedSearch { name: "PDF".into(), query: "ext:pdf".into(), filter: None, narrow: None, order: Order::default() }];
     let ui = open(cx, fake.clone());
-    // ↓ from the field picks it in home, which runs it.
+    // ↓ from the field picks it in home standing alone, which runs it.
     ui.press(cx, "down");
     assert_eq!(ui.field(cx), "ext:pdf");
-    // ← from other results lands on it unpicked; ↵ runs it.
+    // ← from other results lands on it unpicked, and ↓ from the field back there leaves the results be;
+    // ↵ runs it.
     ui.press(cx, "ctrl-f");
     ui.press(cx, "ctrl-a");
     ui.input(cx, "a");
     ui.press(cx, "down");
     ui.press(cx, "left");
+    assert_eq!(ui.read(cx, |v| v.state.query.clone()), "a");
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "down");
+    assert!(ui.home_focused(cx));
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "a");
     ui.press(cx, "enter");
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");

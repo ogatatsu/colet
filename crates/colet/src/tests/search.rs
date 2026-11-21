@@ -29,6 +29,31 @@ fn moves_from_the_search_field_into_the_results_with_down(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn back_in_the_field_down_goes_to_the_column_worked_in_and_enter_to_the_results(cx: &mut TestAppContext) {
+    let fake = Arc::new(
+        Fake::default()
+            .with_results(vec![folder(r"D:\work")])
+            .with_folders(&[(r"D:\work", vec![file(r"D:\work\a.txt")]), (r"D:\", vec![folder(r"D:\work")])]),
+    );
+    let ui = open(cx, fake);
+    ui.input(cx, "w");
+    ui.press(cx, "down");
+    ui.press(cx, "right");
+    let worked_in = ui.active(cx);
+    assert!(worked_in > 1);
+    // Nothing typed: ↓ goes back where the keys were, the columns left as they are.
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "down");
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.active(cx), worked_in);
+    // ↵ goes to the results.
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "enter");
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.active(cx), 1);
+}
+
+#[gpui_kit::test]
 fn the_trail_beside_the_search_starts_at_the_folder_the_results_lead_to(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\alpha.txt")]));
     let ui = open(cx, fake);

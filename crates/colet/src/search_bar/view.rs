@@ -63,10 +63,10 @@ impl Colet {
                     .rounded(scaled(radii.md))
                     .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
                     .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(&search, cx)).child(Input::new(&search)))
-                    // ↓ goes into the results, as from a search field in Explorer; Esc clears the search.
+                    // ↓ goes back to the column worked in, as from the address field.
                     .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {
                         cx.stop_propagation();
-                        this.leave_search(window, cx);
+                        this.down_into_columns(window, cx);
                     }))
                     // Esc empties the field; the filter chosen stays, let go of only from its menu.
                     .on_action(cx.listener(|this, _: &input::Escape, window, cx| {

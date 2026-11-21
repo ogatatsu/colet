@@ -1,6 +1,6 @@
 //! The search field and the search filter chosen for it. What is typed is searched within the filter
-//! chosen; an empty field searches for nothing. Enter or ↓ leaves the field for the results, Esc empties
-//! it and leaves the filter as it is.
+//! chosen; an empty field searches for nothing. Enter leaves the field for the results, ↓ for the column
+//! worked in; Esc empties it and leaves the filter as it is.
 //!
 //! [`SearchBar`] owns the field and the filter chosen, the one the tab in front's next search is narrowed
 //! by; it tells what is typed through [`SearchEvent`]. Colet owns the rest: the search itself, kept in the
@@ -27,7 +27,7 @@ pub struct SearchBar {
 pub enum SearchEvent {
     /// The field holds `query` now, typed or pasted, to be searched for.
     Typed(String),
-    /// Enter: the keys go on to the results.
+    /// Enter: the keys go on to the results, if any are shown.
     Leave,
 }
 
@@ -136,17 +136,12 @@ impl Colet {
         self.changed(cx);
     }
 
-    /// Into the results, as from a search field in Explorer, or home with nothing searched, picking the
-    /// row the keys land on there too unless it already is.
+    /// Enter: into the results, as from a search field in Explorer. With nothing searched there are none,
+    /// and the keys stay in the field.
     pub fn leave_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let pinned = self.state.pinned();
-        self.state.set_active(if pinned { 1 } else { 0 });
-        self.focus_active(window, cx);
-        let home = &self.state.columns[0];
-        if !pinned && let Some(path) = home.focused.clone().filter(|path| !home.selected.contains(path)) {
-            self.state.select(0, vec![path]);
-            // A saved search picked runs, which the field shows.
-            self.sync_search_field(window, cx);
+        if self.state.pinned() {
+            self.state.set_active(1);
+            self.focus_active(window, cx);
         }
     }
 

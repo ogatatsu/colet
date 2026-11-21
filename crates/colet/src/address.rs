@@ -1,7 +1,7 @@
 //! The address bar: the trail of folders, which turns into a field to type or paste a path in, as
 //! Explorer's does. Enter goes there in the tab, Alt+Enter in a new one; a folder opens with its contents
-//! beside it, a file where it lives with it picked. Esc, or the keys going elsewhere, lets go of what was
-//! typed and the trail comes back.
+//! beside it, a file where it lives with it picked. Esc or ↓, or the keys going elsewhere, lets go of what
+//! was typed and the trail comes back; ↓ picks a row in home standing alone, as from the search field.
 //!
 //! [`AddressBar`] owns the field, whether it is open, and the asking whether a typed path is there; it
 //! tells what came of it through [`AddressEvent`]. Colet owns the rest: the trail drawn in its place,
@@ -169,10 +169,16 @@ impl Colet {
         self.address.update(cx, |address, cx| address.reopen(text, picked, reversed, window, cx));
     }
 
-    /// Esc: the trail comes back and the keys go to the column worked in.
+    /// Esc: the trail comes back and the keys go back to the column worked in, picking nothing new.
     pub fn leave_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.address.update(cx, |address, cx| address.close(cx));
-        self.focus_active(window, cx);
+        self.come_back_to_active(window, cx);
+    }
+
+    /// ↓: as Esc, but home standing alone picks the row the keys land on, as ↓ from the search field does.
+    pub fn leave_address_down(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.address.update(cx, |address, cx| address.close(cx));
+        self.down_into_columns(window, cx);
     }
 
     /// Alt+Enter, or Enter: goes to the path typed, in a new tab or this one.

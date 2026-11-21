@@ -186,6 +186,11 @@ impl Colet {
             .key_context(ADDRESS)
             .capture_any_mouse_down(Self::right_press_menu(&address_field, cx))
             .on_action(cx.listener(|this, _: &input::Escape, window, cx| this.leave_address(window, cx)))
+            // ↓ lets go of what was typed as Esc does, back to the column worked in.
+            .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {
+                cx.stop_propagation();
+                this.leave_address_down(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &GoToAddressInNewTab, _, cx| this.go_to_address(true, cx)))
             .child(Input::new(&address_field));
         // Ringed as the search field is while it takes the keys; the ring lies over the gaps around. It gives

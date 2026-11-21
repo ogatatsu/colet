@@ -80,6 +80,60 @@ fn esc_or_the_keys_going_elsewhere_let_go_of_what_was_typed(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
+fn down_lets_go_of_what_was_typed_back_to_the_column_worked_in(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "ctrl-l");
+    ui.input(cx, r"D:\other");
+    ui.press(cx, "down");
+    assert_eq!(ui.address(cx), None);
+    assert_eq!(ui.last_folder(cx), r"D:\work");
+    assert_eq!(ui.active(cx), 2);
+    assert!(ui.columns_focused(cx));
+    // The pick there is left as it was.
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
+}
+
+#[gpui_kit::test]
+fn esc_back_to_rows_the_keys_were_on_none_of_lands_on_none(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\alpha.txt"), file(r"D:\beta.txt")]));
+    let ui = open(cx, fake);
+    ui.input(cx, "a");
+    let focused = |ui: &Ui, cx: &mut TestAppContext| ui.read(cx, |v| v.state.columns[1].focused.clone());
+    ui.press(cx, "ctrl-l");
+    ui.press(cx, "escape");
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.active(cx), 1);
+    assert!(ui.selected(cx, 1).is_empty());
+    assert_eq!(focused(&ui, cx), None);
+    // Nor from its own field, emptied first.
+    ui.input(cx, "x");
+    ui.press(cx, "escape");
+    ui.press(cx, "escape");
+    assert!(ui.columns_focused(cx));
+    assert!(ui.selected(cx, 1).is_empty());
+    assert_eq!(focused(&ui, cx), None);
+    // ↓ picks the first.
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 1), [r"D:\alpha.txt"]);
+}
+
+#[gpui_kit::test]
+fn down_into_home_standing_alone_picks_its_row_where_esc_does_not(cx: &mut TestAppContext) {
+    let ui = open(cx, Arc::new(drive_d()));
+    ui.press(cx, "ctrl-l");
+    ui.press(cx, "escape");
+    assert!(ui.home_focused(cx));
+    assert!(ui.selected(cx, 0).is_empty());
+    assert_eq!(ui.read(cx, |v| v.state.columns[0].focused.clone()), None);
+    ui.press(cx, "ctrl-l");
+    ui.press(cx, "down");
+    assert_eq!(ui.address(cx), None);
+    assert!(ui.home_focused(cx));
+    assert_eq!(ui.selected(cx, 0), [r"D:\"]);
+    assert_eq!(ui.last_folder(cx), r"D:\");
+}
+
+#[gpui_kit::test]
 fn alt_enter_opens_the_path_in_a_new_tab_in_front(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-l");

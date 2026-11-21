@@ -149,6 +149,16 @@ impl State {
     /// which is picked while nothing else is; with neither, on home's first row, unpicked (a pick there
     /// opens a drive), or any other column's, picked.
     pub fn enter(&mut self) {
+        self.arrive(true);
+    }
+
+    /// Esc back from a field: the keys arrive in the active column as [`Self::enter`] has them, but with
+    /// neither a focused row nor an item pointed at they land on no row, picking nothing; ↓ picks the first.
+    pub fn come_back(&mut self) {
+        self.arrive(false);
+    }
+
+    fn arrive(&mut self, to_first: bool) {
         let index = self.active;
         let c = &self.columns[index];
         let listed = |path: &PathBuf| c.entry(path).is_some();
@@ -156,6 +166,8 @@ impl State {
             if c.selected.is_empty() && c.highlight.as_ref() == Some(&target) {
                 self.select(index, vec![target]);
             }
+        } else if !to_first {
+            // Back from a field, the keys land on no row.
         } else if let Some(first) = c.entries.first().map(|e| e.path.clone()) {
             if c.kind == Kind::Home {
                 self.columns[index].focused = Some(first);

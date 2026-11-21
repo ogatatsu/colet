@@ -1052,6 +1052,31 @@ impl Colet {
         self.changed(cx);
     }
 
+    /// Esc from a field: the keys go back to the active column, picking nothing there that was not; with
+    /// no row they were on, they land on none.
+    pub fn come_back_to_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.column_focus(self.state.active).focus(window, cx);
+        self.state.come_back();
+        self.changed(cx);
+    }
+
+    /// ↓ from the search or address field: the keys go to the active column. Home standing alone with
+    /// nothing picked picks the row they land on, a saved search running; with anything open beside it,
+    /// that is left be.
+    pub fn down_into_columns(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_active(window, cx);
+        let home = &self.state.columns[0];
+        let lands_on = home.focused.clone().filter(|path| home.entry(path).is_some());
+        if self.state.columns.len() == 1
+            && home.selected.is_empty()
+            && let Some(path) = lands_on
+        {
+            self.state.select(0, vec![path]);
+            // A saved search picked runs, which the field shows.
+            self.sync_search_field(window, cx);
+        }
+    }
+
     pub fn pick(&mut self, index: usize, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.state.select(index, vec![path]);
         self.state.set_active(index);
@@ -1302,7 +1327,10 @@ impl Colet {
         let Some(field) = self.narrow_fields.get(&id) else { return };
         let input = field.input.clone();
         if input.read(cx).value().is_empty() {
-            self.leave_narrow_field(id, window, cx);
+            // Back to the rows picking nothing new, as Esc from the address field does.
+            let Some(index) = self.state.index_of(id) else { return };
+            self.state.set_active(index);
+            self.come_back_to_active(window, cx);
         } else {
             input.update(cx, |input, cx| input.set_value("", window, cx));
             self.narrow(id, "", cx);

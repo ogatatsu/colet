@@ -2,18 +2,25 @@
 use super::*;
 
 #[gpui_kit::test]
-fn moves_from_the_empty_search_field_into_home_with_down_picking_its_row(cx: &mut TestAppContext) {
+fn moves_from_the_search_field_into_the_column_worked_in_with_down(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(drive_d()));
+    // Enter with nothing searched has no results to go to: the keys stay in the field.
+    ui.press(cx, "enter");
+    assert!(ui.search_focused(cx));
+    // ↓ goes home, standing alone there, and picks its first row.
     ui.press(cx, "down");
     assert!(ui.home_focused(cx));
     assert_eq!(ui.selected(cx, 0), [r"D:\"]);
     assert_eq!(ui.read(cx, |v| v.state.columns[1].path.to_str().unwrap().to_owned()), r"D:\");
-    // The drive picked again leaves the folders open beside it be.
     ui.press(cx, "right");
     ui.press(cx, "right");
+    let worked_in = ui.active(cx);
+    assert!(worked_in > 0);
+    // Back from the field, the keys go where they were, the folders open beside home left be.
     ui.press(cx, "ctrl-f");
     ui.press(cx, "down");
-    assert!(ui.home_focused(cx));
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.active(cx), worked_in);
     assert_eq!(ui.read(cx, |v| v.state.columns.last().unwrap().path.to_str().unwrap().to_owned()), r"D:\work");
 }
 
