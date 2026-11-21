@@ -14,13 +14,12 @@ fn reloads_only_the_folders_a_change_names(cx: &mut TestAppContext) {
     assert_eq!(ui.read(cx, |v| v.state.columns.len()), 3);
     fake.lists.lock().unwrap().clear();
     fake.folders.lock().unwrap().get_mut(r"D:\a").unwrap().push(file(r"D:\a\new.txt"));
-    let changed = ui.read(cx, |v| v.loading.watching.changed.clone());
-    *changed.lock().unwrap() = Changes::Paths(HashSet::from([PathBuf::from(r"D:\a")]));
+    ui.folders_changed(cx, Changes::Paths(HashSet::from([PathBuf::from(r"D:\a")])));
     settle(cx);
     assert_eq!(*fake.lists.lock().unwrap(), [r"D:\a"]);
     assert_eq!(ui.read(cx, |v| v.state.columns[2].entries.len()), 2);
     // Any change, unnamed, reloads them all.
-    *changed.lock().unwrap() = Changes::All;
+    ui.folders_changed(cx, Changes::All);
     settle(cx);
     let lists: HashSet<String> = fake.lists.lock().unwrap().iter().cloned().collect();
     assert!(lists.contains(r"D:\") && lists.contains(r"D:\a"), "{lists:?}");
@@ -33,7 +32,7 @@ fn reloads_the_results_when_everything_says_they_changed(cx: &mut TestAppContext
     ui.input(cx, "x");
     let before = fake.queries().len();
     fake.results.lock().unwrap().push(file(r"D:\x2.txt"));
-    fake.changed.store(true, Ordering::Relaxed);
+    fake.hear_change();
     for _ in 0..4 {
         settle(cx);
     }
@@ -68,7 +67,7 @@ fn refreshes_the_pages_in_sight_and_picked_after_a_change_overtaken_by_paginatio
         c.focused = c.selected.first().cloned();
     });
     fake.results.lock().unwrap().remove(0);
-    fake.changed.store(true, Ordering::Relaxed);
+    fake.hear_change();
     ui.view.update(cx, |v, cx| v.more(id, cx));
     for _ in 0..4 {
         settle(cx);
@@ -89,10 +88,32 @@ fn refreshes_the_pages_in_sight_and_picked_after_a_change_overtaken_by_paginatio
         c.selected = vec![r"D:\0700.txt".into()];
         c.focused = c.selected.first().cloned();
     });
-    fake.changed.store(true, Ordering::Relaxed);
+    fake.hear_change();
     for _ in 0..4 {
         settle(cx);
     }
     assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), PAGE * 2);
     assert_eq!(ui.selected(cx, 1), [r"D:\0700.txt"]);
+}
+
+#[gpui_kit::test]
+fn sleeps_until_something_tells_it_of_a_change(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
+    let ui = open(cx, fake.clone());
+    ui.input(cx, "x");
+    settle(cx);
+    let asked = || fake.asked_changed.load(Ordering::Relaxed);
+    let before = asked();
+    // Nothing changes: nothing is asked, however long it sits.
+    for _ in 0..8 {
+        settle(cx);
+    }
+    assert_eq!(asked(), before);
+    // The watch on the search tells: it is asked, and the results read again.
+    let searched = fake.queries().len();
+    fake.results.lock().unwrap().push(file(r"D:\x2.txt"));
+    fake.hear_change();
+    settle(cx);
+    assert!(asked() > before);
+    assert_eq!(fake.queries().len(), searched + 1);
 }

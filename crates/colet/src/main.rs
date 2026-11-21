@@ -42,6 +42,7 @@ mod tests;
 mod text_menu;
 mod theme;
 mod view;
+mod wake;
 mod watching;
 mod words;
 

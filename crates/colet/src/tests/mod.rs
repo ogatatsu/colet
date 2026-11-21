@@ -13,7 +13,7 @@ use std::{
 
 use colet_core::{
     entry::{Entry, Hiding, Marks, Order, Sort},
-    everything::{Connection, Page, SearchError, SlowProperties},
+    everything::{Connection, Page, SearchError, SlowProperties, Tell},
     folders::ListError,
     operations::{Event, Kind as Operation, OperationError, Request},
     paths::{ancestors, child, folder_name, path_key},
@@ -123,6 +123,10 @@ struct Fake {
     no_quick_look: AtomicBool,
     /// Told of every clipboard change, as the real watcher is.
     watcher: Mutex<Option<Box<dyn Fn() + Send>>>,
+    /// Told as the watch on the search hears something, as the real watch's thread tells.
+    tell: Mutex<Option<Tell>>,
+    /// How many times it was asked whether the search's results changed.
+    asked_changed: AtomicUsize,
 }
 
 impl Fake {
@@ -136,6 +140,19 @@ impl Fake {
 
     fn add(&self, parent: &Path, entry: Entry) {
         self.folders.lock().unwrap().entry(text(parent)).or_default().push(entry);
+    }
+
+    /// The watch on the search hears the results change, and says so.
+    fn hear_change(&self) {
+        self.changed.store(true, Ordering::Relaxed);
+        self.tell_watch();
+    }
+
+    /// The watch on the search tells of what it heard: a change, or its failure.
+    fn tell_watch(&self) {
+        if let Some(tell) = &*self.tell.lock().unwrap() {
+            tell();
+        }
     }
 }
 
@@ -194,11 +211,16 @@ impl Backend for Fake {
         Ok(self.results.lock().unwrap().len())
     }
 
-    fn search_changed(&self) -> Result<bool, SearchError> {
+    fn search_changed(&self) -> Result<Option<bool>, SearchError> {
+        self.asked_changed.fetch_add(1, Ordering::Relaxed);
         if let Some(error) = self.watch_failing.lock().unwrap().clone() {
             return Err(error);
         }
-        Ok(self.changed.load(Ordering::Relaxed))
+        Ok(Some(self.changed.load(Ordering::Relaxed)))
+    }
+
+    fn tell_search(&self, tell: Tell) {
+        *self.tell.lock().unwrap() = Some(tell);
     }
 
     fn stop_search(&self, _: u64) {
@@ -319,11 +341,9 @@ impl Backend for Fake {
         Some(self.clipboard.lock().unwrap().clone())
     }
 
+    /// Told by the window as the write ends, not by the watcher: it would tell from the clipboard's own thread.
     fn copy_files(&self, paths: &[PathBuf], cut: bool, _: Owner) -> windows_core::Result<()> {
         *self.clipboard.lock().unwrap() = ClipboardFiles { paths: paths.to_vec(), cut, sequence: 1, ..Default::default() };
-        if let Some(changed) = &*self.watcher.lock().unwrap() {
-            changed();
-        }
         Ok(())
     }
 
@@ -507,6 +527,13 @@ fn settle(cx: &mut TestAppContext) {
 }
 
 impl Ui {
+    /// The folder watcher adds `changes` to its batch and tells the window, as its thread does.
+    fn folders_changed(&self, cx: &mut TestAppContext, changes: Changes) {
+        let (changed, wake) = self.read(cx, |v| (v.loading.watching.changed.clone(), v.wake.clone()));
+        *changed.lock().unwrap() = changes;
+        wake.wake();
+    }
+
     fn act<R>(&self, cx: &mut TestAppContext, f: impl FnOnce(&mut Window, &mut App) -> R) -> R {
         cx.update_window(self.window, |_, window, cx| {
             window.render_frame(cx);

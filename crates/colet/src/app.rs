@@ -5,6 +5,7 @@ use std::{
     collections::HashSet,
     ops::Range,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 
@@ -41,6 +42,7 @@ use crate::{
     stored::Stored,
     tabs::{TabStrip, Tabs},
     theme::ActivePalette,
+    wake::Wake,
 };
 
 actions!(
@@ -347,6 +349,8 @@ pub struct Colet {
     pub history: Entity<HistoryPanel>,
     /// What QuickLook was last told to show: a preview open follows the keys from it.
     quick_looked: Option<PathBuf>,
+    /// Brings the window round to take in what changed off its thread.
+    pub(crate) wake: Wake,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -388,7 +392,11 @@ impl Colet {
             _ => 0,
         };
         shell::refuse_drops(owner);
-        let operations = cx.new(|cx| Operations::new(backend.clone(), owner, cx));
+        let (wake, woken) = crate::wake::wake();
+        // Told from the watch's thread; asked of the search nothing holds yet, so it never waits.
+        let told = wake.clone();
+        backend.tell_search(Arc::new(move || told.wake()));
+        let operations = cx.new(|cx| Operations::new(backend.clone(), owner, wake.clone(), cx));
         // The history's button, the rows' clipboard marks and the menu's Send To are drawn from it.
         subscriptions.push(cx.observe(&operations, |_, _, cx| cx.notify()));
         subscriptions.push(cx.subscribe_in(&operations, window, |this, _, event, window, cx| this.on_operations_event(event, window, cx)));
@@ -427,6 +435,7 @@ impl Colet {
             operations,
             history,
             quick_looked: None,
+            wake,
             _subscriptions: subscriptions,
         };
         for problem in [problem, sorts_problem].into_iter().flatten() {
@@ -470,7 +479,9 @@ impl Colet {
         crate::theme::set_zoom(this.stored.settings().zoom, cx);
         this.focus_search(window, cx);
         this.sync(cx);
-        this.poll(cx);
+        // Once at start, to read the clipboard.
+        this.wake.wake();
+        this.listen(woken, cx);
         this
     }
 

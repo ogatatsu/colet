@@ -35,6 +35,7 @@ use crate::{
     settings::Favorite,
     state::{Column, HomeKey, Kind as ColumnKind},
     theme::ActivePalette,
+    wake::Wake,
 };
 mod clipboard;
 mod handoff;
@@ -52,6 +53,9 @@ pub use {
     reasons::{NOT_AT_SERVER, SAME_FOLDER},
 };
 
+/// How long the clipboard waits before it is read again, after another app held it.
+const CLIPBOARD_RETRY: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// The file operations and what they leave behind: the one under way and the sends to Windows' Send To,
 /// the history, the clipboard as last read, what Send To offers, and what the latest operation sent away.
 ///
@@ -63,6 +67,8 @@ pub struct Operations {
     backend: backend::Shared,
     /// The window the shell's dialogs belong to.
     owner: shell::Owner,
+    /// Brings the window round to read the clipboard again, after another app held it.
+    wake: Wake,
     /// The file operation under way; they go one at a time.
     running: Option<Running>,
     /// The sends to Windows' Send To under way: their drops run in this process, so the window stays
@@ -112,14 +118,19 @@ struct Ended {
 }
 
 impl Operations {
-    /// Watches the clipboard from now on, and reads what Send To offers.
-    pub fn new(backend: backend::Shared, owner: shell::Owner, cx: &mut Context<Self>) -> Self {
+    /// Watches the clipboard from now on, telling `wake` of each change, and reads what Send To offers.
+    pub fn new(backend: backend::Shared, owner: shell::Owner, wake: Wake, cx: &mut Context<Self>) -> Self {
         let clipboard = Clipboard::default();
         let changed = clipboard.changed_flag();
-        backend.watch_clipboard(Box::new(move || changed.store(true, Ordering::Relaxed)));
+        let told = wake.clone();
+        backend.watch_clipboard(Box::new(move || {
+            changed.store(true, Ordering::Relaxed);
+            told.wake();
+        }));
         let mut this = Self {
             backend,
             owner,
+            wake,
             running: None,
             sending: 0,
             history: History::default(),
@@ -269,13 +280,20 @@ impl Operations {
             let backend = self.backend.clone();
             let read = cx.background_executor().spawn(async move { backend.clipboard_files() });
             cx.spawn(async move |this, cx| {
-                // None while another app holds it: try again next time.
                 match read.await {
                     Some(files) => this.update(cx, |this, cx| {
                         this.clipboard.set_files(files);
                         cx.notify();
                     }),
-                    None => this.update(cx, |this, _| this.clipboard.read_again()),
+                    // None while another app holds it, which says nothing as it lets go: read again in a
+                    // moment.
+                    None => {
+                        cx.background_executor().timer(CLIPBOARD_RETRY).await;
+                        this.update(cx, |this, _| {
+                            this.clipboard.read_again();
+                            this.wake.wake();
+                        })
+                    }
                 }
                 .ok();
             })
@@ -325,6 +343,11 @@ impl Operations {
             let result = task.await;
             this.update(cx, |this, cx| {
                 let written = result.is_ok();
+                // What was written is read back at once, rather than when the watch on the clipboard tells.
+                if written {
+                    this.clipboard.read_again();
+                    this.wake.wake();
+                }
                 cx.emit(match result {
                     Ok(()) => OperationsEvent::Notice(done, Tone::Info),
                     Err(error) => OperationsEvent::Notice(error, Tone::Error),

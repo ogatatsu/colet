@@ -1002,6 +1002,7 @@ dependencies = [
 name = "colet"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "colet-core",
  "embed-resource",
  "gpui-kit",

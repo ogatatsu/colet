@@ -11,6 +11,8 @@ use colet_core::{
     watch::{Changes, FolderWatcher, WatchError},
 };
 
+use crate::wake::Wake;
+
 #[derive(Default)]
 pub struct Watching {
     /// Started with the first folder to watch.
@@ -47,8 +49,9 @@ impl Watching {
 
     /// Watches `folders` but those `released` or `carried` lets go. The watcher opens them on its own
     /// thread, so a share slow to answer never holds up the window; the receiver hears once it has, when
-    /// there was anything to change. Errs when the watcher could not start.
-    pub fn set(&mut self, folders: Vec<PathBuf>) -> Result<Option<mpsc::Receiver<()>>, WatchError> {
+    /// there was anything to change. The watcher, started the first time, tells `wake` of each change and
+    /// each folder it misses. Errs when the watcher could not start.
+    pub fn set(&mut self, folders: Vec<PathBuf>, wake: &Wake) -> Result<Option<mpsc::Receiver<()>>, WatchError> {
         let folders = self.carried.values().fold(kept_watching(folders, &self.released), kept_watching);
         if folders == self.watched {
             return Ok(None);
@@ -58,8 +61,15 @@ impl Watching {
             Some(watcher) => watcher,
             None => {
                 let missed = self.missed.clone();
-                let watcher =
-                    FolderWatcher::new(self.changed.clone(), move |paths| missed.lock().unwrap_or_else(|e| e.into_inner()).extend(paths))?;
+                let (changed, told) = (wake.clone(), wake.clone());
+                let watcher = FolderWatcher::new(
+                    self.changed.clone(),
+                    move || changed.wake(),
+                    move |paths| {
+                        missed.lock().unwrap_or_else(|e| e.into_inner()).extend(paths);
+                        told.wake();
+                    },
+                )?;
                 self.watcher.insert(watcher)
             }
         };

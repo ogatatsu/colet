@@ -167,6 +167,9 @@ pub fn count(query: &str) -> Result<usize, SearchError> {
     }
 }
 
+/// What hears that a watch heard something, called on the watch's thread.
+pub type Tell = Arc<dyn Fn() + Send + Sync>;
+
 /// What a watch has heard: that the results changed, and the error it stopped on (0 for none).
 #[derive(Default)]
 struct News {
@@ -185,9 +188,9 @@ struct Watch {
 }
 
 impl Watch {
-    /// Gives `client`, which it then owns, the search in `state`, and waits on it; `None` if the
-    /// search fails, having let go of `client`.
-    unsafe fn start(client: Handle, state: Handle) -> Option<Self> {
+    /// Gives `client`, which it then owns, the search in `state`, and waits on it, telling `tell` once it
+    /// hears a change or fails; `None` if the search fails, having let go of `client`.
+    unsafe fn start(client: Handle, state: Handle, tell: Option<Tell>) -> Option<Self> {
         unsafe {
             Everything3_SetSearchViewportOffset(state, 0);
             Everything3_SetSearchViewportCount(state, 1);
@@ -209,6 +212,9 @@ impl Watch {
                     // Nothing clears the change on this client, so waiting again would return at once,
                     // over and over: it stays heard until a fresh search starts another watch.
                     heard.changed.store(true, Ordering::Relaxed);
+                    if let Some(tell) = &tell {
+                        tell();
+                    }
                     return;
                 }
                 let error = unsafe { Everything3_GetLastError() };
@@ -219,6 +225,9 @@ impl Watch {
                 }
                 if !heard.stopping.load(Ordering::Relaxed) {
                     heard.failed.store(error, Ordering::Relaxed);
+                    if let Some(tell) = &tell {
+                        tell();
+                    }
                 }
                 return;
             }
@@ -254,6 +263,8 @@ pub struct SearchSession {
     #[cfg(test)]
     watch_instance: Option<String>,
     watch_retry_at: Option<Instant>,
+    /// Told from the watch's thread whenever it hears a change or fails.
+    tell: Option<Tell>,
     /// What it is connected to; none before it first connects.
     pub connection: Option<Connection>,
     /// What to warn of the Everything it last connected to, until taken: the size and date modified it
@@ -273,6 +284,7 @@ impl Default for SearchSession {
             key: None,
             version: String::new(),
             watch_retry_at: None,
+            tell: None,
             connection: None,
             warning: None,
             #[cfg(test)]
@@ -288,6 +300,12 @@ impl Drop for SearchSession {
 }
 
 impl SearchSession {
+    /// From the next search on, `tell` is told, on the watch's thread, whenever the watch hears the
+    /// results change or fails; [`changed`](Self::changed) then says which.
+    pub fn tell(&mut self, tell: Tell) {
+        self.tell = Some(tell);
+    }
+
     pub fn disconnect(&mut self) {
         self.watch = None;
         unsafe {
@@ -440,7 +458,7 @@ impl SearchSession {
         #[cfg(not(test))]
         let instance = None;
         let client = unsafe { open(instance) };
-        self.watch = if client.is_null() { None } else { unsafe { Watch::start(client, self.state) } };
+        self.watch = if client.is_null() { None } else { unsafe { Watch::start(client, self.state, self.tell.clone()) } };
         if self.watch.is_some() {
             self.watch_retry_at = None;
             self.name_connection();

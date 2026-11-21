@@ -110,15 +110,22 @@ pub enum WatchError {
 }
 
 impl FolderWatcher {
-    /// Watches nothing until [`set`](Self::set), adding what changes to `changes`. `unwatched` hears of
-    /// the folders it could list but not watch, as for a share that sends no change notifications; one it
-    /// cannot read is left out, as its column says so. It is called on the watcher's thread.
-    pub fn new(changes: Arc<Mutex<Changes>>, unwatched: impl Fn(Vec<PathBuf>) + Send + 'static) -> Result<Self, WatchError> {
+    /// Watches nothing until [`set`](Self::set), adding what changes to `changes` and then telling
+    /// `added`, so the caller takes the batch when told rather than looking. `unwatched` hears of the
+    /// folders it could list but not watch, as for a share that sends no change notifications; one it
+    /// cannot read is left out, as its column says so. Both are called on the watcher's threads.
+    pub fn new(
+        changes: Arc<Mutex<Changes>>,
+        added: impl Fn() + Send + Sync + 'static,
+        unwatched: impl Fn(Vec<PathBuf>) + Send + 'static,
+    ) -> Result<Self, WatchError> {
+        let added = Arc::new(added);
         let desired = Arc::new(Mutex::new(Vec::<OsString>::new()));
         let requested = desired.clone();
         let (wanted, sets) = mpsc::channel::<WatchCommand>();
         let repair = wanted.clone();
         let repaired = changes.clone();
+        let added_again = added.clone();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             let (paths, reset, error) = match event {
                 Ok(event) => {
@@ -147,6 +154,7 @@ impl FolderWatcher {
                 let _ = repair.send(WatchCommand::Repair(repairs));
             }
             changes.lock().unwrap_or_else(|e| e.into_inner()).add(if error { Vec::new() } else { listings(paths, reset) });
+            added();
         })?;
         // Dropping the handle sends Stop: the callback also has a sender, so disconnection alone
         // cannot stop this thread. Waiting on commands keeps it asleep while no folders change.
@@ -232,6 +240,7 @@ impl FolderWatcher {
                 if !refreshed.is_empty() {
                     // List again after the new handle is installed, covering the gap before it.
                     repaired.lock().unwrap_or_else(|e| e.into_inner()).add(refreshed);
+                    added_again();
                 }
                 if !failed.is_empty() {
                     unwatched(failed);
@@ -352,7 +361,7 @@ mod tests {
         let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let changes = Arc::new(Mutex::new(Changes::default()));
         let (missed, unwatched) = mpsc::channel();
-        let watcher = FolderWatcher::new(changes.clone(), move |paths| missed.send(paths).unwrap()).unwrap();
+        let watcher = FolderWatcher::new(changes.clone(), || {}, move |paths| missed.send(paths).unwrap()).unwrap();
         let path = |dir: &tempfile::TempDir| dir.path().to_owned();
         watcher.set(vec![path(&a)]);
         assert!(reported(a.path(), &changes));
@@ -374,7 +383,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (outer, inner) = (dir.path().join("outer"), dir.path().join("outer").join("inner"));
         std::fs::create_dir_all(&inner).unwrap();
-        let watcher = FolderWatcher::new(Arc::new(Mutex::new(Changes::default())), |_| {}).unwrap();
+        let watcher = FolderWatcher::new(Arc::new(Mutex::new(Changes::default())), || {}, |_| {}).unwrap();
         watcher.set(vec![outer.clone(), inner.clone()]).recv().unwrap();
         assert!(std::fs::rename(&outer, dir.path().join("moved")).is_err());
         watcher.set(vec![]).recv().unwrap();
@@ -387,7 +396,7 @@ mod tests {
         let path = dir.path().join("watched");
         std::fs::create_dir(&path).unwrap();
         let changes = Arc::new(Mutex::new(Changes::default()));
-        let watcher = FolderWatcher::new(changes.clone(), |_| {}).unwrap();
+        let watcher = FolderWatcher::new(changes.clone(), || {}, |_| {}).unwrap();
         watcher.set(vec![path.clone()]);
         assert!(reported(&path, &changes));
         std::fs::rename(&path, dir.path().join("old")).unwrap();

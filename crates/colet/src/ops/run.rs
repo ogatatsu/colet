@@ -56,7 +56,7 @@ impl Colet {
             self.refuse(words::ops::title(request.kind), BUSY, cx);
             return;
         };
-        let (backend, owner, asked) = (self.backend.clone(), self.owner, request.clone());
+        let (backend, owner, asked, wake) = (self.backend.clone(), self.owner, request.clone(), self.wake.clone());
         cx.spawn(async move |this, cx| {
             // A paste reads the clipboard once, and both lets go of and pastes what it read: what was last
             // seen on it may be a moment old.
@@ -96,7 +96,10 @@ impl Colet {
                         asked,
                         clipboard,
                         owner,
-                        Box::new(move |event| events.lock().unwrap_or_else(|e| e.into_inner()).push(event)),
+                        Box::new(move |event| {
+                            events.lock().unwrap_or_else(|e| e.into_inner()).push(event);
+                            wake.wake();
+                        }),
                     )
                 })
                 .await;

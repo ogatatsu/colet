@@ -30,8 +30,12 @@ use crate::{
     home::home_entries,
     search_query::{everything_query, narrowed_query},
     state::{ColumnId, Kind},
+    wake::Woken,
     watching::Watching,
 };
+
+/// How long what changes is gathered, from the first change told, before it is taken in together.
+const GATHER: Duration = Duration::from_millis(200);
 
 #[derive(Default)]
 pub struct Loading {
@@ -399,7 +403,7 @@ impl Colet {
             .filter(|c| c.kind == Kind::Folder && c.error.is_none() && !colet_core::paths::is_server(&c.path))
             .map(|c| c.path.clone())
             .collect();
-        self.loading.watching.set(paths).unwrap_or_else(|error| {
+        self.loading.watching.set(paths, &self.wake).unwrap_or_else(|error| {
             self.notify(words::window::cannot_start_watching(&error), Tone::Error, cx);
             None
         })
@@ -430,14 +434,20 @@ impl Colet {
         }
     }
 
-    /// Takes in what changed, every 200ms: folder changes reload the columns showing them, and what the
-    /// watch on Everything heard of the results.
-    pub(crate) fn poll(&mut self, cx: &mut Context<Self>) {
+    /// Takes in what changed whenever `woken` is told, and sleeps in between: folder changes reload the
+    /// columns showing them, and what the watch on Everything heard of the results. What comes within
+    /// [`GATHER`] of the first is taken in with it, so a burst reloads once.
+    pub(crate) fn listen(&mut self, woken: Woken, cx: &mut Context<Self>) {
         let changed = self.loading.watching.changed.clone();
         let backend = self.backend.clone();
         cx.spawn(async move |this, cx| {
+            // Asked again without being told, while a search held the watch on it.
+            let mut ask_again = false;
             loop {
-                cx.background_executor().timer(Duration::from_millis(200)).await;
+                if !ask_again && !woken.told().await {
+                    return;
+                }
+                cx.background_executor().timer(GATHER).await;
                 if this.update(cx, |this, cx| this.take_changes(cx)).is_err() {
                     return;
                 }
@@ -447,10 +457,11 @@ impl Colet {
                 }
                 let backend = backend.clone();
                 let result = cx.background_executor().spawn(async move { backend.search_changed() }).await;
+                ask_again = matches!(result, Ok(None));
                 let alive = this
                     .update(cx, |this, cx| match result {
-                        Ok(true) => this.search_changed(cx),
-                        Ok(false) => {}
+                        Ok(Some(true)) => this.search_changed(cx),
+                        Ok(Some(false) | None) => {}
                         // Heard of a search no longer in front, as it was let go of: the next search
                         // connects afresh if it must.
                         Err(_) if !this.searches() => {}

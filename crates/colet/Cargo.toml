@@ -6,6 +6,8 @@ publish.workspace = true
 
 [dependencies]
 colet-core = { path = "../colet-core" }
+# Already in the tree through gpui: wakes the window to take in what changed off it.
+async-channel = "2"
 gpui-kit.workspace = true
 image = { version = "0.25", default-features = false }
 raw-window-handle = "0.6"

@@ -117,6 +117,7 @@ fn stops_watching_the_search_once_none_is_in_front_and_drops_what_the_watch_hear
     assert_eq!(stopped(), 1);
     // What the watch heard of the search left behind is not told.
     *fake.watch_failing.lock().unwrap() = Some(SearchError::WatchDisconnected(0));
+    fake.tell_watch();
     settle(cx);
     assert!(ui.toasts(cx).is_empty(), "{:?}", ui.toasts(cx));
     *fake.watch_failing.lock().unwrap() = None;

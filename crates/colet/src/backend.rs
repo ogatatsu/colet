@@ -16,7 +16,7 @@ use crate::{
 };
 use colet_core::{
     entry::{Entry, Order},
-    everything::{self, Connection, Page, SearchError, SearchSession, SlowProperties},
+    everything::{self, Connection, Page, SearchError, SearchSession, SlowProperties, Tell},
     folders::{self, ListError},
     operations::{self, Event, OperationError, Request},
     quick_look,
@@ -62,8 +62,12 @@ pub trait Backend: Send + Sync + 'static {
     fn search(&self, search: Search) -> Result<Option<Found>, SearchError>;
     /// How many results `query` finds, leaving the last search and its watch be.
     fn count(&self, query: &str) -> Result<usize, SearchError>;
-    /// Whether the last search's results changed; so until it is searched afresh.
-    fn search_changed(&self) -> Result<bool, SearchError>;
+    /// Whether the last search's results changed; so until it is searched afresh. `None` while a search
+    /// under way holds it, perhaps waiting out a busy Everything: ask again in a moment.
+    fn search_changed(&self) -> Result<Option<bool>, SearchError>;
+    /// Tells `tell`, from another thread, whenever the watch on the search hears a change or fails, so
+    /// [`Backend::search_changed`] is asked then rather than every so often.
+    fn tell_search(&self, tell: Tell);
     /// Stops watching the last search, as none is in front, unless a search asked after `request` came
     /// first. It may wait for a search under way: never call it on the UI thread.
     fn stop_search(&self, request: u64);
@@ -176,13 +180,17 @@ impl Backend for Live {
         everything::count(query)
     }
 
-    fn search_changed(&self) -> Result<bool, SearchError> {
+    fn search_changed(&self) -> Result<Option<bool>, SearchError> {
         match self.session.try_lock() {
-            Ok(mut session) => session.changed(),
-            // A search under way, perhaps waiting out a busy Everything, is asked next time.
-            Err(TryLockError::WouldBlock) => Ok(false),
-            Err(TryLockError::Poisoned(_)) => self.session().changed(),
+            Ok(mut session) => session.changed().map(Some),
+            // A search under way, perhaps waiting out a busy Everything: asked again in a moment.
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Poisoned(_)) => self.session().changed().map(Some),
         }
+    }
+
+    fn tell_search(&self, tell: Tell) {
+        self.session().tell(tell);
     }
 
     fn stop_search(&self, request: u64) {
