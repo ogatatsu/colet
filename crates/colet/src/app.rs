@@ -1061,12 +1061,13 @@ impl Colet {
     }
 
     /// ↓ from the search or address field: the keys go to the active column. Home standing alone with
-    /// nothing picked picks the row they land on, a saved search running; with anything open beside it,
-    /// that is left be.
+    /// nothing picked picks the row they were on, or its first, a saved search running; with anything open
+    /// beside it, that is left be.
     pub fn down_into_columns(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_active(window, cx);
         let home = &self.state.columns[0];
-        let lands_on = home.focused.clone().filter(|path| home.entry(path).is_some());
+        let lands_on =
+            home.focused.clone().filter(|path| home.entry(path).is_some()).or_else(|| home.entries.first().map(|e| e.path.clone()));
         if self.state.columns.len() == 1
             && home.selected.is_empty()
             && let Some(path) = lands_on

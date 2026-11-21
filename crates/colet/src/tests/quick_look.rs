@@ -28,7 +28,10 @@ fn shows_the_row_the_keys_are_on_in_quick_look_following_them(cx: &mut TestAppCo
 fn shows_homes_places_in_quick_look_but_not_its_saved_searches(cx: &mut TestAppContext) {
     use QuickLookMessage::{Switch, Toggle};
     let (fake, ui) = ordered_home(cx);
+    // Home shown, the keys on no row there: ↓ picks the first.
     ui.press(cx, "ctrl-0");
+    assert_eq!(ui.read(cx, |v| v.state.columns[0].focused.clone()), None);
+    ui.press(cx, "down");
     fake.quick_looked();
     ui.press(cx, "space");
     assert_eq!(fake.quick_looked(), [(Toggle, r"D:\a".into())]);

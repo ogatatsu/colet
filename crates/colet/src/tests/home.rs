@@ -210,8 +210,8 @@ fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_she
     // ↓ from the field picks it in home standing alone, which runs it.
     ui.press(cx, "down");
     assert_eq!(ui.field(cx), "ext:pdf");
-    // ← from other results lands on it unpicked, and ↓ from the field back there leaves the results be;
-    // ↵ runs it.
+    // ← from other results lands on no row in home, and ↓ from the field back there leaves the results
+    // be; ↓ in home picks it, which runs it.
     ui.press(cx, "ctrl-f");
     ui.press(cx, "ctrl-a");
     ui.input(cx, "a");
@@ -222,7 +222,8 @@ fn runs_a_saved_search_from_enter_and_double_click_without_sending_it_to_the_she
     ui.press(cx, "down");
     assert!(ui.home_focused(cx));
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "a");
-    ui.press(cx, "enter");
+    assert_eq!(ui.read(cx, |v| v.state.columns[0].focused.clone()), None);
+    ui.press(cx, "down");
     assert_eq!(ui.read(cx, |v| v.state.query.clone()), "ext:pdf");
     assert_eq!(ui.field(cx), "ext:pdf");
     assert!(ui.home_focused(cx));

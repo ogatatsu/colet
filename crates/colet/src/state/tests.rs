@@ -443,12 +443,15 @@ fn steps_through_rows_picking_each() {
 }
 
 #[test]
-fn enters_home_without_picking_and_results_picking_the_first() {
+fn enters_home_on_no_row_and_results_picking_the_first() {
     let mut s = State::new();
     with_entries(&mut s, 0, vec![folder(r"C:\"), folder(r"D:\")]);
     s.enter();
-    assert_eq!(s.columns[0].focused.as_deref(), Some(Path::new(r"C:\")));
+    assert_eq!(s.columns[0].focused, None);
     assert!(s.columns[0].selected.is_empty());
+    // ↓ picks the first.
+    s.step(1);
+    assert_eq!(s.columns[0].selected, one(r"C:\"));
     s.set_query("x");
     with_entries(&mut s, 1, vec![file(r"D:\x.txt")]);
     s.enter();

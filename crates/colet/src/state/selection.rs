@@ -146,8 +146,8 @@ impl State {
     }
 
     /// The keys arrive in the active column: they land on its focused row, or the item it points at,
-    /// which is picked while nothing else is; with neither, on home's first row, unpicked (a pick there
-    /// opens a drive), or any other column's, picked.
+    /// which is picked while nothing else is; with neither, on no row in home (a pick there opens a drive;
+    /// ↓ picks the first), or any other column's first, picked.
     pub fn enter(&mut self) {
         self.arrive(true);
     }
@@ -166,14 +166,10 @@ impl State {
             if c.selected.is_empty() && c.highlight.as_ref() == Some(&target) {
                 self.select(index, vec![target]);
             }
-        } else if !to_first {
-            // Back from a field, the keys land on no row.
+        } else if !to_first || c.kind == Kind::Home {
+            // Back from a field, or in home, the keys land on no row.
         } else if let Some(first) = c.entries.first().map(|e| e.path.clone()) {
-            if c.kind == Kind::Home {
-                self.columns[index].focused = Some(first);
-            } else {
-                self.select(index, vec![first]);
-            }
+            self.select(index, vec![first]);
         } else if c.loading && c.kind == Kind::Search {
             // Only the results: a folder gone to, as from the address bar, opens with nothing picked.
             self.columns[index].entering = true;
