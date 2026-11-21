@@ -6,10 +6,7 @@ use std::path::PathBuf;
 use gpui_kit::*;
 
 use crate::words;
-use crate::{
-    app::{Colet, Tone},
-    state::HomeKey,
-};
+use crate::{app::Colet, notices::Tone, state::HomeKey};
 
 /// How often it asks whether the app the rows were dropped in is done writing them out.
 const WRITING_POLL: std::time::Duration = std::time::Duration::from_millis(250);

@@ -4,8 +4,8 @@ use super::*;
 #[gpui_kit::test]
 fn keeps_an_error_up_until_it_is_closed_and_lets_a_notice_go_on_its_own(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(drive_d()));
-    ui.view.update(cx, |v, cx| v.notify("失敗しました", crate::app::Tone::Error, cx));
-    ui.view.update(cx, |v, cx| v.notify("コピーしました", crate::app::Tone::Info, cx));
+    ui.view.update(cx, |v, cx| v.notify("失敗しました", crate::notices::Tone::Error, cx));
+    ui.view.update(cx, |v, cx| v.notify("コピーしました", crate::notices::Tone::Info, cx));
     settle(cx);
     assert_eq!(ui.toasts(cx), ["失敗しました", "コピーしました"]);
     cx.executor().advance_clock(Duration::from_secs(10));

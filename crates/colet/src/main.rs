@@ -22,6 +22,7 @@ mod loading;
 mod menus;
 mod metrics;
 mod narrow_fields;
+mod notices;
 mod ops;
 mod overlays;
 mod places;

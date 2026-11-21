@@ -5,8 +5,9 @@ use std::time::Duration;
 use gpui_kit::*;
 
 use crate::{
-    app::{Colet, Tone, Widths},
+    app::{Colet, Widths},
     kept_file::Queued,
+    notices::Tone,
     settings::{Placement, Settings},
     sorts::Sorts,
 };

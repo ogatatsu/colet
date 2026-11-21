@@ -24,10 +24,11 @@ use gpui_kit::{Context, EventEmitter, Task};
 
 use crate::words;
 use crate::{
-    app::{Colet, Tone},
+    app::Colet,
     backend::{self, Search},
     columns::PAGE_AHEAD,
     home::home_entries,
+    notices::Tone,
     search_query::{everything_query, narrowed_query},
     settings::Settings,
     state::{ColumnId, Kind},

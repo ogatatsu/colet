@@ -23,11 +23,12 @@ use gpui_kit::*;
 
 use crate::words;
 use crate::{
-    app::{Colet, FOLD_WIDTH, Tone, WidthOf},
+    app::{Colet, FOLD_WIDTH, WidthOf},
     dialogs::{Choice, Dialog, DialogParts, Pick, SearchEdit, field, label, push},
     file_menu::FileCommand,
     menus::{Line, line},
     metrics::{self, Scale},
+    notices::Tone,
     ops::Reasons,
     reveal::Slide,
     search_filters::filter_tool_id,

@@ -632,7 +632,7 @@ impl Ui {
 
     /// What the notices up in the window say, oldest first.
     fn toasts(&self, cx: &mut TestAppContext) -> Vec<String> {
-        let last = self.read(cx, |v| v.next_toast);
+        let last = self.read(cx, |v| v.notices.last());
         self.act(cx, |window, _| {
             (1..=last).filter_map(|id| window.try_find(("toast", id as usize))).filter_map(|t| t.label().map(str::to_owned)).collect()
         })

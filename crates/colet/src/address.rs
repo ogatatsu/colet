@@ -13,11 +13,7 @@ use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 
 use crate::words;
-use crate::{
-    app::{Colet, Tone},
-    backend,
-    state::Kind,
-};
+use crate::{app::Colet, backend, notices::Tone, state::Kind};
 
 mod view;
 

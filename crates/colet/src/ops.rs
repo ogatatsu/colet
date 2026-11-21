@@ -27,11 +27,12 @@ use gpui_kit::*;
 
 use crate::words;
 use crate::{
-    app::{Colet, Tone},
+    app::Colet,
     backend::{self, PathKind},
     clipboard::{Clipboard, Paste},
     dialogs::{Dialog, DialogParts, field, label, push},
     metrics,
+    notices::Tone,
     settings::Favorite,
     state::{Column, HomeKey, Kind as ColumnKind},
     theme::ActivePalette,

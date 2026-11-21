@@ -10,11 +10,6 @@ use std::{
 };
 
 use colet_core::{quick_look, shell};
-use gpui_kit::component::{
-    WindowExt,
-    button::Button,
-    notification::{Notification, NotificationType},
-};
 use gpui_kit::*;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -31,6 +26,7 @@ use crate::{
     loading::Loading,
     metrics::Scale,
     narrow_fields::NarrowFields,
+    notices::{Details, Notices, Tone},
     ops::Operations,
     overlays::Overlays,
     scrolls::Scrolls,
@@ -279,14 +275,6 @@ struct Resize {
     start_width: f32,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Tone {
-    Info,
-    /// Something to set right outside Colet: it stays until closed, as an error does.
-    Warning,
-    Error,
-}
-
 /// A file kept between starts as it was `read`, what to say of what of it could not be, and its saves
 /// through `write`: none while the file was not all read and is still there, so it is never written over.
 fn kept<T: Default + Clone + Send + 'static>(
@@ -317,9 +305,8 @@ pub struct Colet {
     pub home_focus: FocusHandle,
     pub columns_focus: FocusHandle,
     pub icons: Icons,
-    /// The window the notices go up in.
-    window: AnyWindowHandle,
-    pub(crate) next_toast: u64,
+    /// The notices up in the window.
+    pub(crate) notices: Notices,
     /// Where the tab in front is scrolled.
     pub scrolls: Scrolls,
     pub(crate) owner: shell::Owner,
@@ -426,8 +413,7 @@ impl Colet {
             home_focus: cx.focus_handle().tab_stop(true),
             columns_focus: cx.focus_handle().tab_stop(true),
             icons: Icons::default(),
-            window: Window::window_handle(window),
-            next_toast: 0,
+            notices: Notices::new(Window::window_handle(window)),
             scrolls: Scrolls::default(),
             owner,
             backend,
@@ -608,61 +594,24 @@ impl Colet {
 
     /// An error that tells of an operation in the history, with a button to open it there.
     pub fn notify_entry(&mut self, text: impl Into<SharedString>, entry: u64, cx: &mut Context<Self>) {
-        self.push_notice(text.into(), Tone::Error, Some(entry), cx);
-    }
-
-    pub fn notify(&mut self, text: impl Into<SharedString>, tone: Tone, cx: &mut Context<Self>) {
-        self.push_notice(text.into(), tone, None, cx);
-    }
-
-    /// Puts a notice up in the window, the newest few at a time: errors and warnings stay until closed;
-    /// the rest go on their own.
-    fn push_notice(&mut self, text: SharedString, tone: Tone, entry: Option<u64>, cx: &mut Context<Self>) {
-        self.next_toast += 1;
-        let id = self.next_toast;
-        let stays = tone != Tone::Info;
         let colet = cx.weak_entity();
-        let mut note = Notification::new()
-            .id1::<Self>(("toast", id))
-            .content(move |_, _, _| {
-                div()
-                    .id(("toast", id))
-                    .test_support()
-                    .role(if stays { Role::Alert } else { Role::Status })
-                    .aria_label(text.clone())
-                    .text_sm()
-                    .child(text.clone())
-                    .into_any_element()
-            })
-            .autohide(!stays);
-        match tone {
-            Tone::Error => note = note.with_type(NotificationType::Error),
-            Tone::Warning => note = note.with_type(NotificationType::Warning),
-            Tone::Info => {}
-        }
-        if let Some(entry) = entry {
-            note = note.action(move |_, _, _| {
-                let colet = colet.clone();
-                // The mouse leaves the keys where they are; from the keys, they go on into the history.
-                crate::view::keep_focus(Button::new(("toast-details", id)).label(words::window::DETAILS)).on_click(
-                    move |event: &ClickEvent, window, cx| {
-                        window.remove_notification1::<Colet>(("toast", id), cx);
-                        colet
-                            .update(cx, |this, cx| {
-                                this.show_history(true, Some(entry), window, cx);
-                                if event.is_keyboard() {
-                                    this.history.read(cx).entry_focus(entry, cx).focus(window, cx);
-                                }
-                            })
-                            .ok();
-                    },
-                )
-            });
-        }
-        let window = self.window;
-        cx.defer(move |cx| {
-            window.update(cx, |_, window, cx| window.push_notification(note, cx)).ok();
+        // From the keys, they go on into the history.
+        let details: Details = Box::new(move |event, window, cx| {
+            colet
+                .update(cx, |this, cx| {
+                    this.show_history(true, Some(entry), window, cx);
+                    if event.is_keyboard() {
+                        this.history.read(cx).entry_focus(entry, cx).focus(window, cx);
+                    }
+                })
+                .ok();
         });
+        self.notices.push(text.into(), Tone::Error, Some(details), cx);
+    }
+
+    /// Puts a notice up in the window, as [`Notices::push`] does.
+    pub fn notify(&mut self, text: impl Into<SharedString>, tone: Tone, cx: &mut Context<Self>) {
+        self.notices.push(text.into(), tone, None, cx);
     }
 
     /// Runs `work` off the UI thread, then says `done` once it succeeds, or why it failed.

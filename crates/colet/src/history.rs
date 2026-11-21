@@ -14,10 +14,11 @@ use gpui_kit::*;
 
 use crate::words;
 use crate::{
-    app::{Colet, Tone},
+    app::Colet,
     backend::{self, PathKind},
     dialogs::push,
     metrics::{self, scaled},
+    notices::Tone,
     ops::{ItemStatus, Operations, Status},
     stops::{Stop, Stops},
     theme::ActivePalette,

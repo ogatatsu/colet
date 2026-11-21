@@ -385,7 +385,7 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     ui.press(cx, "delete");
     assert!(ui.toasts(cx).iter().any(|t| t == "「ごみ箱へ移動」: 1 件失敗"), "{:?}", ui.toasts(cx));
     assert_eq!(ui.ops(cx, |o| o.history.unseen), 1);
-    let toast = ui.read(cx, |v| v.next_toast);
+    let toast = ui.read(cx, |v| v.notices.last());
     ui.click(cx, ("toast-details", toast as usize));
     assert!(ui.read_app(cx, |v, app| v.overlays.is_history_open() && v.operations.read(app).history.unseen == 0));
     let entry = ui.ops(cx, |o| o.history.entries[0].clone());
