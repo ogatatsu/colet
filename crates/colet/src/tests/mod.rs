@@ -14,7 +14,7 @@ use std::{
 use colet_core::{
     entry::{Entry, Hiding, Marks, Order, Sort},
     everything::Page,
-    operations::{CANCELLED, Event, Kind as Operation, Request},
+    operations::{Event, Kind as Operation, OperationError, Request},
     paths::{ancestors, child, folder_name, path_key},
     quick_look::{Error as QuickLookError, Message as QuickLookMessage},
     shell::{Dropped, Owner, SendTarget, clipboard::ClipboardFiles},
@@ -237,12 +237,12 @@ impl Backend for Fake {
         read: Option<ClipboardFiles>,
         _: Owner,
         mut report: Box<dyn FnMut(Event) + Send>,
-    ) -> Result<(), String> {
+    ) -> Result<(), OperationError> {
         self.operations.lock().unwrap().push(request.clone());
         let stuck = self.stuck.lock().unwrap().clone();
         let mut failed = false;
         match request.kind {
-            Operation::Recycle | Operation::Delete if self.declined.load(Ordering::Relaxed) => return Err(CANCELLED.into()),
+            Operation::Recycle | Operation::Delete if self.declined.load(Ordering::Relaxed) => return Err(OperationError::Cancelled),
             Operation::Recycle | Operation::Delete => {
                 let unbinnable = self.unbinnable.lock().unwrap().clone();
                 for path in &request.paths {
@@ -311,7 +311,7 @@ impl Backend for Fake {
                 }
             }
         }
-        if failed { Err("一部の項目を操作できませんでした。結果を確認してください。".into()) } else { Ok(()) }
+        if failed { Err(OperationError::PartlyFailed) } else { Ok(()) }
     }
 
     fn clipboard_files(&self) -> Option<ClipboardFiles> {

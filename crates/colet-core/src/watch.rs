@@ -99,11 +99,21 @@ impl Drop for FolderWatcher {
     }
 }
 
+/// Why the folders cannot be watched at all.
+#[derive(Debug, thiserror::Error)]
+pub enum WatchError {
+    #[error(transparent)]
+    Notify(#[from] notify::Error),
+    /// The watcher's thread could not be started.
+    #[error(transparent)]
+    Thread(#[from] std::io::Error),
+}
+
 impl FolderWatcher {
     /// Watches nothing until [`set`](Self::set), adding what changes to `changes`. `unwatched` hears of
     /// the folders it could list but not watch, as for a share that sends no change notifications; one it
     /// cannot read is left out, as its column says so. It is called on the watcher's thread.
-    pub fn new(changes: Arc<Mutex<Changes>>, unwatched: impl Fn(Vec<PathBuf>) + Send + 'static) -> Result<Self, String> {
+    pub fn new(changes: Arc<Mutex<Changes>>, unwatched: impl Fn(Vec<PathBuf>) + Send + 'static) -> Result<Self, WatchError> {
         let desired = Arc::new(Mutex::new(Vec::<OsString>::new()));
         let requested = desired.clone();
         let (wanted, sets) = mpsc::channel::<WatchCommand>();
@@ -137,104 +147,100 @@ impl FolderWatcher {
                 let _ = repair.send(WatchCommand::Repair(repairs));
             }
             changes.lock().unwrap_or_else(|e| e.into_inner()).add(if error { Vec::new() } else { listings(paths, reset) });
-        })
-        .map_err(|e| e.to_string())?;
+        })?;
         // Dropping the handle sends Stop: the callback also has a sender, so disconnection alone
         // cannot stop this thread. Waiting on commands keeps it asleep while no folders change.
-        thread::Builder::new()
-            .name("folder-watch".into())
-            .spawn(move || {
-                let mut wanted = HashMap::<OsString, PathBuf>::new();
-                // Keep each folder's parent too: a directory handle follows a renamed directory, so
-                // only its parent reports that a new directory has taken the same path.
-                let mut asked = HashMap::<OsString, (PathBuf, bool)>::new();
-                while let Ok(mut command) = sets.recv() {
-                    let mut next = None;
-                    let mut told = Vec::new();
-                    let mut all = false;
-                    let mut reset = HashSet::new();
-                    loop {
-                        match command {
-                            WatchCommand::Set(paths, tell) => {
-                                next = Some(paths);
-                                told.push(tell);
-                            }
-                            WatchCommand::Repair(paths) => {
-                                all |= paths.is_empty();
-                                reset.extend(paths);
-                            }
-                            WatchCommand::Stop => return,
+        thread::Builder::new().name("folder-watch".into()).spawn(move || {
+            let mut wanted = HashMap::<OsString, PathBuf>::new();
+            // Keep each folder's parent too: a directory handle follows a renamed directory, so
+            // only its parent reports that a new directory has taken the same path.
+            let mut asked = HashMap::<OsString, (PathBuf, bool)>::new();
+            while let Ok(mut command) = sets.recv() {
+                let mut next = None;
+                let mut told = Vec::new();
+                let mut all = false;
+                let mut reset = HashSet::new();
+                loop {
+                    match command {
+                        WatchCommand::Set(paths, tell) => {
+                            next = Some(paths);
+                            told.push(tell);
                         }
-                        match sets.try_recv() {
-                            Ok(newer) => command = newer,
-                            Err(_) => break,
+                        WatchCommand::Repair(paths) => {
+                            all |= paths.is_empty();
+                            reset.extend(paths);
                         }
+                        WatchCommand::Stop => return,
                     }
-                    let mut checked = HashSet::new();
-                    if let Some(paths) = next {
-                        wanted = paths.into_iter().map(|p| (path_key(&p), p)).collect();
-                        *desired.lock().unwrap_or_else(|e| e.into_inner()) = wanted.keys().cloned().collect();
-                        let mut needed = wanted.clone();
-                        for path in wanted.values() {
-                            if let Some(parent) = path.parent() {
-                                let parent = parent.to_owned();
-                                needed.entry(path_key(&parent)).or_insert(parent);
-                            }
-                        }
-                        asked.retain(|key, (path, watched)| {
-                            let keep = needed.contains_key(key);
-                            if !keep && *watched {
-                                let _ = watcher.unwatch(path);
-                            }
-                            keep
-                        });
-                        for (key, path) in needed {
-                            if asked.contains_key(&key) {
-                                continue;
-                            }
-                            let folder = path.as_path();
-                            let watched = watcher.watch(folder, RecursiveMode::NonRecursive).is_ok();
-                            checked.insert(key.clone());
-                            asked.insert(key, (path, watched));
-                        }
-                    }
-                    let mut refreshed = Vec::new();
-                    for (key, (path, watched)) in &mut asked {
-                        if !all && !reset.iter().any(|p| inside(key, p)) {
-                            continue;
-                        }
-                        if *watched {
-                            let _ = watcher.unwatch(path);
-                        }
-                        let folder = path.as_path();
-                        *watched = watcher.watch(folder, RecursiveMode::NonRecursive).is_ok();
-                        checked.insert(key.clone());
-                        if wanted.contains_key(key) && *watched {
-                            refreshed.push(path.clone());
-                        }
-                    }
-                    // A Set and Repair can try the same folder twice. Report its final state once,
-                    // and do not report an initial failure that the repair recovered from.
-                    let failed: Vec<PathBuf> = checked
-                        .into_iter()
-                        .filter_map(|key| {
-                            let (path, watched) = asked.get(&key)?;
-                            (!watched && wanted.contains_key(&key) && std::fs::read_dir(path).is_ok()).then(|| path.clone())
-                        })
-                        .collect();
-                    if !refreshed.is_empty() {
-                        // List again after the new handle is installed, covering the gap before it.
-                        repaired.lock().unwrap_or_else(|e| e.into_inner()).add(refreshed);
-                    }
-                    if !failed.is_empty() {
-                        unwatched(failed);
-                    }
-                    for tell in told {
-                        let _ = tell.send(());
+                    match sets.try_recv() {
+                        Ok(newer) => command = newer,
+                        Err(_) => break,
                     }
                 }
-            })
-            .map_err(|e| e.to_string())?;
+                let mut checked = HashSet::new();
+                if let Some(paths) = next {
+                    wanted = paths.into_iter().map(|p| (path_key(&p), p)).collect();
+                    *desired.lock().unwrap_or_else(|e| e.into_inner()) = wanted.keys().cloned().collect();
+                    let mut needed = wanted.clone();
+                    for path in wanted.values() {
+                        if let Some(parent) = path.parent() {
+                            let parent = parent.to_owned();
+                            needed.entry(path_key(&parent)).or_insert(parent);
+                        }
+                    }
+                    asked.retain(|key, (path, watched)| {
+                        let keep = needed.contains_key(key);
+                        if !keep && *watched {
+                            let _ = watcher.unwatch(path);
+                        }
+                        keep
+                    });
+                    for (key, path) in needed {
+                        if asked.contains_key(&key) {
+                            continue;
+                        }
+                        let folder = path.as_path();
+                        let watched = watcher.watch(folder, RecursiveMode::NonRecursive).is_ok();
+                        checked.insert(key.clone());
+                        asked.insert(key, (path, watched));
+                    }
+                }
+                let mut refreshed = Vec::new();
+                for (key, (path, watched)) in &mut asked {
+                    if !all && !reset.iter().any(|p| inside(key, p)) {
+                        continue;
+                    }
+                    if *watched {
+                        let _ = watcher.unwatch(path);
+                    }
+                    let folder = path.as_path();
+                    *watched = watcher.watch(folder, RecursiveMode::NonRecursive).is_ok();
+                    checked.insert(key.clone());
+                    if wanted.contains_key(key) && *watched {
+                        refreshed.push(path.clone());
+                    }
+                }
+                // A Set and Repair can try the same folder twice. Report its final state once,
+                // and do not report an initial failure that the repair recovered from.
+                let failed: Vec<PathBuf> = checked
+                    .into_iter()
+                    .filter_map(|key| {
+                        let (path, watched) = asked.get(&key)?;
+                        (!watched && wanted.contains_key(&key) && std::fs::read_dir(path).is_ok()).then(|| path.clone())
+                    })
+                    .collect();
+                if !refreshed.is_empty() {
+                    // List again after the new handle is installed, covering the gap before it.
+                    repaired.lock().unwrap_or_else(|e| e.into_inner()).add(refreshed);
+                }
+                if !failed.is_empty() {
+                    unwatched(failed);
+                }
+                for tell in told {
+                    let _ = tell.send(());
+                }
+            }
+        })?;
         Ok(Self { wanted })
     }
 

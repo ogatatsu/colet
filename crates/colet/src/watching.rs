@@ -59,7 +59,8 @@ impl Watching {
             None => {
                 let missed = self.missed.clone();
                 let watcher =
-                    FolderWatcher::new(self.changed.clone(), move |paths| missed.lock().unwrap_or_else(|e| e.into_inner()).extend(paths))?;
+                    FolderWatcher::new(self.changed.clone(), move |paths| missed.lock().unwrap_or_else(|e| e.into_inner()).extend(paths))
+                        .map_err(|e| e.to_string())?;
                 self.watcher.insert(watcher)
             }
         };

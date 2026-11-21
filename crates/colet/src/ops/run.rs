@@ -141,7 +141,7 @@ impl Colet {
         }
     }
 
-    pub(super) fn finished(&mut self, request: Request, result: Result<(), String>, cx: &mut Context<Self>) {
+    pub(super) fn finished(&mut self, request: Request, result: Result<(), OperationError>, cx: &mut Context<Self>) {
         let Some(Running { id, tab, made, placed: pasted, .. }) = self.operations.update(cx, |operations, cx| operations.end(cx)) else {
             return;
         };
@@ -150,8 +150,8 @@ impl Colet {
         let Request { kind, paths, destination, name } = request;
         let (cancelled, problem) = match &result {
             Ok(()) => (false, None),
-            Err(error) if error == CANCELLED => (true, None),
-            Err(error) => (false, Some(error.clone())),
+            Err(OperationError::Cancelled) => (true, None),
+            Err(error) => (false, Some(error.to_string())),
         };
         // Where the shell says it put it, under the name it got, which may not be the one asked; one that
         // says nothing of it is taken at the name asked, once its item is done.

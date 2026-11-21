@@ -17,7 +17,7 @@ use std::{
 
 use colet_core::{
     entry::Entry,
-    operations::{CANCELLED, Event, Kind, Request},
+    operations::{Event, Kind, OperationError, Request},
     paths::{ancestors, child, folder_name, is_server, parent_folder, path_key, shown},
     shell::{self, Dropped, SendTarget},
 };

@@ -56,15 +56,29 @@ pub fn locate(path: &Path) -> Option<(PathBuf, bool)> {
     Some((found, directory))
 }
 
-/// What a listing that a newer one, or its column's removal, made unnecessary fails with.
-pub const STALE: &str = "古いフォルダー要求です";
+/// Why a folder could not be listed, in the words its column shows.
+#[derive(Debug, thiserror::Error)]
+pub enum ListError {
+    /// A newer listing, or its column's removal, made this one unnecessary.
+    #[error("古いフォルダー要求です")]
+    Stale,
+    #[error("絶対パスを指定してください")]
+    NotAbsolute,
+    #[error("共有フォルダーを一覧できません: {0}")]
+    Shares(std::io::Error),
+    #[error("フォルダーを開けません: {0}")]
+    Open(std::io::Error),
+    /// The listing broke off part way.
+    #[error("フォルダーを最後まで読めません: {0}")]
+    BrokenOff(std::io::Error),
+}
 
-fn check(cancelled: &AtomicBool) -> Result<(), String> {
-    if cancelled.load(Ordering::Relaxed) { Err(STALE.into()) } else { Ok(()) }
+fn check(cancelled: &AtomicBool) -> Result<(), ListError> {
+    if cancelled.load(Ordering::Relaxed) { Err(ListError::Stale) } else { Ok(()) }
 }
 
 /// Checks before asking the iterator for another item, including its metadata.
-fn collect<T>(mut items: impl Iterator<Item = T>, cancelled: &AtomicBool) -> Result<Vec<T>, String> {
+fn collect<T>(mut items: impl Iterator<Item = T>, cancelled: &AtomicBool) -> Result<Vec<T>, ListError> {
     let mut all = Vec::new();
     loop {
         check(cancelled)?;
@@ -75,30 +89,28 @@ fn collect<T>(mut items: impl Iterator<Item = T>, cancelled: &AtomicBool) -> Res
     }
 }
 
-/// The items directly in `path`, sorted, or a server's shares; stops early, failing with [`STALE`], once
+/// The items directly in `path`, sorted, or a server's shares; stops early, failing with [`ListError::Stale`], once
 /// `cancelled` is set. A server that will not let the user in as they are asks them to sign in, in a
 /// dialog of Windows' own over `owner`.
-pub fn list(path: &Path, order: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String> {
+pub fn list(path: &Path, order: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, ListError> {
     check(cancelled)?;
     if path.as_os_str().as_encoded_bytes().contains(&0) || !path.is_absolute() && !is_server(path) {
-        return Err("絶対パスを指定してください".into());
+        return Err(ListError::NotAbsolute);
     }
     if is_server(path) {
-        let mut shares = network::signing_in(path, owner, cancelled, || network::shares(path))
-            .map_err(|e| format!("共有フォルダーを一覧できません: {e}"))?;
+        let mut shares = network::signing_in(path, owner, cancelled, || network::shares(path)).map_err(ListError::Shares)?;
         check(cancelled)?;
         sort_entries(&mut shares, order);
         return Ok(shares);
     }
-    let items =
-        network::signing_in(path, owner, cancelled, || std::fs::read_dir(path)).map_err(|e| format!("フォルダーを開けません: {e}"))?;
+    let items = network::signing_in(path, owner, cancelled, || std::fs::read_dir(path)).map_err(ListError::Open)?;
     // One for all its items: each would otherwise hold a copy of the same text.
     let parent: Arc<str> = shown(path).into();
     let entries = collect(
         items.map(|entry| {
             // Not one item unreadable, whose name it would still give, but the listing broken off: a part
             // of the folder shown as all of it would hide the rest.
-            let entry = entry.map_err(|e| format!("フォルダーを最後まで読めません: {e}"))?;
+            let entry = entry.map_err(ListError::BrokenOff)?;
             let p = entry.path();
             // The listing already holds each item's size, date and attributes; asking the item again
             // opens it, one by one. A link or junction is still asked, for what it points to, but hides as
@@ -127,7 +139,7 @@ pub fn list(path: &Path, order: Order, cancelled: &AtomicBool, owner: Owner) -> 
         }),
         cancelled,
     )?;
-    let mut entries = entries.into_iter().collect::<Result<Vec<_>, String>>()?;
+    let mut entries = entries.into_iter().collect::<Result<Vec<_>, ListError>>()?;
     check(cancelled)?;
     sort_entries(&mut entries, order);
     check(cancelled)?;
@@ -173,7 +185,7 @@ mod tests {
 
     #[test]
     fn a_cancelled_listing_never_opens_the_folder() {
-        assert_eq!(list(Path::new("invalid path"), Order::default(), &AtomicBool::new(true), 0).unwrap_err(), STALE);
+        assert!(matches!(list(Path::new("invalid path"), Order::default(), &AtomicBool::new(true), 0), Err(ListError::Stale)));
     }
 
     #[test]

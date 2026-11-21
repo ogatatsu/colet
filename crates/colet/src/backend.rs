@@ -17,7 +17,7 @@ use colet_core::{
     entry::{Entry, Order},
     everything::{self, Page, SearchSession},
     folders,
-    operations::{self, Event, Request},
+    operations::{self, Event, OperationError, Request},
     quick_look,
     shell::{
         self, Dropped, MenuThread, Owner, SendTarget, ShowMenu,
@@ -77,7 +77,7 @@ pub trait Backend: Send + Sync + 'static {
         clipboard: Option<ClipboardFiles>,
         owner: Owner,
         report: Box<dyn FnMut(Event) + Send>,
-    ) -> Result<(), String>;
+    ) -> Result<(), OperationError>;
     /// The files on the clipboard; `None` while another app holds it.
     fn clipboard_files(&self) -> Option<ClipboardFiles>;
     fn copy_files(&self, paths: &[PathBuf], cut: bool, owner: Owner) -> Result<(), String>;
@@ -144,7 +144,7 @@ impl Backend for Live {
     }
 
     fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String> {
-        folders::list(path, sort, cancelled, owner)
+        folders::list(path, sort, cancelled, owner).map_err(|e| e.to_string())
     }
 
     fn search(&self, search: Search) -> Result<Found, String> {
@@ -154,19 +154,19 @@ impl Backend for Live {
             return Err("古い検索要求です".into());
         }
         // A search that fails after connecting keeps the warning for the next.
-        let page = session.search(&search.query, search.sort, search.offset, search.count, search.refresh)?;
+        let page = session.search(&search.query, search.sort, search.offset, search.count, search.refresh).map_err(|e| e.to_string())?;
         Ok(Found { page, connection: session.connection.clone(), warning: session.warning.take() })
     }
 
     fn count(&self, query: &str) -> Result<usize, String> {
         // Held so it never connects as a search does.
         let _session = self.session.lock().map_err(|e| e.to_string())?;
-        everything::count(query)
+        everything::count(query).map_err(|e| e.to_string())
     }
 
     fn search_changed(&self) -> Result<bool, String> {
         match self.session.try_lock() {
-            Ok(mut session) => session.changed(),
+            Ok(mut session) => session.changed().map_err(|e| e.to_string()),
             // A search under way, perhaps waiting out a busy Everything, is asked next time.
             Err(std::sync::TryLockError::WouldBlock) => Ok(false),
             Err(error) => Err(error.to_string()),
@@ -204,7 +204,7 @@ impl Backend for Live {
         clipboard: Option<ClipboardFiles>,
         owner: Owner,
         report: Box<dyn FnMut(Event) + Send>,
-    ) -> Result<(), String> {
+    ) -> Result<(), OperationError> {
         operations::run(request, clipboard, owner, report)
     }
 

@@ -90,8 +90,44 @@ pub enum Event {
     },
 }
 
-/// What an operation the user stopped fails with.
-pub const CANCELLED: &str = "操作をキャンセルしました";
+/// Why an operation was not carried out, or not all of it, in the words the window shows.
+#[derive(Debug, thiserror::Error)]
+pub enum OperationError {
+    /// The user stopped it.
+    #[error("操作をキャンセルしました")]
+    Cancelled,
+    #[error("絶対パスを指定してください")]
+    NotAbsolute,
+    #[error("貼り付け先がフォルダーではありません")]
+    NotAFolder,
+    #[error("フォルダー自身やその子孫にはコピー・移動できません")]
+    IntoItself,
+    #[error("クリップボードにファイルがありません")]
+    NoFilesOnClipboard,
+    #[error("項目が選択されていません")]
+    NothingSelected,
+    #[error("使用できない名前です")]
+    InvalidName,
+    #[error("名前の変更は1項目ずつ行ってください")]
+    RenameOneAtATime,
+    #[error("ドライブのルートは操作できません")]
+    DriveRoot,
+    #[error("作成先が見つかりません")]
+    NoDestination,
+    #[error("貼り付け先がクリップボードの内容を受け付けませんでした")]
+    Refused,
+    #[error("貼り付けるまでにクリップボードの内容が変わりました。もう一度貼り付けてください。")]
+    ClipboardChanged,
+    /// Some items failed; how each went is in the history.
+    #[error("一部の項目を操作できませんでした。結果を確認してください。")]
+    PartlyFailed,
+    /// A path could not be looked up on the disk.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// The shell refused, in Windows's own words.
+    #[error("{}", message(*.0))]
+    Windows(HRESULT),
+}
 
 /// COPYENGINE_S_USER_IGNORED: skipped at the user's word.
 const USER_IGNORED: HRESULT = HRESULT(0x0027_0005);
@@ -139,31 +175,31 @@ fn valid_name(name: &str) -> bool {
     !name.trim().is_empty() && name_problem(name, true).is_none() && name != "." && name != ".."
 }
 
-fn absolute(path: &Path) -> Result<&Path, String> {
+fn absolute(path: &Path) -> Result<&Path, OperationError> {
     if path.as_os_str().as_encoded_bytes().contains(&0) || !path.is_absolute() {
-        return Err("絶対パスを指定してください".into());
+        return Err(OperationError::NotAbsolute);
     }
     Ok(path)
 }
 
 /// The real path, for telling whether a folder lies inside another.
-fn normalized(path: &Path) -> Result<OsString, String> {
-    Ok(path_key(&std::fs::canonicalize(path).map_err(|e| e.to_string())?))
+fn normalized(path: &Path) -> Result<OsString, OperationError> {
+    Ok(path_key(&std::fs::canonicalize(path)?))
 }
 
 /// Drops paths given twice and those inside another given, so nothing is acted on twice. Compares the
 /// paths as written: their targets may not exist, as for a broken junction. Each path's folders are looked
 /// up among the others, so a selection of thousands is not compared pair by pair.
-fn collapse(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
+fn collapse(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, OperationError> {
     let keys = paths
         .iter()
         .map(|p| {
-            let path = std::path::absolute(absolute(p)?).map_err(|e| e.to_string())?;
+            let path = std::path::absolute(absolute(p)?)?;
             let separated: Vec<u16> =
                 path.as_os_str().encode_wide().map(|c| if c == u16::from(b'/') { u16::from(b'\\') } else { c }).collect();
             Ok(path_key(Path::new(&OsString::from_wide(&separated))))
         })
-        .collect::<Result<Vec<OsString>, String>>()?;
+        .collect::<Result<Vec<OsString>, OperationError>>()?;
     let all: HashSet<&[u8]> = keys.iter().map(|key| key.as_encoded_bytes()).collect();
     let mut seen = HashSet::new();
     Ok(paths
@@ -179,10 +215,10 @@ fn collapse(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
 }
 
 /// A folder cannot go into itself or what it holds.
-fn check_destination(paths: &[PathBuf], destination: &Path) -> Result<(), String> {
+fn check_destination(paths: &[PathBuf], destination: &Path) -> Result<(), OperationError> {
     let target = absolute(destination)?;
     if !target.is_dir() {
-        return Err("貼り付け先がフォルダーではありません".into());
+        return Err(OperationError::NotAFolder);
     }
     let destination = normalized(target)?;
     for source in paths {
@@ -190,13 +226,13 @@ fn check_destination(paths: &[PathBuf], destination: &Path) -> Result<(), String
         let source = normalized(path)?;
         let below = destination.as_encoded_bytes().strip_prefix(source.as_encoded_bytes()).is_some_and(|rest| rest.starts_with(b"\\"));
         if path.is_dir() && (destination == source || below) {
-            return Err("フォルダー自身やその子孫にはコピー・移動できません".into());
+            return Err(OperationError::IntoItself);
         }
     }
     Ok(())
 }
 
-fn in_folder(path: &Path, folder: &Path) -> Result<bool, String> {
+fn in_folder(path: &Path, folder: &Path) -> Result<bool, OperationError> {
     let Some(parent) = absolute(path)?.parent().map(Path::to_path_buf) else { return Ok(false) };
     Ok(normalized(&parent)? == normalized(absolute(folder)?)?)
 }
@@ -213,31 +249,34 @@ struct Prepared {
 }
 
 /// A paste read from the clipboard, the request checked, and overlapping items collapsed.
-fn prepare(request: Request, clipboard: impl FnOnce() -> Result<clipboard::ClipboardFiles, String>) -> Result<Prepared, String> {
+fn prepare(
+    request: Request,
+    clipboard: impl FnOnce() -> Result<clipboard::ClipboardFiles, OperationError>,
+) -> Result<Prepared, OperationError> {
     let Request { kind, mut paths, destination, name } = request;
     let mut cut = None;
     let mut copy = false;
     if kind == Kind::Paste {
         let files = clipboard()?;
         if files.paths.is_empty() {
-            return Err("クリップボードにファイルがありません".into());
+            return Err(OperationError::NoFilesOnClipboard);
         }
         paths = files.paths;
         copy = !files.cut;
         cut = files.cut.then_some(files.sequence);
     }
     if kind != Kind::NewFolder && paths.is_empty() {
-        return Err("項目が選択されていません".into());
+        return Err(OperationError::NothingSelected);
     }
     if matches!(kind, Kind::Rename | Kind::NewFolder) && !valid_name(&name) {
-        return Err("使用できない名前です".into());
+        return Err(OperationError::InvalidName);
     }
     if kind == Kind::Rename && paths.len() != 1 {
-        return Err("名前の変更は1項目ずつ行ってください".into());
+        return Err(OperationError::RenameOneAtATime);
     }
     for path in &paths {
         if absolute(path)?.parent().is_none() {
-            return Err("ドライブのルートは操作できません".into());
+            return Err(OperationError::DriveRoot);
         }
     }
     let mut rename = false;
@@ -253,7 +292,7 @@ fn prepare(request: Request, clipboard: impl FnOnce() -> Result<clipboard::Clipb
         }
     }
     if kind == Kind::NewFolder && !absolute(&destination)?.is_dir() {
-        return Err("作成先が見つかりません".into());
+        return Err(OperationError::NoDestination);
     }
     let paths = collapse(paths)?;
     let operation = match kind {
@@ -268,17 +307,17 @@ fn prepare(request: Request, clipboard: impl FnOnce() -> Result<clipboard::Clipb
 }
 
 /// Carries out `request`, telling `report` how each item ends; a paste pastes `read`, what was read from
-/// the clipboard, or when `None` reads it now. Fails with [`CANCELLED`] when the user stopped it, and
+/// the clipboard, or when `None` reads it now. Fails with [`OperationError::Cancelled`] when the user stopped it, and
 /// says so when some items failed. Blocks until the shell is done.
 pub fn run(
     request: Request,
     read: Option<clipboard::ClipboardFiles>,
     owner: Owner,
     report: impl FnMut(Event) + Send + 'static,
-) -> Result<(), String> {
+) -> Result<(), OperationError> {
     let files = match (request.kind, read) {
         (Kind::Paste, Some(files)) => files,
-        (Kind::Paste, None) => clipboard::read_files().map_err(|e| message(e.code()))?,
+        (Kind::Paste, None) => clipboard::read_files().map_err(|e| OperationError::Windows(e.code()))?,
         _ => clipboard::ClipboardFiles::default(),
     };
     if request.kind == Kind::Paste && files.paths.is_empty() {
@@ -316,7 +355,7 @@ fn paste_items(
     files: clipboard::ClipboardFiles,
     owner: Owner,
     report: impl FnMut(Event) + Send + 'static,
-) -> Result<(), String> {
+) -> Result<(), OperationError> {
     check_destination(&[], &destination)?;
     let operation = if files.cut { Operation::Move { destination } } else { Operation::Copy { destination } };
     let tally = Arc::new(Tally::default());
@@ -334,10 +373,10 @@ fn paste_contents(
     files: clipboard::ClipboardFiles,
     owner: Owner,
     mut report: impl FnMut(Event) + Send + 'static,
-) -> Result<(), String> {
+) -> Result<(), OperationError> {
     check_destination(&[], &destination)?;
     match shell::drop_clipboard(&destination, files.cut, files.sequence, owner) {
-        Ok(Dropped::Refused) => Err("貼り付け先がクリップボードの内容を受け付けませんでした".into()),
+        Ok(Dropped::Refused) => Err(OperationError::Refused),
         Ok(dropped) => {
             for name in &files.contents {
                 report(Event::Handed { path: child(&destination, name) });
@@ -390,14 +429,12 @@ fn reporter(leaves: bool, tally: Arc<Tally>, mut report: impl FnMut(Event) + Sen
 }
 
 /// What the operation comes to, from the shell's result and whether any item failed.
-fn outcome(result: windows::core::Result<()>, failed: bool) -> Result<(), String> {
+fn outcome(result: windows::core::Result<()>, failed: bool) -> Result<(), OperationError> {
     match result {
-        Err(error) if error.code() == E_ABORT || error.code() == USER_CANCELLED => Err(CANCELLED.into()),
-        Err(error) if error.code() == clipboard::CHANGED => {
-            Err("貼り付けるまでにクリップボードの内容が変わりました。もう一度貼り付けてください。".into())
-        }
-        Err(error) => Err(message(error.code())),
-        Ok(()) if failed => Err("一部の項目を操作できませんでした。結果を確認してください。".into()),
+        Err(error) if error.code() == E_ABORT || error.code() == USER_CANCELLED => Err(OperationError::Cancelled),
+        Err(error) if error.code() == clipboard::CHANGED => Err(OperationError::ClipboardChanged),
+        Err(error) => Err(OperationError::Windows(error.code())),
+        Ok(()) if failed => Err(OperationError::PartlyFailed),
         Ok(()) => Ok(()),
     }
 }
@@ -410,7 +447,7 @@ mod tests {
         Request { kind, paths, destination: destination.to_owned(), name: name.into() }
     }
 
-    fn files(paths: Vec<PathBuf>, cut: bool) -> impl FnOnce() -> Result<clipboard::ClipboardFiles, String> {
+    fn files(paths: Vec<PathBuf>, cut: bool) -> impl FnOnce() -> Result<clipboard::ClipboardFiles, OperationError> {
         move || Ok(clipboard::ClipboardFiles { paths, cut, sequence: 1, ..Default::default() })
     }
 

@@ -83,6 +83,32 @@ pub struct Page {
     pub offset: usize,
 }
 
+/// Why a search, or the watch on it, failed, in the words the window shows. The numbers are
+/// Everything's own error codes.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum SearchError {
+    #[error("入力に使用できない文字が含まれています")]
+    NulInQuery,
+    #[error("Everything 1.5に接続できません。本体が起動しているか確認して、再試行してください。")]
+    CannotConnect,
+    #[error("Everything {needed}以降が必要です（接続先: {found}）。更新してから再試行してください。")]
+    TooOld { needed: String, found: String },
+    #[error("検索状態を作成できません")]
+    NoSearchState,
+    #[error("Everythingの索引を準備中です。しばらく待って再試行してください。")]
+    Indexing,
+    #[error("Everythingとの接続が切れました。本体が起動しているか確認して、再試行してください。")]
+    Disconnected,
+    #[error("Everything検索に失敗しました (0x{0:08X})")]
+    Failed(u32),
+    /// The watch heard Everything stop: the next search connects afresh.
+    #[error("Everythingとの接続が切れました。次の検索で再接続します (0x{0:08X})")]
+    WatchDisconnected(u32),
+    /// The watch alone failed: the results are read again with F5 only.
+    #[error("Everythingの自動更新を停止しました。F5で一覧を更新できます (0x{0:08X})")]
+    WatchStopped(u32),
+}
+
 /// Connect to the unnamed instance, or to `instance` when given. The SDK waits out a busy pipe itself,
 /// for up to 30 seconds.
 unsafe fn open(instance: Option<&str>) -> Handle {
@@ -92,24 +118,24 @@ unsafe fn open(instance: Option<&str>) -> Handle {
 
 /// How many results `query` finds, none of them read. Asked on a client of its own and let go, so the last
 /// search and its watch are left alone.
-pub fn count(query: &str) -> Result<usize, String> {
+pub fn count(query: &str) -> Result<usize, SearchError> {
     if query.contains('\0') {
-        return Err("入力に使用できない文字が含まれています".into());
+        return Err(SearchError::NulInQuery);
     }
     unsafe {
         let client = open(None);
         if client.is_null() {
-            return Err("Everything 1.5に接続できません".into());
+            return Err(SearchError::CannotConnect);
         }
         let state = Everything3_CreateSearchState();
         let count = if state.is_null() {
-            Err("検索状態を作成できません".into())
+            Err(SearchError::NoSearchState)
         } else {
             Everything3_SetSearchTextW(state, Wide::new(query).get().0);
             Everything3_SetSearchViewportCount(state, 0);
             let result = Everything3_Search(client, state);
             let count = if result.is_null() {
-                Err(format!("Everything検索に失敗しました (0x{:08X})", Everything3_GetLastError()))
+                Err(SearchError::Failed(Everything3_GetLastError()))
             } else {
                 let total = Everything3_GetResultListCount(result);
                 Everything3_DestroyResultList(result);
@@ -276,7 +302,7 @@ impl SearchSession {
     }
 
     /// Whether Everything has said the last search's results changed; it stays so until searched afresh.
-    pub fn changed(&mut self) -> Result<bool, String> {
+    pub fn changed(&mut self) -> Result<bool, SearchError> {
         let Some(watch) = self.watch.as_ref().filter(|_| self.key.is_some()) else { return Ok(false) };
         let error = watch.news.failed.load(Ordering::Relaxed);
         if error != 0 {
@@ -284,19 +310,19 @@ impl SearchSession {
             // connects afresh; a watch-only failure keeps the usable paging connection.
             if unsafe { Everything3_IsDBLoaded(self.client) == 0 && Everything3_GetLastError() != 0 } {
                 self.disconnect();
-                return Err(format!("Everythingとの接続が切れました。次の検索で再接続します (0x{error:08X})"));
+                return Err(SearchError::WatchDisconnected(error));
             }
             self.stop_watching();
-            return Err(format!("Everythingの自動更新を停止しました。F5で一覧を更新できます (0x{error:08X})"));
+            return Err(SearchError::WatchStopped(error));
         }
         Ok(watch.news.changed.load(Ordering::Relaxed))
     }
 
     /// `count` results of `query` from `offset` on. `refresh` searches afresh even when the query and
     /// sort are the ones last run.
-    pub fn search(&mut self, query: &str, order: Order, offset: usize, count: usize, refresh: bool) -> Result<Page, String> {
+    pub fn search(&mut self, query: &str, order: Order, offset: usize, count: usize, refresh: bool) -> Result<Page, SearchError> {
         if query.contains('\0') {
-            return Err("入力に使用できない文字が含まれています".into());
+            return Err(SearchError::NulInQuery);
         }
         unsafe {
             let fresh = self.client.is_null();
@@ -310,9 +336,9 @@ impl SearchSession {
                     if !fresh {
                         return self.search(query, order, offset, count, refresh);
                     }
-                    return Err("Everythingとの接続が切れました。本体が起動しているか確認して、再試行してください。".into());
+                    return Err(SearchError::Disconnected);
                 }
-                return Err("Everythingの索引を準備中です。しばらく待って再試行してください。".into());
+                return Err(SearchError::Indexing);
             }
             let key = (query.to_owned(), order);
             let new_search = self.key.as_ref() != Some(&key) || refresh || self.state.is_null();
@@ -334,7 +360,7 @@ impl SearchSession {
             if result.is_null() {
                 let error = Everything3_GetLastError();
                 self.disconnect();
-                return Err(format!("Everything検索に失敗しました (0x{error:08X})"));
+                return Err(SearchError::Failed(error));
             }
             self.key = Some(key);
             let page = read(result, offset);
@@ -344,10 +370,10 @@ impl SearchSession {
     }
 
     /// Connects to the unnamed instance, turning away an Everything older than [`OLDEST`].
-    unsafe fn connect(&mut self) -> Result<(), String> {
+    unsafe fn connect(&mut self) -> Result<(), SearchError> {
         let client = unsafe { open(None) };
         if client.is_null() {
-            return Err("Everything 1.5に接続できません。本体が起動しているか確認して、再試行してください。".into());
+            return Err(SearchError::CannotConnect);
         }
         let version = unsafe {
             [
@@ -362,11 +388,7 @@ impl SearchSession {
             unsafe {
                 Everything3_DestroyClient(client);
             }
-            return Err(format!(
-                "Everything {}以降が必要です（接続先: {}）。更新してから再試行してください。",
-                dotted(OLDEST),
-                dotted(version)
-            ));
+            return Err(SearchError::TooOld { needed: dotted(OLDEST), found: dotted(version) });
         }
         self.client = client;
         self.version = dotted(version);
@@ -422,14 +444,14 @@ impl SearchSession {
         }
     }
 
-    unsafe fn prepare(&mut self, query: &str, order: Order) -> Result<(), String> {
+    unsafe fn prepare(&mut self, query: &str, order: Order) -> Result<(), SearchError> {
         unsafe {
             if !self.state.is_null() {
                 Everything3_DestroySearchState(self.state);
             }
             self.state = Everything3_CreateSearchState();
             if self.state.is_null() {
-                return Err("検索状態を作成できません".into());
+                return Err(SearchError::NoSearchState);
             }
             Everything3_SetSearchTextW(self.state, Wide::new(query).get().0);
             // Not attributes: Everything rarely indexes them, and reads each result's from the disk
@@ -590,7 +612,7 @@ mod tests {
     }
 
     /// The error `changed` reports once the watch thread hears its client fail.
-    fn failure(session: &mut SearchSession) -> String {
+    fn failure(session: &mut SearchSession) -> SearchError {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             match session.changed() {
@@ -617,7 +639,7 @@ mod tests {
             assert_ne!(Everything3_ShutdownClient(session.watch.as_ref().unwrap().client), 0);
         }
         let error = failure(&mut session);
-        assert!(error.contains("接続が切れました"));
+        assert!(matches!(error, SearchError::WatchDisconnected(_)), "{error}");
         assert!(session.client.is_null() && session.watch.is_none());
         assert!(session.key.is_none() && session.watch_retry_at.is_none());
         session.search(query, Order::default(), 0, PAGE, true).unwrap();
@@ -652,7 +674,7 @@ mod tests {
             assert_ne!(Everything3_ShutdownClient(session.watch.as_ref().unwrap().client), 0);
         }
         let error = failure(&mut session);
-        assert!(error.contains("自動更新を停止しました"));
+        assert!(matches!(error, SearchError::WatchStopped(_)), "{error}");
         assert_eq!(session.client, client);
         assert!(session.watch.is_none());
         assert!(session.key.is_some() && session.watch_retry_at.is_some());
