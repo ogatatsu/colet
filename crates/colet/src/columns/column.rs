@@ -249,7 +249,7 @@ impl Colet {
             move |this, event: &ClickEvent, window, cx| {
                 // The button goes as the column loads: the keys go back to the columns.
                 if event.is_keyboard() {
-                    this.focus_active(window, cx);
+                    this.come_back_to_active(window, cx);
                 }
                 this.load(id, 0, false, cx);
             },

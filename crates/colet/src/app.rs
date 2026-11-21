@@ -1052,8 +1052,8 @@ impl Colet {
         self.changed(cx);
     }
 
-    /// Esc from a field: the keys go back to the active column, picking nothing there that was not; with
-    /// no row they were on, they land on none.
+    /// Esc from a field, a tab back in front, or a button pressed with the keys on it: the keys go back to
+    /// the active column, picking nothing there that was not; with no row they were on, they land on none.
     pub fn come_back_to_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.column_focus(self.state.active).focus(window, cx);
         self.state.come_back();

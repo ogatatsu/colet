@@ -84,6 +84,27 @@ fn opens_a_tab_of_home_alone_and_goes_back_to_the_one_before_as_it_was(cx: &mut 
 }
 
 #[gpui_kit::test]
+fn back_in_front_a_column_with_nothing_picked_picks_nothing(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\alpha.txt"), file(r"D:\beta.txt")]));
+    let ui = open(cx, fake);
+    ui.input(cx, "a");
+    ui.press(cx, "ctrl-l");
+    ui.press(cx, "escape");
+    assert!(ui.columns_focused(cx));
+    assert!(ui.selected(cx, 1).is_empty());
+    ui.press(cx, "ctrl-t");
+    ui.press(cx, "ctrl-tab");
+    assert_eq!(ui.tabs(cx), (2, 0));
+    assert!(ui.columns_focused(cx));
+    assert_eq!(ui.active(cx), 1);
+    assert!(ui.selected(cx, 1).is_empty());
+    assert_eq!(ui.read(cx, |v| v.state.columns[1].focused.clone()), None);
+    // ↓ picks the first.
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 1), [r"D:\alpha.txt"]);
+}
+
+#[gpui_kit::test]
 fn opens_the_row_the_keys_are_on_in_a_tab_behind_this_one_where_it_lives(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-t");

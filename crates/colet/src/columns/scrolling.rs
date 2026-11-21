@@ -117,7 +117,7 @@ impl Colet {
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         this.state.unfold();
                         if event.is_keyboard() {
-                            this.focus_active(window, cx);
+                            this.come_back_to_active(window, cx);
                         } else {
                             this.changed(cx);
                         }

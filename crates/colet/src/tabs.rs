@@ -209,7 +209,7 @@ impl Colet {
                 self.focus_search(window, cx);
                 self.changed(cx);
             }
-            Keys::Column => self.focus_active(window, cx),
+            Keys::Column => self.come_back_to_active(window, cx),
             Keys::NarrowField(id) => self.focus_narrow_field(id, window, cx),
             Keys::Address { text, picked, reversed } => {
                 self.reopen_address(text, picked, reversed, window, cx);
@@ -222,10 +222,10 @@ impl Colet {
     /// now, for a tab never in front before, has the caret after what it holds. With the column gone, they
     /// go to the active one.
     fn focus_narrow_field(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(index) = self.state.index_of(id) else { return self.focus_active(window, cx) };
+        let Some(index) = self.state.index_of(id) else { return self.come_back_to_active(window, cx) };
         let fresh = !self.narrow_fields.contains_key(&id);
         self.sync_narrow_fields(window, cx);
-        let Some(field) = self.narrow_fields.get(&id) else { return self.focus_active(window, cx) };
+        let Some(field) = self.narrow_fields.get(&id) else { return self.come_back_to_active(window, cx) };
         let input = field.input.clone();
         self.state.set_active(index);
         input.update(cx, |input, cx| {
