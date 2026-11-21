@@ -377,7 +377,8 @@ impl Colet {
             self.scrolls.sideways.ask();
         }
         let target = if open { self.sidebar_width(window) } else { FOLD_WIDTH };
-        let spring = self.widths.resizing() != Some(WidthOf::Sidebar);
+        // With motion reduced, as with Windows' animations off, it stands as wide as it is to be at once.
+        let spring = self.widths.resizing() != Some(WidthOf::Sidebar) && !cx.reduce_motion();
         if self.home_pane.step(target, open, spring, Instant::now()) {
             window.request_animation_frame();
         }

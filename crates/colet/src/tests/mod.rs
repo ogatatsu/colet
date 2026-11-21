@@ -490,6 +490,12 @@ fn open(cx: &mut TestAppContext, fake: Arc<Fake>) -> Ui {
     Ui { window, view }
 }
 
+/// Lets home's pane and the columns slide, as with Windows' animations on, for a test that watches them
+/// under way: opened, they stand where they are to be at once, wherever a press finds them.
+fn allow_motion(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_reduce_motion(false));
+}
+
 /// Lets the timers that wait on typing, listings and changes run out, and draws.
 fn settle(cx: &mut TestAppContext) {
     for _ in 0..3 {

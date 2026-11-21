@@ -246,7 +246,7 @@ impl Colet {
         self.key_menu.begin_frame();
         self.scrolls.sideways.rescale(Scale::of(window), window.scale_factor());
         self.step_home_pane(window, cx);
-        self.reveal(window);
+        self.reveal(window, cx);
     }
 
     /// The zoom this frame is drawn at, as [`Render::render`] reads it before anything is drawn.

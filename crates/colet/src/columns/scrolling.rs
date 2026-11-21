@@ -234,8 +234,9 @@ impl Colet {
         self.scrolls.sideways.drawn(self.widths.column)
     }
 
-    /// Slides the columns toward where they should rest, a frame at a time.
-    pub(crate) fn reveal(&mut self, window: &mut Window) {
+    /// Slides the columns toward where they should rest, a frame at a time; with motion reduced, as with
+    /// Windows' animations off, they are there at once.
+    pub(crate) fn reveal(&mut self, window: &mut Window, cx: &App) {
         let mut view = self.scrolls.sideways.view_width();
         let mut from = self.scrolls.sideways.offset();
         let fold = self.state.fold.map(|f| (f.anchor, self.state.folded_away()));
@@ -282,8 +283,9 @@ impl Colet {
             let start = self.scrolls.sideways.slide.as_ref().map_or(from, |s| s.target);
             let shown: Vec<ColumnId> = self.state.columns[self.state.columns.len() - cells.len()..].iter().map(|c| c.id).collect();
             // Home's pane coming out of its strip or going back in: they make for where they rest once it
-            // stands, as the last layout's view leaves room for it then, so they go one way only.
-            let aim = if self.home_pane.moving() { view + self.scrolls.sideways.fitted_home - self.home_pane.target() } else { view };
+            // stands, as the last layout's view leaves room for it then, so they go one way only. With motion
+            // reduced it stands there already, wider or narrower than that layout had it.
+            let aim = view + self.scrolls.sideways.fitted_home - self.home_pane.target();
             let target = match uncover {
                 Some(at) => uncover_target(at, aim, &cells),
                 // Home or the pinned results taken up again beside the same columns, as ← brings the keys
@@ -311,7 +313,7 @@ impl Colet {
             }
         }
         let Some(slide) = &mut self.scrolls.sideways.slide else { return };
-        let (position, done) = slide.step(Instant::now());
+        let (position, done) = if cx.reduce_motion() { slide.rest() } else { slide.step(Instant::now()) };
         self.scrolls.sideways.set_offset(position);
         if done {
             // At rest, the room held for the slide goes: left past the last column, it would scroll the

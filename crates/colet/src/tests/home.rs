@@ -591,6 +591,7 @@ fn keeps_home_out_while_its_menu_is_up_and_while_the_tab_has_nothing_else(cx: &m
 fn frames_home_worked_in_whole_at_rest_and_as_it_comes_out(cx: &mut TestAppContext) {
     let fake = Arc::new(drive_d());
     let ui = open(cx, fake.clone());
+    allow_motion(cx);
     ui.click_in(cx, "home", row(r"D:\"));
     ui.press(cx, "ctrl-0");
     let frame = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, _| window.find("home-frame").bounds());

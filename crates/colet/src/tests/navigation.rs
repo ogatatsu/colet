@@ -206,11 +206,13 @@ fn works_in_a_favorite_by_mouse_and_tab_leaving_the_folders_above_it_folded(cx: 
     assert_eq!(ui.active(cx), 2);
     assert_eq!(ui.read(cx, |v| v.state.folded_away()), 1);
     // A click off the rows takes the keys to the column clicked, folding nothing out.
+    ui.show_home(cx);
     ui.click_in(cx, "home", row(r"D:\work"));
     ui.click(cx, ("column", work));
     assert_eq!(ui.active(cx), 2);
     assert_eq!(ui.read(cx, |v| v.state.folded_away()), 1);
     // The keys tabbed over from home land where → would, past the fold.
+    ui.show_home(cx);
     ui.click_in(cx, "home", row(r"D:\work"));
     let view = ui.view.clone();
     ui.act(cx, |window, cx| view.read(cx).columns_focus.clone().focus(window, cx));

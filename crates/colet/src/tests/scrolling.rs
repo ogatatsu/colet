@@ -331,6 +331,7 @@ fn leaves_no_room_past_the_last_column_once_the_folders_folded_away_come_out(cx:
 #[gpui_kit::test]
 fn slides_the_folders_brought_out_by_their_strip_in_from_the_left_as_far_as_the_anchor_allows(cx: &mut TestAppContext) {
     let ui = folded_deep(cx);
+    allow_motion(cx);
     let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
     let (before, _) = column_edges(&ui, cx, anchor);
     ui.click(cx, "unfold");
@@ -483,9 +484,9 @@ fn shades_no_right_edge_as_the_folders_come_out_beside_a_last_column_flush_with_
     // The frame the folders come out in, as it begins: built before any layout with the strip gone.
     let first = cx
         .update_window(ui.window, |_, window, cx| {
-            ui.view.update(cx, |v, _| {
+            ui.view.update(cx, |v, cx| {
                 v.state.unfold();
-                v.reveal(window);
+                v.reveal(window, cx);
                 v.on_screen().hidden_right()
             })
         })
@@ -517,6 +518,7 @@ fn slides_the_folders_in_only_as_far_as_the_room_past_the_last_column(cx: &mut T
 #[gpui_kit::test]
 fn slides_a_folded_crumb_picked_in_from_the_left_until_it_is_on_screen(cx: &mut TestAppContext) {
     let ui = folded_deep(cx);
+    allow_motion(cx);
     let anchor = ui.read(cx, |v| v.state.columns.len() - 1);
     let (before, _) = column_edges(&ui, cx, anchor);
     let third = crumb(&ui, cx, 3);
@@ -683,6 +685,7 @@ fn leaves_the_columns_where_they_are_as_home_comes_out_of_its_strip_and_goes_bac
 fn brings_home_out_of_its_strip_alike_whether_the_columns_still_slide_or_rest(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
     let ui = open(cx, Arc::new(fake));
+    allow_motion(cx);
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {
         ui.press(cx, "right");
@@ -719,6 +722,7 @@ fn brings_home_out_of_its_strip_alike_whether_the_columns_still_slide_or_rest(cx
 fn slides_the_columns_one_way_only_as_home_folds_back_into_its_strip(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
     let ui = open(cx, Arc::new(fake));
+    allow_motion(cx);
     ui.click_in(cx, "home", row(r"D:\"));
     for _ in 0..chain.len() {
         ui.press(cx, "right");

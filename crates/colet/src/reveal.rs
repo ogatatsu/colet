@@ -121,6 +121,14 @@ impl Slide {
         }
     }
 
+    /// At rest where it was making for, at once, as with motion reduced: where the columns stand, and
+    /// that they are at rest there.
+    pub fn rest(&mut self) -> (f32, bool) {
+        self.position = self.target;
+        self.velocity = 0.;
+        (self.target, true)
+    }
+
     /// One frame's step at `now`: where the columns stand, and whether they are at rest there.
     ///
     /// Critically damped: settles in about 350ms without overshooting. A frame held up counts as at most
