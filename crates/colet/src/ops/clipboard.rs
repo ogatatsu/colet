@@ -1,5 +1,6 @@
 //! Copy, cut and paste through the clipboard, and copying the items' paths.
 use super::*;
+use crate::words;
 
 impl Colet {
     pub fn copy(&mut self, cut: bool, cx: &mut Context<Self>) {
@@ -10,7 +11,7 @@ impl Colet {
             return;
         }
         if let Some(reason) = if cut { reasons.cut } else { reasons.copy } {
-            self.refuse(if cut { "切り取り" } else { "コピー" }, reason, cx);
+            self.refuse(if cut { words::CUT } else { words::COPY }, reason, cx);
             return;
         }
         let picked: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
@@ -46,7 +47,7 @@ impl Colet {
     pub fn paste(&mut self, cx: &mut Context<Self>) {
         self.take_menu();
         match self.reasons(cx).paste {
-            Some(reason) => self.refuse("貼り付け", reason, cx),
+            Some(reason) => self.refuse(words::PASTE, reason, cx),
             None => {
                 let paste = Paste { destination: self.destination().unwrap_or_default(), tab: self.current_tab() };
                 if let Some(paste) = self.operations.update(cx, |operations, _| operations.clipboard.paste(paste)) {

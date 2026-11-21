@@ -2,6 +2,7 @@
 //! following what it moved, and what is said and picked once it ends. Deleting the items picked is one.
 use super::reasons::{BUSY, NOT_AT_HOME};
 use super::*;
+use crate::words;
 
 impl Colet {
     /// Delete sends to the Recycle Bin and Shift+Delete deletes outright, as in Explorer: whether to ask
@@ -17,11 +18,11 @@ impl Colet {
             let hint = if reason != NOT_AT_HOME {
                 ""
             } else if picked.iter().any(|p| HomeKey::of(p).is_search()) {
-                "保存した検索は右クリックメニューの「保存した検索を解除」で外せます。"
+                words::reasons::UNSAVE_HINT
             } else {
-                "お気に入りは右クリックメニューの「お気に入りを解除」で外せます。"
+                words::reasons::UNFAVORITE_HINT
             };
-            self.notify(format!("「{}」は{reason}。{hint}", kind.title()), Tone::Info, cx);
+            self.notify(words::reasons::refused_with_hint(kind.title(), reason, hint), Tone::Info, cx);
             return;
         }
         self.run(Request { kind, paths: picked, destination: PathBuf::new(), name: String::new() }, cx);
@@ -183,7 +184,7 @@ impl Colet {
         let renamed = renamed.filter(|_| !told);
         let problem = self.operations.update(cx, |operations, cx| operations.record_end(id, kind, cancelled, problem, renamed, cx));
         if let Some(problem) = problem {
-            self.notify_entry(format!("「{}」: {problem}", kind.title()), id, cx);
+            self.notify_entry(words::ops::problem_of(kind.title(), problem), id, cx);
         }
         // Like Explorer, what was pasted is picked once listed, under the names it got.
         if kind == Kind::Paste

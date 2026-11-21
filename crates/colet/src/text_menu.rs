@@ -4,6 +4,7 @@
 use gpui_kit::base::input::{self, InputState};
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::Colet,
     dialogs::Dialog,
@@ -51,12 +52,12 @@ impl TextMenu {
     pub fn lines(&self) -> Vec<Line> {
         let edit = self.editable;
         vec![
-            plain("text-undo", "元に戻す", "Ctrl+Z", edit, Edit::Undo),
-            plain("text-cut", "切り取り", "Ctrl+X", edit && self.copyable, Edit::Cut).grouped(),
-            plain("text-copy", "コピー", "Ctrl+C", self.copyable, Edit::Copy),
-            plain("text-paste", "貼り付け", "Ctrl+V", edit && self.paste, Edit::Paste),
-            plain("text-delete", "削除", "Delete", edit && self.selection, Edit::Delete),
-            plain("text-select-all", "すべて選択", "Ctrl+A", !self.empty, Edit::SelectAll).grouped(),
+            plain("text-undo", words::menu::UNDO, "Ctrl+Z", edit, Edit::Undo),
+            plain("text-cut", words::CUT, "Ctrl+X", edit && self.copyable, Edit::Cut).grouped(),
+            plain("text-copy", words::COPY, "Ctrl+C", self.copyable, Edit::Copy),
+            plain("text-paste", words::PASTE, "Ctrl+V", edit && self.paste, Edit::Paste),
+            plain("text-delete", words::DELETE, "Delete", edit && self.selection, Edit::Delete),
+            plain("text-select-all", words::SELECT_ALL, "Ctrl+A", !self.empty, Edit::SelectAll).grouped(),
         ]
     }
 }

@@ -10,6 +10,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use super::{TabId, Title};
+use crate::words;
 use crate::{
     caption,
     metrics::{self, Scale, scaled},
@@ -275,7 +276,7 @@ impl RenderOnce for TabBar {
             .items_center()
             .bg(p.tab_strip)
             .role(Role::TabList)
-            .aria_label("タブ")
+            .aria_label(words::TAB)
             // The selected tab paints over this line to join the toolbar below.
             .child(div().absolute().left_0().right_0().bottom_0().h(metrics::HAIRLINE).bg(p.border))
             .child(
@@ -291,7 +292,7 @@ impl RenderOnce for TabBar {
                     .children(cells),
             )
             .child(
-                tab_button(p, radius, "new-tab", "plus", "新しいタブ", "新しいタブ（Ctrl+T）")
+                tab_button(p, radius, "new-tab", "plus", words::NEW_TAB, words::tabs::NEW_TAB_KEY)
                     .small()
                     .ml(scaled(NEW_TAB_GAP))
                     .size(scaled(NEW_TAB_BUTTON))
@@ -372,7 +373,7 @@ impl Tab<'_> {
                 p.text_muted
             }))
             .child(div().flex_1().min_w_0().truncate().child(name.clone()))
-            .child(tab_button(p, radius, ("tab-close", id as usize), "x", "タブを閉じる", "タブを閉じる（Ctrl+W）").xsmall().on_click(
+            .child(tab_button(p, radius, ("tab-close", id as usize), "x", words::CLOSE_TAB, words::tabs::CLOSE_TAB_KEY).xsmall().on_click(
                 move |_, _, cx| {
                     cx.stop_propagation();
                     ask(&closing, TabStripEvent::Close(id), cx);

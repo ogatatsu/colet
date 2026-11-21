@@ -6,6 +6,7 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::*,
     columns::row_height,
@@ -81,19 +82,19 @@ impl Colet {
                     .items_center()
                     .text_xs()
                     .text_color(p.text_muted)
-                    .child("ホ")
-                    .child("ー")
-                    .child("ム")
+                    .child(words::home::STRIP[0])
+                    .child(words::home::STRIP[1])
+                    .child(words::home::STRIP[2])
                     .test_support(),
             )
             // The button laid over the whole strip, as on the folders' strip.
             .child(
                 ring(div().id("home-strip-button").track_focus(&focus), p, focus.is_focused(window), 0.)
                     .role(Role::Button)
-                    .aria_label("ホームを表示（Ctrl+0）")
+                    .aria_label(words::home::SHOW)
                     .absolute()
                     .inset_0()
-                    .tip("ホームを表示（Ctrl+0）")
+                    .tip(words::home::SHOW)
                     .on_click(cx.listener(|this, _, window, cx| this.focus_home(window, cx)))
                     .test_support(),
             )
@@ -168,7 +169,7 @@ impl Colet {
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
-                            .child("ホーム"),
+                            .child(words::HOME),
                     ),
             )
             .when_some(field, |d, input| {
@@ -257,7 +258,7 @@ impl Colet {
         let mut rows = div()
             .id("home-rows")
             .role(Role::ListBox)
-            .aria_label("ホーム")
+            .aria_label(words::HOME)
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scrolls.home)

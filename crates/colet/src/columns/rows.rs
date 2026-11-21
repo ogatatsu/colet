@@ -5,6 +5,7 @@ use colet_core::{entry::Entry, paths::id_text, time};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::*,
     home::{HomeDrag, HomeGhost, movable},
@@ -270,7 +271,7 @@ impl Colet {
                 r.child(
                     div()
                         .id(row_part_id(&id, "held"))
-                        .tip(if cut { "切り取り中" } else { "コピー中" })
+                        .tip(if cut { words::column::BEING_CUT } else { words::column::BEING_COPIED })
                         .child(icon(
                             if cut { "scissors" } else { "copy" },
                             12.,
@@ -329,7 +330,7 @@ impl Colet {
             .mr_neg_2()
             .pr_2()
             .role(Role::CheckBox)
-            .aria_label("選択")
+            .aria_label(words::SELECT)
             .aria_toggled(if selected { Toggled::True } else { Toggled::False })
             .child(picture.when(boxed, |d| d.invisible()).group_hover(CHECK_GROUP, |s| s.invisible()))
             .child(
@@ -418,7 +419,7 @@ impl Colet {
                                 .flex()
                                 .items_center()
                                 .gap_0p5()
-                                .tip(format!("絞り込み：{narrow}"))
+                                .tip(words::column::narrowed_to(&narrow))
                                 .child(icon("funnel", 11., muted))
                                 .child(div().min_w_0().truncate().text_xs().text_color(muted).child(narrow)),
                         )

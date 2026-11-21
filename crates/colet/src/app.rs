@@ -17,6 +17,7 @@ use gpui_kit::component::{
 use gpui_kit::*;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
+use crate::words;
 use crate::{
     address::AddressBar,
     backend,
@@ -477,11 +478,11 @@ impl Colet {
     /// rather than a moment after the last change; when that fails, the next close goes without them.
     pub(crate) fn may_close(&mut self, cx: &mut Context<Self>) -> bool {
         if self.operations.read(cx).is_running() {
-            self.notify("ファイル操作中です。完了を待つか、進捗ダイアログでキャンセルしてから閉じてください。", Tone::Info, cx);
+            self.notify(words::window::BUSY_OPERATING, Tone::Info, cx);
             return false;
         }
         if self.operations.read(cx).is_sending() {
-            self.notify("「送る」の処理中です。完了を待ってから閉じてください。", Tone::Info, cx);
+            self.notify(words::window::BUSY_SENDING, Tone::Info, cx);
             return false;
         }
         if self.stored.is_unsaved_close() {
@@ -491,7 +492,7 @@ impl Colet {
             Ok(()) => true,
             Err(error) => {
                 self.stored.give_up_saving_on_close();
-                self.notify(format!("{error}。もう一度閉じると、設定を保存せずに終了します。"), Tone::Error, cx);
+                self.notify(words::window::close_without_settings(error), Tone::Error, cx);
                 false
             }
         }
@@ -621,17 +622,19 @@ impl Colet {
             note = note.action(move |_, _, _| {
                 let colet = colet.clone();
                 // The mouse leaves the keys where they are; from the keys, they go on into the history.
-                crate::view::keep_focus(Button::new(("toast-details", id)).label("詳細")).on_click(move |event: &ClickEvent, window, cx| {
-                    window.remove_notification1::<Colet>(("toast", id), cx);
-                    colet
-                        .update(cx, |this, cx| {
-                            this.show_history(true, Some(entry), window, cx);
-                            if event.is_keyboard() {
-                                this.history.read(cx).entry_focus(entry, cx).focus(window, cx);
-                            }
-                        })
-                        .ok();
-                })
+                crate::view::keep_focus(Button::new(("toast-details", id)).label(words::window::DETAILS)).on_click(
+                    move |event: &ClickEvent, window, cx| {
+                        window.remove_notification1::<Colet>(("toast", id), cx);
+                        colet
+                            .update(cx, |this, cx| {
+                                this.show_history(true, Some(entry), window, cx);
+                                if event.is_keyboard() {
+                                    this.history.read(cx).entry_focus(entry, cx).focus(window, cx);
+                                }
+                            })
+                            .ok();
+                    },
+                )
             });
         }
         let window = self.window;
@@ -797,7 +800,7 @@ impl Colet {
             return;
         }
         let (backend, owner) = (self.backend.clone(), self.owner);
-        self.in_background(move || backend.open(&entry.path, owner).map_err(|error| format!("開けません: {error}")), None, cx);
+        self.in_background(move || backend.open(&entry.path, owner).map_err(words::ops::cannot_open), None, cx);
     }
 
     /// Space: QuickLook shows the row the keys are on, or closes on it. Nowhere for it to go is said, and
@@ -810,10 +813,10 @@ impl Colet {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| match result {
-                Ok(Err(quick_look::Error::NotRunning)) => this.notify("QuickLook が起動していません", Tone::Info, cx),
-                Ok(Err(quick_look::Error::Unnamable)) => this.notify("この名前は QuickLook に渡せないため表示できません", Tone::Info, cx),
+                Ok(Err(quick_look::Error::NotRunning)) => this.notify(words::window::QUICK_LOOK_NOT_RUNNING, Tone::Info, cx),
+                Ok(Err(quick_look::Error::Unnamable)) => this.notify(words::window::QUICK_LOOK_UNNAMABLE, Tone::Info, cx),
                 Ok(Err(quick_look::Error::Failed(error))) => {
-                    this.notify(format!("QuickLook で表示できません: {}", message(error.code())), Tone::Error, cx)
+                    this.notify(words::window::quick_look_failed(message(error.code())), Tone::Error, cx)
                 }
                 _ => {}
             })

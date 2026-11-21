@@ -12,6 +12,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::{Colet, Tone},
     backend::{self, PathKind},
@@ -209,7 +210,7 @@ impl HistoryPanel {
                                 .into_any_element()
                         }))
                         .when(entry.more > 0, |d| {
-                            d.child(div().pl_8().py_1().text_xs().text_color(p.text_faint).child(format!("ほか {} 項目", entry.more)))
+                            d.child(div().pl_8().py_1().text_xs().text_color(p.text_faint).child(words::more_items(entry.more)))
                         })
                     })
                     .into_any_element()
@@ -253,15 +254,15 @@ impl Render for HistoryPanel {
                     .items_center()
                     .border_b_1()
                     .border_color(p.border)
-                    .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child("操作履歴"))
+                    .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child(words::history::TITLE))
                     .child(
-                        keep_focus(push("clear-history", "履歴を消去", false, clearable).ghost().small()).on_click(
+                        keep_focus(push("clear-history", words::history::CLEAR, false, clearable).ghost().small()).on_click(
                             cx.listener(|this, _, _, cx| this.operations.update(cx, |operations, cx| operations.clear_history(cx))),
                         ),
                     ),
             )
             .child(if entries.is_empty() {
-                div().p_4().text_xs().text_color(p.text_muted).child("まだファイル操作はありません").into_any_element()
+                div().p_4().text_xs().text_color(p.text_muted).child(words::history::EMPTY).into_any_element()
             } else {
                 div().id("history-list").flex_1().overflow_y_scroll().children(entries).into_any_element()
             })
@@ -285,7 +286,7 @@ impl Colet {
         let p = cx.palette();
         let operations = self.operations.read(cx);
         let (unseen, running) = (operations.history.unseen, operations.is_running());
-        let label = if unseen > 0 { format!("操作履歴（問題のある操作 {unseen} 件）") } else { "操作履歴".to_owned() };
+        let label = if unseen > 0 { words::history::title_with_problems(unseen) } else { words::history::TITLE.to_owned() };
         let button = Button::new("history-button")
             .ghost()
             .xsmall()
@@ -350,7 +351,7 @@ impl Colet {
     pub(crate) fn on_history_event(&mut self, event: &HistoryEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             HistoryEvent::Dismiss => self.show_history(false, None, window, cx),
-            HistoryEvent::Gone(path) => self.notify(format!("「{}」はもうありません", shown(folder_name(path))), Tone::Info, cx),
+            HistoryEvent::Gone(path) => self.notify(words::history::gone(shown(folder_name(path))), Tone::Info, cx),
             HistoryEvent::Reveal { path, folder } => {
                 self.show_history(false, None, window, cx);
                 self.state.go_to_path(path, *folder);

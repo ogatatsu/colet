@@ -4,6 +4,7 @@ use std::time::Instant;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::*,
     metrics::{self, Scale, scaled},
@@ -99,8 +100,8 @@ impl Colet {
                     .text_xs()
                     .text_color(p.text_muted)
                     .child(away.to_string())
-                    .child("階")
-                    .child("層")
+                    .child(words::column::FOLDED[0])
+                    .child(words::column::FOLDED[1])
                     .test_support(),
             )
             // The button laid over the whole strip: its ring's room would push the heading's line off the
@@ -110,10 +111,10 @@ impl Colet {
                 // with the keys on it, they go to the column worked in.
                 keep_focus(ring(div().id("unfold").track_focus(&focus), p, focus.is_focused(window), 0.))
                     .role(Role::Button)
-                    .aria_label(format!("上の階層を表示（{away}階層）"))
+                    .aria_label(words::column::show_levels_above(away))
                     .absolute()
                     .inset_0()
-                    .tip(format!("上の階層を表示（{away}階層）"))
+                    .tip(words::column::show_levels_above(away))
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         this.state.unfold();
                         if event.is_keyboard() {

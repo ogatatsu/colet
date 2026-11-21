@@ -4,6 +4,7 @@
 use colet_core::entry::{Order, Sort, direction_label};
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::Colet,
     menus::{Line, Popup, choice},
@@ -131,10 +132,12 @@ impl Colet {
         }));
         lines[sorts].group = true;
         let first = sort.folders_first;
-        lines.push(choice("folders-first", "フォルダを先に表示", OrderCommand::FoldersFirst(target, !first), first).grouped());
+        lines.push(choice("folders-first", words::column::FOLDERS_FIRST, OrderCommand::FoldersFirst(target, !first), first).grouped());
         // A column given its own order goes back to the default from here.
         let own = self.own_order(column).is_some();
-        lines.push(Line { off: (!own).then_some(""), ..choice("unsort", "既定に戻す", OrderCommand::Unsort(target), false) }.grouped());
+        lines.push(
+            Line { off: (!own).then_some(""), ..choice("unsort", words::column::UNSORT, OrderCommand::Unsort(target), false) }.grouped(),
+        );
         lines
     }
 

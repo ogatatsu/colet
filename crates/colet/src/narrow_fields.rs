@@ -9,6 +9,7 @@ use std::{
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::Colet,
     state::{Column, ColumnId, Kind, narrow_words, room_for_a_word},
@@ -88,7 +89,8 @@ impl NarrowFields {
                 },
                 None => {
                     let text = c.narrow.as_ref().map(|f| f.text().to_owned()).unwrap_or_default();
-                    let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む").default_value(text.clone()));
+                    let input =
+                        cx.new(|cx| InputState::new(window, cx).placeholder(words::column::NARROW_PLACEHOLDER).default_value(text.clone()));
                     cx.palette().style_input(&input, cx);
                     let subscription = cx.subscribe_in(&input, window, move |this: &mut Colet, input, event, window, cx| match event {
                         InputEvent::Change => {

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::{Colet, Tone},
     state::HomeKey,
@@ -77,7 +78,7 @@ impl Colet {
                     }
                 }
                 Err(error) => {
-                    this.update(cx, |this, cx| this.notify(format!("ドラッグできません: {error}"), Tone::Error, cx)).ok();
+                    this.update(cx, |this, cx| this.notify(words::ops::cannot_drag(error), Tone::Error, cx)).ok();
                 }
             }
             this.update(cx, |this, cx| this.put_down(carry, cx)).ok();

@@ -19,6 +19,7 @@ use windows::Win32::{
     },
 };
 
+use crate::words;
 use crate::{
     metrics::scaled,
     theme::{ActivePalette, Palette},
@@ -55,10 +56,10 @@ impl Caption {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Minimize => "最小化",
-            Self::Maximize => "最大化",
-            Self::Restore => "元に戻す（縮小）",
-            Self::Close => "閉じる",
+            Self::Minimize => words::window::MINIMIZE,
+            Self::Maximize => words::window::MAXIMIZE,
+            Self::Restore => words::window::RESTORE,
+            Self::Close => words::CLOSE,
         }
     }
 

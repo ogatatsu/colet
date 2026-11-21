@@ -9,6 +9,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder;
 
+use crate::words;
 use crate::{
     app::Colet,
     dialogs::{Dialog, DialogParts, field, label, push},
@@ -70,7 +71,7 @@ impl Colet {
             .and_then(|name| self.stored.settings().filters.iter().find(|f| f.name == name))
             .cloned()
             .unwrap_or_default();
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("画像").default_value(found.name));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(words::search::FILTER_NAME_PLACEHOLDER).default_value(found.name));
         let query = cx.new(|cx| InputState::new(window, cx).placeholder("ext:jpg;png;gif").default_value(found.query));
         self.begin_dialog(window, cx);
         for input in [&name, &query] {
@@ -93,7 +94,7 @@ impl Colet {
         if name.is_empty() || edit.query.read(cx).value().trim().is_empty() {
             Some("")
         } else if edit.original.as_deref() != Some(name.as_str()) && self.stored.settings().filter_query(&name).is_some() {
-            Some("この名前のフィルターは既にあります")
+            Some(words::search::FILTER_EXISTS)
         } else {
             None
         }
@@ -212,71 +213,69 @@ impl Colet {
         let radii = metrics::Radii::of(window, cx);
         let FilterEdit { name, query, .. } = edit;
         let problem = self.filter_problem(cx);
-        let content =
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(label(p, "名前"))
-                        .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
-                        .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                            d.child(div().text_xs().text_color(p.danger).child(problem))
-                        }),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(label(p, "検索文字列"))
-                        .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
-                        .child(div().text_xs().text_color(p.text_faint).child(
-                            "Everythingの検索式で書きます（例：ext:jpg;png、dm:thisweek）。検索欄に打った語と両方に合うものを探します",
-                        )),
-                );
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, words::NAME))
+                    .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
+                    .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
+                        d.child(div().text_xs().text_color(p.danger).child(problem))
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label(p, words::QUERY))
+                    .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
+                    .child(div().text_xs().text_color(p.text_faint).child(words::search::FILTER_QUERY_HINT)),
+            );
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
+                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
             ),
             (
                 "save-filter",
-                push("save-filter", "保存", true, problem.is_none())
+                push("save-filter", words::SAVE, true, problem.is_none())
                     .on_click(cx.listener(|this, _, window, cx| this.submit_filter(window, cx))),
             ),
         ];
-        (if edit.original.is_none() { "フィルターを追加" } else { "フィルターを編集" }, content, buttons)
+        (if edit.original.is_none() { words::search::ADD_FILTER } else { words::search::EDIT_FILTER }, content, buttons)
     }
 
     /// Whether the search filter `name` is to go.
     pub(crate) fn filter_delete_dialog(&self, name: &str, cx: &mut Context<Self>) -> DialogParts {
         let p = cx.palette();
         let users = self.filter_users(name);
-        let content =
-            div().flex().flex_col().gap_2().text_sm().child(format!("「{name}」を削除しますか？")).when(users > 0, |d| {
-                d.child(div().text_xs().text_color(p.text_muted).child(format!(
-                    "このフィルターを使う保存した検索が{users}件あります。削除すると、それらはフィルターなしで検索します。"
-                )))
-            });
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .text_sm()
+            .child(words::search::delete_filter(name))
+            .when(users > 0, |d| d.child(div().text_xs().text_color(p.text_muted).child(words::search::filter_users(users))));
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
+                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
             ),
             (
                 "delete-filter",
                 // Destructive: drawn as danger, not as the primary commit.
-                push("delete-filter", "削除", false, true)
+                push("delete-filter", words::DELETE, false, true)
                     .danger()
                     .on_click(cx.listener(|this, _, window, cx| this.delete_filter(window, cx))),
             ),
         ];
-        ("フィルターを削除", content, buttons)
+        (words::search::DELETE_FILTER, content, buttons)
     }
 
     /// The search filters, in their order.
@@ -293,9 +292,9 @@ impl Colet {
                 let (up_name, down_name, edit_name, default_name) = (name.clone(), name.clone(), name.clone(), name.clone());
                 let is_default = default.as_deref() == Some(f.name.as_str());
                 let (default_glyph, default_label) = if is_default {
-                    ("circle-check", format!("「{}」を既定から外す", f.name))
+                    ("circle-check", words::search::undefault(&f.name))
                 } else {
-                    ("circle", format!("「{}」を既定にする", f.name))
+                    ("circle", words::search::make_default(&f.name))
                 };
                 div()
                     .flex()
@@ -317,7 +316,9 @@ impl Colet {
                                     .gap_2()
                                     .min_w_0()
                                     .child(div().truncate().text_sm().child(f.name.clone()))
-                                    .when(is_default, |d| d.child(div().flex_none().text_xs().text_color(p.text_muted).child("既定"))),
+                                    .when(is_default, |d| {
+                                        d.child(div().flex_none().text_xs().text_color(p.text_muted).child(words::DEFAULT))
+                                    }),
                             )
                             .child(
                                 div().truncate().text_xs().text_color(p.text_muted).font_family(metrics::FONT_CODE).child(f.query.clone()),
@@ -336,7 +337,7 @@ impl Colet {
                     )
                     .child(
                         self.ringed(
-                            tool(filter_tool_id("filter-up", &f.name), "arrow-up", format!("「{}」を上へ", f.name), i > 0)
+                            tool(filter_tool_id("filter-up", &f.name), "arrow-up", words::search::move_up(&f.name), i > 0)
                                 .when(i > 0, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&up_name, -1, cx)))),
                             Stop::Filter(FilterTool::Up, f.name.clone()),
                             RingAt::Edge,
@@ -346,7 +347,7 @@ impl Colet {
                     )
                     .child(
                         self.ringed(
-                            tool(filter_tool_id("filter-down", &f.name), "arrow-down", format!("「{}」を下へ", f.name), i < last)
+                            tool(filter_tool_id("filter-down", &f.name), "arrow-down", words::search::move_down(&f.name), i < last)
                                 .when(i < last, |d| d.on_click(cx.listener(move |this, _, _, cx| this.move_filter(&down_name, 1, cx)))),
                             Stop::Filter(FilterTool::Down, f.name.clone()),
                             RingAt::Edge,
@@ -356,7 +357,7 @@ impl Colet {
                     )
                     .child(
                         self.ringed(
-                            tool(filter_tool_id("filter-edit", &f.name), "pencil-line", format!("「{}」を編集", f.name), true)
+                            tool(filter_tool_id("filter-edit", &f.name), "pencil-line", words::search::edit_named(&f.name), true)
                                 .on_click(cx.listener(move |this, _, window, cx| this.edit_filter(Some(edit_name.clone()), window, cx))),
                             Stop::Filter(FilterTool::Edit, f.name.clone()),
                             RingAt::Edge,
@@ -366,7 +367,7 @@ impl Colet {
                     )
                     .child(
                         self.ringed(
-                            tool(filter_tool_id("filter-delete", &f.name), "trash", format!("「{}」を削除", f.name), true)
+                            tool(filter_tool_id("filter-delete", &f.name), "trash", words::search::delete_named(&f.name), true)
                                 .on_click(cx.listener(move |this, _, window, cx| this.ask_delete_filter(name.clone(), window, cx))),
                             Stop::Filter(FilterTool::Delete, f.name.clone()),
                             RingAt::Edge,
@@ -377,32 +378,26 @@ impl Colet {
                     .into_any_element()
             })
             .collect();
-        let content = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(p.text_muted)
-                    .child("検索に加えるEverythingの検索式を登録し、検索欄の左のボタン（Ctrl+Shift+F）で1つ選んで使います。"),
-            )
-            .child(if rows.is_empty() {
-                div().py_2().text_xs().text_color(p.text_faint).child("フィルターはまだありません").into_any_element()
-            } else {
-                div().flex().flex_col().children(rows).into_any_element()
-            });
+        let content =
+            div().flex().flex_col().gap_2().child(div().text_xs().text_color(p.text_muted).child(words::search::FILTERS_ABOUT)).child(
+                if rows.is_empty() {
+                    div().py_2().text_xs().text_color(p.text_faint).child(words::search::NO_FILTERS).into_any_element()
+                } else {
+                    div().flex().flex_col().children(rows).into_any_element()
+                },
+            );
         let buttons = vec![
             (
                 "add-filter",
-                push("add-filter", "追加", false, true).on_click(cx.listener(|this, _, window, cx| this.edit_filter(None, window, cx))),
+                push("add-filter", words::search::ADD, false, true)
+                    .on_click(cx.listener(|this, _, window, cx| this.edit_filter(None, window, cx))),
             ),
             (
                 "close-filters",
-                push("close-filters", "閉じる", true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("close-filters", words::CLOSE, true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
         ];
-        ("検索フィルター", content, buttons)
+        (words::SEARCH_FILTER, content, buttons)
     }
 }
 
@@ -434,10 +429,10 @@ impl Colet {
     pub(crate) fn filter_lines(&self, cx: &App) -> Vec<Line> {
         let chosen = self.chosen_filter(cx);
         let chosen = chosen.as_deref();
-        let mut lines = vec![choice("filter-none", "なし", FilterCommand::Choose(None), chosen.is_none())];
+        let mut lines = vec![choice("filter-none", words::NONE, FilterCommand::Choose(None), chosen.is_none())];
         let default = self.stored.settings().default_filter.as_deref();
         lines.extend(self.stored.settings().filters.iter().map(|f| Line {
-            hint: (default == Some(f.name.as_str())).then_some("既定"),
+            hint: (default == Some(f.name.as_str())).then_some(words::DEFAULT),
             ..choice(
                 filter_tool_id("filter", &f.name),
                 f.name.clone(),
@@ -445,7 +440,7 @@ impl Colet {
                 chosen == Some(f.name.as_str()),
             )
         }));
-        lines.push(line("edit-filters", "pencil-line", "フィルターを編集…", None, None, FilterCommand::Edit).grouped());
+        lines.push(line("edit-filters", "pencil-line", words::search::EDIT_FILTERS, None, None, FilterCommand::Edit).grouped());
         lines
     }
 

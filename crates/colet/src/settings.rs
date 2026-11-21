@@ -14,6 +14,7 @@ use colet_core::{
 use serde::{Deserialize, Serialize};
 
 pub use self::tab::KeptTab;
+use crate::words;
 use crate::{
     app::{COLUMN_WIDTHS, SEARCH_FIELD_WIDTH, SEARCH_FIELD_WIDTHS, SIDEBAR_WIDTHS},
     kept_file::{self, Fields, File, Lenient, Loaded, kept_path, lenient},
@@ -126,9 +127,9 @@ impl Theme {
 
     pub fn label(self) -> &'static str {
         match self {
-            Theme::System => "システム",
-            Theme::Light => "ライト",
-            Theme::Dark => "ダーク",
+            Theme::System => words::preferences::THEME_SYSTEM,
+            Theme::Light => words::preferences::THEME_LIGHT,
+            Theme::Dark => words::preferences::THEME_DARK,
         }
     }
 }
@@ -347,7 +348,8 @@ impl<'de> Deserialize<'de> for Settings {
     }
 }
 
-pub const SETTINGS: File = File { stem: "settings", what: "設定", file: "設定ファイル", fallback: "既定の設定" };
+pub const SETTINGS: File =
+    File { stem: "settings", what: words::kept::SETTINGS, file: words::kept::SETTINGS_FILE, fallback: words::kept::SETTINGS_FALLBACK };
 
 /// `%APPDATA%\Colet\settings.json`.
 pub fn path() -> Option<PathBuf> {
@@ -368,7 +370,7 @@ fn load_from(path: &Path) -> Loaded<Settings> {
 
 /// Writes beside the file and then over it, so a failed write leaves the old one whole.
 pub fn save(settings: &Settings) -> Result<(), String> {
-    let path = path().ok_or("設定の保存先がわかりません")?;
+    let path = path().ok_or(words::kept::NO_SETTINGS_PLACE)?;
     save_to(settings, &path)
 }
 

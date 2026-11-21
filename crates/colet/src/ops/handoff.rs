@@ -1,6 +1,7 @@
 //! What is handed to Windows: showing an item in Explorer, its properties, the shell's own menu, and
 //! Send To; and the items carried out of the window, faded until they land.
 use super::*;
+use crate::words;
 
 impl Colet {
     /// Shows the picked items, all in one folder, selected together in it; with nothing picked, the folder
@@ -15,7 +16,7 @@ impl Colet {
         match folder {
             Some(folder) if picked.is_empty() => {
                 let owner = self.owner;
-                self.in_background(move || backend.open(&folder, owner).map_err(|error| format!("開けません: {error}")), None, cx);
+                self.in_background(move || backend.open(&folder, owner).map_err(words::ops::cannot_open), None, cx);
             }
             _ if !picked.is_empty() => {
                 let paths: Vec<PathBuf> = picked.into_iter().map(|e| HomeKey::on_disk(&e.path).into_owned()).collect();
@@ -32,7 +33,7 @@ impl Colet {
         let (mut picked, refused) = (self.picked(), self.reasons(cx).properties);
         self.take_menu();
         if let Some(reason) = refused {
-            self.refuse("プロパティ", reason, cx);
+            self.refuse(words::PROPERTIES, reason, cx);
             return;
         }
         if picked.is_empty() {
@@ -87,7 +88,7 @@ impl Colet {
             return;
         }
         if let Some(reason) = refused {
-            self.refuse("送る", reason, cx);
+            self.refuse(words::SEND_TO, reason, cx);
             return;
         }
         let paths: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();

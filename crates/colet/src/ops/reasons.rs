@@ -2,6 +2,7 @@
 //! the actions act on: the column the menu opened in, or the one worked in, and the items picked there.
 use super::*;
 use crate::file_menu::Menu;
+use crate::words;
 
 /// Why an action is off, as its button and menu item say; `None` while it is on.
 pub struct Reasons {
@@ -17,19 +18,10 @@ pub struct Reasons {
     pub properties: Option<&'static str>,
 }
 
-pub(super) const NEEDS_SELECTION: &str = "項目を選択すると使えます";
-pub const NEEDS_FOLDER: &str = "フォルダーのカラムで使えます";
-pub(super) const BUSY: &str = "ファイル操作の完了後に使えます";
-pub(super) const NOT_AT_HOME: &str = "ホームでは使えません";
-pub const NOT_AT_SERVER: &str = "サーバーの共有一覧では使えません";
-pub const ONE_ITEM: &str = "1項目を選択したときに使えます";
-pub const NEEDS_FILE: &str = "ファイルを選択したときに使えます";
-pub const SAME_FOLDER: &str = "同じフォルダーの項目を選んだときに使えます";
-pub(super) const NO_SEND_TARGETS: &str = "送るフォルダーに送り先がありません";
-pub(super) const NO_SEND_DRIVE: &str = "ドライブは送れません";
-pub(super) const NO_COPY_SAVED: &str = "保存した検索はコピーできません";
-pub(super) const NO_COPY_DRIVE: &str = "ドライブはコピーできません";
-pub(super) const NOT_FOR_SAVED: &str = "保存した検索には使えません";
+pub use crate::words::reasons::{
+    BUSY, NEEDS_FILE, NEEDS_FOLDER, NEEDS_SELECTION, NO_COPY_DRIVE, NO_COPY_SAVED, NO_SEND_DRIVE, NO_SEND_TARGETS, NOT_AT_HOME,
+    NOT_AT_SERVER, NOT_FOR_SAVED, ONE_ITEM, SAME_FOLDER,
+};
 
 impl Colet {
     /// A menu keeps the column it opened on even if another column takes its place in the chain.
@@ -125,6 +117,6 @@ impl Colet {
 
     /// Says why a shortcut did nothing, as the buttons and menu items say it.
     pub(super) fn refuse(&mut self, title: &str, reason: &str, cx: &mut Context<Self>) {
-        self.notify(format!("「{title}」は{reason}"), Tone::Info, cx);
+        self.notify(words::reasons::refused(title, reason), Tone::Info, cx);
     }
 }

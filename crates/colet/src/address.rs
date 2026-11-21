@@ -12,6 +12,7 @@ use colet_core::paths::{address, shown};
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::{Colet, Tone},
     backend,
@@ -19,9 +20,6 @@ use crate::{
 };
 
 mod view;
-
-/// What the empty address says before and while editing.
-pub(crate) const PLACEHOLDER: &str = "パスを入力（Ctrl+L）";
 
 /// The address bar's field, shown in place of the trail while open, and how many times anything has
 /// happened to it: a path typed, the field opened or closed. An answer about a path is taken only while
@@ -48,7 +46,7 @@ impl EventEmitter<AddressEvent> for AddressBar {}
 impl AddressBar {
     /// Enter in the field goes to what is typed, in this tab.
     pub fn new(backend: backend::Shared, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let field = cx.new(|cx| InputState::new(window, cx).placeholder(PLACEHOLDER));
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder(words::address::PLACEHOLDER));
         let typed = cx.subscribe_in(&field, window, |this: &mut Self, _, event, _, cx| match event {
             InputEvent::PressEnter { .. } => this.go(false, cx),
             // What was asked for is no longer what the field holds.
@@ -106,10 +104,7 @@ impl AddressBar {
             return;
         }
         let Some(path) = address(&text, |name| std::env::var(name).ok()) else {
-            cx.emit(AddressEvent::Problem(format!(
-                "「{}」は開けません。ドライブ（C:\\…）かサーバー（\\\\server）から始まるパスを入力してください",
-                text.trim()
-            )));
+            cx.emit(AddressEvent::Problem(words::address::not_a_path(text.trim())));
             return;
         };
         self.asked += 1;
@@ -133,7 +128,7 @@ impl AddressBar {
             return;
         }
         let Some((path, directory)) = found else {
-            cx.emit(AddressEvent::Problem(format!("「{}」が見つかりません", shown(&typed))));
+            cx.emit(AddressEvent::Problem(words::address::not_found(shown(&typed))));
             return;
         };
         self.close(cx);

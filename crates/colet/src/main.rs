@@ -43,6 +43,7 @@ mod text_menu;
 mod theme;
 mod view;
 mod watching;
+mod words;
 
 use std::borrow::Cow;
 

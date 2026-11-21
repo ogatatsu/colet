@@ -1,6 +1,7 @@
 //! The status bar along the bottom.
 use super::*;
 use crate::loading::Engine;
+use crate::words;
 
 impl Colet {
     pub(super) fn render_statusbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -9,10 +10,10 @@ impl Colet {
         let active = &self.state.columns[self.state.active];
         let place = match active.kind {
             Kind::Folder => shown(&active.path),
-            Kind::Search if active.error.is_some() => "検索できません".into(),
-            Kind::Search if active.unread() => "検索中…".into(),
-            Kind::Search => "検索結果".into(),
-            Kind::Home => "ホーム".into(),
+            Kind::Search if active.error.is_some() => words::status::CANNOT_SEARCH.into(),
+            Kind::Search if active.unread() => words::status::SEARCHING.into(),
+            Kind::Search => words::SEARCH_RESULTS.into(),
+            Kind::Home => words::HOME.into(),
         };
         // What a filter hides is not counted, nor acted on.
         let shown_selected = active.shown_selected();
@@ -22,11 +23,11 @@ impl Colet {
             _ => None,
         };
         let detail = match picked {
-            _ if shown_selected.len() > 1 => format!("{} 項目を選択", shown_selected.len()),
+            _ if shown_selected.len() > 1 => words::status::selected(shown_selected.len()),
             Some(entry) => {
-                let what = if entry.directory { "フォルダー".into() } else { time::size(entry.size) };
+                let what = if entry.directory { words::FOLDER.into() } else { time::size(entry.size) };
                 match entry.modified.and_then(time::date_time) {
-                    Some(when) => format!("{what} · {when}"),
+                    Some(when) => words::status::with_time(&what, when),
                     None => what,
                 }
             }

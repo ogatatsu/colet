@@ -21,6 +21,7 @@ use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::{Colet, FOLD_WIDTH, Tone, WidthOf},
     dialogs::{Choice, Dialog, DialogParts, Pick, field, label, push},
@@ -64,10 +65,10 @@ pub fn home_groups<'a>(settings: &Settings, entries: &'a [std::sync::Arc<Entry>]
     let search = |e: &&Entry| !pinned(e) && HomeKey::of(&e.path).is_search();
     let entries = || entries.iter().map(|e| &**e);
     [
-        ("ピン留め", entries().filter(pinned).collect::<Vec<_>>()),
-        ("お気に入り", entries().filter(favorite).collect()),
-        ("保存した検索", entries().filter(search).collect()),
-        ("場所", entries().filter(|e| !pinned(e) && !favorite(e) && !search(e)).collect()),
+        (words::home::PINNED, entries().filter(pinned).collect::<Vec<_>>()),
+        (words::home::FAVORITES, entries().filter(favorite).collect()),
+        (words::home::SAVED_SEARCHES, entries().filter(search).collect()),
+        (words::home::PLACES, entries().filter(|e| !pinned(e) && !favorite(e) && !search(e)).collect()),
     ]
     .into_iter()
     .filter(|(_, rows)| !rows.is_empty())
@@ -445,7 +446,7 @@ impl Colet {
         );
         // The name given to it, or the narrowing, goes too; say so.
         if let Some(found) = found.filter(|f| !f.name.is_empty() || f.narrow.is_some()) {
-            self.notify(format!("「{}」をお気に入りから外しました", found.label()), Tone::Info, cx);
+            self.notify(words::home::unfavorited(found.label()), Tone::Info, cx);
         }
     }
 
@@ -516,7 +517,7 @@ impl Colet {
     /// others.
     pub fn toggle_saved(&mut self, query: &str, filter: Option<String>, narrow: Option<String>, order: Order, cx: &mut Context<Self>) {
         if query.trim().is_empty() {
-            self.notify("検索語を入力すると保存できます", Tone::Info, cx);
+            self.notify(words::home::QUERY_NEEDED, Tone::Info, cx);
             return;
         }
         let found = self.stored.settings().saved(query, filter.as_deref(), narrow.as_deref(), order).cloned();
@@ -530,7 +531,7 @@ impl Colet {
         );
         // The name given to it goes too; say so.
         if let Some(found) = found {
-            self.notify(format!("「{}」を保存した検索から外しました", found.label()), Tone::Info, cx);
+            self.notify(words::home::unsaved(found.label()), Tone::Info, cx);
         }
     }
 
@@ -551,7 +552,7 @@ impl Colet {
             let key = self.favorite_key_of(self.state.active);
             self.toggle_favorite(&key, cx);
         } else {
-            self.notify("「保存」は検索結果かフォルダーのカラムで使えます", Tone::Info, cx);
+            self.notify(words::home::SAVE_WHERE, Tone::Info, cx);
         }
     }
 
@@ -583,7 +584,7 @@ impl Colet {
         self.begin_dialog(window, cx);
         let name = self.edit_field(found.name.clone(), found.query.clone(), Self::submit_edit, window, cx);
         let query = self.edit_field(found.query.clone(), String::new(), Self::submit_edit, window, cx);
-        let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), "なし".into(), Self::submit_edit, window, cx);
+        let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), words::NONE.into(), Self::submit_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
         let (filter, order) = (found.filter.clone(), found.order);
         self.overlays.set_dialog(Dialog::EditSearch { original: found, name, query, filter, narrow, order });
@@ -627,7 +628,7 @@ impl Colet {
         } else if edited.key() != original.key()
             && self.stored.settings().saved(&edited.query, edited.filter.as_deref(), edited.narrow.as_deref(), edited.order).is_some()
         {
-            Some("この検索は既に保存しています")
+            Some(words::home::SEARCH_SAVED_ALREADY)
         } else {
             None
         }
@@ -662,7 +663,7 @@ impl Colet {
         self.take_menu();
         self.begin_dialog(window, cx);
         let name = self.edit_field(found.name.clone(), shown(folder_name(&found.path)), Self::submit_favorite_edit, window, cx);
-        let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), "なし".into(), Self::submit_favorite_edit, window, cx);
+        let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), words::NONE.into(), Self::submit_favorite_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
         self.overlays.set_dialog(Dialog::EditFavorite { original: found, name, narrow });
         cx.notify();
@@ -683,7 +684,7 @@ impl Colet {
         let Some(Dialog::EditFavorite { original, .. }) = self.overlays.dialog() else { return None };
         let edited = self.edited_favorite(cx)?;
         let other = edited.narrow != original.narrow && self.stored.settings().favorite(&edited.path, edited.narrow.as_deref()).is_some();
-        other.then_some("この絞り込みのお気に入りは既にあります")
+        other.then_some(words::home::FAVORITE_EXISTS)
     }
 
     pub fn submit_favorite_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -721,11 +722,11 @@ impl Colet {
             .flex()
             .flex_col()
             .gap_1()
-            .child(label(p, "絞り込み"))
+            .child(label(p, words::NARROWING))
             .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
             .child(match problem {
                 Some(problem) => div().text_xs().text_color(p.danger).child(problem),
-                None => div().text_xs().text_color(p.text_faint).child("開いたとき、この文字で名前を絞り込みます"),
+                None => div().text_xs().text_color(p.text_faint).child(words::home::NARROW_HINT),
             })
     }
 
@@ -746,13 +747,14 @@ impl Colet {
         };
         let by = Sort::ALL.into_iter().map(|by| (OrderChoice::By(by), by.label())).collect();
         let direction = [false, true].into_iter().map(|d| (OrderChoice::Descending(d), direction_label(d))).collect();
-        let folders = vec![(OrderChoice::FoldersFirst(true), "フォルダを先に"), (OrderChoice::FoldersFirst(false), "混在")];
+        let folders =
+            vec![(OrderChoice::FoldersFirst(true), words::home::FOLDERS_FIRST), (OrderChoice::FoldersFirst(false), words::home::MIXED)];
         let (by, direction, folders) = (
-            row("edit-search-sort", "並べ替え", by),
-            row("edit-search-direction", "向き", direction),
-            row("edit-search-folders", "フォルダ", folders),
+            row("edit-search-sort", words::home::SORT_BY, by),
+            row("edit-search-direction", words::home::DIRECTION, direction),
+            row("edit-search-folders", words::home::FOLDERS, folders),
         );
-        div().flex().flex_col().gap_1().child(label(p, "並び順")).child(by).child(direction).child(folders)
+        div().flex().flex_col().gap_1().child(label(p, words::SORT_ORDER)).child(by).child(direction).child(folders)
     }
 
     /// A favorite's name and narrowing.
@@ -771,29 +773,29 @@ impl Colet {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_xs().text_color(p.text_faint).child(format!("フォルダー：{}", shown(&original.path))))
+            .child(div().text_xs().text_color(p.text_faint).child(words::home::folder_of(shown(&original.path))))
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, "名前"))
+                    .child(label(p, words::NAME))
                     .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
-                    .child(div().text_xs().text_color(p.text_faint).child("空欄ならフォルダー名を表示します")),
+                    .child(div().text_xs().text_color(p.text_faint).child(words::home::FAVORITE_NAME_HINT)),
             )
             .child(self.narrow_field(narrow, problem, window, cx));
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
             (
                 "save-favorite",
-                push("save-favorite", "保存", true, problem.is_none())
+                push("save-favorite", words::SAVE, true, problem.is_none())
                     .on_click(cx.listener(|this, _, window, cx| this.submit_favorite_edit(window, cx))),
             ),
         ];
-        ("お気に入りを編集", content, buttons)
+        (words::home::EDIT_FAVORITE, content, buttons)
     }
 
     /// A saved search's name, query, filter, narrowing and order.
@@ -818,7 +820,7 @@ impl Colet {
         let filters = choices
             .into_iter()
             .map(|choice| {
-                let text = choice.clone().unwrap_or_else(|| "なし".into());
+                let text = choice.clone().unwrap_or_else(|| words::NONE.into());
                 let id = match &choice {
                     Some(name) => filter_tool_id("edit-search-filter", name),
                     None => "edit-search-filter-none".into(),
@@ -829,7 +831,7 @@ impl Colet {
                 Choice::new(id, text, Stop::EditSearchFilter(choice), is_chosen, pick)
             })
             .collect();
-        let filters = self.radio_group("edit-search-filters", "検索フィルター", filters, window, cx);
+        let filters = self.radio_group("edit-search-filters", words::SEARCH_FILTER, filters, window, cx);
         let content = div()
             .flex()
             .flex_col()
@@ -839,36 +841,36 @@ impl Colet {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, "名前"))
+                    .child(label(p, words::NAME))
                     .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
-                    .child(div().text_xs().text_color(p.text_faint).child("空欄なら検索文字列をそのまま表示します")),
+                    .child(div().text_xs().text_color(p.text_faint).child(words::home::SEARCH_NAME_HINT)),
             )
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, "検索文字列"))
+                    .child(label(p, words::QUERY))
                     .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
                     .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                         d.child(div().text_xs().text_color(p.danger).child(problem))
                     }),
             )
-            .child(div().flex().flex_col().gap_1().child(label(p, "検索フィルター")).child(filters))
+            .child(div().flex().flex_col().gap_1().child(label(p, words::SEARCH_FILTER)).child(filters))
             .child(self.narrow_field(narrow, None, window, cx))
             .child(self.order_field(order, window, cx));
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
             (
                 "save-search",
-                push("save-search", "保存", true, problem.is_none())
+                push("save-search", words::SAVE, true, problem.is_none())
                     .on_click(cx.listener(|this, _, window, cx| this.submit_edit(window, cx))),
             ),
         ];
-        ("保存した検索を編集", content, buttons)
+        (words::home::EDIT_SEARCH, content, buttons)
     }
 }
 
@@ -890,45 +892,47 @@ impl Colet {
         let path = path.clone();
         // A row of home is pinned above the rest, or put back.
         let pin = if self.stored.settings().is_pinned(&path) {
-            line("menu-unpin", "pin-off", "ピン留めを外す", None, None, HomeCommand::Pin(path.clone()))
+            line("menu-unpin", "pin-off", words::UNPIN, None, None, HomeCommand::Pin(path.clone()))
         } else {
-            line("menu-pin", "pin", "ピン留め", None, None, HomeCommand::Pin(path.clone()))
+            line("menu-pin", "pin", words::PIN, None, None, HomeCommand::Pin(path.clone()))
         };
         let in_tab =
-            line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, FileCommand::OpenInTab(path.clone()));
+            line("menu-open-tab", "app-window", words::OPEN_IN_NEW_TAB, Some("Ctrl+Enter"), None, FileCommand::OpenInTab(path.clone()));
         if HomeKey::of(&path).is_search() {
             return vec![
-                line("menu-open", "external-link", "開く", Some("Enter"), None, FileCommand::Open),
+                line("menu-open", "external-link", words::OPEN, Some("Enter"), None, FileCommand::Open),
                 in_tab,
-                line("menu-copy-query", "link", "検索文字列をコピー", Some("Ctrl+Shift+C"), None, FileCommand::CopyPath).grouped(),
-                line("menu-edit-search", "pencil-line", "編集", Some("F2"), None, HomeCommand::EditSearch(path.clone())).grouped(),
+                line("menu-copy-query", "link", words::home::COPY_QUERY, Some("Ctrl+Shift+C"), None, FileCommand::CopyPath).grouped(),
+                line("menu-edit-search", "pencil-line", words::EDIT, Some("F2"), None, HomeCommand::EditSearch(path.clone())).grouped(),
                 pin,
-                line("menu-unsave", "star", "保存した検索を解除", None, None, HomeCommand::Unsave(path)),
+                line("menu-unsave", "star", words::UNSAVE_SEARCH, None, None, HomeCommand::Unsave(path)),
             ];
         }
         let mut lines = vec![
-            line("menu-open", "external-link", "開く", Some("Enter"), None, FileCommand::Open),
+            line("menu-open", "external-link", words::OPEN, Some("Enter"), None, FileCommand::Open),
             in_tab,
-            line("menu-explorer", "folder-open", "エクスプローラーで表示", None, reasons.explorer, FileCommand::Explorer),
-            line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath).grouped(),
+            line("menu-explorer", "folder-open", words::SHOW_IN_EXPLORER, None, reasons.explorer, FileCommand::Explorer),
+            line("menu-copy-path", "link", words::COPY_PATH, Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath).grouped(),
         ];
         // F2 on a favorite edits it: a place has nothing to edit, and its folder is not renamed from here.
         let favorite = self.stored.settings().is_favorite(&path);
         if favorite {
-            lines.push(line("menu-edit-favorite", "pencil-line", "編集", Some("F2"), None, FileCommand::Rename));
+            lines.push(line("menu-edit-favorite", "pencil-line", words::EDIT, Some("F2"), None, FileCommand::Rename));
         }
         lines.push(pin);
         lines.push(line(
             "menu-favorite",
             if favorite { "star-fill" } else { "star" },
-            if favorite { "お気に入りを解除" } else { "お気に入りに追加" },
+            if favorite { words::REMOVE_FAVORITE } else { words::ADD_FAVORITE },
             Some("Ctrl+D"),
             None,
             FileCommand::Favorite(path),
         ));
         lines[4].group = true;
-        lines.push(line("menu-properties", "info", "プロパティ", Some("Alt+Enter"), reasons.properties, FileCommand::Properties).grouped());
-        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, FileCommand::Windows));
+        lines.push(
+            line("menu-properties", "info", words::PROPERTIES, Some("Alt+Enter"), reasons.properties, FileCommand::Properties).grouped(),
+        );
+        lines.push(line("menu-windows", "ellipsis", words::MORE_OPTIONS, None, reasons.shell, FileCommand::Windows));
         lines
     }
 

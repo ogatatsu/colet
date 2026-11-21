@@ -10,6 +10,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::*,
     metrics::{self, scaled},
@@ -31,8 +32,8 @@ impl Colet {
                 .ghost()
                 .xsmall()
                 .icon(glyph("x"))
-                .accessibility_label("検索をクリア")
-                .tooltip("検索をクリア（Esc）")
+                .accessibility_label(words::CLEAR_SEARCH)
+                .tooltip(words::search::CLEAR_KEY)
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.clear_search(window, cx);
                     this.focus_search(window, cx);
@@ -128,7 +129,7 @@ impl Colet {
         let focus = self.stop("search-filter", cx);
         let chosen = self.chosen_filter(cx);
         let on = chosen.is_some();
-        let label = format!("検索フィルター: {}", chosen.as_deref().unwrap_or("なし"));
+        let label = words::search::filter_label(chosen.as_deref());
         // In a narrow window its name gives way to the search field, down to the funnel and the chevron;
         // the tip still names it.
         div()
@@ -162,9 +163,9 @@ impl Colet {
                         .border_color(if on { p.accent } else { p.border_strong })
                         .rounded(scaled(radii.md))
                         .hover(|d| d.bg(p.hover))
-                        .tip_while_shut(self.filter_open(), format!("{label}（Ctrl+Shift+F）"))
+                        .tip_while_shut(self.filter_open(), words::search::filter_tip(&label))
                         .child(icon("funnel", metrics::GLYPH, if on { p.accent } else { p.text_muted }))
-                        .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| "フィルター".into())))
+                        .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| words::search::FILTER.into())))
                         .child(icon("chevron-down", metrics::GLYPH, p.text_faint))
                         .map(|d| Self::opener(d, Self::filter_open, cx))
                         .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
@@ -176,7 +177,7 @@ impl Colet {
                         })),
                 ),
             )
-            .when_some(self.menu_element("search-filter-menu", "検索フィルター", cx).filter(|_| self.filter_open()), |d, menu| {
+            .when_some(self.menu_element("search-filter-menu", words::SEARCH_FILTER, cx).filter(|_| self.filter_open()), |d, menu| {
                 d.child(drop_down(menu, MenuSide::Left, 200., Some(320.), self.scale()))
             })
             .into_any_element()
@@ -197,28 +198,24 @@ impl Colet {
             .text_xs()
             .text_color(p.text_muted)
             .child(icon("search", 28., p.text_faint))
-            .child("名前やEverythingの検索式で探せます")
+            .child(words::search::HINT)
             // Ringed as a field is; the rings' room makes up most of the gaps. In a narrow window they go on
             // to a second line rather than past the edges.
-            .child(div().flex().flex_wrap().justify_center().gap_0p5().children(
-                [("ext:pdf", "PDFファイル"), ("dm:today", "今日更新した項目"), ("size:>1gb", "1 GBを超えるファイル")].map(
-                    |(query, label)| {
-                        let button = Button::new(query)
-                            .outline()
-                            .accessibility_label(format!("{query} {label}"))
-                            .h(scaled(metrics::SMALL_CONTROL_HEIGHT))
-                            .px_2p5()
-                            .gap_1p5()
-                            .child(div().text_color(p.accent).font_family(metrics::FONT_CODE).child(query))
-                            .child(label)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                let filter = this.chosen_filter(cx);
-                                this.search_for(query, filter, window, cx)
-                            }));
-                        self.ringed(button, Stop::Hint(query.to_string()), RingAt::Round, window, cx)
-                    },
-                ),
-            ))
+            .child(div().flex().flex_wrap().justify_center().gap_0p5().children(words::search::EXAMPLES.map(|(query, label)| {
+                let button = Button::new(query)
+                    .outline()
+                    .accessibility_label(format!("{query} {label}"))
+                    .h(scaled(metrics::SMALL_CONTROL_HEIGHT))
+                    .px_2p5()
+                    .gap_1p5()
+                    .child(div().text_color(p.accent).font_family(metrics::FONT_CODE).child(query))
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        let filter = this.chosen_filter(cx);
+                        this.search_for(query, filter, window, cx)
+                    }));
+                self.ringed(button, Stop::Hint(query.to_string()), RingAt::Round, window, cx)
+            })))
             .into_any_element()
     }
 }

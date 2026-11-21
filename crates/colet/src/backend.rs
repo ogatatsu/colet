@@ -8,6 +8,7 @@ use std::sync::{
     mpsc,
 };
 
+use crate::words;
 use crate::{
     kept_file::Loaded,
     settings::{self, Settings},
@@ -151,7 +152,7 @@ impl Backend for Live {
         self.latest.fetch_max(search.request, Ordering::Relaxed);
         let mut session = self.session.lock().map_err(|e| e.to_string())?;
         if self.latest.load(Ordering::Relaxed) != search.request {
-            return Err("古い検索要求です".into());
+            return Err(words::search::STALE.into());
         }
         // A search that fails after connecting keeps the warning for the next.
         let page = session.search(&search.query, search.sort, search.offset, search.count, search.refresh).map_err(|e| e.to_string())?;
@@ -222,7 +223,7 @@ impl Backend for Live {
 
     fn watch_clipboard(&self, changed: Box<dyn Fn() + Send>) {
         if let Err(error) = clipboard::watch(changed) {
-            eprintln!("クリップボードを監視できません: {}", said(error));
+            eprintln!("{}", words::ops::cannot_watch_clipboard(said(error)));
         }
     }
 
@@ -258,11 +259,9 @@ impl Backend for Live {
         match self.menu_thread()?.show(ShowMenu { owner, paths, background, at }) {
             Ok(_) => Ok(()),
             // The items are not all in one folder.
-            Err(error) if error.code() == windows::Win32::Foundation::E_INVALIDARG => {
-                Err("同じフォルダーの項目を選んだときに使えます".into())
-            }
+            Err(error) if error.code() == windows::Win32::Foundation::E_INVALIDARG => Err(words::reasons::SAME_FOLDER.into()),
             // A command from the menu before is still running, as a dialog it opened.
-            Err(error) if error.code() == shell::MENU_BUSY => Err("その他のオプションで開いた操作が終わってから使えます".into()),
+            Err(error) if error.code() == shell::MENU_BUSY => Err(words::ops::MENU_BUSY.into()),
             Err(error) => Err(said(error)),
         }
     }

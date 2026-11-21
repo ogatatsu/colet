@@ -1,6 +1,7 @@
 //! The bar along the top: back, forward and refresh, the search filters' button and the search field, the
 //! address, and the preferences, each drawn by its own feature.
 use super::*;
+use crate::words;
 
 impl Colet {
     fn icon_button(id: &'static str, name: &'static str, label: &'static str, tip: &'static str, enabled: bool) -> Button {
@@ -13,16 +14,16 @@ impl Colet {
         let filter_button = self.filter_button(window, cx);
         let search_box = self.render_search_box(window, cx);
         let address = self.render_address(window, cx);
-        let back = Self::icon_button("back", "arrow-left", "戻る", "戻る（Alt+←）", back)
+        let back = Self::icon_button("back", "arrow-left", words::window::BACK, words::window::BACK_KEY, back)
             .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)));
         let back = self.ringed(back, "back", RingAt::Edge, window, cx);
-        let forward = Self::icon_button("forward", "arrow-right", "進む", "進む（Alt+→）", forward)
+        let forward = Self::icon_button("forward", "arrow-right", words::window::FORWARD, words::window::FORWARD_KEY, forward)
             .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx)));
         let forward = self.ringed(forward, "forward", RingAt::Edge, window, cx);
-        let refresh =
-            Self::icon_button("refresh", "refresh-cw", "更新", "更新（F5）", true).on_click(cx.listener(|this, _, _, cx| this.refresh(cx)));
+        let refresh = Self::icon_button("refresh", "refresh-cw", words::REFRESH, words::window::REFRESH_KEY, true)
+            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)));
         let refresh = self.ringed(refresh, "refresh", RingAt::Edge, window, cx);
-        let preferences = Self::icon_button("preferences", "sliders-horizontal", "設定", "設定", true)
+        let preferences = Self::icon_button("preferences", "sliders-horizontal", words::SETTINGS, words::SETTINGS, true)
             .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)));
         let preferences = self.ringed(preferences, "preferences", RingAt::Edge, window, cx);
         div()

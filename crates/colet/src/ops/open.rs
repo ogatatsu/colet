@@ -1,5 +1,6 @@
 //! Opening the items picked: a folder beside, a file in its app, and many files only once asked.
 use super::*;
+use crate::words;
 
 /// The fewest files opened together that are asked about first, as Explorer stops offering to open them
 /// past 15.
@@ -50,11 +51,11 @@ impl Colet {
                     .collect();
                 match failed.as_slice() {
                     [] => Ok(()),
-                    [(name, error)] => Err(format!("「{name}」を開けません: {error}")),
+                    [(name, error)] => Err(words::ops::cannot_open_named(name, error)),
                     [(_, error), ..] => {
-                        let names: Vec<String> = failed.iter().take(3).map(|(name, _)| format!("「{name}」")).collect();
-                        let more = if failed.len() > 3 { format!("ほか {} 項目", failed.len() - 3) } else { String::new() };
-                        Err(format!("{} 項目を開けません: {}{more}（{error}）", failed.len(), names.join("")))
+                        let names: Vec<String> = failed.iter().take(3).map(|(name, _)| words::quoted(name)).collect();
+                        let more = if failed.len() > 3 { words::more_items(failed.len() - 3) } else { String::new() };
+                        Err(words::ops::cannot_open_many(failed.len(), names.join(""), more, error))
                     }
                 }
             },
@@ -71,20 +72,20 @@ impl Colet {
             .flex_col()
             .gap_2()
             .text_sm()
-            .child(format!("{count} 項目を開きますか？"))
-            .child(div().text_xs().text_color(p.text_muted).child("それぞれ関連付けられたアプリで開きます。"));
+            .child(words::ops::open_many(count))
+            .child(div().text_xs().text_color(p.text_muted).child(words::ops::OPEN_MANY_HINT));
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
             // It takes the keys as the dialog opens, so Enter goes on as it was pressed to open them; its
             // stop is the one opening the dialog sends them to.
             (
                 "confirm-open",
-                push("confirm-open", "開く", true, true).on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx))),
+                push("confirm-open", words::OPEN, true, true).on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx))),
             ),
         ];
-        ("開く", content, buttons)
+        (words::OPEN, content, buttons)
     }
 }

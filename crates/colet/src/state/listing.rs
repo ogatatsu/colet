@@ -1,6 +1,7 @@
 //! The columns' listings as they come: loading, a page or the whole, a count, an error, and keeping the
 //! picks and the keys on what is still there.
 use super::*;
+use crate::words;
 
 impl State {
     /// Picks what the column waits to pick, once it lists any of it.
@@ -196,7 +197,7 @@ impl State {
             self.columns.truncate(index + 1);
             self.active = self.active.min(index);
             if !departed_path(&child) {
-                self.notice = Some("選択していたフォルダーがなくなったため、右側のカラムを閉じました。".into());
+                self.notice = Some(words::column::CLOSED_RIGHT.into());
             }
         }
         // A column left while it waits to pick lets go of it.

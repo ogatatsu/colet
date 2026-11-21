@@ -6,6 +6,7 @@ use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::*,
     crumbs::Crumb,
@@ -174,7 +175,7 @@ impl Colet {
                         d.flex()
                             .items_center()
                             .px_1p5()
-                            .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(crate::address::PLACEHOLDER))
+                            .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(words::address::PLACEHOLDER))
                     })
                     .on_click(cx.listener(|this, _, window, cx| this.open_address(window, cx)))
                     .test_support(),
@@ -226,14 +227,14 @@ impl Colet {
         let p = cx.palette();
         let radii = metrics::Radii::of(window, cx);
         let open = self.crumbs_open();
-        let menu = if open { self.menu_element("crumb-menu", "上の階層", cx) } else { None };
+        let menu = if open { self.menu_element("crumb-menu", words::LEVELS_ABOVE, cx) } else { None };
         let focus = self.stop("crumb-fold", cx);
         div()
             .relative()
             .child(
                 ring(crate::view::keep_focus(div().id("crumb-fold")).track_focus(&focus), p, focus.is_focused(window), radii.sm)
                     .role(Role::Button)
-                    .aria_label("上の階層")
+                    .aria_label(words::LEVELS_ABOVE)
                     .aria_expanded(open)
                     .size(scaled(metrics::ICON_BUTTON))
                     .flex()
@@ -241,7 +242,7 @@ impl Colet {
                     .justify_center()
                     .rounded(scaled(radii.sm))
                     .hover(|d| d.bg(p.hover))
-                    .tip_while_shut(open, "上の階層")
+                    .tip_while_shut(open, words::LEVELS_ABOVE)
                     .child(icon("ellipsis", 15., if current { p.text } else { p.text_muted }))
                     .map(|d| Self::opener(d, Self::crumbs_open, cx))
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {

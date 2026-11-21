@@ -1,6 +1,7 @@
 //! What each operation is kept as in the history: its request, how each of its items ended, and how it
 //! ended as a whole; and the history itself, newest first.
 use super::*;
+use crate::words;
 
 /// The most operations kept, and the most items of each.
 const MAX_ENTRIES: usize = 100;
@@ -21,12 +22,12 @@ pub enum ItemStatus {
 impl ItemStatus {
     pub fn label(self) -> &'static str {
         match self {
-            ItemStatus::Done => "完了",
-            ItemStatus::Destroyed => "完全に削除",
-            ItemStatus::Failed => "失敗",
-            ItemStatus::Skipped => "スキップ",
-            ItemStatus::Cancelled => "キャンセル",
-            ItemStatus::Handed => "シェルに渡した",
+            ItemStatus::Done => words::history::DONE,
+            ItemStatus::Destroyed => words::history::DESTROYED,
+            ItemStatus::Failed => words::history::FAILED,
+            ItemStatus::Skipped => words::history::SKIPPED,
+            ItemStatus::Cancelled => words::history::CANCELLED,
+            ItemStatus::Handed => words::history::HANDED,
         }
     }
 }
@@ -127,27 +128,27 @@ impl HistoryEntry {
     pub fn target(&self) -> String {
         let Request { kind, paths, destination, name } = &self.request;
         match kind {
-            Kind::Paste => format!("{} 項目 → {}", self.items.len() + self.more, shown(folder_name(destination))),
+            Kind::Paste => words::history::pasted(self.items.len() + self.more, shown(folder_name(destination))),
             Kind::Recycle | Kind::Delete if paths.len() == 1 => shown(folder_name(&paths[0])),
-            Kind::Recycle | Kind::Delete => format!("{} 項目", paths.len()),
-            Kind::Rename => format!("{} → {name}", shown(folder_name(paths.first().map_or(Path::new(""), |p| p)))),
-            Kind::NewFolder => format!("{name}（{}）", shown(folder_name(destination))),
+            Kind::Recycle | Kind::Delete => words::history::items(paths.len()),
+            Kind::Rename => words::history::renamed(shown(folder_name(paths.first().map_or(Path::new(""), |p| p))), name),
+            Kind::NewFolder => words::history::new_folder(name, shown(folder_name(destination))),
         }
     }
 
     /// How it went: what failed or was skipped, its own failure, or that it ran to the end.
     pub fn outcome(&self) -> String {
         if self.status == Status::Running {
-            return "処理中".into();
+            return words::history::RUNNING.into();
         }
         let mut parts = self.item_problems();
         if self.status == Status::Cancelled {
-            parts.push("キャンセル".into());
+            parts.push(words::history::CANCELLED.into());
         }
         if self.status == Status::Error && self.count(ItemStatus::Failed) == 0 {
-            parts.push("失敗".into());
+            parts.push(words::history::FAILED.into());
         }
-        if parts.is_empty() { "完了".into() } else { parts.join("・") }
+        if parts.is_empty() { words::history::DONE.into() } else { parts.join(words::SEPARATOR) }
     }
 
     /// How many of its items failed and how many were skipped, those there were: `1 件失敗`, `1 件スキップ`.
@@ -155,10 +156,10 @@ impl HistoryEntry {
         let (failed, skipped) = (self.count(ItemStatus::Failed), self.count(ItemStatus::Skipped));
         let mut parts = Vec::new();
         if failed > 0 {
-            parts.push(format!("{failed} 件失敗"));
+            parts.push(words::history::failed_count(failed));
         }
         if skipped > 0 {
-            parts.push(format!("{skipped} 件スキップ"));
+            parts.push(words::history::skipped_count(skipped));
         }
         parts
     }

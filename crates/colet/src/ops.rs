@@ -25,6 +25,7 @@ use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::{Colet, Tone},
     backend::{self, PathKind},
@@ -247,7 +248,7 @@ impl Operations {
             entry.error = if counts.is_empty() { problem.clone() } else { None };
         }
         cx.notify();
-        let problem = if counts.is_empty() { problem } else { Some(counts.join("・")) };
+        let problem = if counts.is_empty() { problem } else { Some(counts.join(words::SEPARATOR)) };
         if problem.is_some() {
             self.history.unseen += 1;
         }
@@ -298,14 +299,14 @@ impl Operations {
     /// Puts `paths` on the clipboard, to be moved by the paste when `cut`.
     pub fn copy_files(&mut self, paths: Vec<PathBuf>, cut: bool, cx: &mut Context<Self>) {
         let (backend, owner) = (self.backend.clone(), self.owner);
-        let done = format!("{} 項目を{}しました", paths.len(), if cut { "切り取り" } else { "コピー" });
+        let done = words::ops::put_on_clipboard(paths.len(), cut);
         self.write_clipboard(move || backend.copy_files(&paths, cut, owner), done, cx);
     }
 
     /// Puts `text`, the paths of `count` items, on the clipboard.
     pub fn copy_text(&mut self, text: OsString, count: usize, cx: &mut Context<Self>) {
         let (backend, owner) = (self.backend.clone(), self.owner);
-        let done = format!("{count} 項目のパスをコピーしました");
+        let done = words::ops::paths_copied(count);
         self.write_clipboard(move || backend.copy_text(&text, owner), done, cx);
     }
 
@@ -314,9 +315,8 @@ impl Operations {
     fn write_clipboard(&mut self, work: impl FnOnce() -> Result<(), String> + Send + 'static, done: String, cx: &mut Context<Self>) {
         let (which, result) = self.clipboard.write(work);
         // A lane that stopped, as after a write panicked, never says.
-        let task = cx
-            .background_executor()
-            .spawn(async move { result.recv().unwrap_or_else(|_| Err("クリップボードに書き込めません".into())) });
+        let task =
+            cx.background_executor().spawn(async move { result.recv().unwrap_or_else(|_| Err(words::ops::CANNOT_WRITE_CLIPBOARD.into())) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
@@ -352,9 +352,9 @@ impl Operations {
             this.update(cx, |this, cx| {
                 this.sending -= 1;
                 match result {
-                    Ok(Dropped::Refused) => cx.emit(OperationsEvent::Notice(format!("「{name}」は受け付けませんでした"), Tone::Info)),
+                    Ok(Dropped::Refused) => cx.emit(OperationsEvent::Notice(words::ops::refused(&name), Tone::Info)),
                     Ok(_) => {}
-                    Err(error) => cx.emit(OperationsEvent::Notice(format!("「{name}」に送れません: {error}"), Tone::Error)),
+                    Err(error) => cx.emit(OperationsEvent::Notice(words::ops::cannot_send(&name, error), Tone::Error)),
                 }
                 cx.emit(OperationsEvent::Sent(carry));
             })

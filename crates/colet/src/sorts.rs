@@ -11,9 +11,10 @@ use colet_core::{entry::Order, paths::path_key};
 use serde::{Deserialize, Serialize};
 
 use crate::kept_file::{self, Fields, File, Lenient, Loaded};
+use crate::words;
 
 pub const SORTS: File =
-    File { stem: "sort", what: "カラムの並び順", file: "カラムの並び順のファイル", fallback: "既定の並び順" };
+    File { stem: "sort", what: words::kept::SORTS, file: words::kept::SORTS_FILE, fallback: words::kept::SORTS_FALLBACK };
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(into = "SortsFile")]
@@ -94,7 +95,7 @@ pub fn load() -> Loaded<Sorts> {
 }
 
 pub fn save(sorts: &Sorts) -> Result<(), String> {
-    let path = path().ok_or("カラムの並び順の保存先がわかりません")?;
+    let path = path().ok_or(words::kept::NO_SORTS_PLACE)?;
     kept_file::write(sorts, &path, &SORTS)
 }
 

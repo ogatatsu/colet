@@ -1,6 +1,7 @@
 //! Naming a new folder, or an item renamed: the dialog that asks, and whether the folder has the name
 //! already, asked off the UI thread.
 use super::*;
+use crate::words;
 
 impl Colet {
     /// F2: a rename, or for a saved search or favorite in home, its edit.
@@ -22,7 +23,7 @@ impl Colet {
             return;
         }
         if let Some(reason) = reasons.rename {
-            self.refuse("名前を変更", reason, cx);
+            self.refuse(words::RENAME, reason, cx);
             return;
         }
         let Some(entry) = entries.into_iter().next() else { return };
@@ -35,11 +36,11 @@ impl Colet {
     pub fn ask_new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.take_menu();
         if let Some(reason) = self.reasons(cx).paste {
-            self.refuse("新規フォルダー", reason, cx);
+            self.refuse(words::NEW_FOLDER, reason, cx);
             return;
         }
         let destination = self.destination().unwrap_or_default();
-        let name = "新しいフォルダー".to_owned();
+        let name = words::ops::NEW_FOLDER_NAME.to_owned();
         let end = name.len();
         self.ask_name(Request { kind: Kind::NewFolder, paths: Vec::new(), destination, name }, end, window, cx);
     }
@@ -75,7 +76,7 @@ impl Colet {
         let Some(Dialog::Name { input, tried, taken, .. }) = self.overlays.dialog() else { return None };
         let name = input.read(cx).value();
         colet_core::operations::name_problem(&name, *tried)
-            .or(taken.as_deref().filter(|&taken| taken == name.as_ref()).map(|_| "同じ名前の項目があります"))
+            .or(taken.as_deref().filter(|&taken| taken == name.as_ref()).map(|_| words::ops::NAME_TAKEN))
     }
 
     pub fn submit_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -158,10 +159,10 @@ impl Colet {
         let empty = input.read(cx).value().trim().is_empty();
         // Where the name goes: a rename may come from the results, far from its folder.
         let (place, submit) = match kind {
-            Kind::NewFolder => (format!("作成先：{}", shown(destination)), "作成"),
+            Kind::NewFolder => (words::ops::created_in(shown(destination)), words::ops::CREATE),
             _ => (
-                format!("場所：{}", paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).map(shown).unwrap_or_default()),
-                "保存",
+                words::ops::located_in(paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).map(shown).unwrap_or_default()),
+                words::SAVE,
             ),
         };
         let content = div().flex().flex_col().gap_3().child(div().text_xs().text_color(p.text_faint).child(place)).child(
@@ -169,22 +170,22 @@ impl Colet {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(label(p, "名前"))
+                .child(label(p, words::NAME))
                 .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
                 .when_some(problem, |d, problem| d.child(div().text_xs().text_color(p.danger).child(problem))),
         );
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", "キャンセル", false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
             // While the folder is asked whether the name is free, the press is in and waits.
             (
                 "submit-name",
-                push("submit-name", if checking { "確認中…" } else { submit }, true, !empty && problem.is_none() && !checking)
+                push("submit-name", if checking { words::ops::CHECKING } else { submit }, true, !empty && problem.is_none() && !checking)
                     .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx))),
             ),
         ];
-        (if matches!(kind, Kind::NewFolder) { "新規フォルダー" } else { "名前を変更" }, content, buttons)
+        (if matches!(kind, Kind::NewFolder) { words::NEW_FOLDER } else { words::RENAME }, content, buttons)
     }
 }

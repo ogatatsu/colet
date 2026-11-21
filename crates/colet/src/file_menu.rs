@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use colet_core::shell::IconSource;
 use gpui_kit::*;
 
+use crate::words;
 use crate::{
     app::Colet,
     menus::{Line, Popup, choice, line},
@@ -29,7 +30,7 @@ pub enum FileCommand {
     Rename,
     NewFolder,
     Recycle,
-    /// "ごみ箱へ移動" picked with Shift held, as Explorer's Delete deletes outright then.
+    /// words::RECYCLE picked with Shift held, as Explorer's Delete deletes outright then.
     Delete,
     Favorite(PathBuf),
     /// What is picked, sent to the item of Windows' Send To at `target`: moved when `shift` is held as it
@@ -53,7 +54,7 @@ pub struct Menu {
 }
 
 impl FileCommand {
-    /// As picked with Shift held, or not: "ごみ箱へ移動" deletes outright, as Explorer's Delete does, and
+    /// As picked with Shift held, or not: words::RECYCLE deletes outright, as Explorer's Delete does, and
     /// Send To moves, as Explorer's does.
     pub fn shifted(&self, shift: bool) -> Self {
         match self {
@@ -133,20 +134,20 @@ impl Colet {
             ([entry], _) => line(
                 "menu-open-tab",
                 "app-window",
-                "新しいタブで開く",
+                words::OPEN_IN_NEW_TAB,
                 Some("Ctrl+Enter"),
                 None,
                 FileCommand::OpenInTab(entry.path.clone()),
             ),
             (_, Some(folder)) => {
-                line("menu-open-tab", "app-window", "新しいタブで開く", Some("Ctrl+Enter"), None, FileCommand::OpenInTab(folder))
+                line("menu-open-tab", "app-window", words::OPEN_IN_NEW_TAB, Some("Ctrl+Enter"), None, FileCommand::OpenInTab(folder))
             }
             _ => {
                 let off = if some { ONE_ITEM } else { NEEDS_FOLDER };
                 line(
                     "menu-open-tab",
                     "app-window",
-                    "新しいタブで開く",
+                    words::OPEN_IN_NEW_TAB,
                     Some("Ctrl+Enter"),
                     Some(off),
                     FileCommand::OpenInTab(Default::default()),
@@ -166,7 +167,7 @@ impl Colet {
             ..line(
                 "menu-send-to",
                 "send",
-                "送る",
+                words::SEND_TO,
                 None,
                 quiet(reasons.send_to),
                 FileCommand::SendTo { target: PathBuf::new(), shift: false },
@@ -174,17 +175,17 @@ impl Colet {
         }
         .grouped();
         let mut lines = vec![
-            line("menu-open", "external-link", "開く", Some("Enter"), open_off, FileCommand::Open),
+            line("menu-open", "external-link", words::OPEN, Some("Enter"), open_off, FileCommand::Open),
             in_tab,
-            line("menu-explorer", "folder-open", "エクスプローラーで表示", None, reasons.explorer, FileCommand::Explorer),
+            line("menu-explorer", "folder-open", words::SHOW_IN_EXPLORER, None, reasons.explorer, FileCommand::Explorer),
             send_to,
-            line("menu-copy", "copy", "コピー", Some("Ctrl+C"), quiet(reasons.copy), FileCommand::Copy).grouped(),
-            line("menu-cut", "scissors", "切り取り", Some("Ctrl+X"), quiet(reasons.cut), FileCommand::Cut),
-            line("menu-paste", "clipboard-paste", "貼り付け", Some("Ctrl+V"), reasons.paste, FileCommand::Paste),
-            line("menu-copy-path", "link", "パスをコピー", Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath),
-            line("menu-rename", "pencil-line", "名前を変更", Some("F2"), quiet(reasons.rename), FileCommand::Rename).grouped(),
-            line("menu-new-folder", "folder-plus", "新規フォルダー", Some("Ctrl+Shift+N"), reasons.paste, FileCommand::NewFolder),
-            line("menu-recycle", "trash", "ごみ箱へ移動", Some("Delete"), quiet(reasons.delete), FileCommand::Recycle),
+            line("menu-copy", "copy", words::COPY, Some("Ctrl+C"), quiet(reasons.copy), FileCommand::Copy).grouped(),
+            line("menu-cut", "scissors", words::CUT, Some("Ctrl+X"), quiet(reasons.cut), FileCommand::Cut),
+            line("menu-paste", "clipboard-paste", words::PASTE, Some("Ctrl+V"), reasons.paste, FileCommand::Paste),
+            line("menu-copy-path", "link", words::COPY_PATH, Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath),
+            line("menu-rename", "pencil-line", words::RENAME, Some("F2"), quiet(reasons.rename), FileCommand::Rename).grouped(),
+            line("menu-new-folder", "folder-plus", words::NEW_FOLDER, Some("Ctrl+Shift+N"), reasons.paste, FileCommand::NewFolder),
+            line("menu-recycle", "trash", words::RECYCLE, Some("Delete"), quiet(reasons.delete), FileCommand::Recycle),
         ];
         if one && entries[0].directory {
             let path = entries[0].path.clone();
@@ -193,7 +194,7 @@ impl Colet {
                 line(
                     "menu-favorite",
                     if favorite { "star-fill" } else { "star" },
-                    if favorite { "お気に入りを解除" } else { "お気に入りに追加" },
+                    if favorite { words::REMOVE_FAVORITE } else { words::ADD_FAVORITE },
                     Some("Ctrl+D"),
                     None,
                     FileCommand::Favorite(path),
@@ -202,9 +203,10 @@ impl Colet {
             );
         }
         lines.push(
-            line("menu-properties", "info", "プロパティ", Some("Alt+Enter"), quiet(reasons.properties), FileCommand::Properties).grouped(),
+            line("menu-properties", "info", words::PROPERTIES, Some("Alt+Enter"), quiet(reasons.properties), FileCommand::Properties)
+                .grouped(),
         );
-        lines.push(line("menu-windows", "ellipsis", "その他のオプションを確認", None, reasons.shell, FileCommand::Windows));
+        lines.push(line("menu-windows", "ellipsis", words::MORE_OPTIONS, None, reasons.shell, FileCommand::Windows));
         lines
     }
 

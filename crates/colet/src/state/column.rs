@@ -1,6 +1,7 @@
 //! A column: what kind it is, what it lists and has picked, where the keys are in it, and what its
 //! narrowing shows of it.
 use super::*;
+use crate::words;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -120,8 +121,8 @@ impl Column {
 
     pub fn title(&self) -> Cow<'_, str> {
         match self.kind {
-            Kind::Home => "ホーム".into(),
-            Kind::Search => "検索結果".into(),
+            Kind::Home => words::HOME.into(),
+            Kind::Search => words::SEARCH_RESULTS.into(),
             Kind::Folder => folder_name(&self.path).to_string_lossy(),
         }
     }

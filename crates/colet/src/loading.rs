@@ -22,6 +22,7 @@ use colet_core::{
 };
 use gpui_kit::{Context, Task};
 
+use crate::words;
 use crate::{
     app::{Colet, Tone},
     backend::Search,
@@ -162,10 +163,10 @@ impl Engine {
     /// What the status bar shows, and what it says in full.
     pub fn describe(&self) -> (String, String) {
         match self {
-            Engine::Unknown => ("Everything · 検索時に接続".into(), "検索エンジン: Everything（検索すると接続します）".into()),
-            Engine::Connecting => ("Everything · 接続中…".into(), "検索エンジン: Everythingに接続しています".into()),
-            Engine::Connected(name) => (name.clone(), format!("検索エンジン: {name}（接続済み）")),
-            Engine::Failed(error) => ("Everything · 要確認".into(), error.clone()),
+            Engine::Unknown => (words::status::ENGINE_UNKNOWN.into(), words::status::ENGINE_UNKNOWN_TIP.into()),
+            Engine::Connecting => (words::status::ENGINE_CONNECTING.into(), words::status::ENGINE_CONNECTING_TIP.into()),
+            Engine::Connected(name) => (name.clone(), words::status::engine_connected(name)),
+            Engine::Failed(error) => (words::status::ENGINE_FAILED.into(), error.clone()),
         }
     }
 }
@@ -409,8 +410,8 @@ impl Colet {
     fn take_missed(&mut self, cx: &mut Context<Self>) {
         let fresh = self.loading.watching.take_missed();
         if !fresh.is_empty() {
-            let names: String = fresh.iter().map(|p| format!("「{}」", shown(colet_core::paths::folder_name(p)))).collect();
-            self.notify(format!("{names}の変更を監視できません。F5で更新できます。"), Tone::Error, cx);
+            let names: String = fresh.iter().map(|p| words::quoted(shown(colet_core::paths::folder_name(p)))).collect();
+            self.notify(words::window::cannot_watch(names), Tone::Error, cx);
         }
     }
 

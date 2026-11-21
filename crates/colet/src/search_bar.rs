@@ -10,11 +10,9 @@ use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 
 use crate::app::Colet;
+use crate::words;
 
 mod view;
-
-/// What the empty search field says.
-const PLACEHOLDER: &str = "Everythingで検索（Ctrl+F）";
 
 /// The search field and the filter chosen for the next search in the tab in front.
 pub struct SearchBar {
@@ -35,7 +33,7 @@ impl EventEmitter<SearchEvent> for SearchBar {}
 
 impl SearchBar {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let field = cx.new(|cx| InputState::new(window, cx).placeholder(PLACEHOLDER));
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder(words::search::PLACEHOLDER));
         let typed = cx.subscribe_in(&field, window, |_: &mut Self, input, event, _, cx| match event {
             InputEvent::Change => cx.emit(SearchEvent::Typed(input.read(cx).value().to_string())),
             InputEvent::PressEnter { .. } => cx.emit(SearchEvent::Leave),

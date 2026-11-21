@@ -11,6 +11,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::lane::Lane;
+use crate::words;
 
 /// `%APPDATA%\Colet\<name>`, beside the other files Colet keeps.
 pub fn kept_path(name: &str) -> Option<PathBuf> {
@@ -83,7 +84,7 @@ pub struct Queued {
 impl Queued {
     /// How the save went, once it is written; a write that broke off never says, and is taken as failed.
     pub fn written(self) -> Result<(), String> {
-        self.result.recv().unwrap_or_else(|_| Err(format!("{}を保存できません", self.what)))
+        self.result.recv().unwrap_or_else(|_| Err(words::kept::cannot_save(self.what)))
     }
 
     #[cfg(test)]
@@ -144,10 +145,7 @@ impl<T: Clone + Send + 'static> Saves<T> {
 /// the defaults written next do not take its place unseen; one with fields or items that cannot be read
 /// is read without them, and copied aside, as the next save leaves them out.
 pub fn read<T: Lenient + Default>(path: &Path, file: &File) -> Loaded<T> {
-    let kept = |e: &dyn std::fmt::Display| LoadError {
-        message: format!("{}を読み込めません: {e}。元の{}を残すため、変更は保存しません。", file.what, file.file),
-        kept: true,
-    };
+    let kept = |e: &dyn std::fmt::Display| LoadError { message: words::kept::unreadable(file.what, e, file.file), kept: true };
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Loaded::read(T::default()),
@@ -160,15 +158,7 @@ pub fn read<T: Lenient + Default>(path: &Path, file: &File) -> Loaded<T> {
         Ok(fields) => fields,
         Err(e) => {
             return Loaded::failed(match std::fs::rename(path, &aside) {
-                Ok(()) => LoadError {
-                    message: format!(
-                        "{}が壊れていたため、{}で始めました（{e}）。元のファイルは{}に残しています。",
-                        file.file,
-                        file.fallback,
-                        aside.display()
-                    ),
-                    kept: false,
-                },
+                Ok(()) => LoadError { message: words::kept::put_aside(file.file, file.fallback, &e, aside.display()), kept: false },
                 Err(_) => kept(&e),
             });
         }
@@ -177,21 +167,17 @@ pub fn read<T: Lenient + Default>(path: &Path, file: &File) -> Loaded<T> {
     if fields.skipped == 0 {
         return Loaded::read(value);
     }
-    let skipped = format!("{}の読めない項目を{}件飛ばしました", file.file, fields.skipped);
+    let skipped = words::kept::skipped(file.file, fields.skipped);
     let problem = match std::fs::copy(path, &aside) {
-        Ok(_) => {
-            LoadError { message: format!("{skipped}。元のファイルは{}に残しています。", aside.display()), kept: false }
-        }
-        Err(_) => {
-            LoadError { message: format!("{skipped}。元の{}を残すため、変更は保存しません。", file.file), kept: true }
-        }
+        Ok(_) => LoadError { message: words::kept::copied_aside(&skipped, aside.display()), kept: false },
+        Err(_) => LoadError { message: words::kept::not_saved(&skipped, file.file), kept: true },
     };
     Loaded { value, problem: Some(problem) }
 }
 
 /// Writes `kept` beside `path` and then over it, so a failed write leaves the old one whole.
 pub fn write<T: Serialize>(kept: &T, path: &Path, file: &File) -> Result<(), String> {
-    let fail = |e: std::io::Error| format!("{}を保存できません: {e}", file.what);
+    let fail = |e: std::io::Error| words::kept::cannot_save_because(file.what, e);
     std::fs::create_dir_all(path.parent().unwrap()).map_err(fail)?;
     let temporary = path.with_extension("json.tmp");
     let json = serde_json::to_vec_pretty(kept).map_err(|e| e.to_string())?;
@@ -227,7 +213,7 @@ impl Fields {
     pub fn of(value: serde_json::Value) -> Result<Self, String> {
         match value {
             serde_json::Value::Object(map) => Ok(Self { map, skipped: 0 }),
-            _ => Err("オブジェクトではありません".into()),
+            _ => Err(words::kept::NOT_AN_OBJECT.into()),
         }
     }
 
