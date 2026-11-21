@@ -74,7 +74,7 @@ fn the_trail_beside_the_search_starts_at_the_folder_the_results_lead_to(cx: &mut
 #[gpui_kit::test]
 fn reports_a_failed_search_as_one_and_retries(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
-    *fake.failing.lock().unwrap() = Some("Everything 1.5に接続できません。".into());
+    *fake.failing.lock().unwrap() = Some(SearchError::CannotConnect);
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
     assert!(ui.read(cx, |v| v.state.columns[1].error.is_some()));
@@ -89,12 +89,14 @@ fn reports_a_failed_search_as_one_and_retries(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn warns_once_a_connection_of_what_everything_does_not_index_and_keeps_the_warning_up(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt"), file(r"D:\y.txt")]));
-    *fake.warning.lock().unwrap() = Some("Everything がサイズを索引していないため、検索が遅くなることがあります。".into());
+    *fake.warning.lock().unwrap() = Some(SlowProperties { unindexed: vec![Sort::Size], unsorted: vec![] });
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
     // The results come all the same, the size and date asked for as ever.
     assert_eq!(ui.read(cx, |v| v.state.columns[1].entries.len()), 2);
-    let warned = ["Everything がサイズを索引していないため、検索が遅くなることがあります。"];
+    let warned = [
+        "Everything がサイズを索引していないため、検索が遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。",
+    ];
     assert_eq!(ui.toasts(cx), warned);
     // Said once for the connection, and up until closed.
     ui.input(cx, "y");
@@ -114,7 +116,7 @@ fn stops_watching_the_search_once_none_is_in_front_and_drops_what_the_watch_hear
     ui.press(cx, "ctrl-t");
     assert_eq!(stopped(), 1);
     // What the watch heard of the search left behind is not told.
-    *fake.watch_failing.lock().unwrap() = Some("Everythingとの接続が切れました。".into());
+    *fake.watch_failing.lock().unwrap() = Some(SearchError::WatchDisconnected(0));
     settle(cx);
     assert!(ui.toasts(cx).is_empty(), "{:?}", ui.toasts(cx));
     *fake.watch_failing.lock().unwrap() = None;

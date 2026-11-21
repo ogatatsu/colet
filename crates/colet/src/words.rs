@@ -2,8 +2,11 @@
 //! reasons an action is off. The words said in many places sit at the top; the rest under the part of the
 //! window that says them. What takes a value is a function of it.
 //!
-//! colet-core says its own failures, in its error types; the orders' names are its too.
+//! colet-core says nothing to the user: what it reports, its failures among them, is said here.
 use std::fmt::Display;
+
+use colet_core::entry::{Order, Sort};
+use windows_core::HRESULT;
 
 // ---- Said in many places ----
 
@@ -69,6 +72,31 @@ pub fn more_items(count: usize) -> String {
     format!("ほか {count} 項目")
 }
 
+/// What a sort goes by.
+pub fn sort_name(by: Sort) -> &'static str {
+    match by {
+        Sort::Name => NAME,
+        Sort::Location => "場所",
+        Sort::Size => "サイズ",
+        Sort::Modified => "更新日時",
+    }
+}
+
+pub fn direction(descending: bool) -> &'static str {
+    if descending { "降順" } else { "昇順" }
+}
+
+/// `名前・昇順`, with `・混在` when folders mix in with files.
+pub fn order(order: Order) -> String {
+    let mixed = if order.folders_first { "" } else { "・混在" };
+    format!("{}{SEPARATOR}{}{mixed}", sort_name(order.by), direction(order.descending))
+}
+
+/// Windows's own words for what it refused, or the code when it has none.
+pub fn windows_failure(code: HRESULT) -> String {
+    colet_core::operations::system_message(code).unwrap_or_else(|| format!("Windowsの操作に失敗しました (0x{:08X})", code.0 as u32))
+}
+
 // ---- The window: its buttons, and what it says as it closes ----
 pub mod window {
     use super::Display;
@@ -100,6 +128,11 @@ pub mod window {
     /// `names`, each quoted, are listed but not watched.
     pub fn cannot_watch(names: impl Display) -> String {
         format!("{names}の変更を監視できません。F5で更新できます。")
+    }
+
+    /// The watch on the folders could not start at all.
+    pub fn cannot_start_watching(error: &colet_core::watch::WatchError) -> String {
+        format!("フォルダーの変更を監視できません: {error}。F5で更新できます。")
     }
 }
 
@@ -188,6 +221,44 @@ pub mod search {
     pub fn delete_named(name: impl Display) -> String {
         format!("「{name}」を削除")
     }
+
+    /// Why a search, or the watch on it, failed.
+    pub fn error(error: &colet_core::everything::SearchError) -> String {
+        use colet_core::everything::SearchError;
+        match error {
+            SearchError::NulInQuery => "入力に使用できない文字が含まれています".into(),
+            SearchError::CannotConnect => "Everything 1.5に接続できません。本体が起動しているか確認して、再試行してください。".into(),
+            SearchError::TooOld { needed, found } => {
+                format!("Everything {needed}以降が必要です（接続先: {found}）。更新してから再試行してください。")
+            }
+            SearchError::NoSearchState => "検索状態を作成できません".into(),
+            SearchError::Indexing => "Everythingの索引を準備中です。しばらく待って再試行してください。".into(),
+            SearchError::Disconnected => "Everythingとの接続が切れました。本体が起動しているか確認して、再試行してください。".into(),
+            SearchError::Failed(code) => format!("Everything検索に失敗しました (0x{code:08X})"),
+            SearchError::WatchDisconnected(code) => format!("Everythingとの接続が切れました。次の検索で再接続します (0x{code:08X})"),
+            SearchError::WatchStopped(code) => format!("Everythingの自動更新を停止しました。F5で一覧を更新できます (0x{code:08X})"),
+        }
+    }
+
+    /// The warning of what of the size and date modified Everything leaves unindexed or not fast sorted.
+    pub fn slow(slow: &colet_core::everything::SlowProperties) -> String {
+        let names = |sorts: &[super::Sort], end: &str| {
+            sorts.iter().map(|by| format!("{}{end}", super::sort_name(*by))).collect::<Vec<_>>().join("と")
+        };
+        let mut warning = String::new();
+        if !slow.unindexed.is_empty() {
+            warning += &format!("Everything が{}を索引していないため、検索が遅くなることがあります。", names(&slow.unindexed, ""));
+        }
+        if !slow.unsorted.is_empty() {
+            let lead = if slow.unindexed.is_empty() { "Everything で" } else { "" };
+            warning += &format!(
+                "{lead}{}の高速ソートが無効なため、{}の並べ替えが遅くなることがあります。",
+                names(&slow.unsorted, ""),
+                names(&slow.unsorted, "順")
+            );
+        }
+        warning + "Everything のオプションの「インデックス」で有効にしてください。"
+    }
 }
 
 // ---- A column: its header, its rows and its order ----
@@ -236,6 +307,18 @@ pub mod column {
 
     pub fn show_levels_above(away: usize) -> String {
         format!("上の階層を表示（{away}階層）")
+    }
+
+    /// Why a folder could not be listed.
+    pub fn list_error(error: &colet_core::folders::ListError) -> String {
+        use colet_core::folders::ListError;
+        match error {
+            ListError::Stale => "古いフォルダー要求です".into(),
+            ListError::NotAbsolute => super::ops::NOT_ABSOLUTE.into(),
+            ListError::Shares(error) => format!("共有フォルダーを一覧できません: {error}"),
+            ListError::Open(error) => format!("フォルダーを開けません: {error}"),
+            ListError::BrokenOff(error) => format!("フォルダーを最後まで読めません: {error}"),
+        }
     }
 }
 
@@ -309,6 +392,12 @@ pub mod status {
 
     pub fn engine_connected(name: impl Display) -> String {
         format!("検索エンジン: {name}（接続済み）")
+    }
+
+    /// The Everything connected to, by its version; read again on F5 only while its results go unwatched.
+    pub fn connection(connection: &colet_core::everything::Connection) -> String {
+        let manual = if connection.watched { "" } else { " · 手動更新（F5）" };
+        format!("Everything {}{manual}", connection.version)
     }
 
     pub fn selected(count: usize) -> String {
@@ -387,6 +476,52 @@ pub mod ops {
     /// What went wrong with an operation, named by what it was.
     pub fn problem_of(title: impl Display, problem: impl Display) -> String {
         format!("「{title}」: {problem}")
+    }
+
+    pub const NOT_ABSOLUTE: &str = "絶対パスを指定してください";
+
+    /// What the history and the notices call an operation.
+    pub fn title(kind: colet_core::operations::Kind) -> &'static str {
+        use colet_core::operations::Kind;
+        match kind {
+            Kind::Paste => super::PASTE,
+            Kind::Recycle => super::RECYCLE,
+            Kind::Delete => "完全に削除",
+            Kind::Rename => super::RENAME,
+            Kind::NewFolder => "フォルダーを作成",
+        }
+    }
+
+    /// Why an operation was not carried out, or not all of it.
+    pub fn error(error: &colet_core::operations::OperationError) -> String {
+        use colet_core::operations::OperationError;
+        match error {
+            OperationError::Cancelled => "操作をキャンセルしました".into(),
+            OperationError::NotAbsolute => NOT_ABSOLUTE.into(),
+            OperationError::NotAFolder => "貼り付け先がフォルダーではありません".into(),
+            OperationError::IntoItself => "フォルダー自身やその子孫にはコピー・移動できません".into(),
+            OperationError::NoFilesOnClipboard => "クリップボードにファイルがありません".into(),
+            OperationError::NothingSelected => "項目が選択されていません".into(),
+            OperationError::InvalidName => "使用できない名前です".into(),
+            OperationError::RenameOneAtATime => "名前の変更は1項目ずつ行ってください".into(),
+            OperationError::DriveRoot => "ドライブのルートは操作できません".into(),
+            OperationError::NoDestination => "作成先が見つかりません".into(),
+            OperationError::Refused => "貼り付け先がクリップボードの内容を受け付けませんでした".into(),
+            OperationError::ClipboardChanged => "貼り付けるまでにクリップボードの内容が変わりました。もう一度貼り付けてください。".into(),
+            OperationError::PartlyFailed => "一部の項目を操作できませんでした。結果を確認してください。".into(),
+            OperationError::Io(error) => error.to_string(),
+            OperationError::Windows(code) => super::windows_failure(*code),
+        }
+    }
+
+    /// What Windows refuses in a name, said as it is typed.
+    pub fn name_problem(problem: colet_core::operations::NameProblem) -> &'static str {
+        use colet_core::operations::NameProblem;
+        match problem {
+            NameProblem::ForbiddenCharacter => "次の文字は使えません：\\ / : * ? \" < > |",
+            NameProblem::TrailingDotOrSpace => "末尾にピリオドや空白は使えません",
+            NameProblem::Reserved => "Windowsで予約された名前は使えません",
+        }
     }
 }
 
@@ -597,5 +732,48 @@ pub mod kept {
     /// What was skipped, the file kept as it is since it could not be copied aside.
     pub fn not_saved(skipped: impl Display, file: impl Display) -> String {
         format!("{skipped}。元の{file}を残すため、変更は保存しません。")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use colet_core::everything::SlowProperties;
+
+    #[test]
+    fn names_an_order_and_says_when_folders_mix_in() {
+        assert_eq!(order(Order { by: Sort::Location, ..Order::default() }), "場所・昇順");
+        let first = Order { by: Sort::Size, descending: true, ..Order::default() };
+        assert_eq!(order(first), "サイズ・降順");
+        assert_eq!(order(Order { folders_first: false, ..first }), "サイズ・降順・混在");
+    }
+
+    #[test]
+    fn warns_of_what_everything_does_not_index_or_fast_sort() {
+        let slow = |unindexed: &[Sort], unsorted: &[Sort]| {
+            search::slow(&SlowProperties { unindexed: unindexed.to_vec(), unsorted: unsorted.to_vec() })
+        };
+        assert_eq!(
+            slow(&[Sort::Size], &[Sort::Modified]),
+            "Everything がサイズを索引していないため、検索が遅くなることがあります。更新日時の高速ソートが無効なため、更新日時順の並べ替えが遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。"
+        );
+        assert_eq!(
+            slow(&[Sort::Size, Sort::Modified], &[]),
+            "Everything がサイズと更新日時を索引していないため、検索が遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。"
+        );
+        assert_eq!(
+            slow(&[], &[Sort::Size, Sort::Modified]),
+            "Everything でサイズと更新日時の高速ソートが無効なため、サイズ順と更新日時順の並べ替えが遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。"
+        );
+    }
+
+    #[test]
+    fn names_the_connection_and_says_when_it_is_read_again_by_hand() {
+        use colet_core::everything::Connection;
+        assert_eq!(status::connection(&Connection { version: "1.5.0.1424".into(), watched: true }), "Everything 1.5.0.1424");
+        assert_eq!(
+            status::connection(&Connection { version: "1.5.0.1424".into(), watched: false }),
+            "Everything 1.5.0.1424 · 手動更新（F5）"
+        );
     }
 }

@@ -329,7 +329,7 @@ fn deletes_outright_on_shift_delete_and_says_so_of_what_the_bin_could_not_take(c
     ui.press(cx, "shift-delete");
     assert_eq!(fake.operations.lock().unwrap()[0].kind, Operation::Delete);
     let entry = ui.ops(cx, |o| o.history.entries[0].clone());
-    assert_eq!(entry.request.kind.title(), "完全に削除");
+    assert_eq!(crate::words::ops::title(entry.request.kind), "完全に削除");
     assert_eq!(entry.items[0].status.label(), "完全に削除");
     // Sent to the bin, one it could not take is told apart from the rest.
     fake.unbinnable.lock().unwrap().push(r"D:\work\c.txt".into());
@@ -390,7 +390,7 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     assert!(ui.read_app(cx, |v, app| v.overlays.is_history_open() && v.operations.read(app).history.unseen == 0));
     let entry = ui.ops(cx, |o| o.history.entries[0].clone());
     assert!(ui.read_app(cx, |v, app| v.history.read(app).is_expanded(entry.id)));
-    assert_eq!(entry.items[0].error.as_deref(), Some("アクセスが拒否されました。"));
+    assert_eq!(entry.items[0].error.as_deref(), Some(crate::words::windows_failure(windows::Win32::Foundation::E_ACCESSDENIED).as_str()));
     // Still there: its name opens it in the columns.
     ui.click(cx, crate::history::history_item_id(entry.id, 0));
     assert!(ui.read(cx, |v| !v.overlays.is_history_open()));

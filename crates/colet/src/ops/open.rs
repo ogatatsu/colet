@@ -47,7 +47,9 @@ impl Colet {
             move || {
                 let failed: Vec<(String, String)> = paths
                     .iter()
-                    .filter_map(|path| backend.open(path, owner).err().map(|error| (shown(folder_name(path)), error)))
+                    .filter_map(|path| {
+                        backend.open(path, owner).err().map(|error| (shown(folder_name(path)), words::windows_failure(error.code())))
+                    })
                     .collect();
                 match failed.as_slice() {
                     [] => Ok(()),

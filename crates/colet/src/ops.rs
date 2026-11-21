@@ -304,14 +304,14 @@ impl Operations {
     pub fn copy_files(&mut self, paths: Vec<PathBuf>, cut: bool, cx: &mut Context<Self>) {
         let (backend, owner) = (self.backend.clone(), self.owner);
         let done = words::ops::put_on_clipboard(paths.len(), cut);
-        self.write_clipboard(move || backend.copy_files(&paths, cut, owner), done, cx);
+        self.write_clipboard(move || backend.copy_files(&paths, cut, owner).map_err(|e| words::windows_failure(e.code())), done, cx);
     }
 
     /// Puts `text`, the paths of `count` items, on the clipboard.
     pub fn copy_text(&mut self, text: OsString, count: usize, cx: &mut Context<Self>) {
         let (backend, owner) = (self.backend.clone(), self.owner);
         let done = words::ops::paths_copied(count);
-        self.write_clipboard(move || backend.copy_text(&text, owner), done, cx);
+        self.write_clipboard(move || backend.copy_text(&text, owner).map_err(|e| words::windows_failure(e.code())), done, cx);
     }
 
     /// Puts something on the clipboard off the UI thread; a paste asked for meanwhile waits for it, so it
@@ -358,7 +358,9 @@ impl Operations {
                 match result {
                     Ok(Dropped::Refused) => cx.emit(OperationsEvent::Notice(words::ops::refused(&name), Tone::Info)),
                     Ok(_) => {}
-                    Err(error) => cx.emit(OperationsEvent::Notice(words::ops::cannot_send(&name, error), Tone::Error)),
+                    Err(error) => {
+                        cx.emit(OperationsEvent::Notice(words::ops::cannot_send(&name, words::windows_failure(error.code())), Tone::Error))
+                    }
                 }
                 cx.emit(OperationsEvent::Sent(carry));
             })

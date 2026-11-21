@@ -13,7 +13,8 @@ use std::{
 
 use colet_core::{
     entry::{Entry, Hiding, Marks, Order, Sort},
-    everything::Page,
+    everything::{Connection, Page, SearchError, SlowProperties},
+    folders::ListError,
     operations::{Event, Kind as Operation, OperationError, Request},
     paths::{ancestors, child, folder_name, path_key},
     quick_look::{Error as QuickLookError, Message as QuickLookMessage},
@@ -73,12 +74,12 @@ struct Fake {
     orders: Mutex<Vec<Order>>,
     /// Each folder listed, with the order it was asked in.
     listed: Mutex<Vec<(String, Order)>>,
-    failing: Mutex<Option<String>>,
+    failing: Mutex<Option<SearchError>>,
     /// What the next search that answers warns of Everything, as a fresh connection does once.
-    warning: Mutex<Option<String>>,
+    warning: Mutex<Option<SlowProperties>>,
     changed: AtomicBool,
     /// What the watch on the last search fails with, as Everything's may.
-    watch_failing: Mutex<Option<String>>,
+    watch_failing: Mutex<Option<SearchError>>,
     /// How many times the watch on the last search was let go of.
     stopped: AtomicUsize,
     /// The settings as last written, starting from those it is made with.
@@ -143,7 +144,7 @@ impl Backend for Fake {
         self.roots.clone()
     }
 
-    fn list(&self, path: &Path, sort: Order, _: &AtomicBool, _: colet_core::shell::Owner) -> Result<Vec<Entry>, String> {
+    fn list(&self, path: &Path, sort: Order, _: &AtomicBool, _: colet_core::shell::Owner) -> Result<Vec<Entry>, ListError> {
         self.lists.lock().unwrap().push(text(path));
         self.orders.lock().unwrap().push(sort);
         self.listed.lock().unwrap().push((text(path), sort));
@@ -152,7 +153,7 @@ impl Backend for Fake {
         let (folder, entries) = folders
             .get_key_value(&text(path))
             .or_else(|| folders.iter().find(|(p, _)| path_key(Path::new(p)) == path_key(path)))
-            .ok_or_else(|| "フォルダーを開けません".to_string())?;
+            .ok_or_else(|| ListError::Open(std::io::ErrorKind::NotFound.into()))?;
         let under = |e: &Entry| Entry {
             path: colet_core::paths::moved(&e.path, Path::new(folder), path).unwrap_or_else(|| e.path.clone()),
             ..e.clone()
@@ -160,7 +161,7 @@ impl Backend for Fake {
         Ok(entries.iter().map(under).collect())
     }
 
-    fn search(&self, search: Search) -> Result<Found, String> {
+    fn search(&self, search: Search) -> Result<Option<Found>, SearchError> {
         self.searches.lock().unwrap().push((search.query.clone(), search.offset));
         self.orders.lock().unwrap().push(search.sort);
         // As Everything's watch, it says the results changed until they are searched afresh.
@@ -182,18 +183,18 @@ impl Backend for Fake {
             .collect();
         let end = (search.offset + search.count).min(results.len());
         let entries = results[search.offset.min(end)..end].to_vec();
-        Ok(Found {
+        Ok(Some(Found {
             page: Page { entries, total: results.len(), offset: search.offset },
-            connection: "Everything 1.5".into(),
+            connection: Some(Connection { version: "1.5".into(), watched: true }),
             warning: self.warning.lock().unwrap().take(),
-        })
+        }))
     }
 
-    fn count(&self, _: &str) -> Result<usize, String> {
+    fn count(&self, _: &str) -> Result<usize, SearchError> {
         Ok(self.results.lock().unwrap().len())
     }
 
-    fn search_changed(&self) -> Result<bool, String> {
+    fn search_changed(&self) -> Result<bool, SearchError> {
         if let Some(error) = self.watch_failing.lock().unwrap().clone() {
             return Err(error);
         }
@@ -248,7 +249,7 @@ impl Backend for Fake {
                 for path in &request.paths {
                     if stuck.contains(&text(path)) {
                         failed = true;
-                        report(Event::Failed { path: path.clone(), error: "アクセスが拒否されました。".into() });
+                        report(Event::Failed { path: path.clone(), error: windows::Win32::Foundation::E_ACCESSDENIED });
                     } else {
                         self.remove(path);
                         report(Event::Done { path: path.clone() });
@@ -318,7 +319,7 @@ impl Backend for Fake {
         Some(self.clipboard.lock().unwrap().clone())
     }
 
-    fn copy_files(&self, paths: &[PathBuf], cut: bool, _: Owner) -> Result<(), String> {
+    fn copy_files(&self, paths: &[PathBuf], cut: bool, _: Owner) -> windows_core::Result<()> {
         *self.clipboard.lock().unwrap() = ClipboardFiles { paths: paths.to_vec(), cut, sequence: 1, ..Default::default() };
         if let Some(changed) = &*self.watcher.lock().unwrap() {
             changed();
@@ -326,7 +327,7 @@ impl Backend for Fake {
         Ok(())
     }
 
-    fn copy_text(&self, copied: &OsStr, _: Owner) -> Result<(), String> {
+    fn copy_text(&self, copied: &OsStr, _: Owner) -> windows_core::Result<()> {
         *self.text.lock().unwrap() = copied.to_str().unwrap().into();
         Ok(())
     }
@@ -335,20 +336,20 @@ impl Backend for Fake {
         *self.watcher.lock().unwrap() = Some(changed);
     }
 
-    fn open(&self, path: &Path, _: Owner) -> Result<(), String> {
+    fn open(&self, path: &Path, _: Owner) -> windows_core::Result<()> {
         if self.unopenable.lock().unwrap().iter().any(|p| Path::new(p) == path) {
-            return Err("関連付けられたアプリがありません".into());
+            return Err(windows_core::Error::from_hresult(windows::Win32::Foundation::ERROR_NO_ASSOCIATION.to_hresult()));
         }
         self.opened.lock().unwrap().push(text(path));
         Ok(())
     }
 
-    fn reveal(&self, paths: &[PathBuf]) -> Result<(), String> {
+    fn reveal(&self, paths: &[PathBuf]) -> windows_core::Result<()> {
         self.revealed.lock().unwrap().push(paths.iter().map(|p| text(p)).collect());
         Ok(())
     }
 
-    fn properties(&self, paths: &[PathBuf], _: Owner) -> Result<(), String> {
+    fn properties(&self, paths: &[PathBuf], _: Owner) -> windows_core::Result<()> {
         self.properties.lock().unwrap().push(paths.iter().map(|p| text(p)).collect());
         Ok(())
     }
@@ -372,7 +373,7 @@ impl Backend for Fake {
         folders.values().flatten().find(|e| path_key(&e.path) == key).map(|e| (e.path.clone(), e.directory))
     }
 
-    fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, _: (i32, i32), _: Owner) -> Result<(), String> {
+    fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, _: (i32, i32), _: Owner) -> windows_core::Result<()> {
         self.menus.lock().unwrap().push((paths.iter().map(|p| text(p)).collect(), text(&background)));
         Ok(())
     }
@@ -381,12 +382,12 @@ impl Backend for Fake {
         self.send_targets.lock().unwrap().clone()
     }
 
-    fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, _: Owner) -> Result<Dropped, String> {
+    fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, _: Owner) -> windows_core::Result<Dropped> {
         self.sent.lock().unwrap().push((text(target), paths.iter().map(|p| text(p)).collect(), shift));
         Ok(if shift { Dropped::Moved } else { Dropped::Copied })
     }
 
-    fn drag_out(&self, paths: &[PathBuf], _: Owner) -> Result<Box<dyn Fn() -> bool>, String> {
+    fn drag_out(&self, paths: &[PathBuf], _: Owner) -> windows_core::Result<Box<dyn Fn() -> bool>> {
         self.dragged.lock().unwrap().push(paths.iter().map(|p| text(p)).collect());
         let writing = self.drag_writing.clone();
         Ok(Box::new(move || writing.load(Ordering::Relaxed)))

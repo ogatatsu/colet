@@ -297,13 +297,14 @@ impl Colet {
                 self.loading.searching();
                 let search = Search { query, sort, offset, count, refresh: offset == 0, request };
                 cx.background_executor().spawn(async move {
-                    let found = backend.search(search)?;
+                    let found = backend.search(search).map_err(|error| words::search::error(&error))?;
+                    let found = found.ok_or_else(|| words::search::STALE.to_string())?;
                     let whole = whole.and_then(|query| backend.count(&query).ok());
                     Ok(Listed {
                         entries: found.page.entries,
                         total: found.page.total,
-                        connection: Some(found.connection),
-                        warning: found.warning,
+                        connection: found.connection.as_ref().map(words::status::connection),
+                        warning: found.warning.as_ref().map(words::search::slow),
                         whole,
                     })
                 })
@@ -311,7 +312,10 @@ impl Colet {
             Kind::Folder => {
                 let path = c.path.clone();
                 let (cancelled, owner) = (self.loading.cancel_before(id), self.owner);
-                cx.background_executor().spawn(async move { Ok(Listed::all(backend.list(&path, sort, &cancelled, owner)?)) })
+                cx.background_executor().spawn(async move {
+                    let entries = backend.list(&path, sort, &cancelled, owner).map_err(|error| words::column::list_error(&error))?;
+                    Ok(Listed::all(entries))
+                })
             }
         };
         let asked = Asked { id, kind: c.kind, request, offset };
@@ -396,7 +400,7 @@ impl Colet {
             .map(|c| c.path.clone())
             .collect();
         self.loading.watching.set(paths).unwrap_or_else(|error| {
-            self.notify(error, Tone::Error, cx);
+            self.notify(words::window::cannot_start_watching(&error), Tone::Error, cx);
             None
         })
     }
@@ -451,6 +455,7 @@ impl Colet {
                         // connects afresh if it must.
                         Err(_) if !this.searches() => {}
                         Err(error) => {
+                            let error = words::search::error(&error);
                             this.loading.search_failed(error.clone());
                             this.notify(error, Tone::Error, cx);
                         }

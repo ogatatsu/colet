@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use colet_core::{operations::message, quick_look, shell};
+use colet_core::{quick_look, shell};
 use gpui_kit::component::{
     WindowExt,
     button::Button,
@@ -800,7 +800,11 @@ impl Colet {
             return;
         }
         let (backend, owner) = (self.backend.clone(), self.owner);
-        self.in_background(move || backend.open(&entry.path, owner).map_err(words::ops::cannot_open), None, cx);
+        self.in_background(
+            move || backend.open(&entry.path, owner).map_err(|e| words::ops::cannot_open(words::windows_failure(e.code()))),
+            None,
+            cx,
+        );
     }
 
     /// Space: QuickLook shows the row the keys are on, or closes on it. Nowhere for it to go is said, and
@@ -816,7 +820,7 @@ impl Colet {
                 Ok(Err(quick_look::Error::NotRunning)) => this.notify(words::window::QUICK_LOOK_NOT_RUNNING, Tone::Info, cx),
                 Ok(Err(quick_look::Error::Unnamable)) => this.notify(words::window::QUICK_LOOK_UNNAMABLE, Tone::Info, cx),
                 Ok(Err(quick_look::Error::Failed(error))) => {
-                    this.notify(words::window::quick_look_failed(message(error.code())), Tone::Error, cx)
+                    this.notify(words::window::quick_look_failed(words::windows_failure(error.code())), Tone::Error, cx)
                 }
                 _ => {}
             })

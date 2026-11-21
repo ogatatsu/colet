@@ -76,6 +76,7 @@ impl Colet {
         let Some(Dialog::Name { input, tried, taken, .. }) = self.overlays.dialog() else { return None };
         let name = input.read(cx).value();
         colet_core::operations::name_problem(&name, *tried)
+            .map(words::ops::name_problem)
             .or(taken.as_deref().filter(|&taken| taken == name.as_ref()).map(|_| words::ops::NAME_TAKEN))
     }
 

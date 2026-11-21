@@ -87,7 +87,7 @@ impl HistoryEntry {
                 return;
             }
             Event::Done { path } => (path, ItemStatus::Done, None),
-            Event::Failed { path, error } => (path, ItemStatus::Failed, Some(error)),
+            Event::Failed { path, error } => (path, ItemStatus::Failed, Some(words::windows_failure(error))),
             Event::Skipped { path } => (path, ItemStatus::Skipped, None),
             Event::Cancelled { path } => (path, ItemStatus::Cancelled, None),
             Event::Handed { path } => (path, ItemStatus::Handed, None),
@@ -237,7 +237,7 @@ mod tests {
         let mut paste = entry(Kind::Paste);
         paste.record(Event::Done { path: r"D:\a.txt".into() });
         paste.record(Event::Placed { path: r"D:\dest\a.txt".into() });
-        paste.record(Event::Failed { path: r"D:\b.txt".into(), error: "アクセスが拒否されました。".into() });
+        paste.record(Event::Failed { path: r"D:\b.txt".into(), error: windows::Win32::Foundation::E_ACCESSDENIED });
         paste.record(Event::Skipped { path: r"D:\c.txt".into() });
         assert_eq!(paste.items[0].path, std::path::Path::new(r"D:\dest\a.txt"));
         assert_eq!(paste.items[0].from.as_deref(), Some(std::path::Path::new(r"D:\a.txt")));
@@ -256,7 +256,7 @@ mod tests {
             paste.record(Event::Done { path: format!(r"D:\{i}.txt").into() });
         }
         paste.record(Event::Skipped { path: r"D:\skipped.txt".into() });
-        paste.record(Event::Failed { path: r"D:\failed.txt".into(), error: "アクセスが拒否されました。".into() });
+        paste.record(Event::Failed { path: r"D:\failed.txt".into(), error: windows::Win32::Foundation::E_ACCESSDENIED });
         assert_eq!((paste.items.len(), paste.more), (super::MAX_ITEMS, 2));
         paste.status = Status::Done;
         assert_eq!(paste.outcome(), "1 件失敗・1 件スキップ");

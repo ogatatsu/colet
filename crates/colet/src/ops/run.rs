@@ -22,7 +22,7 @@ impl Colet {
             } else {
                 words::reasons::UNFAVORITE_HINT
             };
-            self.notify(words::reasons::refused_with_hint(kind.title(), reason, hint), Tone::Info, cx);
+            self.notify(words::reasons::refused_with_hint(words::ops::title(kind), reason, hint), Tone::Info, cx);
             return;
         }
         self.run(Request { kind, paths: picked, destination: PathBuf::new(), name: String::new() }, cx);
@@ -53,7 +53,7 @@ impl Colet {
     /// Runs `request` for the tab `tab`, which picks what it makes.
     pub(super) fn run_in(&mut self, request: Request, tab: crate::tabs::TabId, cx: &mut Context<Self>) {
         let Some(events) = self.operations.update(cx, |operations, cx| operations.begin(&request, tab, cx)) else {
-            self.refuse(request.kind.title(), BUSY, cx);
+            self.refuse(words::ops::title(request.kind), BUSY, cx);
             return;
         };
         let (backend, owner, asked) = (self.backend.clone(), self.owner, request.clone());
@@ -152,7 +152,7 @@ impl Colet {
         let (cancelled, problem) = match &result {
             Ok(()) => (false, None),
             Err(OperationError::Cancelled) => (true, None),
-            Err(error) => (false, Some(error.to_string())),
+            Err(error) => (false, Some(words::ops::error(error))),
         };
         // Where the shell says it put it, under the name it got, which may not be the one asked; one that
         // says nothing of it is taken at the name asked, once its item is done.
@@ -185,7 +185,7 @@ impl Colet {
         let problem =
             self.operations.update(cx, |operations, cx| operations.record_end(Ended { id, kind, cancelled, problem, renamed }, cx));
         if let Some(problem) = problem {
-            self.notify_entry(words::ops::problem_of(kind.title(), problem), id, cx);
+            self.notify_entry(words::ops::problem_of(words::ops::title(kind), problem), id, cx);
         }
         // Like Explorer, what was pasted is picked once listed, under the names it got.
         if kind == Kind::Paste

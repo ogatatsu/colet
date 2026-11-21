@@ -1,10 +1,6 @@
 //! A column: its heading, narrowing field, headings, rows and the edge that widens it.
 
-use colet_core::{
-    entry::{Sort, direction_label},
-    paths::shown,
-    time,
-};
+use colet_core::{entry::Sort, paths::shown, time};
 use gpui_kit::base::input::{self, Input, InputState};
 use gpui_kit::component::{
     Disableable, Selectable, Sizable,
@@ -447,7 +443,7 @@ impl Colet {
         let id = c.id;
         let (order, own) = (self.order_of(c), self.own_order(c).is_some());
         let open = self.column_sort_open() == Some(id);
-        let label = words::column::sort_order(order.label(), own);
+        let label = words::column::sort_order(words::order(order), own);
         let button = Button::new(("column-sort", id))
             .ghost()
             .xsmall()
@@ -490,9 +486,9 @@ impl Colet {
         let heading = |by: Sort, name: &'static str| {
             let chosen = order.by == by;
             let label = if chosen {
-                words::column::sorted_by_in(by.label(), direction_label(order.descending))
+                words::column::sorted_by_in(words::sort_name(by), words::direction(order.descending))
             } else {
-                words::column::sorted_by(by.label())
+                words::column::sorted_by(words::sort_name(by))
             };
             div()
                 .id((name, id))
@@ -506,7 +502,7 @@ impl Colet {
                 .rounded(scaled(self.radii(cx).sm))
                 .hover(|d| d.bg(p.hover))
                 .text_color(if chosen { p.text } else { p.text_muted })
-                .child(by.label())
+                .child(words::sort_name(by))
                 .when(chosen, |d| d.child(icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted)))
                 .on_click(cx.listener(move |this, _, _, cx| this.sort_by_heading(id, by, cx)))
                 .test_support()

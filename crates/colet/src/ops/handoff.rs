@@ -16,11 +16,15 @@ impl Colet {
         match folder {
             Some(folder) if picked.is_empty() => {
                 let owner = self.owner;
-                self.in_background(move || backend.open(&folder, owner).map_err(words::ops::cannot_open), None, cx);
+                self.in_background(
+                    move || backend.open(&folder, owner).map_err(|e| words::ops::cannot_open(words::windows_failure(e.code()))),
+                    None,
+                    cx,
+                );
             }
             _ if !picked.is_empty() => {
                 let paths: Vec<PathBuf> = picked.into_iter().map(|e| HomeKey::on_disk(&e.path).into_owned()).collect();
-                self.in_background(move || backend.reveal(&paths), None, cx);
+                self.in_background(move || backend.reveal(&paths).map_err(|e| words::windows_failure(e.code())), None, cx);
             }
             _ => {}
         }
@@ -41,7 +45,7 @@ impl Colet {
         }
         let paths: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
         let (backend, owner) = (self.backend.clone(), self.owner);
-        self.in_background(move || backend.properties(&paths, owner), None, cx);
+        self.in_background(move || backend.properties(&paths, owner).map_err(|e| words::windows_failure(e.code())), None, cx);
     }
 
     /// The Windows (Explorer) menu, where this one was opened. Dismisses Colet's menu and returns its
@@ -71,7 +75,14 @@ impl Colet {
         let task = cx.background_executor().spawn(async move { backend.shell_menu(paths, background, at, owner) });
         cx.spawn(async move |this, cx| {
             if let Err(error) = task.await {
-                this.update(cx, |this, cx| this.notify(error, Tone::Error, cx)).ok();
+                let said = match error.code() {
+                    // The items are not all in one folder.
+                    code if code == windows::Win32::Foundation::E_INVALIDARG => words::reasons::SAME_FOLDER.to_string(),
+                    // A command from the menu before is still running, as a dialog it opened.
+                    code if code == colet_core::shell::MENU_BUSY => words::ops::MENU_BUSY.to_string(),
+                    code => words::windows_failure(code),
+                };
+                this.update(cx, |this, cx| this.notify(said, Tone::Error, cx)).ok();
             }
             // What it ran may have changed the folders.
             this.update(cx, |this, cx| this.refresh(cx)).ok();

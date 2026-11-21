@@ -132,7 +132,7 @@ impl HistoryPanel {
                     .child(
                         keep_focus(ring(div().id(("history-entry", id)).track_focus(&focus), p, focus.is_focused(window), 0.))
                             .role(Role::Button)
-                            .aria_label(format!("{} {}", entry.request.kind.title(), entry.target()))
+                            .aria_label(format!("{} {}", words::ops::title(entry.request.kind), entry.target()))
                             .aria_expanded(open)
                             .px_3()
                             .py_2()
@@ -148,7 +148,7 @@ impl HistoryPanel {
                                     .text_color(p.text_faint),
                             )
                             .child(div().text_color(p.text_faint).child(clock(entry.started)))
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child(entry.request.kind.title()))
+                            .child(div().font_weight(FontWeight::SEMIBOLD).child(words::ops::title(entry.request.kind)))
                             .child(div().flex_1().min_w_0().truncate().text_color(p.text_muted).child(entry.target()))
                             .child(div().text_color(if problems { p.danger } else { p.text_muted }).child(entry.outcome()))
                             .on_click(cx.listener(move |this, _, _, cx| this.toggle(id, cx)))

@@ -159,15 +159,6 @@ pub enum Sort {
 impl Sort {
     pub const ALL: [Sort; 4] = [Sort::Name, Sort::Location, Sort::Size, Sort::Modified];
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Sort::Name => "名前",
-            Sort::Location => "場所",
-            Sort::Size => "サイズ",
-            Sort::Modified => "更新日時",
-        }
-    }
-
     /// Whether a column of a folder's items, or the default, can be sorted by it.
     pub fn for_folders(self) -> bool {
         self != Sort::Location
@@ -197,18 +188,6 @@ impl Default for Order {
     fn default() -> Self {
         Self { by: Sort::default(), descending: false, folders_first: true }
     }
-}
-
-impl Order {
-    /// `名前・昇順`, with `・混在` when folders mix in with files.
-    pub fn label(self) -> String {
-        let mixed = if self.folders_first { "" } else { "・混在" };
-        format!("{}・{}{mixed}", self.by.label(), direction_label(self.descending))
-    }
-}
-
-pub fn direction_label(descending: bool) -> &'static str {
-    if descending { "降順" } else { "昇順" }
 }
 
 /// A name ordered as Explorer orders it: without case, and numbers by their value.
@@ -380,14 +359,6 @@ mod tests {
             sort(&mut entries, true),
             [r"D:\a10\x", r"D:\a2\x", r"D:\a b\x", r"D:\A\Sub\a", r"D:\a\sub\x", r"D:\a\x", r"D:\A\y", r"C:\z\y"]
         );
-        assert_eq!(Order { by: Sort::Location, ..Order::default() }.label(), "場所・昇順");
-    }
-
-    #[test]
-    fn says_when_folders_mix_in() {
-        let first = Order { by: Sort::Size, descending: true, ..Order::default() };
-        assert_eq!(first.label(), "サイズ・降順");
-        assert_eq!(Order { folders_first: false, ..first }.label(), "サイズ・降順・混在");
     }
 
     #[test]

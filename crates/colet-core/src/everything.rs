@@ -83,30 +83,48 @@ pub struct Page {
     pub offset: usize,
 }
 
-/// Why a search, or the watch on it, failed, in the words the window shows. The numbers are
-/// Everything's own error codes.
+/// Why a search, or the watch on it, failed. The numbers are Everything's own error codes. The window
+/// says each in words of its own; these are for a developer.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SearchError {
-    #[error("入力に使用できない文字が含まれています")]
+    #[error("the query holds a NUL")]
     NulInQuery,
-    #[error("Everything 1.5に接続できません。本体が起動しているか確認して、再試行してください。")]
+    #[error("cannot connect to Everything 1.5")]
     CannotConnect,
-    #[error("Everything {needed}以降が必要です（接続先: {found}）。更新してから再試行してください。")]
+    #[error("Everything {needed} or later is needed, connected to {found}")]
     TooOld { needed: String, found: String },
-    #[error("検索状態を作成できません")]
+    #[error("cannot create a search state")]
     NoSearchState,
-    #[error("Everythingの索引を準備中です。しばらく待って再試行してください。")]
+    #[error("Everything is still building its index")]
     Indexing,
-    #[error("Everythingとの接続が切れました。本体が起動しているか確認して、再試行してください。")]
+    #[error("the connection to Everything broke")]
     Disconnected,
-    #[error("Everything検索に失敗しました (0x{0:08X})")]
+    #[error("the search failed (0x{0:08X})")]
     Failed(u32),
     /// The watch heard Everything stop: the next search connects afresh.
-    #[error("Everythingとの接続が切れました。次の検索で再接続します (0x{0:08X})")]
+    #[error("the watch heard Everything stop (0x{0:08X})")]
     WatchDisconnected(u32),
     /// The watch alone failed: the results are read again with F5 only.
-    #[error("Everythingの自動更新を停止しました。F5で一覧を更新できます (0x{0:08X})")]
+    #[error("the watch on the results stopped (0x{0:08X})")]
     WatchStopped(u32),
+}
+
+/// The Everything a search is answered by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Connection {
+    /// Its version, as 1.5.0.1424.
+    pub version: String,
+    /// Whether its results are watched for changes; if not, they are read again on F5 only.
+    pub watched: bool,
+}
+
+/// What of the size and date modified, which every search asks for, Everything leaves unindexed or not
+/// fast sorted, each named by the sort by it: [`Sort::Size`] or [`Sort::Modified`]. One unindexed is not
+/// also among those not fast sorted.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SlowProperties {
+    pub unindexed: Vec<Sort>,
+    pub unsorted: Vec<Sort>,
 }
 
 /// Connect to the unnamed instance, or to `instance` when given. The SDK waits out a busy pipe itself,
@@ -236,11 +254,11 @@ pub struct SearchSession {
     #[cfg(test)]
     watch_instance: Option<String>,
     watch_retry_at: Option<Instant>,
-    /// What it is connected to, as the status bar names it.
-    pub connection: String,
+    /// What it is connected to; none before it first connects.
+    pub connection: Option<Connection>,
     /// What to warn of the Everything it last connected to, until taken: the size and date modified it
     /// does not index or fast sort, which every search asks for.
-    pub warning: Option<String>,
+    pub warning: Option<SlowProperties>,
 }
 
 // Used from one thread at a time, behind the app's lock.
@@ -255,7 +273,7 @@ impl Default for SearchSession {
             key: None,
             version: String::new(),
             watch_retry_at: None,
-            connection: String::new(),
+            connection: None,
             warning: None,
             #[cfg(test)]
             watch_instance: None,
@@ -438,10 +456,7 @@ impl SearchSession {
     }
 
     fn name_connection(&mut self) {
-        self.connection = format!("Everything {}", self.version);
-        if self.watch.is_none() {
-            self.connection.push_str(" · 手動更新（F5）");
-        }
+        self.connection = Some(Connection { version: self.version.clone(), watched: self.watch.is_some() });
     }
 
     unsafe fn prepare(&mut self, query: &str, order: Order) -> Result<(), SearchError> {
@@ -496,27 +511,14 @@ struct Indexing {
     fast_sort: Option<bool>,
 }
 
-/// The warning of what of the size and date modified Everything leaves unindexed or not fast sorted;
-/// none when it does both, or could not be asked. One unindexed is not named again as not fast sorted.
-fn slow_properties(size: Indexing, modified: Indexing) -> Option<String> {
-    let named = [("サイズ", size), ("更新日時", modified)];
-    let unindexed: Vec<&str> = named.iter().filter(|(_, i)| i.indexed == Some(false)).map(|(name, _)| *name).collect();
-    let unsorted: Vec<&str> =
-        named.iter().filter(|(_, i)| i.indexed != Some(false) && i.fast_sort == Some(false)).map(|(name, _)| *name).collect();
-    if unindexed.is_empty() && unsorted.is_empty() {
-        return None;
-    }
-    let mut warning = String::new();
-    if !unindexed.is_empty() {
-        warning += &format!("Everything が{}を索引していないため、検索が遅くなることがあります。", unindexed.join("と"));
-    }
-    if !unsorted.is_empty() {
-        let by: Vec<String> = unsorted.iter().map(|name| format!("{name}順")).collect();
-        let lead = if unindexed.is_empty() { "Everything で" } else { "" };
-        warning += &format!("{lead}{}の高速ソートが無効なため、{}の並べ替えが遅くなることがあります。", unsorted.join("と"), by.join("と"));
-    }
-    warning += "Everything のオプションの「インデックス」で有効にしてください。";
-    Some(warning)
+/// What of the size and date modified Everything leaves unindexed or not fast sorted; none when it does
+/// both, or could not be asked. One unindexed is not named again as not fast sorted.
+fn slow_properties(size: Indexing, modified: Indexing) -> Option<SlowProperties> {
+    let named = [(Sort::Size, size), (Sort::Modified, modified)];
+    let unindexed: Vec<Sort> = named.iter().filter(|(_, i)| i.indexed == Some(false)).map(|(by, _)| *by).collect();
+    let unsorted: Vec<Sort> =
+        named.iter().filter(|(_, i)| i.indexed != Some(false) && i.fast_sort == Some(false)).map(|(by, _)| *by).collect();
+    (!unindexed.is_empty() || !unsorted.is_empty()).then_some(SlowProperties { unindexed, unsorted })
 }
 
 /// A result's text as UTF-16, which the SDK writes into a buffer it first says the length of, up to its
@@ -597,18 +599,12 @@ mod tests {
         assert_eq!(slow_properties(fine, fine), None);
         // What could not be asked is not warned of.
         assert_eq!(slow_properties(unknown, unknown), None);
-        assert_eq!(
-            slow_properties(unindexed, unsorted).unwrap(),
-            "Everything がサイズを索引していないため、検索が遅くなることがあります。更新日時の高速ソートが無効なため、更新日時順の並べ替えが遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。"
-        );
-        assert_eq!(
-            slow_properties(unindexed, unindexed).unwrap(),
-            "Everything がサイズと更新日時を索引していないため、検索が遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。"
-        );
-        assert_eq!(
-            slow_properties(unsorted, unsorted).unwrap(),
-            "Everything でサイズと更新日時の高速ソートが無効なため、サイズ順と更新日時順の並べ替えが遅くなることがあります。Everything のオプションの「インデックス」で有効にしてください。"
-        );
+        let slow =
+            |unindexed: &[Sort], unsorted: &[Sort]| Some(SlowProperties { unindexed: unindexed.to_vec(), unsorted: unsorted.to_vec() });
+        assert_eq!(slow_properties(unindexed, unsorted), slow(&[Sort::Size], &[Sort::Modified]));
+        assert_eq!(slow_properties(unindexed, unindexed), slow(&[Sort::Size, Sort::Modified], &[]));
+        assert_eq!(slow_properties(unsorted, unsorted), slow(&[], &[Sort::Size, Sort::Modified]));
+        assert_eq!(slow_properties(unknown, unsorted), slow(&[], &[Sort::Modified]));
     }
 
     /// The error `changed` reports once the watch thread hears its client fail.
@@ -631,7 +627,8 @@ mod tests {
         let mut session = SearchSession::default();
         session.search(query, Order::default(), 0, PAGE, true).unwrap();
         // Named by its version, which the session pipes made the oldest asked.
-        assert!(session.connection.starts_with("Everything 1.5.0."), "{}", session.connection);
+        let version = &session.connection.as_ref().unwrap().version;
+        assert!(version.starts_with("1.5.0."), "{version}");
         // Shut down only this session's handles, reproducing failed IPC on both connections without
         // stopping the user's Everything process.
         unsafe {
@@ -712,7 +709,7 @@ mod tests {
         assert_eq!(first.entries.len(), PAGE);
         assert_eq!(session.client, client);
         assert!(session.watch.is_none());
-        assert!(session.connection.contains("手動更新（F5）"));
+        assert!(!session.connection.as_ref().unwrap().watched);
         assert!(!session.changed().unwrap());
         assert_eq!(session.search(&query, Order::default(), PAGE, PAGE, false).unwrap().entries.len(), 11);
         session.watch_instance = None;
@@ -730,7 +727,7 @@ mod tests {
         session.search(&query, Order::default(), 0, PAGE, true).unwrap();
         assert_eq!(session.client, client);
         assert!(session.watch.is_some());
-        assert!(!session.connection.contains("手動更新"));
+        assert!(session.connection.as_ref().unwrap().watched);
         std::fs::remove_file(fixture.path().join("0000.txt")).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !session.changed().unwrap() {

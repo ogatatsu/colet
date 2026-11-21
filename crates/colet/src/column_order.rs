@@ -1,7 +1,7 @@
 //! The order each column is listed in: the default, or one of its own, a folder's kept for every tab and
 //! the search results' kept with the tab; set from the column's heading, its order's menu, or the
 //! headings of its rows.
-use colet_core::entry::{Order, Sort, direction_label};
+use colet_core::entry::{Order, Sort};
 use gpui_kit::*;
 
 use crate::words;
@@ -123,11 +123,11 @@ impl Colet {
         let mut lines: Vec<Line> = Sort::ALL
             .into_iter()
             .filter(|by| search || by.for_folders())
-            .map(|by| choice(by.label(), by.label(), OrderCommand::Sort(target, by), by == sort.by))
+            .map(|by| choice(words::sort_name(by), words::sort_name(by), OrderCommand::Sort(target, by), by == sort.by))
             .collect();
         let sorts = lines.len();
         lines.extend([false, true].map(|descending| {
-            let label = direction_label(descending);
+            let label = words::direction(descending);
             choice(label, label, OrderCommand::Direction(target, descending), descending == sort.descending)
         }));
         lines[sorts].group = true;

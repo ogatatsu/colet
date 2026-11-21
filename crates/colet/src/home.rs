@@ -14,7 +14,7 @@ use std::{
 };
 
 use colet_core::{
-    entry::{Entry, Order, Sort, direction_label},
+    entry::{Entry, Order, Sort},
     paths::{folder_name, shown},
 };
 use gpui_kit::base::input::{InputEvent, InputState};
@@ -747,8 +747,8 @@ impl Colet {
                 .collect();
             self.radio_group(id, label, choices, window, cx)
         };
-        let by = Sort::ALL.into_iter().map(|by| (OrderChoice::By(by), by.label())).collect();
-        let direction = [false, true].into_iter().map(|d| (OrderChoice::Descending(d), direction_label(d))).collect();
+        let by = Sort::ALL.into_iter().map(|by| (OrderChoice::By(by), words::sort_name(by))).collect();
+        let direction = [false, true].into_iter().map(|d| (OrderChoice::Descending(d), words::direction(d))).collect();
         let folders =
             vec![(OrderChoice::FoldersFirst(true), words::home::FOLDERS_FIRST), (OrderChoice::FoldersFirst(false), words::home::MIXED)];
         let (by, direction, folders) = (

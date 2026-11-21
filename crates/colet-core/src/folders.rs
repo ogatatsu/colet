@@ -56,20 +56,20 @@ pub fn locate(path: &Path) -> Option<(PathBuf, bool)> {
     Some((found, directory))
 }
 
-/// Why a folder could not be listed, in the words its column shows.
+/// Why a folder could not be listed. Its column says each in words of its own; these are for a developer.
 #[derive(Debug, thiserror::Error)]
 pub enum ListError {
     /// A newer listing, or its column's removal, made this one unnecessary.
-    #[error("古いフォルダー要求です")]
+    #[error("the listing was overtaken")]
     Stale,
-    #[error("絶対パスを指定してください")]
+    #[error("the path is not absolute")]
     NotAbsolute,
-    #[error("共有フォルダーを一覧できません: {0}")]
+    #[error("cannot list the shares: {0}")]
     Shares(std::io::Error),
-    #[error("フォルダーを開けません: {0}")]
+    #[error("cannot open the folder: {0}")]
     Open(std::io::Error),
     /// The listing broke off part way.
-    #[error("フォルダーを最後まで読めません: {0}")]
+    #[error("the listing broke off: {0}")]
     BrokenOff(std::io::Error),
 }
 

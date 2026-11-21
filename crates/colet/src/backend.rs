@@ -3,7 +3,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc, Mutex, OnceLock,
+    Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError,
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc,
 };
@@ -16,8 +16,8 @@ use crate::{
 };
 use colet_core::{
     entry::{Entry, Order},
-    everything::{self, Page, SearchSession},
-    folders,
+    everything::{self, Connection, Page, SearchError, SearchSession, SlowProperties},
+    folders::{self, ListError},
     operations::{self, Event, OperationError, Request},
     quick_look,
     shell::{
@@ -49,20 +49,21 @@ pub struct Search {
 pub struct Found {
     pub page: Page,
     /// The Everything that answered it.
-    pub connection: String,
+    pub connection: Option<Connection>,
     /// What to warn of that Everything, once for each connection to it.
-    pub warning: Option<String>,
+    pub warning: Option<SlowProperties>,
 }
 
 pub trait Backend: Send + Sync + 'static {
     fn roots(&self) -> Vec<Entry>;
     /// A server that will not let the user in as they are asks them to sign in, in a dialog over `owner`.
-    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String>;
-    fn search(&self, search: Search) -> Result<Found, String>;
+    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, ListError>;
+    /// `None` when a search asked after it came first, and it was not sent.
+    fn search(&self, search: Search) -> Result<Option<Found>, SearchError>;
     /// How many results `query` finds, leaving the last search and its watch be.
-    fn count(&self, query: &str) -> Result<usize, String>;
+    fn count(&self, query: &str) -> Result<usize, SearchError>;
     /// Whether the last search's results changed; so until it is searched afresh.
-    fn search_changed(&self) -> Result<bool, String>;
+    fn search_changed(&self) -> Result<bool, SearchError>;
     /// Stops watching the last search, as none is in front, unless a search asked after `request` came
     /// first. It may wait for a search under way: never call it on the UI thread.
     fn stop_search(&self, request: u64);
@@ -81,40 +82,38 @@ pub trait Backend: Send + Sync + 'static {
     ) -> Result<(), OperationError>;
     /// The files on the clipboard; `None` while another app holds it.
     fn clipboard_files(&self) -> Option<ClipboardFiles>;
-    fn copy_files(&self, paths: &[PathBuf], cut: bool, owner: Owner) -> Result<(), String>;
-    fn copy_text(&self, text: &OsStr, owner: Owner) -> Result<(), String>;
+    fn copy_files(&self, paths: &[PathBuf], cut: bool, owner: Owner) -> windows_core::Result<()>;
+    fn copy_text(&self, text: &OsStr, owner: Owner) -> windows_core::Result<()>;
     /// Calls `changed` whenever any app changes the clipboard.
     fn watch_clipboard(&self, changed: Box<dyn Fn() + Send>);
     /// Opens a file in the app Windows associates with it.
-    fn open(&self, path: &Path, owner: Owner) -> Result<(), String>;
+    fn open(&self, path: &Path, owner: Owner) -> windows_core::Result<()>;
     /// Shows them, all in one folder, selected together in an Explorer window.
-    fn reveal(&self, paths: &[PathBuf]) -> Result<(), String>;
+    fn reveal(&self, paths: &[PathBuf]) -> windows_core::Result<()>;
     /// Opens Windows' properties of `paths`, several together in one dialog, from any folders.
-    fn properties(&self, paths: &[PathBuf], owner: Owner) -> Result<(), String>;
+    fn properties(&self, paths: &[PathBuf], owner: Owner) -> windows_core::Result<()>;
     /// Whether `path` is a folder, a file, or gone. It touches the disk, which a share can keep waiting for
     /// seconds: never ask it on the UI thread.
     fn path_kind(&self, path: &Path) -> PathKind;
     /// `path` as it is named on disk, and whether it is a folder; `None` when it cannot be reached. It
     /// touches the disk: never ask it on the UI thread.
     fn locate(&self, path: &Path) -> Option<(PathBuf, bool)>;
-    /// The Windows context menu at screen point `at`, for `paths` or the folder `background`.
-    fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String>;
+    /// The Windows context menu at screen point `at`, for `paths` or the folder `background`. It fails with
+    /// `E_INVALIDARG` when they are not all in one folder, and with [`shell::MENU_BUSY`] while a command
+    /// from the menu before still runs.
+    fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> windows_core::Result<()>;
     /// What Windows' Send To offers, from its folder; none while it cannot be read. It touches the disk.
     fn send_targets(&self) -> Vec<SendTarget>;
     /// Drops `paths`, from any folders, on `target`, one of [`Backend::send_targets`]: copied, or with
     /// `shift` moved where it allows it. Blocks until the drop returns.
-    fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> Result<Dropped, String>;
+    fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> windows_core::Result<Dropped>;
     /// Drags `paths`, from any folders, out of the window `owner` into another app, which copies, moves
     /// or links them. Call it on the window's own thread, out of any update: it runs the window's
     /// messages until the drag ends. What it returns tells, asked on the same thread, whether the app
     /// they were dropped in is still writing them out on a thread of its own.
-    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> Result<Box<dyn Fn() -> bool>, String>;
+    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> windows_core::Result<Box<dyn Fn() -> bool>>;
     /// Asks QuickLook to show `path`, in the order asked; what it returns tells how that went.
     fn quick_look(&self, message: quick_look::Message, path: PathBuf) -> mpsc::Receiver<Result<(), quick_look::Error>>;
-}
-
-fn said(error: windows_core::Error) -> String {
-    operations::message(error.code())
 }
 
 /// Everything 1.5, the real disks, the clipboard and the shell.
@@ -130,12 +129,24 @@ pub struct Live {
 
 impl Live {
     /// The thread the shell's menus and properties are shown on, started the first time it is wanted.
-    fn menu_thread(&self) -> Result<MenuThread, String> {
-        let mut menu = self.menu.lock().map_err(|e| e.to_string())?;
-        if menu.is_none() {
-            *menu = Some(MenuThread::spawn().map_err(said)?);
+    fn menu_thread(&self) -> windows_core::Result<MenuThread> {
+        // What a panic left is a thread or none, either of which serves.
+        let mut menu = self.menu.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(thread) = &*menu {
+            return Ok(thread.clone());
         }
-        Ok(menu.clone().unwrap())
+        Ok(menu.insert(MenuThread::spawn()?).clone())
+    }
+
+    /// The last search and its watch. One a panic left part way is let go of, and the next search
+    /// connects afresh, rather than every search failing from then on.
+    fn session(&self) -> MutexGuard<'_, SearchSession> {
+        self.session.lock().unwrap_or_else(|poisoned| {
+            let mut session = poisoned.into_inner();
+            session.disconnect();
+            self.session.clear_poison();
+            session
+        })
     }
 }
 
@@ -144,40 +155,40 @@ impl Backend for Live {
         folders::roots()
     }
 
-    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, String> {
-        folders::list(path, sort, cancelled, owner).map_err(|e| e.to_string())
+    fn list(&self, path: &Path, sort: Order, cancelled: &AtomicBool, owner: Owner) -> Result<Vec<Entry>, ListError> {
+        folders::list(path, sort, cancelled, owner)
     }
 
-    fn search(&self, search: Search) -> Result<Found, String> {
+    fn search(&self, search: Search) -> Result<Option<Found>, SearchError> {
         self.latest.fetch_max(search.request, Ordering::Relaxed);
-        let mut session = self.session.lock().map_err(|e| e.to_string())?;
+        let mut session = self.session();
         if self.latest.load(Ordering::Relaxed) != search.request {
-            return Err(words::search::STALE.into());
+            return Ok(None);
         }
         // A search that fails after connecting keeps the warning for the next.
-        let page = session.search(&search.query, search.sort, search.offset, search.count, search.refresh).map_err(|e| e.to_string())?;
-        Ok(Found { page, connection: session.connection.clone(), warning: session.warning.take() })
+        let page = session.search(&search.query, search.sort, search.offset, search.count, search.refresh)?;
+        Ok(Some(Found { page, connection: session.connection.clone(), warning: session.warning.take() }))
     }
 
-    fn count(&self, query: &str) -> Result<usize, String> {
+    fn count(&self, query: &str) -> Result<usize, SearchError> {
         // Held so it never connects as a search does.
-        let _session = self.session.lock().map_err(|e| e.to_string())?;
-        everything::count(query).map_err(|e| e.to_string())
+        let _session = self.session();
+        everything::count(query)
     }
 
-    fn search_changed(&self) -> Result<bool, String> {
+    fn search_changed(&self) -> Result<bool, SearchError> {
         match self.session.try_lock() {
-            Ok(mut session) => session.changed().map_err(|e| e.to_string()),
+            Ok(mut session) => session.changed(),
             // A search under way, perhaps waiting out a busy Everything, is asked next time.
-            Err(std::sync::TryLockError::WouldBlock) => Ok(false),
-            Err(error) => Err(error.to_string()),
+            Err(TryLockError::WouldBlock) => Ok(false),
+            Err(TryLockError::Poisoned(_)) => self.session().changed(),
         }
     }
 
     fn stop_search(&self, request: u64) {
         // A search asked before it and not yet run is not run: it is no longer in front.
         self.latest.fetch_max(request, Ordering::Relaxed);
-        let Ok(mut session) = self.session.lock() else { return };
+        let mut session = self.session();
         if self.latest.load(Ordering::Relaxed) == request {
             session.release();
         }
@@ -213,30 +224,30 @@ impl Backend for Live {
         clipboard::read_files().ok()
     }
 
-    fn copy_files(&self, paths: &[PathBuf], cut: bool, owner: Owner) -> Result<(), String> {
-        clipboard::write_files(paths, cut, owner).map_err(said)
+    fn copy_files(&self, paths: &[PathBuf], cut: bool, owner: Owner) -> windows_core::Result<()> {
+        clipboard::write_files(paths, cut, owner)
     }
 
-    fn copy_text(&self, text: &OsStr, owner: Owner) -> Result<(), String> {
-        clipboard::write_text(text, owner).map_err(said)
+    fn copy_text(&self, text: &OsStr, owner: Owner) -> windows_core::Result<()> {
+        clipboard::write_text(text, owner)
     }
 
     fn watch_clipboard(&self, changed: Box<dyn Fn() + Send>) {
         if let Err(error) = clipboard::watch(changed) {
-            eprintln!("{}", words::ops::cannot_watch_clipboard(said(error)));
+            eprintln!("{}", words::ops::cannot_watch_clipboard(words::windows_failure(error.code())));
         }
     }
 
-    fn open(&self, path: &Path, owner: Owner) -> Result<(), String> {
-        shell::open(path, owner).map_err(said)
+    fn open(&self, path: &Path, owner: Owner) -> windows_core::Result<()> {
+        shell::open(path, owner)
     }
 
-    fn reveal(&self, paths: &[PathBuf]) -> Result<(), String> {
-        shell::reveal(paths).map_err(said)
+    fn reveal(&self, paths: &[PathBuf]) -> windows_core::Result<()> {
+        shell::reveal(paths)
     }
 
-    fn properties(&self, paths: &[PathBuf], owner: Owner) -> Result<(), String> {
-        self.menu_thread()?.properties(paths.to_vec(), owner).map_err(said)
+    fn properties(&self, paths: &[PathBuf], owner: Owner) -> windows_core::Result<()> {
+        self.menu_thread()?.properties(paths.to_vec(), owner)
     }
 
     fn path_kind(&self, path: &Path) -> PathKind {
@@ -255,27 +266,20 @@ impl Backend for Live {
         folders::locate(path)
     }
 
-    fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> Result<(), String> {
-        match self.menu_thread()?.show(ShowMenu { owner, paths, background, at }) {
-            Ok(_) => Ok(()),
-            // The items are not all in one folder.
-            Err(error) if error.code() == windows::Win32::Foundation::E_INVALIDARG => Err(words::reasons::SAME_FOLDER.into()),
-            // A command from the menu before is still running, as a dialog it opened.
-            Err(error) if error.code() == shell::MENU_BUSY => Err(words::ops::MENU_BUSY.into()),
-            Err(error) => Err(said(error)),
-        }
+    fn shell_menu(&self, paths: Vec<PathBuf>, background: PathBuf, at: (i32, i32), owner: Owner) -> windows_core::Result<()> {
+        self.menu_thread()?.show(ShowMenu { owner, paths, background, at }).map(drop)
     }
 
     fn send_targets(&self) -> Vec<SendTarget> {
         shell::send_targets().unwrap_or_default()
     }
 
-    fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> Result<Dropped, String> {
-        shell::send_to(target, paths, shift, owner).map_err(said)
+    fn send_to(&self, target: &Path, paths: &[PathBuf], shift: bool, owner: Owner) -> windows_core::Result<Dropped> {
+        shell::send_to(target, paths, shift, owner)
     }
 
-    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> Result<Box<dyn Fn() -> bool>, String> {
-        let dragged = shell::drag_out(paths, owner).map_err(said)?;
+    fn drag_out(&self, paths: &[PathBuf], owner: Owner) -> windows_core::Result<Box<dyn Fn() -> bool>> {
+        let dragged = shell::drag_out(paths, owner)?;
         Ok(Box::new(move || dragged.writing()))
     }
 
@@ -304,7 +308,7 @@ mod tests {
         let base = format!("\"{}\\\"", fixture.path().display());
         let names = |query: String| {
             let search = Search { query, sort: Order::default(), offset: 0, count: 100, refresh: true, request: 0 };
-            let mut names: Vec<String> = live.search(search).unwrap().page.entries.into_iter().map(|e| e.name).collect();
+            let mut names: Vec<String> = live.search(search).unwrap().unwrap().page.entries.into_iter().map(|e| e.name).collect();
             names.sort();
             names
         };

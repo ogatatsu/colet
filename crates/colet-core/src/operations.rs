@@ -27,19 +27,6 @@ pub enum Kind {
     NewFolder,
 }
 
-impl Kind {
-    /// What the history and the notices call it.
-    pub fn title(self) -> &'static str {
-        match self {
-            Kind::Paste => "貼り付け",
-            Kind::Recycle => "ごみ箱へ移動",
-            Kind::Delete => "完全に削除",
-            Kind::Rename => "名前を変更",
-            Kind::NewFolder => "フォルダーを作成",
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Request {
     pub kind: Kind,
@@ -59,7 +46,7 @@ pub enum Event {
     },
     Failed {
         path: PathBuf,
-        error: String,
+        error: HRESULT,
     },
     /// Passed over at the user's word, as from a name clash.
     Skipped {
@@ -90,43 +77,55 @@ pub enum Event {
     },
 }
 
-/// Why an operation was not carried out, or not all of it, in the words the window shows.
+/// Why an operation was not carried out, or not all of it. The window says each in words of its own;
+/// these are for a developer.
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
     /// The user stopped it.
-    #[error("操作をキャンセルしました")]
+    #[error("cancelled")]
     Cancelled,
-    #[error("絶対パスを指定してください")]
+    #[error("the path is not absolute")]
     NotAbsolute,
-    #[error("貼り付け先がフォルダーではありません")]
+    #[error("the destination is not a folder")]
     NotAFolder,
-    #[error("フォルダー自身やその子孫にはコピー・移動できません")]
+    #[error("a folder cannot go into itself or a folder inside it")]
     IntoItself,
-    #[error("クリップボードにファイルがありません")]
+    #[error("no files on the clipboard")]
     NoFilesOnClipboard,
-    #[error("項目が選択されていません")]
+    #[error("nothing selected")]
     NothingSelected,
-    #[error("使用できない名前です")]
+    #[error("the name cannot be used")]
     InvalidName,
-    #[error("名前の変更は1項目ずつ行ってください")]
+    #[error("one item is renamed at a time")]
     RenameOneAtATime,
-    #[error("ドライブのルートは操作できません")]
+    #[error("a drive's root cannot be acted on")]
     DriveRoot,
-    #[error("作成先が見つかりません")]
+    #[error("the destination is not found")]
     NoDestination,
-    #[error("貼り付け先がクリップボードの内容を受け付けませんでした")]
+    #[error("the destination refused what the clipboard holds")]
     Refused,
-    #[error("貼り付けるまでにクリップボードの内容が変わりました。もう一度貼り付けてください。")]
+    #[error("the clipboard changed before the paste")]
     ClipboardChanged,
     /// Some items failed; how each went is in the history.
-    #[error("一部の項目を操作できませんでした。結果を確認してください。")]
+    #[error("some items failed")]
     PartlyFailed,
     /// A path could not be looked up on the disk.
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// The shell refused, in Windows's own words.
-    #[error("{}", message(*.0))]
+    /// The shell refused.
+    #[error("the shell refused (0x{:08X})", .0.0 as u32)]
     Windows(HRESULT),
+}
+
+/// What Windows refuses in a file or folder name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NameProblem {
+    /// A control character, or one of `\ / : * ? " < > |`.
+    ForbiddenCharacter,
+    /// A period or a space at the end.
+    TrailingDotOrSpace,
+    /// A device's name, as `CON` or `COM1`.
+    Reserved,
 }
 
 /// COPYENGINE_S_USER_IGNORED: skipped at the user's word.
@@ -136,27 +135,27 @@ const PENDING: HRESULT = HRESULT(0x0027_000B);
 /// COPYENGINE_E_USER_CANCELLED.
 const USER_CANCELLED: HRESULT = HRESULT(0x8027_0000_u32 as i32);
 
-/// Windows's own words for `code`, or its number.
-pub fn message(code: HRESULT) -> String {
+/// Windows's own words for `code`, in the language it is set to; none when it has none.
+pub fn system_message(code: HRESULT) -> Option<String> {
     let text = windows::core::Error::from_hresult(code).message();
     let text = text.trim();
-    if text.is_empty() { format!("Windowsの操作に失敗しました (0x{:08X})", code.0 as u32) } else { text.to_owned() }
+    (!text.is_empty()).then(|| text.to_owned())
 }
 
 /// What Windows refuses in a file or folder name, to say before it is sent. A forbidden character is
 /// wrong whatever follows; the rest only once `tried`, as typing "report.pdf" passes through "report.".
-pub fn name_problem(name: &str, tried: bool) -> Option<&'static str> {
+pub fn name_problem(name: &str, tried: bool) -> Option<NameProblem> {
     if name.chars().any(|c| c < ' ' || "\\/:*?\"<>|".contains(c)) {
-        return Some("次の文字は使えません：\\ / : * ? \" < > |");
+        return Some(NameProblem::ForbiddenCharacter);
     }
     if !tried {
         return None;
     }
     if name.ends_with(['.', ' ']) {
-        return Some("末尾にピリオドや空白は使えません");
+        return Some(NameProblem::TrailingDotOrSpace);
     }
     if is_device_name(name) {
-        return Some("Windowsで予約された名前は使えません");
+        return Some(NameProblem::Reserved);
     }
     None
 }
@@ -412,7 +411,7 @@ fn reporter(leaves: bool, tally: Arc<Tally>, mut report: impl FnMut(Event) + Sen
             Item::Done { path, result } if result == USER_IGNORED => Event::Skipped { path },
             Item::Done { path, result } if result.is_err() => {
                 tally.failed.store(true, Ordering::Relaxed);
-                Event::Failed { path, error: message(result) }
+                Event::Failed { path, error: result }
             }
             Item::Done { path, .. } => Event::Done { path },
             Item::Placed { path } => Event::Placed { path },
@@ -532,7 +531,7 @@ mod tests {
     #[test]
     fn refuses_a_device_name_as_the_whole_name_as_the_shell_does() {
         for name in ["CON", "con", "PRN", "AUX", "NUL", "COM1", "COM9", "lpt9", "COM¹", "LPT²", "LPT³", "CONIN$", "conout$"] {
-            assert_eq!(name_problem(name, true), Some("Windowsで予約された名前は使えません"), "{name}");
+            assert_eq!(name_problem(name, true), Some(NameProblem::Reserved), "{name}");
             // Not yet a problem while it is typed: "CON" passes through on the way to "CONTRACT".
             assert_eq!(name_problem(name, false), None, "{name}");
         }
