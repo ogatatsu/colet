@@ -30,15 +30,8 @@ pub enum Dialog {
     /// name tried last that the rename's folder already has. `checking`: the name tried whose folder is being
     /// asked, off the UI thread, whether it has it already; typing lets go of it.
     Name { request: Request, input: Entity<InputState>, tried: bool, taken: Option<String>, checking: Option<String> },
-    /// A saved search's name, query, filter, narrowing and order, found by those it had as the dialog opened.
-    EditSearch {
-        original: SavedSearch,
-        name: Entity<InputState>,
-        query: Entity<InputState>,
-        filter: Option<String>,
-        narrow: Entity<InputState>,
-        order: Order,
-    },
+    /// A saved search being edited.
+    EditSearch(SearchEdit),
     /// A favorite's name and narrowing, found by those it had as the dialog opened; its folder stays.
     EditFavorite { original: Favorite, name: Entity<InputState>, narrow: Entity<InputState> },
     /// The search filters, to add to, put in order, edit or delete: one at a time, in `edit`, or the one
@@ -50,12 +43,23 @@ pub enum Dialog {
     Open { paths: Vec<std::path::PathBuf> },
 }
 
+/// A saved search's name, query, filter, narrowing and order as the dialog has them, found by those it had
+/// as the dialog opened.
+pub struct SearchEdit {
+    pub original: SavedSearch,
+    pub name: Entity<InputState>,
+    pub query: Entity<InputState>,
+    pub filter: Option<String>,
+    pub narrow: Entity<InputState>,
+    pub order: Order,
+}
+
 impl Dialog {
     /// Its text fields, in their order.
     pub fn fields(&self) -> Vec<Entity<InputState>> {
         match self {
             Dialog::Name { input, .. } => vec![input.clone()],
-            Dialog::EditSearch { name, query, narrow, .. } => vec![name.clone(), query.clone(), narrow.clone()],
+            Dialog::EditSearch(SearchEdit { name, query, narrow, .. }) => vec![name.clone(), query.clone(), narrow.clone()],
             Dialog::EditFavorite { name, narrow, .. } => vec![name.clone(), narrow.clone()],
             Dialog::Filters { edit: Some(edit), .. } => vec![edit.name.clone(), edit.query.clone()],
             Dialog::Filters { .. } | Dialog::Preferences | Dialog::Open { .. } => Vec::new(),
@@ -238,9 +242,7 @@ impl Colet {
         let parts = match self.overlays.dialog()? {
             Dialog::Name { request, input, checking, .. } => self.name_dialog(request, input, checking.is_some(), window, cx),
             Dialog::EditFavorite { original, name, narrow } => self.favorite_dialog(original, name, narrow, window, cx),
-            Dialog::EditSearch { name, query, filter, narrow, order, .. } => {
-                self.search_dialog(name, query, filter, narrow, *order, window, cx)
-            }
+            Dialog::EditSearch(edit) => self.search_dialog(edit, window, cx),
             Dialog::Filters { edit: Some(edit), .. } => self.filter_edit_dialog(edit, window, cx),
             Dialog::Filters { deleting: Some(name), .. } => self.filter_delete_dialog(name, cx),
             Dialog::Filters { .. } => self.filters_dialog(window, cx),

@@ -250,6 +250,15 @@ impl Listed {
 
 type Listing = Result<Listed, String>;
 
+/// What a listing was asked for: the column, from where, and the request it went out as.
+#[derive(Clone, Copy)]
+struct Asked {
+    id: ColumnId,
+    kind: Kind,
+    request: u64,
+    offset: usize,
+}
+
 impl Colet {
     /// Lists the column `id` from `offset` on; `quiet` keeps what it shows meanwhile.
     pub fn load(&mut self, id: ColumnId, offset: usize, quiet: bool, cx: &mut Context<Self>) {
@@ -305,15 +314,17 @@ impl Colet {
                 cx.background_executor().spawn(async move { Ok(Listed::all(backend.list(&path, sort, &cancelled, owner)?)) })
             }
         };
-        let kind = c.kind;
+        let asked = Asked { id, kind: c.kind, request, offset };
         cx.spawn(async move |this, cx| {
             let result = task.await;
-            this.update(cx, |this, cx| this.listed(id, kind, request, offset, result, cx)).ok();
+            this.update(cx, |this, cx| this.listed(asked, result, cx)).ok();
         })
         .detach();
     }
 
-    fn listed(&mut self, id: ColumnId, kind: Kind, request: u64, offset: usize, result: Listing, cx: &mut Context<Self>) {
+    /// The answer to `asked` came.
+    fn listed(&mut self, asked: Asked, result: Listing, cx: &mut Context<Self>) {
+        let Asked { id, kind, request, offset } = asked;
         let current = self.loading.answered(id, request);
         match result {
             Ok(Listed { entries, total, connection, warning, whole }) => {

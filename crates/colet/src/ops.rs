@@ -99,6 +99,18 @@ pub struct Carried {
 
 impl EventEmitter<OperationsEvent> for Operations {}
 
+/// How an operation ended, for its entry in the history.
+struct Ended {
+    id: u64,
+    kind: Kind,
+    /// The user stopped it.
+    cancelled: bool,
+    /// Its own failure, apart from its items'.
+    problem: Option<String>,
+    /// Where a rename that told nothing of its item put it.
+    renamed: Option<PathBuf>,
+}
+
 impl Operations {
     /// Watches the clipboard from now on, and reads what Send To offers.
     pub fn new(backend: backend::Shared, owner: shell::Owner, cx: &mut Context<Self>) -> Self {
@@ -208,17 +220,9 @@ impl Operations {
         self.running.take()
     }
 
-    /// Puts down in its entry how operation `id` ended: `problem` is its own failure, and `renamed` where a
-    /// rename that told nothing of its item put it. What to say of its problems, counted as not yet seen.
-    fn record_end(
-        &mut self,
-        id: u64,
-        kind: Kind,
-        cancelled: bool,
-        problem: Option<String>,
-        renamed: Option<PathBuf>,
-        cx: &mut Context<Self>,
-    ) -> Option<String> {
+    /// Puts down in its entry how the operation ended. What to say of its problems, counted as not yet seen.
+    fn record_end(&mut self, ended: Ended, cx: &mut Context<Self>) -> Option<String> {
+        let Ended { id, kind, cancelled, problem, renamed } = ended;
         let index = self.history.entries.iter().position(|e| e.id == id)?;
         let entry = &mut self.history.entries[index];
         let counts = entry.item_problems();

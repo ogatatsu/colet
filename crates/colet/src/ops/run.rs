@@ -182,7 +182,8 @@ impl Colet {
         }
         // Told where it went, the item already says so.
         let renamed = renamed.filter(|_| !told);
-        let problem = self.operations.update(cx, |operations, cx| operations.record_end(id, kind, cancelled, problem, renamed, cx));
+        let problem =
+            self.operations.update(cx, |operations, cx| operations.record_end(Ended { id, kind, cancelled, problem, renamed }, cx));
         if let Some(problem) = problem {
             self.notify_entry(words::ops::problem_of(kind.title(), problem), id, cx);
         }

@@ -24,7 +24,7 @@ use gpui_kit::*;
 use crate::words;
 use crate::{
     app::{Colet, FOLD_WIDTH, Tone, WidthOf},
-    dialogs::{Choice, Dialog, DialogParts, Pick, field, label, push},
+    dialogs::{Choice, Dialog, DialogParts, Pick, SearchEdit, field, label, push},
     file_menu::FileCommand,
     menus::{Line, line},
     metrics::{self, Scale},
@@ -587,13 +587,13 @@ impl Colet {
         let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), words::NONE.into(), Self::submit_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
         let (filter, order) = (found.filter.clone(), found.order);
-        self.overlays.set_dialog(Dialog::EditSearch { original: found, name, query, filter, narrow, order });
+        self.overlays.set_dialog(Dialog::EditSearch(SearchEdit { original: found, name, query, filter, narrow, order }));
         cx.notify();
     }
 
     /// The filter the edited search is to run within.
     pub fn pick_edit_filter(&mut self, chosen: Option<String>, cx: &mut Context<Self>) {
-        if let Some(Dialog::EditSearch { filter, .. }) = self.overlays.dialog_mut() {
+        if let Some(Dialog::EditSearch(SearchEdit { filter, .. })) = self.overlays.dialog_mut() {
             *filter = chosen;
             cx.notify();
         }
@@ -601,7 +601,7 @@ impl Colet {
 
     /// The order the edited search's results are to be listed in, as `change` makes it.
     pub fn change_edit_order(&mut self, change: impl FnOnce(&mut Order), cx: &mut Context<Self>) {
-        if let Some(Dialog::EditSearch { order, .. }) = self.overlays.dialog_mut() {
+        if let Some(Dialog::EditSearch(SearchEdit { order, .. })) = self.overlays.dialog_mut() {
             change(order);
             cx.notify();
         }
@@ -609,7 +609,7 @@ impl Colet {
 
     /// The saved search as the dialog now has it, its name and narrowing as they are kept.
     fn edited_search(&self, cx: &App) -> Option<SavedSearch> {
-        let Some(Dialog::EditSearch { name, query, filter, narrow, order, .. }) = self.overlays.dialog() else { return None };
+        let Some(Dialog::EditSearch(SearchEdit { name, query, filter, narrow, order, .. })) = self.overlays.dialog() else { return None };
         Some(SavedSearch {
             name: name.read(cx).value().trim().to_owned(),
             query: query.read(cx).value().to_string(),
@@ -621,7 +621,7 @@ impl Colet {
 
     /// Why the edited search cannot be saved as it stands, if it cannot.
     pub fn edit_problem(&self, cx: &App) -> Option<&'static str> {
-        let Some(Dialog::EditSearch { original, .. }) = self.overlays.dialog() else { return None };
+        let Some(Dialog::EditSearch(SearchEdit { original, .. })) = self.overlays.dialog() else { return None };
         let edited = self.edited_search(cx)?;
         if edited.query.trim().is_empty() {
             Some("")
@@ -638,7 +638,9 @@ impl Colet {
         if self.edit_problem(cx).is_some() {
             return;
         }
-        let (Some(Dialog::EditSearch { original, .. }), Some(edited)) = (self.overlays.dialog(), self.edited_search(cx)) else { return };
+        let (Some(Dialog::EditSearch(SearchEdit { original, .. })), Some(edited)) = (self.overlays.dialog(), self.edited_search(cx)) else {
+            return;
+        };
         let original = original.clone();
         let (was, is) = (original.key(), edited.key());
         self.update_settings(
@@ -799,17 +801,9 @@ impl Colet {
     }
 
     /// A saved search's name, query, filter, narrowing and order.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn search_dialog(
-        &self,
-        name: &Entity<InputState>,
-        query: &Entity<InputState>,
-        filter: &Option<String>,
-        narrow: &Entity<InputState>,
-        order: Order,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> DialogParts {
+    pub(crate) fn search_dialog(&self, edit: &SearchEdit, window: &Window, cx: &mut Context<Self>) -> DialogParts {
+        let SearchEdit { name, query, filter, narrow, order, .. } = edit;
+        let order = *order;
         let p = cx.palette();
         let radii = metrics::Radii::of(window, cx);
         // The saved search's choice of filter, none first.

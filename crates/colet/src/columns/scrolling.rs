@@ -8,7 +8,7 @@ use crate::words;
 use crate::{
     app::*,
     metrics::{self, Scale, scaled},
-    reveal::{Cell, Slide, on_screen, refit, reveal_target, uncover_target},
+    reveal::{Cell, Rested, Slide, on_screen, refit, reveal_target, uncover_target},
     state::ColumnId,
     theme::ActivePalette,
     view::*,
@@ -376,7 +376,7 @@ impl Colet {
             }
             None if pushed => {}
             None => {
-                let target = refit(sideways.offset(), was, cells.len() as f32 * was_width, view, &cells, active);
+                let target = refit(Rested { at: sideways.offset(), view: was, end: cells.len() as f32 * was_width }, view, &cells, active);
                 sideways.set_offset(target);
                 sideways.hold = target;
             }

@@ -173,7 +173,7 @@ fn edits_a_saved_searchs_name_and_query_with_f2(cx: &mut TestAppContext) {
     ui.click(cx, row(HomeKey::search("ext:pdf", None, None, Order::default()).key()));
     ui.press(cx, "f2");
     let (name, query) = ui.read(cx, |v| match v.overlays.dialog() {
-        Some(crate::dialogs::Dialog::EditSearch { name, query, .. }) => (name.clone(), query.clone()),
+        Some(crate::dialogs::Dialog::EditSearch(crate::dialogs::SearchEdit { name, query, .. })) => (name.clone(), query.clone()),
         _ => panic!("no dialog"),
     });
     // A query already saved cannot be taken.
