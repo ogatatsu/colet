@@ -1,8 +1,8 @@
 //! Colet's colors by role, dark and light, as Windows is set or as the settings fix them. The light ones
 //! keep the dark ones' roles, hues and contrasts on a light ground.
-use std::{rc::Rc, sync::LazyLock};
+use std::{rc::Rc, sync::LazyLock, time::Duration};
 
-use gpui_kit::base::input::{InputEditorStyle, InputState};
+use gpui_kit::base::input::{CursorBlink, InputEditorStyle, InputState};
 use gpui_kit::component::{ThemeConfig, ThemeConfigColors, ThemeMode};
 use gpui_kit::{App, Entity, Hsla, Rgba, Window, WindowAppearance, hsla};
 
@@ -257,12 +257,64 @@ pub fn set_zoom(zoom: u16, cx: &mut App) {
 pub fn apply(window: &Window, theme: Theme, cx: &mut App) {
     let mode = if is_dark(window, theme) { ThemeMode::Dark } else { ThemeMode::Light };
     gpui_kit::component::Theme::change(mode, None, cx);
+    // Read again with the theme, so a change made in Windows meanwhile is taken up.
+    let blink = caret_blink();
+    if gpui_kit::component::Theme::global(cx).cursor_blink != blink {
+        gpui_kit::component::Theme::update(cx, |theme| theme.cursor_blink = blink);
+    }
+}
+
+/// The caret blinks as Windows has it blink in its own fields: at its rate, and only for so long after
+/// the last key or move, after which it stays shown. Each blink draws the window afresh, so a field left
+/// with the keys in it costs nothing once the blinking stops.
+fn caret_blink() -> CursorBlink {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetCaretBlinkTime, SPI_GETCARETTIMEOUT, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    let interval = unsafe { GetCaretBlinkTime() };
+    let mut timeout = 0u32;
+    let read =
+        unsafe { SystemParametersInfoW(SPI_GETCARETTIMEOUT, 0, Some((&raw mut timeout).cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) };
+    caret_blink_of(interval, read.ok().map(|()| timeout))
+}
+
+/// The blinking for Windows's blink time and caret timeout, both in milliseconds: a blink time of
+/// `INFINITE` is not to blink at all, as accessibility may set; 0, it could not be read, and the default
+/// blinks. A timeout not read, 0 or `INFINITE` lets it blink on.
+fn caret_blink_of(interval: u32, timeout: Option<u32>) -> CursorBlink {
+    const INFINITE: u32 = u32::MAX;
+    let blink = match interval {
+        INFINITE => return CursorBlink::steady(),
+        0 => CursorBlink::default(),
+        ms => CursorBlink::blinking(Duration::from_millis(ms.into())),
+    };
+    match timeout {
+        Some(ms) if ms != 0 && ms != INFINITE => blink.with_idle_timeout(Duration::from_millis(ms.into())),
+        _ => blink,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use gpui_kit::base::{ColorTokens, SemanticThemeTokens};
+
+    #[test]
+    fn blinks_the_caret_as_windows_has_it_and_stops_when_it_says() {
+        let ms = |ms: u64| Duration::from_millis(ms);
+        // As Windows 11 is set out of the box: blinking, and still after 5 seconds of nothing.
+        let blink = caret_blink_of(530, Some(5000));
+        assert_eq!(blink, CursorBlink::blinking(ms(530)).with_idle_timeout(ms(5000)));
+        assert_eq!((blink.interval(), blink.idle_timeout()), (Some(ms(530)), Some(ms(5000))));
+        // Set not to blink, for accessibility.
+        assert!(caret_blink_of(u32::MAX, Some(5000)).is_steady());
+        // A timeout not read, or none, lets it blink on.
+        for timeout in [None, Some(0), Some(u32::MAX)] {
+            assert_eq!(caret_blink_of(530, timeout).idle_timeout(), None, "{timeout:?}");
+        }
+        // A blink time not read blinks as the library does.
+        assert_eq!(caret_blink_of(0, None), CursorBlink::default());
+    }
 
     #[test]
     fn the_pointer_and_the_pointed_at_stand_off_what_they_lie_on() {
