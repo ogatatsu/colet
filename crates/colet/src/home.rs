@@ -364,7 +364,7 @@ impl Colet {
         if self.state.columns.len() == 1 || self.home_pane.held {
             return true;
         }
-        let here = |focus: &FocusHandle| focus.is_focused(window) || self.keys_go_back_to(focus);
+        let here = |focus: &FocusHandle| focus.is_focused(window) || self.overlays.keys_go_back_to(focus);
         let field = self.narrow_fields.get(&self.state.columns[0].id).map(|field| field.input.read(cx).focus_handle(cx));
         here(&self.home_focus) || field.is_some_and(|field| here(&field))
     }

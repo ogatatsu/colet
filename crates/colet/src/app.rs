@@ -560,7 +560,7 @@ impl Colet {
                 cx.with_window(id, |window, cx| {
                     view.update(cx, |this, cx| {
                         if this.overlays.popup().is_none() && this.overlays.has_menu() {
-                            let keys = this.menu_has_keys(window, cx);
+                            let keys = this.overlays.menu_has_keys(window, cx);
                             this.close_menus(keys, window, cx);
                         }
                     })
@@ -681,31 +681,9 @@ impl Colet {
     /// The keys are in the columns or home, or with a menu, dialog or the history that gives them back
     /// there: the column worked in is framed and its selection lit. Elsewhere, it steps back.
     pub fn columns_marked(&self, window: &Window) -> bool {
-        self.keys_in_column(window) || self.keys_go_back_to_columns()
-    }
-
-    /// A menu, dialog or the history holds the keys, and closing gives them back to the columns or home,
-    /// as [`Colet::restore_keys`] does.
-    fn keys_go_back_to_columns(&self) -> bool {
-        self.holds_keys() && self.overlays.keys_before().is_none_or(|before| before == self.home_focus || before == self.columns_focus)
-    }
-
-    /// A menu, dialog or the history holds the keys, and closing gives them back to `focus`.
-    pub(crate) fn keys_go_back_to(&self, focus: &FocusHandle) -> bool {
-        self.holds_keys() && self.overlays.keys_before().is_some_and(|before| before == *focus)
-    }
-
-    /// A menu, dialog or the history is open, holding the keys.
-    fn holds_keys(&self) -> bool {
-        self.overlays.is_open() || self.overlays.is_history_open()
-    }
-
-    /// A menu, dialog or the history opening: where the keys are now is where they go back to as it closes.
-    /// One opened from another leaves it as the first found it.
-    pub(crate) fn remember_keys(&mut self, window: &Window, cx: &App) {
-        if !self.holds_keys() {
-            self.overlays.remember_keys(window.focused(cx).as_ref());
-        }
+        // Closing gives the keys back to the columns or home, as `restore_keys` does; there too when where
+        // they were is gone.
+        self.keys_in_column(window) || self.overlays.keys_go_back_to_any(&[&self.home_focus, &self.columns_focus])
     }
 
     /// The last menu, dialog or history closing: the keys go back to where they were as the first opened.

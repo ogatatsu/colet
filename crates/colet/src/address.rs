@@ -184,7 +184,7 @@ impl Colet {
         let address = self.address.read(cx);
         let gone = address.is_open()
             && !self.has_keys(address.field(), window, cx)
-            && !self.keys_go_back_to(&address.field().read(cx).focus_handle(cx));
+            && !self.overlays.keys_go_back_to(&address.field().read(cx).focus_handle(cx));
         if gone {
             self.address.update(cx, |address, cx| address.close(cx));
         }

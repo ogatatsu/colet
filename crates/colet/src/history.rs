@@ -332,7 +332,7 @@ impl Colet {
     pub fn show_history(&mut self, open: bool, entry: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
         let was_open = self.overlays.is_history_open();
         if open && !was_open {
-            self.remember_keys(window, cx);
+            self.overlays.remember_keys(window, cx);
         }
         self.overlays.set_history_open(open);
         if open {

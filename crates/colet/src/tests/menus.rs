@@ -527,7 +527,7 @@ fn keeps_the_keys_in_the_menu_from_a_row_or_the_folder_s_empty_space(cx: &mut Te
         ui.act(cx, |window, cx| window.right_click(target.clone(), cx));
         settle(cx);
         let view = ui.view.clone();
-        assert!(ui.act(cx, |window, cx| view.read(cx).menu_has_keys(window, cx)));
+        assert!(ui.act(cx, |window, cx| view.read(cx).overlays.menu_has_keys(window, cx)));
         // What is typed over the menu goes nowhere, not on in the column's field.
         ui.input(cx, "b");
         let typed = ui.view.read_with(cx, |v, cx| v.narrow_fields.get(&work).map(|f| f.input.read(cx).value().to_string()));

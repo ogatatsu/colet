@@ -314,15 +314,10 @@ impl Colet {
             }
         });
         let focus = menu.focus_handle(cx);
-        self.remember_keys(window, cx);
+        self.overlays.remember_keys(window, cx);
         focus.focus(window, cx);
         self.overlays.show_menu(menu, focus, dismissed);
         cx.notify();
-    }
-
-    /// The open menu has the keys.
-    pub fn menu_has_keys(&self, window: &Window, cx: &App) -> bool {
-        self.overlays.menu_focus().is_some_and(|focus| focus.contains_focused(window, cx))
     }
 
     /// The open menu, to lay out where it opened; Shift+F10 and the menu key close it, as they open it.

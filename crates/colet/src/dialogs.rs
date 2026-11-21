@@ -204,7 +204,7 @@ impl Colet {
     /// the fields the new dialog listens to, and before the keys go into it: where they are is where they go
     /// back to as it closes.
     pub(crate) fn begin_dialog(&mut self, window: &Window, cx: &App) {
-        self.remember_keys(window, cx);
+        self.overlays.remember_keys(window, cx);
         self.overlays.forget_dialog_listeners();
     }
 

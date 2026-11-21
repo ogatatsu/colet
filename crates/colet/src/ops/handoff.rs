@@ -58,7 +58,7 @@ impl Colet {
         if let Some(index) = index {
             self.state.set_active(index);
         }
-        let to_column = !self.overlays.has_dialog() && self.menu_has_keys(window, cx);
+        let to_column = !self.overlays.has_dialog() && self.overlays.menu_has_keys(window, cx);
         self.close_menus(to_column, window, cx);
         let Some(index) = index else { return };
         if let Some(reason) = refused {

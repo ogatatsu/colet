@@ -167,14 +167,38 @@ impl Overlays {
 
     // ---- Where the keys go back to ----
 
-    /// The keys were at `focused` as the first of what is open now opened.
-    pub fn remember_keys(&mut self, focused: Option<&FocusHandle>) {
-        self.keys_before = focused.map(FocusHandle::downgrade);
+    /// A menu, dialog or the history is open, holding the keys.
+    pub fn holds_keys(&self) -> bool {
+        self.is_open() || self.history_open
+    }
+
+    /// The open menu has the keys.
+    pub fn menu_has_keys(&self, window: &Window, cx: &App) -> bool {
+        self.menu_focus().is_some_and(|focus| focus.contains_focused(window, cx))
+    }
+
+    /// A menu, dialog or the history opening: where the keys are now is where they go back to as it closes.
+    /// One opened from another leaves it as the first found it.
+    pub fn remember_keys(&mut self, window: &Window, cx: &App) {
+        if !self.holds_keys() {
+            self.keys_before = window.focused(cx).as_ref().map(FocusHandle::downgrade);
+        }
     }
 
     /// Where the keys go back to, if it is still there.
-    pub fn keys_before(&self) -> Option<FocusHandle> {
+    fn keys_before(&self) -> Option<FocusHandle> {
         self.keys_before.as_ref().and_then(WeakFocusHandle::upgrade)
+    }
+
+    /// A menu, dialog or the history holds the keys, and closing gives them back to `focus`.
+    pub fn keys_go_back_to(&self, focus: &FocusHandle) -> bool {
+        self.holds_keys() && self.keys_before().is_some_and(|before| before == *focus)
+    }
+
+    /// A menu, dialog or the history holds the keys, and closing gives them back to one of `focuses`, or,
+    /// with where they were gone, to wherever the caller sends them then.
+    pub fn keys_go_back_to_any(&self, focuses: &[&FocusHandle]) -> bool {
+        self.holds_keys() && self.keys_before().is_none_or(|before| focuses.contains(&&before))
     }
 
     /// Where the keys go back to as the last of what is open closes, let go of.
