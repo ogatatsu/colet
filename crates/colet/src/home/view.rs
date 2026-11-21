@@ -107,7 +107,7 @@ impl Colet {
         let p = cx.palette();
         let home = &self.state.columns[0];
         let (id, narrowed) = (home.id, home.narrow.is_some());
-        let field = self.narrow_fields.get(&id).map(|field| field.input.clone());
+        let field = self.narrow_fields.input(id);
         let marked = self.state.active == 0 && self.columns_marked(window);
         let body = self.column_body(0, marked, window, cx);
         let width = self.sidebar_width(window);

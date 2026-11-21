@@ -21,6 +21,7 @@ mod lane;
 mod loading;
 mod menus;
 mod metrics;
+mod narrow_fields;
 mod ops;
 mod overlays;
 mod places;

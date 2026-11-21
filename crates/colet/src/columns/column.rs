@@ -303,7 +303,7 @@ impl Colet {
         let header_title = title.clone();
         let count = count_text(c);
         let narrowed = c.is_narrowed();
-        let field = self.narrow_fields.get(&id).map(|field| field.input.clone());
+        let field = self.narrow_fields.input(id);
         let path = shown(&c.path);
         let star = self.star_button(index, window, cx);
         let body = self.column_body(index, marked, window, cx);

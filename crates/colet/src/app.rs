@@ -1,24 +1,14 @@
-//! The window's one view: it keeps the navigation state, fetches what the columns list, watches the open
-//! folders, and takes the keys. `view.rs` draws it.
+//! The window's one view: it keeps the navigation state and takes the keys. `view.rs` draws it; what the
+//! columns list and the watch on the open folders are `loading.rs`'s, and the columns' fields `narrow_fields.rs`'s.
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
-    ffi::OsString,
+    collections::HashSet,
     ops::Range,
     path::{Path, PathBuf},
-    sync::mpsc,
     time::Duration,
 };
 
-use colet_core::{
-    entry::Entry,
-    everything::PAGE,
-    operations::message,
-    paths::{path_key, shown},
-    quick_look, shell,
-    watch::Changes,
-};
-use gpui_kit::base::input::{InputEvent, InputState};
+use colet_core::{operations::message, quick_look, shell};
 use gpui_kit::component::{
     WindowExt,
     button::Button,
@@ -29,23 +19,23 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use crate::{
     address::AddressBar,
-    backend::{self, Search},
+    backend,
     crumbs::Trail,
     dialogs::Dialog,
     history::HistoryPanel,
-    home::{HomeDragging, HomePane, home_entries, home_groups},
+    home::{HomeDragging, HomePane, home_groups},
     icons::Icons,
     kept_file::{File, Loaded, Saves},
     loading::Loading,
     metrics::Scale,
+    narrow_fields::NarrowFields,
     ops::Operations,
     overlays::Overlays,
     scrolls::Scrolls,
     search_bar::SearchBar,
-    search_query::{everything_query, narrowed_query},
     settings::{self, Settings},
     sorts::Sorts,
-    state::{ColumnId, Kind, Showing, State, narrow_words, room_for_a_word},
+    state::{ColumnId, Kind, Showing, State},
     stops::{Stop, Stops},
     stored::Stored,
     tabs::{TabStrip, Tabs},
@@ -304,36 +294,6 @@ fn kept<T: Default + Clone + Send + 'static>(
     (read.value, Saves::new(file, (!still_there).then_some(write)), read.problem.map(|problem| problem.message))
 }
 
-/// What a listing came back with.
-struct Listed {
-    entries: Vec<Entry>,
-    /// How many in all, loaded or not.
-    total: usize,
-    /// For a search, the Everything that answered it.
-    connection: Option<String>,
-    /// For a search, what to warn of that Everything, once for each connection to it.
-    warning: Option<String>,
-    /// For a narrowed search's first page, how many it finds without the filter.
-    whole: Option<usize>,
-}
-
-impl Listed {
-    /// A listing loaded whole at once, as home's and a folder's are.
-    fn all(entries: Vec<Entry>) -> Self {
-        Listed { total: entries.len(), entries, connection: None, warning: None, whole: None }
-    }
-}
-
-type Listing = Result<Listed, String>;
-
-/// The field narrowing a column, and what it last narrowed it to: the column lifting the filter on
-/// its own, for what was made or pasted there, tells from that, not from text typed and yet to be told.
-pub struct NarrowField {
-    pub input: Entity<InputState>,
-    applied: String,
-    _changes: Subscription,
-}
-
 pub struct Colet {
     /// The tab in front's; the other tabs are parked in `tabs`, with the fields below kept for each.
     pub state: State,
@@ -349,7 +309,7 @@ pub struct Colet {
     /// opens and closes and hears from.
     pub address: Entity<AddressBar>,
     /// The field of each column, narrowing it to some names.
-    pub narrow_fields: HashMap<ColumnId, NarrowField>,
+    pub narrow_fields: NarrowFields,
     pub home_focus: FocusHandle,
     pub columns_focus: FocusHandle,
     pub icons: Icons,
@@ -445,7 +405,7 @@ impl Colet {
             widths: Widths::new(settings.sidebar_width, settings.search_width, settings.column_width, settings.search_field_width),
             search,
             address,
-            narrow_fields: HashMap::new(),
+            narrow_fields: NarrowFields::default(),
             home_focus: cx.focus_handle().tab_stop(true),
             columns_focus: cx.focus_handle().tab_stop(true),
             icons: Icons::default(),
@@ -700,109 +660,7 @@ impl Colet {
         .detach();
     }
 
-    // ---- Listings ----
-
-    /// Lists the column `id` from `offset` on; `quiet` keeps what it shows meanwhile.
-    pub fn load(&mut self, id: ColumnId, offset: usize, quiet: bool, cx: &mut Context<Self>) {
-        let Some(index) = self.state.index_of(id) else { return };
-        if offset > 0 && self.loading.is_loading(id) {
-            return;
-        }
-        let request = self.loading.start(id);
-        self.state.load(id, request, quiet);
-        let c = &self.state.columns[index];
-        let sort = self.order_of(c);
-        let backend = self.backend.clone();
-        let task: Task<Listing> = match c.kind {
-            Kind::Home => {
-                let settings = self.stored.settings().clone();
-                cx.background_executor().spawn(async move { Ok(Listed::all(home_entries(&settings, backend.roots()))) })
-            }
-            Kind::Search => {
-                let filter = self.state.search_filter.as_deref().and_then(|name| self.stored.settings().filter_query(name));
-                let whole = everything_query(&self.state.query, filter);
-                // Narrowed, the search is counted without it too, along with the first page.
-                let (query, whole) = match &c.narrow {
-                    Some(filter) => (narrowed_query(&whole, filter.text()), (offset == 0).then_some(whole)),
-                    None => (whole, None),
-                };
-                // A refresh reloads the pages in sight and those the picked rows and the keys are on, so
-                // they stay; the rest load again as the list nears its end.
-                let count = if offset > 0 {
-                    PAGE
-                } else {
-                    let in_sight = crate::columns::rows_in_sight(self.scrolls.rows.handle(id), c.entries.len()).unwrap_or(0);
-                    let keep: HashSet<&Path> = c.selected.iter().chain(&c.focused).chain(&c.highlight).map(PathBuf::as_path).collect();
-                    let last_kept = c.entries.iter().rposition(|e| keep.contains(e.path.as_path()));
-                    crate::loading::reread_count(c.entries.len(), last_kept, in_sight)
-                };
-                self.loading.searching();
-                let search = Search { query, sort, offset, count, refresh: offset == 0, request };
-                cx.background_executor().spawn(async move {
-                    let found = backend.search(search)?;
-                    let whole = whole.and_then(|query| backend.count(&query).ok());
-                    Ok(Listed {
-                        entries: found.page.entries,
-                        total: found.page.total,
-                        connection: Some(found.connection),
-                        warning: found.warning,
-                        whole,
-                    })
-                })
-            }
-            Kind::Folder => {
-                let path = c.path.clone();
-                let (cancelled, owner) = (self.loading.cancel_before(id), self.owner);
-                cx.background_executor().spawn(async move { Ok(Listed::all(backend.list(&path, sort, &cancelled, owner)?)) })
-            }
-        };
-        let kind = c.kind;
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            this.update(cx, |this, cx| this.listed(id, kind, request, offset, result, cx)).ok();
-        })
-        .detach();
-    }
-
-    fn listed(&mut self, id: ColumnId, kind: Kind, request: u64, offset: usize, result: Listing, cx: &mut Context<Self>) {
-        let current = self.loading.answered(id, request);
-        match result {
-            Ok(Listed { entries, total, connection, warning, whole }) => {
-                // Told even of a search gone stale: it is the connection's, said once.
-                if let Some(warning) = warning {
-                    self.notify(warning, Tone::Warning, cx);
-                }
-                if let Some(whole) = whole {
-                    self.state.counted(id, request, whole);
-                }
-                self.state.page(id, request, entries, total, offset, self.operations.read(cx).departed());
-                // What the listing showed held in another case than the disk's, as a favorite kept from
-                // before a rename elsewhere, is kept in the disk's from now on.
-                for (from, to) in std::mem::take(&mut self.state.respelled) {
-                    self.follow_move(&from, &to, cx);
-                }
-                self.loading.search_answered(connection, current);
-            }
-            Err(error) => {
-                if kind == Kind::Search && current {
-                    self.loading.search_failed(error.clone());
-                }
-                self.state.error(id, request, error);
-            }
-        }
-        self.changed(cx);
-    }
-
-    /// The tab come to the front lists all its columns again: what it showed stays meanwhile, and what it
-    /// never listed shows as loading. What the tab before it still had out is let go of.
-    pub(crate) fn relist(&mut self, cx: &mut Context<Self>) {
-        self.loading.let_go();
-        let columns: Vec<(ColumnId, bool)> = self.state.columns.iter().map(|c| (c.id, c.request != 0)).collect();
-        for (id, listed) in columns {
-            self.loading.first(id);
-            self.load(id, 0, listed, cx);
-        }
-    }
+    // ---- Hidden items ----
 
     /// Which hidden items the folders list, as the settings say.
     pub fn showing(&self) -> Showing {
@@ -832,168 +690,6 @@ impl Colet {
             self.scrolls.rows.moved(id);
         }
         self.changed(cx);
-    }
-
-    /// Reloads every column, keeping what each shows meanwhile.
-    pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        let ids: Vec<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
-        for id in ids {
-            self.load(id, 0, true, cx);
-        }
-        cx.notify();
-    }
-
-    /// The search results load their next page once the list nears its end.
-    pub fn more(&mut self, id: ColumnId, cx: &mut Context<Self>) {
-        let Some(index) = self.state.index_of(id) else { return };
-        let c = &self.state.columns[index];
-        if c.kind == Kind::Search && c.error.is_none() && !c.loading && c.entries.len() < c.total {
-            let offset = c.entries.len();
-            self.load(id, offset, true, cx);
-        }
-    }
-
-    // ---- Watching ----
-
-    /// Watches the folders the columns could read, one level deep, as [`Watching::set`] does; a server's
-    /// shares, which no change tells of, are read again with F5 only.
-    pub(crate) fn watch(&mut self, cx: &mut Context<Self>) -> Option<mpsc::Receiver<()>> {
-        let paths: Vec<PathBuf> = self
-            .state
-            .columns
-            .iter()
-            .filter(|c| c.kind == Kind::Folder && c.error.is_none() && !colet_core::paths::is_server(&c.path))
-            .map(|c| c.path.clone())
-            .collect();
-        self.loading.watching.set(paths).unwrap_or_else(|error| {
-            self.notify(error, Tone::Error, cx);
-            None
-        })
-    }
-
-    /// The tab in front searches no more, as another without a search came to the front, or its search
-    /// was cleared or closed: Everything stops watching the last search. It comes back with the next.
-    fn stop_search_out_of_sight(&mut self, cx: &mut Context<Self>) {
-        if self.searches() {
-            return;
-        }
-        let Some(request) = self.loading.stop_searching() else { return };
-        let backend = self.backend.clone();
-        cx.background_executor().spawn(async move { backend.stop_search(request) }).detach();
-    }
-
-    /// The tab in front has a search.
-    fn searches(&self) -> bool {
-        self.state.columns.iter().any(|c| c.kind == Kind::Search)
-    }
-
-    /// Says which folders the watcher could list but not watch, each once.
-    fn take_missed(&mut self, cx: &mut Context<Self>) {
-        let fresh = self.loading.watching.take_missed();
-        if !fresh.is_empty() {
-            let names: String = fresh.iter().map(|p| format!("「{}」", shown(colet_core::paths::folder_name(p)))).collect();
-            self.notify(format!("{names}の変更を監視できません。F5で更新できます。"), Tone::Error, cx);
-        }
-    }
-
-    /// Takes in what changed, every 200ms: folder changes reload the columns showing them, and what the
-    /// watch on Everything heard of the results.
-    fn poll(&mut self, cx: &mut Context<Self>) {
-        let changed = self.loading.watching.changed.clone();
-        let backend = self.backend.clone();
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_millis(200)).await;
-                if this.update(cx, |this, cx| this.take_changes(cx)).is_err() {
-                    return;
-                }
-                let batch = changed.lock().unwrap_or_else(|e| e.into_inner()).take();
-                if batch != Changes::Nothing && this.update(cx, |this, cx| this.files_changed(batch, cx)).is_err() {
-                    return;
-                }
-                let backend = backend.clone();
-                let result = cx.background_executor().spawn(async move { backend.search_changed() }).await;
-                let alive = this
-                    .update(cx, |this, cx| match result {
-                        Ok(true) => this.search_changed(cx),
-                        Ok(false) => {}
-                        // Heard of a search no longer in front, as it was let go of: the next search
-                        // connects afresh if it must.
-                        Err(_) if !this.searches() => {}
-                        Err(error) => {
-                            this.loading.search_failed(error.clone());
-                            this.notify(error, Tone::Error, cx);
-                        }
-                    })
-                    .is_ok();
-                if !alive {
-                    return;
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// The folders that went unwatched, how the running operation's items ended so far, and what the
-    /// clipboard now holds.
-    fn take_changes(&mut self, cx: &mut Context<Self>) {
-        self.take_missed(cx);
-        self.operations.update(cx, |operations, cx| operations.take_changes(cx));
-    }
-
-    /// Reloads the folder columns whose listings changed.
-    fn files_changed(&mut self, changes: Changes, cx: &mut Context<Self>) {
-        let paths = match changes {
-            Changes::Nothing => return,
-            Changes::Paths(paths) => paths,
-            Changes::All => {
-                self.refresh(cx);
-                return;
-            }
-        };
-        let folders: HashSet<OsString> = paths.iter().map(|path| path_key(path)).collect();
-        let ids: Vec<ColumnId> =
-            self.state.columns.iter().filter(|c| c.kind == Kind::Folder && folders.contains(&path_key(&c.path))).map(|c| c.id).collect();
-        for id in ids {
-            self.load(id, 0, true, cx);
-        }
-    }
-
-    /// A busy disk reports changes each second: the first reloads at once, then at most one every couple
-    /// of seconds. One met by a reload in flight waits for it, as it may have read the results before.
-    fn search_changed(&mut self, cx: &mut Context<Self>) {
-        let Some((reload, wait)) = self.loading.search_refresh.wait() else {
-            return;
-        };
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(wait).await;
-            loop {
-                let busy = this
-                    .update(cx, |this, cx| {
-                        // Cancelled while it waited: the search in front now is another tab's, read afresh
-                        // as it came to the front.
-                        if !this.loading.search_refresh.is_waiting(reload) {
-                            return false;
-                        }
-                        let Some(search) = this.state.columns.iter().find(|c| c.kind == Kind::Search).map(|c| c.id) else {
-                            this.loading.search_refresh.cancel();
-                            return false;
-                        };
-                        if this.loading.is_loading(search) {
-                            return true;
-                        }
-                        this.loading.search_refresh.went();
-                        this.load(search, 0, true, cx);
-                        false
-                    })
-                    .unwrap_or(false);
-                if !busy {
-                    return;
-                }
-                cx.background_executor().timer(Duration::from_millis(200)).await;
-            }
-        })
-        .detach();
     }
 
     // ---- Keys and picks ----
@@ -1172,171 +868,6 @@ impl Colet {
         if let Some(next) = self.state.neighbour(self.state.active, right) {
             self.state.set_active(next);
             self.focus_active(window, cx);
-        }
-    }
-
-    // ---- Narrowing ----
-
-    /// Each column has its field, holding what it is narrowed to: a field is made for a column new here,
-    /// goes with one gone, empties where a new folder or a paste lifted the filter, and takes the narrowing
-    /// a favorite or saved search opened with.
-    pub fn sync_narrow_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let kept: HashSet<ColumnId> = self.state.columns.iter().map(|c| c.id).collect();
-        self.narrow_fields.retain(|id, _| kept.contains(id));
-        for c in &self.state.columns {
-            let id = c.id;
-            match self.narrow_fields.get_mut(&id) {
-                Some(field) => match &c.narrow {
-                    None if !field.applied.is_empty() => {
-                        field.applied.clear();
-                        field.input.update(cx, |input, cx| input.set_value("", window, cx));
-                    }
-                    Some(filter) if filter.text() != field.applied => {
-                        field.applied = filter.text().to_owned();
-                        field.input.update(cx, |input, cx| input.set_value(filter.text().to_owned(), window, cx));
-                    }
-                    _ => {}
-                },
-                None => {
-                    let text = c.narrow.as_ref().map(|f| f.text().to_owned()).unwrap_or_default();
-                    let input = cx.new(|cx| InputState::new(window, cx).placeholder("絞り込む").default_value(text.clone()));
-                    cx.palette().style_input(&input, cx);
-                    let subscription = cx.subscribe_in(&input, window, move |this: &mut Self, input, event, window, cx| match event {
-                        InputEvent::Change => {
-                            let text = input.read(cx).value().to_string();
-                            this.narrow(id, &text, cx);
-                        }
-                        InputEvent::PressEnter { .. } => this.open_from_narrow_field(id, window, cx),
-                        InputEvent::Focus | InputEvent::Blur => cx.notify(),
-                    });
-                    self.narrow_fields.insert(id, NarrowField { input, applied: text, _changes: subscription });
-                }
-            }
-        }
-    }
-
-    /// What is typed in the rows goes on in their column's field, which takes the keys: after what it
-    /// holds, as a word of its own. What an IME is composing, `marked` with its caret, is handed on as it
-    /// is, so the field takes the rest of it. A space alone starts nothing.
-    pub fn type_into_narrowing(&mut self, text: &str, marked: Option<Option<Range<usize>>>, window: &mut Window, cx: &mut Context<Self>) {
-        if text.trim().is_empty() {
-            return;
-        }
-        let id = self.state.columns[self.state.active].id;
-        self.sync_narrow_fields(window, cx);
-        let Some(field) = self.narrow_fields.get(&id) else { return };
-        field.input.clone().update(cx, |input, cx| {
-            let held = room_for_a_word(&input.value());
-            input.set_value(held, window, cx);
-            input.focus(window, cx);
-            match marked {
-                Some(caret) => input.replace_and_mark_text_in_range(None, text, caret, window, cx),
-                None => input.replace_text_in_range(None, text, window, cx),
-            }
-        });
-        // The IME's panel goes on under the field's caret, now the field's to tell.
-        window.invalidate_character_coordinates();
-        self.changed(cx);
-    }
-
-    /// Backspace in the rows takes the last char off their column's field, which takes the keys; false
-    /// while it holds none.
-    pub fn trim_narrowing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let id = self.state.columns[self.state.active].id;
-        let Some(field) = self.narrow_fields.get(&id) else { return false };
-        let input = field.input.clone();
-        let mut held = input.read(cx).value().to_string();
-        if held.pop().is_none() {
-            return false;
-        }
-        input.update(cx, |input, cx| {
-            input.set_value(held.clone(), window, cx);
-            input.focus(window, cx);
-        });
-        self.narrow(id, &held, cx);
-        true
-    }
-
-    /// Narrows the column `id` to the names holding `text`, as it is typed.
-    pub fn narrow(&mut self, id: ColumnId, text: &str, cx: &mut Context<Self>) {
-        let Some(index) = self.state.index_of(id) else { return };
-        self.state.set_narrowing(index, Some(text));
-        if let Some(field) = self.narrow_fields.get_mut(&id) {
-            field.applied = text.into();
-        }
-        // Everything narrows the results, asked as the search field asks it: once typing pauses, for the
-        // text still there.
-        if self.state.columns[index].kind == Kind::Search {
-            let text = text.to_owned();
-            cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(Duration::from_millis(150)).await;
-                this.update(cx, |this, cx| {
-                    let Some(index) = this.state.index_of(id) else { return };
-                    // Spaces alone, no words, ask for all as an empty field does.
-                    let applied = this.state.columns[index].narrow.as_ref().map_or("", |f| f.text());
-                    if applied == text || applied.is_empty() && narrow_words(&text).is_empty() {
-                        this.load(id, 0, true, cx);
-                    }
-                })
-                .ok();
-            })
-            .detach();
-        }
-        // The rows move: the focused one is brought in sight again.
-        self.scrolls.rows.moved(id);
-        self.changed(cx);
-    }
-
-    /// From the field into the rows it lets through, landing on the first while none is picked.
-    pub fn leave_narrow_field(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(index) = self.state.index_of(id) else { return };
-        self.state.set_active(index);
-        self.focus_active(window, cx);
-    }
-
-    /// ↓ or Enter in a field picks the row the keys were on, or the first it lets through, as a click does,
-    /// and the keys go there; a row picked already, among others too, is not picked again. With none let
-    /// through, the field keeps the keys.
-    pub fn open_from_narrow_field(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(index) = self.state.index_of(id) else { return };
-        let c = &self.state.columns[index];
-        let shown = c.focused.clone().filter(|path| c.entry(path).is_some());
-        let Some(path) = shown.or_else(|| c.entries.first().map(|e| e.path.clone())) else { return };
-        if c.selected.contains(&path) {
-            self.state.columns[index].focused = Some(path);
-            self.leave_narrow_field(id, window, cx);
-        } else {
-            self.pick(index, path, window, cx);
-        }
-    }
-
-    /// Lists all again and empties the field; the keys go back to the rows.
-    pub fn clear_narrowing(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(index) = self.state.index_of(id) else { return };
-        self.state.set_narrowing(index, None);
-        if self.state.columns[index].kind == Kind::Search {
-            self.load(id, 0, true, cx);
-        }
-        if let Some(field) = self.narrow_fields.get_mut(&id) {
-            field.applied.clear();
-            field.input.clone().update(cx, |input, cx| input.set_value("", window, cx));
-        }
-        self.scrolls.rows.moved(id);
-        self.leave_narrow_field(id, window, cx);
-    }
-
-    /// Esc in the field: clears what it holds, or, empty, goes back to the rows.
-    pub fn escape_narrow_field(&mut self, id: ColumnId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(field) = self.narrow_fields.get(&id) else { return };
-        let input = field.input.clone();
-        if input.read(cx).value().is_empty() {
-            // Back to the rows picking nothing new, as Esc from the address field does.
-            let Some(index) = self.state.index_of(id) else { return };
-            self.state.set_active(index);
-            self.come_back_to_active(window, cx);
-        } else {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-            self.narrow(id, "", cx);
         }
     }
 

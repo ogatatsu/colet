@@ -1,10 +1,8 @@
 //! The tabs on the strip, in order: which is in front, the others parked as they were, and the ones
 //! closed to bring back. Colet swaps a tab's state in and out of its own fields; this keeps the list, the
 //! front and the closed ones in step as it does.
-use std::collections::HashMap;
-
 use crate::{
-    app::NarrowField,
+    narrow_fields::NarrowFields,
     scrolls::Scrolls,
     state::{ColumnId, State},
 };
@@ -42,14 +40,14 @@ pub struct Front {
     pub state: State,
     /// The filter its next search is narrowed by.
     pub filter: Option<String>,
-    pub narrow_fields: HashMap<ColumnId, NarrowField>,
+    pub narrow_fields: NarrowFields,
     pub scrolls: Scrolls,
 }
 
 impl Parked {
     /// A tab never in front yet: its fields and scrolls are made as it first comes there.
     pub fn new(state: State, filter: Option<String>, keys: Keys) -> Self {
-        Self { front: Front { state, filter, narrow_fields: HashMap::new(), scrolls: Scrolls::default() }, keys }
+        Self { front: Front { state, filter, narrow_fields: NarrowFields::default(), scrolls: Scrolls::default() }, keys }
     }
 
     /// The search filter `from` is named `to` now, or is gone.
