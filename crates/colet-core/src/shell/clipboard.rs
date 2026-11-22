@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use windows::Win32::Foundation::{E_CHANGED_STATE, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{E_CHANGED_STATE, ERROR_CLASS_ALREADY_EXISTS, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::IDataObject;
 use windows::Win32::System::DataExchange::{
     AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, IsClipboardFormatAvailable,
@@ -262,7 +262,11 @@ pub fn watch(changed: impl Fn() + Send + 'static) -> Result<()> {
                     ..Default::default()
                 };
                 if unsafe { RegisterClassW(&class) } == 0 {
-                    return Err(Error::from_thread());
+                    let error = Error::from_thread();
+                    // A watch started before registered it: the class serves this one as well.
+                    if error.code() != ERROR_CLASS_ALREADY_EXISTS.to_hresult() {
+                        return Err(error);
+                    }
                 }
                 let window = unsafe {
                     CreateWindowExW(
@@ -312,6 +316,13 @@ mod tests {
         atomic::{AtomicU32, Ordering},
     };
     use std::time::Instant;
+
+    #[test]
+    fn watches_again_after_a_watch_has_started() {
+        // Only listens: the clipboard is left as it is.
+        watch(|| {}).unwrap();
+        watch(|| {}).unwrap();
+    }
 
     #[test]
     #[ignore = "replaces the real clipboard"]

@@ -219,6 +219,11 @@ impl Watch {
                 }
                 let error = unsafe { Everything3_GetLastError() };
                 if error == 0 {
+                    // Woken for nothing while being stopped: done, rather than wait on a client shut
+                    // down, which the drop waits for.
+                    if heard.stopping.load(Ordering::Relaxed) {
+                        return;
+                    }
                     // Woken for nothing: wait a moment before waiting again, so it never spins.
                     std::thread::sleep(WAKE_PAUSE);
                     continue;
