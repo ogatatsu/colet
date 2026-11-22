@@ -902,8 +902,10 @@ fn slides_once_to_leave_no_room_past_the_last_as_home_folds_after_the_folders_co
 /// in each on only while the last column is cut there.
 fn shades_the_right_edge_only_where_cut(ui: &Ui, cx: &mut TestAppContext, what: &str) {
     for _ in 0..40 {
-        let room = room_past_last(ui, cx);
-        let shade = ui.act(cx, |window, _| window.try_find("shade-right").is_some());
+        // Both from the one frame: each frame drawn steps home's pane on by the clock, so the room read off one
+        // and the shade off the next would be a frame apart.
+        let last = ui.read(cx, |v| v.state.columns.last().unwrap().id);
+        let (room, shade) = ui.act(cx, |window, _| (room_past(window, last), window.try_find("shade-right").is_some()));
         assert!(if shade { room < -0.5 } else { room > -1.5 }, "{what}: shade {shade} with {room} past the last");
         if ui.read(cx, |v| v.scrolls.sideways.slide.is_none() && !v.home_pane.moving()) {
             return;

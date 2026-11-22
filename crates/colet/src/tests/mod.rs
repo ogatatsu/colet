@@ -726,7 +726,13 @@ fn rest(ui: &Ui, cx: &mut TestAppContext) {
 /// it is flush with the right edge.
 fn room_past_last(ui: &Ui, cx: &mut TestAppContext) -> f32 {
     let last = ui.read(cx, |v| v.state.columns.last().unwrap().id);
-    ui.act(cx, |window, _| f32::from(window.find("columns-scroll").bounds().right() - window.find(("column", last)).bounds().right()))
+    ui.act(cx, |window, _| room_past(window, last))
+}
+
+/// As [`room_past_last`], past column `last` in the frame `window` has drawn, to read with something else
+/// off that same frame.
+fn room_past(window: &mut Window, last: ColumnId) -> f32 {
+    f32::from(window.find("columns-scroll").bounds().right() - window.find(("column", last)).bounds().right())
 }
 
 /// A file four folders down, found and picked: its folder opens with those above it folded away.
