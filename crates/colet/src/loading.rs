@@ -53,6 +53,8 @@ pub struct Loading {
     engine: Engine,
     /// A search was sent since the last was let go of: Everything watches it until it is.
     searched: bool,
+    /// The request of the last search sent or let go of: what the watch on Everything tells is of it.
+    search_request: u64,
     /// The answers come and not yet taken: each the latest for its column or one overtaken, which the
     /// columns tell apart by its request, as a search's warning is said even when it went stale. The
     /// engine has taken in what they say of Everything already.
@@ -120,6 +122,7 @@ impl Loading {
             search_refresh: SearchRefresh::default(),
             engine: Engine::default(),
             searched: false,
+            search_request: 0,
             answers: Vec::new(),
         }
     }
@@ -160,7 +163,7 @@ impl Loading {
         let task: Task<Listing> = match job {
             Job::Home(settings) => cx.background_executor().spawn(async move { Ok(Listed::all(home_entries(&settings, backend.roots()))) }),
             Job::Search { search, whole } => {
-                self.searching();
+                self.searching(asked.request);
                 cx.background_executor().spawn(async move {
                     let found = backend.search(search).map_err(|error| words::search::error(&error))?;
                     let found = found.ok_or_else(|| words::search::STALE.to_string())?;
@@ -247,9 +250,10 @@ impl Loading {
         &self.engine
     }
 
-    /// A search is on its way: connecting, unless already connected.
-    fn searching(&mut self) {
+    /// A search is on its way as `request`: connecting, unless already connected.
+    fn searching(&mut self, request: u64) {
         self.searched = true;
+        self.search_request = request;
         if !matches!(self.engine, Engine::Connected(_)) {
             self.engine = Engine::Connecting;
         }
@@ -262,6 +266,7 @@ impl Loading {
             return;
         }
         let request = self.next();
+        self.search_request = request;
         let backend = self.backend.clone();
         cx.background_executor().spawn(async move { backend.stop_search(request) }).detach();
     }
@@ -272,6 +277,11 @@ impl Loading {
         if let Some(name) = connection.filter(|_| current || matches!(self.engine, Engine::Connecting)) {
             self.engine = Engine::Connected(name);
         }
+    }
+
+    /// Which search the watch on Everything is of: a number that changes with each sent or let go of.
+    pub fn search_request(&self) -> u64 {
+        self.search_request
     }
 
     /// The search engine could not be reached, or stopped answering.
@@ -532,6 +542,9 @@ impl Colet {
                 if batch != Changes::Nothing && this.update(cx, |this, cx| this.files_changed(batch, cx)).is_err() {
                     return;
                 }
+                let Ok(asked) = this.update(cx, |this, cx| this.loading.read(cx).search_request()) else {
+                    return;
+                };
                 let backend = backend.clone();
                 let result = cx.background_executor().spawn(async move { backend.search_changed() }).await;
                 ask_again = matches!(result, Ok(None));
@@ -539,9 +552,10 @@ impl Colet {
                     .update(cx, |this, cx| match result {
                         Ok(Some(true)) => this.search_changed(cx),
                         Ok(Some(false) | None) => {}
-                        // Heard of a search no longer in front, as it was let go of: the next search
-                        // connects afresh if it must.
-                        Err(_) if !this.searches() => {}
+                        // Heard of a search no longer in front, as it was let go of, or of one another was
+                        // sent after while it was asked: the next search connects afresh if it must, and
+                        // says itself what failed.
+                        Err(_) if !this.searches() || this.loading.read(cx).search_request() != asked => {}
                         Err(error) => {
                             let error = words::search::error(&error);
                             this.loading.update(cx, |loading, cx| {
