@@ -615,12 +615,17 @@ pub mod preferences {
     pub const SHOW: &str = "表示";
     pub const SHOW_HIDDEN: &str = "隠しファイルを表示する";
     pub const SHOW_PROTECTED: &str = "保護されたシステムファイルも表示する";
-    pub const KEYS: &str = "キーボード操作";
     pub const THEME_SYSTEM: &str = "システム";
     pub const THEME_LIGHT: &str = "ライト";
     pub const THEME_DARK: &str = "ダーク";
+}
 
-    /// The keys the preferences list, under a heading for each kind of work.
+// ---- The keys' list ----
+pub mod shortcuts {
+    pub const KEYS: &str = "キーボード操作";
+    pub const KEYS_KEY: &str = "キーボード操作（Ctrl+/）";
+
+    /// The keys the list shows, under a heading for each kind of work.
     pub const SHORTCUTS: [(&str, &[(&str, &str)]); 6] = [
         (
             "移動",
@@ -686,6 +691,7 @@ pub mod preferences {
                 ("Ctrl+H", "隠しファイルの表示を切り替え"),
                 ("Ctrl+U", "上の階層を表示"),
                 ("F5", "更新"),
+                ("Ctrl+/", "キーボード操作を表示"),
             ],
         ),
     ];

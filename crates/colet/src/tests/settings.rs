@@ -181,3 +181,48 @@ fn takes_its_colors_from_the_library_s_theme_however_it_changes(cx: &mut TestApp
         assert_eq!(cx.read(|cx| cx.palette().accent), palette.accent, "{mode:?}");
     }
 }
+
+#[gpui_kit::test]
+fn lists_the_keys_apart_from_the_preferences(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.click(cx, "shortcuts");
+    assert!(ui.read(cx, |v| matches!(v.overlays.dialog(), Some(crate::dialogs::Dialog::Shortcuts))));
+    // The close button takes the keys, there being nothing else to press.
+    assert!(ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.stop("close-shortcuts", cx).is_focused(window))));
+    ui.click(cx, "close-shortcuts");
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
+    // The preferences no longer list them.
+    ui.click(cx, "preferences");
+    let shown = ui.act(cx, |window, _| window.try_find("close-shortcuts").is_some());
+    assert!(!shown);
+}
+
+#[gpui_kit::test]
+fn opens_and_closes_the_keys_with_ctrl_slash(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    assert!(ui.columns_focused(cx));
+    ui.press(cx, "ctrl-/");
+    assert!(ui.read(cx, |v| matches!(v.overlays.dialog(), Some(crate::dialogs::Dialog::Shortcuts))));
+    ui.press(cx, "ctrl-/");
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
+    // The keys go back where they were.
+    assert!(ui.columns_focused(cx));
+    // As Esc closes it.
+    ui.press(cx, "ctrl-/");
+    ui.press(cx, "escape");
+    assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
+    assert!(ui.columns_focused(cx));
+}
+
+#[gpui_kit::test]
+fn leaves_the_keys_shut_over_a_menu_or_another_dialog(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "shift-f10");
+    assert!(ui.read(cx, |v| v.overlays.has_menu()));
+    ui.press(cx, "ctrl-/");
+    assert!(ui.read(cx, |v| v.overlays.has_menu() && !v.overlays.has_dialog()));
+    ui.press(cx, "escape");
+    ui.click(cx, "preferences");
+    ui.press(cx, "ctrl-/");
+    assert!(ui.read(cx, |v| matches!(v.overlays.dialog(), Some(crate::dialogs::Dialog::Preferences))));
+}

@@ -1,5 +1,5 @@
 //! The bar along the top: back, forward and refresh, the search filters' button and the search field, the
-//! address, and the preferences, each drawn by its own feature.
+//! address, the keys' list and the preferences, each drawn by its own feature.
 use super::*;
 use crate::words;
 
@@ -26,6 +26,9 @@ impl Colet {
         let preferences = Self::icon_button("preferences", "sliders-horizontal", words::SETTINGS, words::SETTINGS, true)
             .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)));
         let preferences = self.ringed(preferences, "preferences", RingAt::Edge, window, cx);
+        let shortcuts = Self::icon_button("shortcuts", "keyboard", words::shortcuts::KEYS, words::shortcuts::KEYS_KEY, true)
+            .on_click(cx.listener(|this, _, window, cx| this.open_shortcuts(window, cx)));
+        let shortcuts = self.ringed(shortcuts, "shortcuts", RingAt::Edge, window, cx);
         div()
             .h_12()
             .flex_none()
@@ -40,7 +43,8 @@ impl Colet {
             .child(search_box)
             .child(self.field_resizer(cx))
             .child(address)
-            .child(preferences)
+            // The whole app's: its keys, and its preferences.
+            .child(div().flex().flex_none().gap_0p5().child(shortcuts).child(preferences))
             .into_any_element()
     }
 }

@@ -1,5 +1,6 @@
-//! The preferences: the theme, the display size, which hidden items show, and the keys, in a dialog of
-//! their own. Each is taken at once as it is picked, and kept.
+//! The preferences: the theme, the display size, and which hidden items show, in a dialog of their own.
+//! Each is taken at once as it is picked, and kept. The keys are listed in a dialog of theirs
+//! (`shortcuts.rs`).
 use std::rc::Rc;
 
 use gpui_kit::component::{Disableable, checkbox::Checkbox};
@@ -9,14 +10,10 @@ use crate::words;
 use crate::{
     app::Colet,
     dialogs::{Choice, Dialog, DialogParts, Pick, label, push},
-    metrics::scaled,
     settings::{Theme, ZOOMS},
     stops::Stop,
     theme::ActivePalette,
 };
-
-/// How wide the keys' side of the list is: room for the longest, "Ctrl+Shift+↑↓ / Ctrl+Shift+クリック".
-const KEYS_WIDTH: f32 = 240.;
 
 impl Colet {
     pub fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -41,7 +38,7 @@ impl Colet {
         cx.notify();
     }
 
-    /// The theme, the display, and the keys.
+    /// The theme, the display, and what shows.
     pub(crate) fn preferences_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> DialogParts {
         let p = cx.palette();
         let themes = Theme::ALL
@@ -95,20 +92,7 @@ impl Colet {
                                 }),
                         ),
                     )
-            })
-            .child(div().pt_1().text_sm().font_weight(FontWeight::SEMIBOLD).child(words::preferences::KEYS))
-            // One by one: an array of them all would lie whole on the stack, past what a debug build has.
-            .child(div().flex().flex_col().gap_3().text_xs().children(words::preferences::SHORTCUTS.iter().map(|&(heading, keys)| {
-                div().flex().flex_col().gap_1().child(label(p, heading)).children(keys.iter().map(|&(key, what)| {
-                    div()
-                        .flex()
-                        .gap_3()
-                        // As wide as the longest key, so none wraps.
-                        .child(div().w(scaled(KEYS_WIDTH)).flex_none().text_color(p.text).child(key))
-                        // Wrapped in the room left, rather than cut at the dialog's edge.
-                        .child(div().flex_1().min_w_0().text_color(p.text_muted).child(what))
-                }))
-            })));
+            });
         let buttons = vec![(
             "close-preferences",
             push("close-preferences", words::CLOSE, true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),

@@ -356,6 +356,7 @@ impl Render for Colet {
             }))
             .on_action(cx.listener(|this, _: &FocusHome, window, cx| this.focus_home(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleHidden, _, cx| this.toggle_hidden(cx)))
+            .on_action(cx.listener(|this, _: &ToggleShortcuts, window, cx| this.toggle_shortcuts(window, cx)))
             // Esc puts down a drag in home, before the keys reach anything else.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.home_carried(cx).is_some() && event.keystroke.key == "escape" {

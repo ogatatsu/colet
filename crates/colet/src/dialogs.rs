@@ -37,8 +37,10 @@ pub enum Dialog {
     /// The search filters, to add to, put in order, edit or delete: one at a time, in `edit`, or the one
     /// asked about before it goes.
     Filters { edit: Option<FilterEdit>, deleting: Option<String> },
-    /// The theme, the display, and the keys.
+    /// The theme, the display, and what shows.
     Preferences,
+    /// The keys, listed.
+    Shortcuts,
     /// The files to open together, asked about first when they are many.
     Open { paths: Vec<std::path::PathBuf> },
 }
@@ -62,7 +64,7 @@ impl Dialog {
             Dialog::EditSearch(SearchEdit { name, query, narrow, .. }) => vec![name.clone(), query.clone(), narrow.clone()],
             Dialog::EditFavorite { name, narrow, .. } => vec![name.clone(), narrow.clone()],
             Dialog::Filters { edit: Some(edit), .. } => vec![edit.name.clone(), edit.query.clone()],
-            Dialog::Filters { .. } | Dialog::Preferences | Dialog::Open { .. } => Vec::new(),
+            Dialog::Filters { .. } | Dialog::Preferences | Dialog::Shortcuts | Dialog::Open { .. } => Vec::new(),
         }
     }
 }
@@ -247,6 +249,7 @@ impl Colet {
             Dialog::Filters { deleting: Some(name), .. } => self.filter_delete_dialog(name, cx),
             Dialog::Filters { .. } => self.filters_dialog(window, cx),
             Dialog::Preferences => self.preferences_dialog(window, cx),
+            Dialog::Shortcuts => self.shortcuts_dialog(cx),
             Dialog::Open { paths } => {
                 let count = paths.len();
                 self.open_dialog(count, cx)
@@ -287,9 +290,20 @@ impl Colet {
                     .track_focus(self.overlays.dialog_focus())
                     // The window's dialog lies outside Colet's own elements: the menu key in its fields is heard here.
                     .on_action(cx.listener(|this, _: &crate::app::OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
+                    // And Ctrl+/, which closes the keys' list, and over any other dialog does nothing.
+                    .on_action(cx.listener(|this, _: &crate::app::ToggleShortcuts, window, cx| this.toggle_shortcuts(window, cx)))
                     .child(content),
             )
-            .footer(div().flex().items_center().justify_end().gap_2().children(buttons))
+            .footer(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap_2()
+                    // The buttons lie outside the contents: Ctrl+/ from one is heard here.
+                    .on_action(cx.listener(|this, _: &crate::app::ToggleShortcuts, window, cx| this.toggle_shortcuts(window, cx)))
+                    .children(buttons),
+            )
             // A field's menu, over the dialog it is in.
             .children(self.render_menu(cx))
     }

@@ -99,6 +99,7 @@ actions!(
         OpenInNewTab,
         FocusAddress,
         GoToAddressInNewTab,
+        ToggleShortcuts,
     ]
 );
 
@@ -166,6 +167,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-f10", OpenTextMenu, Some(TEXT)),
         KeyBinding::new("menu", OpenTextMenu, Some(TEXT)),
         KeyBinding::new("f5", RefreshAll, None),
+        KeyBinding::new("ctrl-/", ToggleShortcuts, None),
         KeyBinding::new("ctrl-d", SaveCurrent, None),
         KeyBinding::new("escape", CloseMenu, Some(MENU)),
         // The keys that open a menu close it again, as Windows' own menus do.
@@ -258,7 +260,7 @@ pub const SEARCH_FIELD_WIDTHS: (f32, f32) = (200., 640.);
 pub const ADDRESS_MIN: f32 = 120.;
 /// What the toolbar takes from the window but the address and the search field, guessed before it is first
 /// drawn.
-pub const ADDRESS_GUESS: f32 = 240.;
+pub const ADDRESS_GUESS: f32 = 274.;
 
 /// Which width a drag on an edge changes.
 #[derive(Clone, Copy, PartialEq, Eq)]

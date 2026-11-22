@@ -22,12 +22,13 @@ fn keeps_an_error_up_until_it_is_closed_and_lets_a_notice_go_on_its_own(cx: &mut
 fn keeps_a_dialog_taller_than_the_window_within_it_its_buttons_in_reach(cx: &mut TestAppContext) {
     let ui = open(cx, Arc::new(Fake::default()));
     cx.simulate_window_resize(ui.window, size(px(1200.), px(500.)));
-    ui.click(cx, "preferences");
-    let (content, close) = ui.act(cx, |window, _| (window.find("dialog-content").bounds(), window.find("close-preferences").bounds()));
+    // The keys' list, the longest of them.
+    ui.click(cx, "shortcuts");
+    let (content, close) = ui.act(cx, |window, _| (window.find("dialog-content").bounds(), window.find("close-shortcuts").bounds()));
     assert!(close.top() >= px(0.) && close.bottom() <= px(500.), "{close:?}");
     // What does not fit scrolls between the heading and the buttons: more than the room it has.
     assert!(content.size.height > close.top() - content.top(), "{content:?} {close:?}");
-    ui.click(cx, "close-preferences");
+    ui.click(cx, "close-shortcuts");
     assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
 }
 
@@ -87,9 +88,21 @@ fn leaves_the_window_keys_alone_in_a_dialog(cx: &mut TestAppContext) {
     };
     let before = unchanged(&ui, cx);
     assert!(before.0);
-    for key in
-        ["ctrl-h", "ctrl-0", "ctrl-u", "ctrl-d", "ctrl-shift-f", "ctrl-l", "ctrl-f", "ctrl-t", "ctrl-w", "ctrl-tab", "ctrl-shift-t", "f5"]
-    {
+    for key in [
+        "ctrl-h",
+        "ctrl-0",
+        "ctrl-u",
+        "ctrl-d",
+        "ctrl-shift-f",
+        "ctrl-l",
+        "ctrl-f",
+        "ctrl-t",
+        "ctrl-w",
+        "ctrl-tab",
+        "ctrl-shift-t",
+        "f5",
+        "ctrl-/",
+    ] {
         ui.press(cx, key);
         assert_eq!(unchanged(&ui, cx), before, "{key} went past the dialog");
     }

@@ -33,6 +33,7 @@ mod search_bar;
 mod search_filters;
 mod search_query;
 mod settings;
+mod shortcuts;
 mod sorts;
 mod state;
 mod stops;
@@ -61,6 +62,7 @@ gpui_kit::assets::icon_assets!(
         Circle,
         CircleCheck,
         SlidersHorizontal,
+        Keyboard,
         StarFill,
         Pin,
         PinOff,
