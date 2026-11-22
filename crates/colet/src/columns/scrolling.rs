@@ -369,9 +369,9 @@ impl Colet {
         // Gone into a column as it folds, they are reckoned with the view it leaves them once it stands, the
         // same however far it has gone, so they go one way only.
         let aim = view + home - self.home_pane.target();
-        let pushed = self.widths.resizing() != Some(WidthOf::Sidebar)
-            && (home - was_home).abs() >= 0.5
-            && (view + home - was - was_home).abs() <= 1.;
+        // However little it moved: as it slows to rest it moves a fraction of a pixel a frame, while the view
+        // still changes by a pixel rounded, which taken for the window's would set them flush at once.
+        let pushed = self.widths.resizing() != Some(WidthOf::Sidebar) && home != was_home && (view + home - was - was_home).abs() <= 1.;
         let (cells, active) = self.scrolling();
         let sideways = &mut self.scrolls.sideways;
         match &mut sideways.slide {

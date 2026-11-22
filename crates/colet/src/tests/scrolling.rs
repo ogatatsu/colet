@@ -943,3 +943,50 @@ fn shades_the_right_edge_only_where_cut_as_home_folds_and_comes_out(cx: &mut Tes
     ui.press(cx, "right");
     shades_the_right_edge_only_where_cut(&ui, cx, "folding back");
 }
+
+#[gpui_kit::test]
+fn leaves_the_columns_put_as_home_comes_out_beside_room_past_the_last(cx: &mut TestAppContext) {
+    // A deep chain scrolled to its end, then a file picked a column back: the last column closes, the
+    // first on screen still cut on the left and room left past the last.
+    let chain: Vec<String> = (1..=8).map(|n| format!(r"D:\{}", (1..=n).map(|k| format!("d{k}")).collect::<Vec<_>>().join(r"\"))).collect();
+    let files: Vec<String> = chain.iter().map(|p| format!(r"{p}\f.txt")).collect();
+    let mut folders: Vec<(&str, Vec<Entry>)> = vec![(r"D:\", vec![folder(&chain[0])])];
+    for (k, path) in chain.iter().enumerate() {
+        let mut entries: Vec<Entry> = chain.get(k + 1).map(|next| vec![folder(next)]).unwrap_or_default();
+        entries.push(file(&files[k]));
+        folders.push((path, entries));
+    }
+    for by_click in [false, true] {
+        let fake = Fake { roots: vec![Entry::folder(r"D:\", "データ (D:)")], ..Fake::default().with_folders(&folders) };
+        let ui = open(cx, Arc::new(fake));
+        allow_motion(cx);
+        ui.click_in(cx, "home", row(r"D:\"));
+        for _ in 0..chain.len() {
+            ui.press(cx, "right");
+        }
+        rest(&ui, cx);
+        ui.press(cx, "left");
+        ui.press(cx, "down");
+        rest(&ui, cx);
+        assert!(ui.read(cx, |v| v.on_screen().hidden_left()));
+        assert!(room_past_last(&ui, cx) > 1.);
+        let at = ui.read(cx, |v| v.scrolls.sideways.offset());
+        if by_click {
+            ui.click(cx, "home-strip-button");
+        } else {
+            ui.press(cx, "ctrl-0");
+        }
+        // Out, it pushes them aside every frame of the way, to its very rest: they never leap flush.
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_millis(16));
+            ui.act(cx, |_, _| ());
+            settle(cx);
+            assert_eq!(ui.read(cx, |v| v.scrolls.sideways.offset()), at, "by click {by_click}");
+            if ui.read(cx, |v| v.scrolls.sideways.slide.is_none() && !v.home_pane.moving()) {
+                break;
+            }
+        }
+        assert!(ui.act(cx, |window, _| window.try_find("sidebar").is_some()));
+        assert!(room_past_last(&ui, cx) > 1., "by click {by_click}: the room it leaves stays");
+    }
+}
