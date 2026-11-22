@@ -50,13 +50,12 @@ impl Watching {
     /// Watches `folders` but those `released` or `carried` lets go. The watcher opens them on its own
     /// thread, so a share slow to answer never holds up the window; the receiver hears once it has, when
     /// there was anything to change. The watcher, started the first time, tells `wake` of each change and
-    /// each folder it misses. Errs when the watcher could not start.
+    /// each folder it misses. Errs when the watcher could not start, and tries again on the next call.
     pub fn set(&mut self, folders: Vec<PathBuf>, wake: &Wake) -> Result<Option<mpsc::Receiver<()>>, WatchError> {
         let folders = self.carried.values().fold(kept_watching(folders, &self.released), kept_watching);
         if folders == self.watched {
             return Ok(None);
         }
-        self.watched = folders.clone();
         let watcher = match &mut self.watcher {
             Some(watcher) => watcher,
             None => {
@@ -73,7 +72,10 @@ impl Watching {
                 self.watcher.insert(watcher)
             }
         };
-        Ok(Some(watcher.set(folders)))
+        // Noted only once the watcher has them: one that could not start leaves them to be asked again.
+        let told = watcher.set(folders.clone());
+        self.watched = folders;
+        Ok(Some(told))
     }
 
     /// The folders the watcher could list but not watch that were not taken before.
