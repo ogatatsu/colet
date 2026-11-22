@@ -171,7 +171,7 @@ impl Backend for Live {
         }
         // A search that fails after connecting keeps the warning for the next.
         let page = session.search(&search.query, search.sort, search.offset, search.count, search.refresh)?;
-        Ok(Some(Found { page, connection: session.connection.clone(), warning: session.warning.take() }))
+        Ok(Some(Found { page, connection: session.connection().cloned(), warning: session.take_warning() }))
     }
 
     fn count(&self, query: &str) -> Result<usize, SearchError> {

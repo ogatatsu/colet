@@ -266,13 +266,18 @@ pub struct SearchSession {
     /// Told from the watch's thread whenever it hears a change or fails.
     tell: Option<Tell>,
     /// What it is connected to; none before it first connects.
-    pub connection: Option<Connection>,
+    connection: Option<Connection>,
     /// What to warn of the Everything it last connected to, until taken: the size and date modified it
     /// does not index or fast sort, which every search asks for.
-    pub warning: Option<SlowProperties>,
+    warning: Option<SlowProperties>,
 }
 
-// Used from one thread at a time, behind the app's lock.
+// SAFETY: the raw pointers are the SDK's client and search state, which belong to no thread: the SDK
+// talks to Everything over a named pipe, from whichever thread calls it. Moving the session to another
+// thread is therefore sound. Its errors come through Windows' per-thread last error, read on the thread
+// that made the call, within the same method. It stays !Sync, so it is used by one thread at a time; the app keeps it
+// behind a lock. The watch's own client is used on its thread alone, and shut down and let go of from
+// here only after that thread is told to stop (see `Watch`'s `Drop`).
 unsafe impl Send for SearchSession {}
 
 impl Default for SearchSession {
@@ -300,6 +305,16 @@ impl Drop for SearchSession {
 }
 
 impl SearchSession {
+    /// What it is connected to; none before it first connects.
+    pub fn connection(&self) -> Option<&Connection> {
+        self.connection.as_ref()
+    }
+
+    /// What to warn of the Everything it last connected to, let go of: said once for each connection.
+    pub fn take_warning(&mut self) -> Option<SlowProperties> {
+        self.warning.take()
+    }
+
     /// From the next search on, `tell` is told, on the watch's thread, whenever the watch hears the
     /// results change or fails; [`changed`](Self::changed) then says which.
     pub fn tell(&mut self, tell: Tell) {
@@ -645,7 +660,7 @@ mod tests {
         let mut session = SearchSession::default();
         session.search(query, Order::default(), 0, PAGE, true).unwrap();
         // Named by its version, which the session pipes made the oldest asked.
-        let version = &session.connection.as_ref().unwrap().version;
+        let version = &session.connection().unwrap().version;
         assert!(version.starts_with("1.5.0."), "{version}");
         // Shut down only this session's handles, reproducing failed IPC on both connections without
         // stopping the user's Everything process.
@@ -727,7 +742,7 @@ mod tests {
         assert_eq!(first.entries.len(), PAGE);
         assert_eq!(session.client, client);
         assert!(session.watch.is_none());
-        assert!(!session.connection.as_ref().unwrap().watched);
+        assert!(!session.connection().unwrap().watched);
         assert!(!session.changed().unwrap());
         assert_eq!(session.search(&query, Order::default(), PAGE, PAGE, false).unwrap().entries.len(), 11);
         session.watch_instance = None;
@@ -745,7 +760,7 @@ mod tests {
         session.search(&query, Order::default(), 0, PAGE, true).unwrap();
         assert_eq!(session.client, client);
         assert!(session.watch.is_some());
-        assert!(session.connection.as_ref().unwrap().watched);
+        assert!(session.connection().unwrap().watched);
         std::fs::remove_file(fixture.path().join("0000.txt")).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !session.changed().unwrap() {
