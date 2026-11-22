@@ -114,7 +114,7 @@ impl Colet {
                     .aria_label(words::column::show_levels_above(away))
                     .absolute()
                     .inset_0()
-                    .tip(words::column::show_levels_above(away))
+                    .tip(words::column::show_levels_above_key(away))
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         this.state.unfold();
                         if event.is_keyboard() {

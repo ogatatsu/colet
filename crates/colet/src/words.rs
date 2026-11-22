@@ -305,6 +305,10 @@ pub mod column {
         format!("絞り込み：{narrow}")
     }
 
+    pub fn show_levels_above_key(away: usize) -> String {
+        format!("上の階層を表示（{away}階層、Ctrl+U）")
+    }
+
     pub fn show_levels_above(away: usize) -> String {
         format!("上の階層を表示（{away}階層）")
     }
