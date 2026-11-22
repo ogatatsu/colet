@@ -46,7 +46,9 @@ impl Colet {
         let count = self.state.columns.len().saturating_sub(first);
         // As this frame lays it out: the strip of folders gone, the view the last frame laid out would
         // still end short of the columns' and shade the right edge for a frame.
-        let view = self.scrolls.sideways.view_ahead();
+        // Home's pane, stepped ahead of this layout as it folds into its strip or comes out, gives the view
+        // the room it takes from it, or takes back: the edges' shades would show a frame behind it.
+        let view = self.scrolls.sideways.view_ahead() + self.scrolls.sideways.fitted_home - self.home_pane.width();
         // A wheel moves the offset past its bounds until the next layout brings it back: read it as it
         // will be drawn, so the edges' shades do not flash on.
         let max = self.scrolls.sideways.max_offset().max(self.scrolls.sideways.hold);

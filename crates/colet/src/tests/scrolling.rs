@@ -897,3 +897,49 @@ fn slides_once_to_leave_no_room_past_the_last_as_home_folds_after_the_folders_co
         assert!(room.abs() < 1., "{still_sliding}: {room}");
     }
 }
+
+/// Frames a screen's refresh apart until home's pane and the columns are at rest, the right edge's shade
+/// in each on only while the last column is cut there.
+fn shades_the_right_edge_only_where_cut(ui: &Ui, cx: &mut TestAppContext, what: &str) {
+    for _ in 0..40 {
+        let room = room_past_last(ui, cx);
+        let shade = ui.act(cx, |window, _| window.try_find("shade-right").is_some());
+        assert!(if shade { room < -0.5 } else { room > -1.5 }, "{what}: shade {shade} with {room} past the last");
+        if ui.read(cx, |v| v.scrolls.sideways.slide.is_none() && !v.home_pane.moving()) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(16));
+        ui.act(cx, |_, _| ());
+        settle(cx);
+    }
+}
+
+#[gpui_kit::test]
+fn shades_the_right_edge_only_where_cut_as_home_folds_and_comes_out(cx: &mut TestAppContext) {
+    // Home folding as → leaves it, the columns sliding flush with the room it gives the view.
+    for still_sliding in [true, false] {
+        let ui = folded_deep(cx);
+        allow_motion(cx);
+        ui.press(cx, "ctrl-0");
+        rest(&ui, cx);
+        ui.press(cx, "ctrl-u");
+        if !still_sliding {
+            rest(&ui, cx);
+        }
+        ui.press(cx, "right");
+        shades_the_right_edge_only_where_cut(&ui, cx, &format!("folding, still sliding {still_sliding}"));
+    }
+    // Home coming out beside a last column flush with the right edge, cutting it, and folding back.
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    allow_motion(cx);
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    ui.press(cx, "ctrl-0");
+    shades_the_right_edge_only_where_cut(&ui, cx, "coming out");
+    ui.press(cx, "right");
+    shades_the_right_edge_only_where_cut(&ui, cx, "folding back");
+}
