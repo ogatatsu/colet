@@ -384,7 +384,7 @@ impl Backend for Fake {
     }
 
     /// Without case, as the disk finds it: a drive or a folder listed, or an item in one.
-    fn locate(&self, path: &Path) -> Option<(PathBuf, bool)> {
+    fn locate(&self, path: &Path, _: &AtomicBool, _: colet_core::shell::Owner) -> Option<(PathBuf, bool)> {
         let key = path_key(path);
         let folders = self.folders.lock().unwrap();
         if let Some(folder) = folders.keys().find(|p| path_key(Path::new(p)) == key) {

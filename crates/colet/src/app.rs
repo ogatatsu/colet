@@ -355,8 +355,13 @@ impl Colet {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
+            Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
+            _ => 0,
+        };
+        shell::refuse_drops(owner);
         let search = cx.new(|cx| SearchBar::new(window, cx));
-        let address = cx.new(|cx| AddressBar::new(backend.clone(), window, cx));
+        let address = cx.new(|cx| AddressBar::new(backend.clone(), owner, window, cx));
         let mut subscriptions = vec![
             // The ring around the field and the filter's button follow it.
             cx.observe(&search, |_, _, cx| cx.notify()),
@@ -378,11 +383,6 @@ impl Colet {
             let backend = backend.clone();
             kept(sorts, &crate::sorts::SORTS, move |sorts| backend.save_sorts(sorts))
         };
-        let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
-            Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
-            _ => 0,
-        };
-        shell::refuse_drops(owner);
         let (wake, woken) = crate::wake::wake();
         // Told from the watch's thread; asked of the search nothing holds yet, so it never waits.
         let told = wake.clone();

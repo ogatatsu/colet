@@ -7,8 +7,13 @@
 //! tells what came of it through [`AddressEvent`]. Colet owns the rest: the trail drawn in its place,
 //! what the field opens holding, where the keys went, and going to what was found.
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use colet_core::paths::{address, shown};
+use colet_core::shell::Owner;
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::*;
 
@@ -24,7 +29,12 @@ pub struct AddressBar {
     field: Entity<InputState>,
     open: bool,
     asked: u64,
+    /// Set once the path last asked about is let go of, so a share does not ask for a sign-in no one
+    /// waits for any more.
+    let_go: Arc<AtomicBool>,
     backend: backend::Shared,
+    /// The window a share's sign-in is asked over.
+    owner: Owner,
     _typed: Subscription,
 }
 
@@ -41,15 +51,21 @@ impl EventEmitter<AddressEvent> for AddressBar {}
 
 impl AddressBar {
     /// Enter in the field goes to what is typed, in this tab.
-    pub fn new(backend: backend::Shared, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(backend: backend::Shared, owner: Owner, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let field = cx.new(|cx| InputState::new(window, cx).placeholder(words::address::PLACEHOLDER));
         let typed = cx.subscribe_in(&field, window, |this: &mut Self, _, event, _, cx| match event {
             InputEvent::PressEnter { .. } => this.go(false, cx),
             // What was asked for is no longer what the field holds.
-            InputEvent::Change => this.asked += 1,
+            InputEvent::Change => this.let_go_of_asked(),
             _ => {}
         });
-        Self { field, open: false, asked: 0, backend, _typed: typed }
+        Self { field, open: false, asked: 0, let_go: Arc::default(), backend, owner, _typed: typed }
+    }
+
+    /// Something happened to the field: an answer still on its way is let go of.
+    fn let_go_of_asked(&mut self) {
+        self.asked += 1;
+        self.let_go.store(true, Ordering::Relaxed);
     }
 
     pub fn field(&self) -> &Entity<InputState> {
@@ -63,7 +79,7 @@ impl AddressBar {
     /// Opens or closes the field; an answer still on its way is let go of.
     fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
         self.open = open;
-        self.asked += 1;
+        self.let_go_of_asked();
         cx.notify();
     }
 
@@ -93,7 +109,8 @@ impl AddressBar {
     }
 
     /// Goes to the path typed, in this tab or, `in_new_tab`, a new one. Whether it is there, and how its
-    /// names are written on disk, is asked off the UI thread, as a share can keep it waiting.
+    /// names are written on disk, is asked off the UI thread, as a share can keep it waiting, or ask the
+    /// user to sign in.
     pub fn go(&mut self, in_new_tab: bool, cx: &mut Context<Self>) {
         let text = self.field.read(cx).value().to_string();
         if text.trim().is_empty() {
@@ -103,12 +120,14 @@ impl AddressBar {
             cx.emit(AddressEvent::Problem(words::address::not_a_path(text.trim())));
             return;
         };
-        self.asked += 1;
+        self.let_go_of_asked();
         let asked = self.asked;
-        let backend = self.backend.clone();
+        let let_go = Arc::new(AtomicBool::new(false));
+        self.let_go = let_go.clone();
+        let (backend, owner) = (self.backend.clone(), self.owner);
         let found = {
             let path = path.clone();
-            cx.background_executor().spawn(async move { backend.locate(&path) })
+            cx.background_executor().spawn(async move { backend.locate(&path, &let_go, owner) })
         };
         cx.spawn(async move |this, cx| {
             let found = found.await;

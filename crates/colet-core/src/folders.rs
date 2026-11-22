@@ -22,8 +22,9 @@ use crate::{
 
 /// `path` as it is named on disk, each name in its own case, and whether it is a folder: a junction or
 /// link to one is, as listed, and is not followed. `None` when any part of the way is not there or cannot
-/// be reached. It touches the disk, once for each folder on the way.
-pub fn locate(path: &Path) -> Option<(PathBuf, bool)> {
+/// be reached. It touches the disk, once for each folder on the way. A share that refuses the user as they
+/// are signed in asks them to sign in over `owner`, as its listing does, unless `cancelled` is set first.
+pub fn locate(path: &Path, owner: Owner, cancelled: &AtomicBool) -> Option<(PathBuf, bool)> {
     let chain = ancestors(path);
     // A server is no folder to look at: its shares are, below it, named as typed.
     let top = usize::from(is_server(chain.first()?));
@@ -31,7 +32,7 @@ pub fn locate(path: &Path) -> Option<(PathBuf, bool)> {
         return network::answers(&chain[0]).then(|| (chain[0].clone(), true));
     };
     let mut found = root.clone();
-    if !std::fs::metadata(&found).ok()?.is_dir() {
+    if !network::signing_in(&found, owner, cancelled, || std::fs::metadata(&found)).ok()?.is_dir() {
         return None;
     }
     let mut directory = true;
@@ -257,22 +258,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("Mixed")).unwrap();
         std::fs::write(dir.path().join(r"Mixed\Inner.TXT"), "").unwrap();
-        let (found, directory) = locate(&dir.path().join(r"mixed\inner.txt")).unwrap();
+        let (found, directory) = locate(&dir.path().join(r"mixed\inner.txt"), 0, &AtomicBool::new(false)).unwrap();
         assert!(found.to_string_lossy().ends_with(r"\Mixed\Inner.TXT"), "{found:?}");
         assert!(!directory);
         assert_eq!(crate::paths::path_key(&found), crate::paths::path_key(&dir.path().join(r"Mixed\Inner.TXT")));
-        let (found, directory) = locate(&dir.path().join("MIXED")).unwrap();
+        let (found, directory) = locate(&dir.path().join("MIXED"), 0, &AtomicBool::new(false)).unwrap();
         assert!(found.ends_with("Mixed") && directory);
-        assert_eq!(locate(&dir.path().join(r"Mixed\gone")), None);
-        assert_eq!(locate(&dir.path().join(r"gone\Inner.TXT")), None);
-        assert_eq!(locate(Path::new(r"C:\")), Some((PathBuf::from(r"C:\"), true)));
+        assert_eq!(locate(&dir.path().join(r"Mixed\gone"), 0, &AtomicBool::new(false)), None);
+        assert_eq!(locate(&dir.path().join(r"gone\Inner.TXT"), 0, &AtomicBool::new(false)), None);
+        assert_eq!(locate(Path::new(r"C:\"), 0, &AtomicBool::new(false)), Some((PathBuf::from(r"C:\"), true)));
         let link = dir.path().join("link");
         let made = std::process::Command::new("cmd")
             .args(["/C".as_ref(), "mklink".as_ref(), "/J".as_ref(), link.as_os_str(), dir.path().join("Mixed").as_os_str()])
             .output()
             .unwrap();
         assert!(made.status.success());
-        let (found, directory) = locate(&dir.path().join(r"LINK\inner.txt")).unwrap();
+        let (found, directory) = locate(&dir.path().join(r"LINK\inner.txt"), 0, &AtomicBool::new(false)).unwrap();
         assert!(found.to_string_lossy().ends_with(r"\link\Inner.TXT"), "{found:?}");
         assert!(!directory);
     }
