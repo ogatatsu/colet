@@ -47,6 +47,33 @@ impl<E: StatefulInteractiveElement> TipExt for E {
     }
 }
 
+/// How a line of text that may be cut short with an ellipsis was last drawn: the box it was cut to and
+/// the style it was drawn in, noted as it is drawn, so whether it fit can be told when the pointer comes
+/// to rest on it. A text box tells neither by itself.
+#[derive(Clone, Default)]
+pub(crate) struct Fit(Rc<std::cell::RefCell<Option<(Pixels, TextStyle)>>>);
+
+impl Fit {
+    /// Laid over the box the text is cut to, it notes the box's width and the text's style as they are
+    /// drawn; the box is to be `relative`.
+    pub(crate) fn note(&self) -> impl IntoElement + use<> {
+        let drawn = self.0.clone();
+        canvas(move |bounds, window, _| *drawn.borrow_mut() = Some((bounds.size.width, window.text_style())), |_, _, _, _| {})
+            .absolute()
+            .size_full()
+    }
+
+    /// Whether `text`, as last drawn, was cut short: wider, shaped whole, than its box. A box sized to
+    /// text that fits is a whole pixel wide, rounded, so half a pixel over is still taken to fit. Not
+    /// drawn yet, it was not cut.
+    pub(crate) fn cut(&self, text: &str, window: &Window) -> bool {
+        let Some((width, style)) = &*self.0.borrow() else { return false };
+        let size = style.font_size.to_pixels(window.rem_size());
+        let line = window.text_system().shape_line(text.to_owned().into(), size, &[style.to_run(text.len())], None);
+        line.width > *width + px(0.5)
+    }
+}
+
 /// The icon named `name` among Colet's, for a button.
 pub fn glyph(name: &str) -> gpui_kit::component::Icon {
     gpui_kit::component::Icon::empty().path(format!("icons/{name}.svg"))

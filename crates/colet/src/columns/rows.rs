@@ -2,6 +2,7 @@
 use std::ops::Range;
 
 use colet_core::{entry::Entry, paths::id_text, time};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -44,6 +45,36 @@ pub(crate) struct DrawnRow<'a> {
 
 pub(crate) fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
+}
+
+/// Where a row's name and a search result's folder under it note how they were drawn, for the row's tip
+/// to tell whether either was cut short.
+#[derive(Clone, Default)]
+struct RowFits {
+    name: Fit,
+    parent: Fit,
+}
+
+/// The tip of the row of `entry`, built as the pointer comes to rest on the row: the name if it was cut
+/// short; for a search result, the name over its folder if either was. Neither cut, it shows nothing. A
+/// part of the row with a tip of its own shows that one, drawn after the row's.
+fn row_tip(entry: &Entry, kind: Kind, fits: RowFits) -> impl Fn(&mut Window, &mut App) -> AnyView + use<> {
+    let name = entry.name.clone();
+    let parent = (kind == Kind::Search).then(|| entry.parent.clone());
+    move |window, cx| {
+        let cut = fits.name.cut(&name, window) || parent.as_deref().is_some_and(|parent| fits.parent.cut(parent, window));
+        match &parent {
+            _ if !cut => cx.new(|_| EmptyView).into(),
+            Some(parent) => Tooltip::new(format!("{name}\n{parent}")).build(window, cx),
+            None => Tooltip::new(name.clone()).build(window, cx),
+        }
+    }
+}
+
+/// The tip of a text that may be cut short, which `fit` notes the drawing of: the text whole if it was
+/// cut, nothing if it fit.
+fn cut_tip(text: String, fit: Fit) -> impl Fn(&mut Window, &mut App) -> AnyView + use<> {
+    move |window, cx| if fit.cut(&text, window) { Tooltip::new(text.clone()).build(window, cx) } else { cx.new(|_| EmptyView).into() }
 }
 
 /// The inks a row's text takes: on the selection's fill while it is `lit`, on the column's otherwise.
@@ -187,6 +218,10 @@ impl Colet {
         // Built once a row: its parts take it as their parent's rather than each writing out the path.
         let id = std::sync::Arc::new(row_id(&entry.path));
         let drawn = DrawnRow { entry, id: &id, radii };
+        let fits = RowFits::default();
+        // Not while a row is carried or about to be, nor while a menu lies over the rows.
+        let tip = (self.home_carried(cx).is_none() && self.press.is_none() && self.overlays.popup().is_none())
+            .then(|| row_tip(entry, kind, fits.clone()));
         div()
             .id(ElementId::clone(&id))
             // Like Finder, the selection stays: the menu acts on the row clicked, or the whole selection if
@@ -265,7 +300,14 @@ impl Colet {
                 let picture = div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture);
                 if kind == Kind::Home { r.child(picture) } else { r.child(self.check(index, drawn, selected, lit, picture, cx)) }
             })
-            .child(self.row_name(drawn, name_marks.as_deref().unwrap_or(&entry.marks.name), kind, RowInks::on(p, lit), within, narrow))
+            .child(self.row_name(
+                drawn,
+                name_marks.as_deref().unwrap_or(&entry.marks.name),
+                kind,
+                RowInks::on(p, lit),
+                &fits,
+                (within, narrow),
+            ))
             // Out of the name, so the name stays the file's own: a fade alone would read as hidden.
             .when(held, |r| {
                 r.child(
@@ -287,6 +329,7 @@ impl Colet {
                 )
             })
             .when(kind != Kind::Home, |r| r.children(Self::row_cells(entry, lit, muted, p)))
+            .when_some(tip, |r, tip| r.tooltip(tip))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| this.click_row(index, kind, &path, event, window, cx)))
             .test_support()
             .into_any_element()
@@ -368,15 +411,16 @@ impl Colet {
 
     /// The name, with the filter a saved search runs within and what a favorite or saved search opens
     /// narrowed to beside it, and a search result's folder under it.
-    /// `marks`: where the name is marked, by the column's filter or the search.
+    /// `marks`: where the name is marked, by the column's filter or the search; `fits`: where the name and
+    /// the folder note how they were drawn.
     fn row_name(
         &self,
         row: DrawnRow,
         marks: &[Range<usize>],
         kind: Kind,
         inks: RowInks,
-        within: Option<String>,
-        narrow: Option<String>,
+        fits: &RowFits,
+        (within, narrow): (Option<String>, Option<String>),
     ) -> Div {
         let RowInks { ink, muted, mark } = inks;
         div()
@@ -391,11 +435,14 @@ impl Colet {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().min_w_0().truncate().child(with_marks(&row.entry.name, marks, mark)))
-                    // A badge, tinted with the row's own ink so it shows on any of its fills.
+                    .child(div().relative().min_w_0().truncate().child(with_marks(&row.entry.name, marks, mark)).child(fits.name.note()))
+                    // A badge, tinted with the row's own ink so it shows on any of its fills; its own tip
+                    // gives the filter it cuts short.
                     .when_some(within, |d, filter| {
+                        let fit = Fit::default();
                         d.child(
                             div()
+                                .id(row_part_id(row.id, "within"))
                                 .flex_shrink_0()
                                 .max_w_24()
                                 .px_1p5()
@@ -403,11 +450,12 @@ impl Colet {
                                 .border_1()
                                 .border_color(ink.opacity(0.3))
                                 .bg(ink.opacity(0.1))
-                                .truncate()
                                 .text_xs()
                                 .line_height(scaled(16.))
                                 .text_color(ink)
-                                .child(filter),
+                                .tooltip(cut_tip(filter.clone(), fit.clone()))
+                                .child(div().relative().truncate().child(filter).child(fit.note()))
+                                .test_support(),
                         )
                     })
                     .when_some(narrow, |d, narrow| {
@@ -428,13 +476,15 @@ impl Colet {
             .when(kind == Kind::Search, |d| {
                 d.child(
                     div()
+                        .relative()
                         .w_full()
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis_start()
                         .text_xs()
                         .text_color(muted)
-                        .child(with_marks(&row.entry.parent, &row.entry.marks.parent, mark)),
+                        .child(with_marks(&row.entry.parent, &row.entry.marks.parent, mark))
+                        .child(fits.parent.note()),
                 )
             })
     }

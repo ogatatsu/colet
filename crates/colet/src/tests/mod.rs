@@ -58,6 +58,7 @@ mod search;
 mod settings;
 mod sorting;
 mod tabs;
+mod tips;
 mod watch;
 mod window;
 
