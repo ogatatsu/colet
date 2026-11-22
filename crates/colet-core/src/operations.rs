@@ -213,7 +213,8 @@ fn collapse(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, OperationError> {
         .collect())
 }
 
-/// A folder cannot go into itself or what it holds.
+/// A folder cannot go into itself or what it holds. What is no folder, as a file or a junction whose
+/// target is gone, holds nothing, so its real path is not asked for: a broken junction has none.
 fn check_destination(paths: &[PathBuf], destination: &Path) -> Result<(), OperationError> {
     let target = absolute(destination)?;
     if !target.is_dir() {
@@ -222,9 +223,12 @@ fn check_destination(paths: &[PathBuf], destination: &Path) -> Result<(), Operat
     let destination = normalized(target)?;
     for source in paths {
         let path = absolute(source)?;
+        if !path.is_dir() {
+            continue;
+        }
         let source = normalized(path)?;
         let below = destination.as_encoded_bytes().strip_prefix(source.as_encoded_bytes()).is_some_and(|rest| rest.starts_with(b"\\"));
-        if path.is_dir() && (destination == source || below) {
+        if destination == source || below {
             return Err(OperationError::IntoItself);
         }
     }
@@ -501,6 +505,26 @@ mod tests {
         assert_eq!(moved.paths, [p(&y)]);
         assert_eq!(moved.cut, Some(1));
         assert!(paste(vec![p(&x)], true, &a).paths.is_empty());
+    }
+
+    #[test]
+    fn pastes_a_junction_whose_target_is_gone_with_what_is_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (target, link, file, to) =
+            (dir.path().join("target"), dir.path().join("link"), dir.path().join("x.txt"), dir.path().join("to"));
+        std::fs::create_dir(&target).unwrap();
+        std::fs::create_dir(&to).unwrap();
+        std::fs::write(&file, "").unwrap();
+        let made = std::process::Command::new("cmd")
+            .args(["/C".as_ref(), "mklink".as_ref(), "/J".as_ref(), link.as_os_str(), target.as_os_str()])
+            .output()
+            .unwrap();
+        assert!(made.status.success());
+        std::fs::remove_dir(&target).unwrap();
+        for cut in [true, false] {
+            let pasted = prepare(request(Kind::Paste, vec![], &to, ""), files(vec![link.clone(), file.clone()], cut)).unwrap();
+            assert_eq!(pasted.paths, [link.clone(), file.clone()]);
+        }
     }
 
     #[test]
