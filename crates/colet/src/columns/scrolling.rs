@@ -287,13 +287,19 @@ impl Colet {
             // stands, as the last layout's view leaves room for it then, so they go one way only. With motion
             // reduced it stands there already, wider or narrower than that layout had it.
             let aim = view + self.scrolls.sideways.fitted_home - self.home_pane.target();
-            let target = match uncover {
+            // Home folding into its strip as the keys leave it: the room it gives the view would be left
+            // empty past the last column where they stood, brought there for the view it left them.
+            let flush = uncover.is_none() && aim - view >= 0.5;
+            let mut target = match uncover {
                 Some(at) => uncover_target(at, aim, &cells),
                 // Home or the pinned results taken up again beside the same columns, as ← brings the keys
                 // there, leave the columns where they are.
                 None if active.is_none() && shown == self.scrolls.sideways.revealed => start,
                 None => reveal_target(start, aim, &cells, active),
             };
+            if flush {
+                target = uncover_target(target, aim, &cells);
+            }
             self.scrolls.sideways.revealed = shown;
             self.scrolls.sideways.hold = target.max(from);
             self.scrolls.sideways.fitted = (view, self.column_drawn());
@@ -303,8 +309,9 @@ impl Colet {
                         slide.origin = start;
                         slide.target = target;
                         slide.uncover = uncover;
+                        slide.flush = flush;
                     }
-                    None => self.scrolls.sideways.slide = Some(Slide::new(start, from, target, uncover)),
+                    None => self.scrolls.sideways.slide = Some(Slide { flush, ..Slide::new(start, from, target, uncover) }),
                 }
             } else if uncover.is_some() {
                 // Folders come out with no room past the last column: the columns stay where they are drawn,
@@ -370,6 +377,7 @@ impl Colet {
             Some(slide) => {
                 slide.target = match slide.uncover {
                     Some(at) => uncover_target(at, aim, &cells),
+                    None if slide.flush => uncover_target(reveal_target(slide.origin, aim, &cells, active), aim, &cells),
                     None => reveal_target(slide.origin, aim, &cells, active),
                 };
                 sideways.hold = slide.target.max(slide.position);

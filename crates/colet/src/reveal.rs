@@ -104,11 +104,14 @@ pub struct Slide {
     /// Folders brought out by their strip: where the columns stood as they came out, which they slide
     /// in from only as far as the room past the last column takes.
     pub uncover: Option<f32>,
+    /// Set going as home's pane folds into its strip: the room it gives the view leaves none past the last
+    /// column, however the target is reckoned again on the way.
+    pub flush: bool,
 }
 
 impl Slide {
     pub fn new(origin: f32, position: f32, target: f32, uncover: Option<f32>) -> Self {
-        Self { origin, position, target, velocity: 0., time: None, uncover }
+        Self { origin, position, target, velocity: 0., time: None, uncover, flush: false }
     }
 
     /// Moves all of it by `by`, as the columns under it are.

@@ -865,3 +865,35 @@ fn brings_the_column_on_screen_as_home_folds_for_its_menu(cx: &mut TestAppContex
     assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
     assert!(past_left(&ui, cx, id) >= -1.);
 }
+
+#[gpui_kit::test]
+fn slides_once_to_leave_no_room_past_the_last_as_home_folds_after_the_folders_come_out(cx: &mut TestAppContext) {
+    // The folders brought out with the keys in home, then → back to the column worked in: home folds,
+    // the room it gives the view going to the columns in one slide, whether theirs is still under way.
+    for still_sliding in [true, false] {
+        let ui = folded_deep(cx);
+        allow_motion(cx);
+        ui.press(cx, "ctrl-0");
+        rest(&ui, cx);
+        assert!(ui.home_focused(cx));
+        ui.press(cx, "ctrl-u");
+        if !still_sliding {
+            rest(&ui, cx);
+        }
+        assert_eq!(ui.read(cx, |v| v.scrolls.sideways.slide.is_some()), still_sliding);
+        ui.press(cx, "right");
+        let mut seen = vec![ui.read(cx, |v| v.scrolls.sideways.offset())];
+        for _ in 0..40 {
+            std::thread::sleep(Duration::from_millis(16));
+            ui.act(cx, |_, _| ());
+            settle(cx);
+            seen.push(ui.read(cx, |v| v.scrolls.sideways.offset()));
+        }
+        assert!(ui.act(cx, |window, _| window.try_find("home-strip").is_some()));
+        let steps: Vec<f32> = seen.windows(2).map(|w| w[1] - w[0]).filter(|step| step.abs() >= 0.5).collect();
+        assert!(steps.iter().all(|&s| s < 0.), "{still_sliding}: one way only: {seen:?}");
+        assert!(steps.iter().all(|&s| s > -100.), "{still_sliding}: no leap: {seen:?}");
+        let room = room_past_last(&ui, cx);
+        assert!(room.abs() < 1., "{still_sliding}: {room}");
+    }
+}
