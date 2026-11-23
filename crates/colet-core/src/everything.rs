@@ -170,7 +170,9 @@ pub fn count(query: &str) -> Result<usize, SearchError> {
 /// What hears that a watch heard something, called on the watch's thread.
 pub type Tell = Arc<dyn Fn() + Send + Sync>;
 
-/// What a watch has heard: that the results changed, and the error it stopped on (0 for none).
+/// What a watch has heard: that the results changed, and the error it stopped on (0 for none). Each is
+/// stored with `Release` and loaded with `Acquire`: `stopping` is set on one thread and read on the
+/// watch's after a shutdown wakes it, and nothing but this pair orders the two across the SDK's call.
 #[derive(Default)]
 struct News {
     changed: AtomicBool,
@@ -211,7 +213,7 @@ impl Watch {
                 if unsafe { Everything3_WaitForResultListChange(client) } != 0 {
                     // Nothing clears the change on this client, so waiting again would return at once,
                     // over and over: it stays heard until a fresh search starts another watch.
-                    heard.changed.store(true, Ordering::Relaxed);
+                    heard.changed.store(true, Ordering::Release);
                     if let Some(tell) = &tell {
                         tell();
                     }
@@ -221,15 +223,15 @@ impl Watch {
                 if error == 0 {
                     // Woken for nothing while being stopped: done, rather than wait on a client shut
                     // down, which the drop waits for.
-                    if heard.stopping.load(Ordering::Relaxed) {
+                    if heard.stopping.load(Ordering::Acquire) {
                         return;
                     }
                     // Woken for nothing: wait a moment before waiting again, so it never spins.
                     std::thread::sleep(WAKE_PAUSE);
                     continue;
                 }
-                if !heard.stopping.load(Ordering::Relaxed) {
-                    heard.failed.store(error, Ordering::Relaxed);
+                if !heard.stopping.load(Ordering::Acquire) {
+                    heard.failed.store(error, Ordering::Release);
                     if let Some(tell) = &tell {
                         tell();
                     }
@@ -243,7 +245,7 @@ impl Watch {
 
 impl Drop for Watch {
     fn drop(&mut self) {
-        self.news.stopping.store(true, Ordering::Relaxed);
+        self.news.stopping.store(true, Ordering::Release);
         unsafe {
             Everything3_ShutdownClient(self.client);
         }
@@ -360,7 +362,7 @@ impl SearchSession {
     /// Whether Everything has said the last search's results changed; it stays so until searched afresh.
     pub fn changed(&mut self) -> Result<bool, SearchError> {
         let Some(watch) = self.watch.as_ref().filter(|_| self.key.is_some()) else { return Ok(false) };
-        let error = watch.news.failed.load(Ordering::Relaxed);
+        let error = watch.news.failed.load(Ordering::Acquire);
         if error != 0 {
             // A stopped Everything breaks both pipes. Discard them together so the next search
             // connects afresh; a watch-only failure keeps the usable paging connection.
@@ -371,7 +373,7 @@ impl SearchSession {
             self.stop_watching();
             return Err(SearchError::WatchStopped(error));
         }
-        Ok(watch.news.changed.load(Ordering::Relaxed))
+        Ok(watch.news.changed.load(Ordering::Acquire))
     }
 
     /// `count` results of `query` from `offset` on. `refresh` searches afresh even when the query and
