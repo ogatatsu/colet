@@ -22,12 +22,12 @@ pub enum ItemStatus {
 impl ItemStatus {
     pub fn label(self) -> &'static str {
         match self {
-            ItemStatus::Done => words::history::DONE,
-            ItemStatus::Destroyed => words::history::DESTROYED,
-            ItemStatus::Failed => words::history::FAILED,
-            ItemStatus::Skipped => words::history::SKIPPED,
-            ItemStatus::Cancelled => words::history::CANCELLED,
-            ItemStatus::Handed => words::history::HANDED,
+            ItemStatus::Done => words::history::done(),
+            ItemStatus::Destroyed => words::history::destroyed(),
+            ItemStatus::Failed => words::history::failed(),
+            ItemStatus::Skipped => words::history::skipped(),
+            ItemStatus::Cancelled => words::history::cancelled(),
+            ItemStatus::Handed => words::history::handed(),
         }
     }
 }
@@ -139,16 +139,16 @@ impl HistoryEntry {
     /// How it went: what failed or was skipped, its own failure, or that it ran to the end.
     pub fn outcome(&self) -> String {
         if self.status == Status::Running {
-            return words::history::RUNNING.into();
+            return words::history::running().into();
         }
         let mut parts = self.item_problems();
         if self.status == Status::Cancelled {
-            parts.push(words::history::CANCELLED.into());
+            parts.push(words::history::cancelled().into());
         }
         if self.status == Status::Error && self.count(ItemStatus::Failed) == 0 {
-            parts.push(words::history::FAILED.into());
+            parts.push(words::history::failed().into());
         }
-        if parts.is_empty() { words::history::DONE.into() } else { parts.join(words::SEPARATOR) }
+        if parts.is_empty() { words::history::done().into() } else { parts.join(words::separator()) }
     }
 
     /// How many of its items failed and how many were skipped, those there were: `1 件失敗`, `1 件スキップ`.

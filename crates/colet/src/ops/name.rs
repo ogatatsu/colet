@@ -23,7 +23,7 @@ impl Colet {
             return;
         }
         if let Some(reason) = reasons.rename {
-            self.refuse(words::RENAME, reason, cx);
+            self.refuse(words::rename(), reason, cx);
             return;
         }
         let Some(entry) = entries.into_iter().next() else { return };
@@ -36,11 +36,11 @@ impl Colet {
     pub fn ask_new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.take_menu();
         if let Some(reason) = self.reasons(cx).paste {
-            self.refuse(words::NEW_FOLDER, reason, cx);
+            self.refuse(words::new_folder(), reason, cx);
             return;
         }
         let destination = self.destination().unwrap_or_default();
-        let name = words::ops::NEW_FOLDER_NAME.to_owned();
+        let name = words::ops::new_folder_name().to_owned();
         let end = name.len();
         self.ask_name(Request { kind: Kind::NewFolder, paths: Vec::new(), destination, name }, end, window, cx);
     }
@@ -77,7 +77,7 @@ impl Colet {
         let name = input.read(cx).value();
         colet_core::operations::name_problem(&name, *tried)
             .map(words::ops::name_problem)
-            .or(taken.as_deref().filter(|&taken| taken == name.as_ref()).map(|_| words::ops::NAME_TAKEN))
+            .or(taken.as_deref().filter(|&taken| taken == name.as_ref()).map(|_| words::ops::name_taken()))
     }
 
     pub fn submit_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -160,10 +160,10 @@ impl Colet {
         let empty = input.read(cx).value().trim().is_empty();
         // Where the name goes: a rename may come from the results, far from its folder.
         let (place, submit) = match kind {
-            Kind::NewFolder => (words::ops::created_in(shown(destination)), words::ops::CREATE),
+            Kind::NewFolder => (words::ops::created_in(shown(destination)), words::ops::create()),
             _ => (
                 words::ops::located_in(paths.first().and_then(|p| ancestors(p).into_iter().rev().nth(1)).map(shown).unwrap_or_default()),
-                words::SAVE,
+                words::save(),
             ),
         };
         let content = div().flex().flex_col().gap_3().child(div().text_xs().text_color(p.text_faint).child(place)).child(
@@ -171,22 +171,22 @@ impl Colet {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(label(p, words::NAME))
+                .child(label(p, words::name()))
                 .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
                 .when_some(problem, |d, problem| d.child(div().text_xs().text_color(p.danger).child(problem))),
         );
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("cancel", words::cancel(), false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
             // While the folder is asked whether the name is free, the press is in and waits.
             (
                 "submit-name",
-                push("submit-name", if checking { words::ops::CHECKING } else { submit }, true, !empty && problem.is_none() && !checking)
+                push("submit-name", if checking { words::ops::checking() } else { submit }, true, !empty && problem.is_none() && !checking)
                     .on_click(cx.listener(|this, _, window, cx| this.submit_name(window, cx))),
             ),
         ];
-        (if matches!(kind, Kind::NewFolder) { words::NEW_FOLDER } else { words::RENAME }, content, buttons)
+        (if matches!(kind, Kind::NewFolder) { words::new_folder() } else { words::rename() }, content, buttons)
     }
 }

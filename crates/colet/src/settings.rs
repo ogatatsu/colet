@@ -127,9 +127,9 @@ impl Theme {
 
     pub fn label(self) -> &'static str {
         match self {
-            Theme::System => words::preferences::THEME_SYSTEM,
-            Theme::Light => words::preferences::THEME_LIGHT,
-            Theme::Dark => words::preferences::THEME_DARK,
+            Theme::System => words::preferences::theme_system(),
+            Theme::Light => words::preferences::theme_light(),
+            Theme::Dark => words::preferences::theme_dark(),
         }
     }
 }
@@ -349,7 +349,7 @@ impl<'de> Deserialize<'de> for Settings {
 }
 
 pub const SETTINGS: File =
-    File { stem: "settings", what: words::kept::SETTINGS, file: words::kept::SETTINGS_FILE, fallback: words::kept::SETTINGS_FALLBACK };
+    File { stem: "settings", what: words::kept::settings, file: words::kept::settings_file, fallback: words::kept::settings_fallback };
 
 /// `%APPDATA%\Colet\settings.json`.
 pub fn path() -> Option<PathBuf> {
@@ -370,7 +370,7 @@ fn load_from(path: &Path) -> Loaded<Settings> {
 
 /// Writes beside the file and then over it, so a failed write leaves the old one whole.
 pub fn save(settings: &Settings) -> Result<(), String> {
-    let path = path().ok_or(words::kept::NO_SETTINGS_PLACE)?;
+    let path = path().ok_or(words::kept::no_settings_place())?;
     save_to(settings, &path)
 }
 

@@ -14,7 +14,7 @@ use crate::kept_file::{self, Fields, File, Lenient, Loaded};
 use crate::words;
 
 pub const SORTS: File =
-    File { stem: "sort", what: words::kept::SORTS, file: words::kept::SORTS_FILE, fallback: words::kept::SORTS_FALLBACK };
+    File { stem: "sort", what: words::kept::sorts, file: words::kept::sorts_file, fallback: words::kept::sorts_fallback };
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(into = "SortsFile")]
@@ -95,7 +95,7 @@ pub fn load() -> Loaded<Sorts> {
 }
 
 pub fn save(sorts: &Sorts) -> Result<(), String> {
-    let path = path().ok_or(words::kept::NO_SORTS_PLACE)?;
+    let path = path().ok_or(words::kept::no_sorts_place())?;
     kept_file::write(sorts, &path, &SORTS)
 }
 

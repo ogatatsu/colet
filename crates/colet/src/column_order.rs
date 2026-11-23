@@ -132,11 +132,11 @@ impl Colet {
         }));
         lines[sorts].group = true;
         let first = sort.folders_first;
-        lines.push(choice("folders-first", words::column::FOLDERS_FIRST, OrderCommand::FoldersFirst(target, !first), first).grouped());
+        lines.push(choice("folders-first", words::column::folders_first(), OrderCommand::FoldersFirst(target, !first), first).grouped());
         // A column given its own order goes back to the default from here.
         let own = self.own_order(column).is_some();
         lines.push(
-            Line { off: (!own).then_some(""), ..choice("unsort", words::column::UNSORT, OrderCommand::Unsort(target), false) }.grouped(),
+            Line { off: (!own).then_some(""), ..choice("unsort", words::column::unsort(), OrderCommand::Unsort(target), false) }.grouped(),
         );
         lines
     }

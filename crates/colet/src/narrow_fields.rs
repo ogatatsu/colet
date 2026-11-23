@@ -89,8 +89,8 @@ impl NarrowFields {
                 },
                 None => {
                     let text = c.narrow.as_ref().map(|f| f.text().to_owned()).unwrap_or_default();
-                    let input =
-                        cx.new(|cx| InputState::new(window, cx).placeholder(words::column::NARROW_PLACEHOLDER).default_value(text.clone()));
+                    let input = cx
+                        .new(|cx| InputState::new(window, cx).placeholder(words::column::narrow_placeholder()).default_value(text.clone()));
                     cx.palette().style_input(&input, cx);
                     let subscription = cx.subscribe_in(&input, window, move |this: &mut Colet, input, event, window, cx| match event {
                         InputEvent::Change => {

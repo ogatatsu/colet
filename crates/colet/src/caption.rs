@@ -53,10 +53,10 @@ impl Caption {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Minimize => words::window::MINIMIZE,
-            Self::Maximize => words::window::MAXIMIZE,
-            Self::Restore => words::window::RESTORE,
-            Self::Close => words::CLOSE,
+            Self::Minimize => words::window::minimize(),
+            Self::Maximize => words::window::maximize(),
+            Self::Restore => words::window::restore(),
+            Self::Close => words::close(),
         }
     }
 

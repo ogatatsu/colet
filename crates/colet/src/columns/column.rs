@@ -206,7 +206,7 @@ impl Colet {
             .text_xs()
             .text_color(p.text_muted)
             .child(Spinner::new().icon(glyph("loader-circle")).color(p.text_muted).with_size(self.scale().px(metrics::GLYPH)))
-            .child(words::column::LOADING)
+            .child(words::column::loading())
     }
 
     /// What a column lists, or why it lists nothing.
@@ -222,13 +222,13 @@ impl Colet {
         }
         if c.entries.is_empty() {
             let (name, text) = match kind {
-                Kind::Search if c.narrow.is_some() => ("funnel", words::NO_MATCH),
-                Kind::Search => ("search", words::NO_MATCH),
-                Kind::Home if c.narrow.is_some() => ("funnel", words::NO_MATCH),
-                Kind::Home => ("hard-drive", words::home::EMPTY),
-                Kind::Folder if c.shown_total() > 0 && c.is_narrowed() => ("funnel", words::NO_MATCH),
-                Kind::Folder if c.total > 0 => ("eye-off", words::column::ONLY_HIDDEN),
-                Kind::Folder => ("folder", words::column::EMPTY_FOLDER),
+                Kind::Search if c.narrow.is_some() => ("funnel", words::no_match()),
+                Kind::Search => ("search", words::no_match()),
+                Kind::Home if c.narrow.is_some() => ("funnel", words::no_match()),
+                Kind::Home => ("hard-drive", words::home::empty()),
+                Kind::Folder if c.shown_total() > 0 && c.is_narrowed() => ("funnel", words::no_match()),
+                Kind::Folder if c.total > 0 => ("eye-off", words::column::only_hidden()),
+                Kind::Folder => ("folder", words::column::empty_folder()),
             };
             return self.message(name, text.into(), cx).into_any_element();
         }
@@ -242,7 +242,7 @@ impl Colet {
 
     /// Why the column `id` could not be listed, with a button to try again.
     fn column_error(&mut self, id: ColumnId, error: String, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let retry = Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label(words::column::RETRY).on_click(cx.listener(
+        let retry = Button::new(("retry", id)).outline().icon(glyph("refresh-cw")).label(words::column::retry()).on_click(cx.listener(
             move |this, event: &ClickEvent, window, cx| {
                 // The button goes as the column loads: the keys go back to the columns.
                 if event.is_keyboard() {
@@ -413,10 +413,10 @@ impl Colet {
             _ => self.stored.settings().favorite(&c.path, narrowing.as_deref()).is_some(),
         };
         let label = match (kind, kept) {
-            (Kind::Search, true) => words::column::UNSAVE_SEARCH_KEY,
-            (Kind::Search, false) => words::column::SAVE_SEARCH_KEY,
-            (_, true) => words::column::REMOVE_FAVORITE_KEY,
-            (_, false) => words::column::ADD_FAVORITE_KEY,
+            (Kind::Search, true) => words::column::unsave_search_key(),
+            (Kind::Search, false) => words::column::save_search_key(),
+            (_, true) => words::column::remove_favorite_key(),
+            (_, false) => words::column::add_favorite_key(),
         };
         let star = Button::new(("star", id))
             .ghost()
@@ -468,7 +468,7 @@ impl Colet {
             .relative()
             .flex_none()
             .child(Self::opener(div().flex(), move |this| this.column_sort_open() == Some(id), cx).child(button))
-            .when_some(self.menu_element("column-sort-menu", words::SORT_ORDER, cx).filter(|_| open), |d, menu| {
+            .when_some(self.menu_element("column-sort-menu", words::sort_order(), cx).filter(|_| open), |d, menu| {
                 d.child(drop_down(menu, MenuSide::Right, 160., Some(160.), self.scale()))
             })
             .into_any_element()
@@ -558,7 +558,7 @@ impl Colet {
             .flex()
             .items_center()
             .justify_center()
-            .child(Checkbox::new(("check-all", id)).small().accessibility_label(words::SELECT_ALL).checked(all).disabled(empty).on_click(
+            .child(Checkbox::new(("check-all", id)).small().accessibility_label(words::select_all()).checked(all).disabled(empty).on_click(
                 cx.listener(move |this, _, _, cx| {
                     let Some(index) = this.state.index_of(id) else { return };
                     this.state.toggle_all(index);
@@ -586,8 +586,8 @@ impl Colet {
                 .ghost()
                 .xsmall()
                 .icon(glyph("x"))
-                .accessibility_label(words::column::CLEAR_FILTER)
-                .tooltip(words::column::CLEAR_FILTER_KEY)
+                .accessibility_label(words::column::clear_filter())
+                .tooltip(words::column::clear_filter_key())
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if let Some(field) = this.narrow_fields.get(&id) {
                         let input = field.input.clone();

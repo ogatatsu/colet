@@ -68,7 +68,7 @@ impl Notices {
             note = note.action(move |_, _, _| {
                 let details = details.clone();
                 // The mouse leaves the keys where they are; from the keys, they go on as `details` takes them.
-                crate::view::keep_focus(Button::new(("toast-details", id)).label(words::window::DETAILS)).on_click(
+                crate::view::keep_focus(Button::new(("toast-details", id)).label(words::window::details())).on_click(
                     move |event: &ClickEvent, window, cx| {
                         window.remove_notification1::<Notices>(("toast", id), cx);
                         details(event, window, cx);

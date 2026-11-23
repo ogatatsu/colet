@@ -166,7 +166,7 @@ impl Loading {
                 self.searching(asked.request);
                 cx.background_executor().spawn(async move {
                     let found = backend.search(search).map_err(|error| words::search::error(&error))?;
-                    let found = found.ok_or_else(|| words::search::STALE.to_string())?;
+                    let found = found.ok_or_else(|| words::search::stale().to_string())?;
                     let whole = whole.and_then(|query| backend.count(&query).ok());
                     Ok(Listed {
                         entries: found.page.entries,
@@ -305,10 +305,10 @@ impl Engine {
     /// What the status bar shows, and what it says in full.
     pub fn describe(&self) -> (String, String) {
         match self {
-            Engine::Unknown => (words::status::ENGINE_UNKNOWN.into(), words::status::ENGINE_UNKNOWN_TIP.into()),
-            Engine::Connecting => (words::status::ENGINE_CONNECTING.into(), words::status::ENGINE_CONNECTING_TIP.into()),
+            Engine::Unknown => (words::status::engine_unknown().into(), words::status::engine_unknown_tip().into()),
+            Engine::Connecting => (words::status::engine_connecting().into(), words::status::engine_connecting_tip().into()),
             Engine::Connected(name) => (name.clone(), words::status::engine_connected(name)),
-            Engine::Failed(error) => (words::status::ENGINE_FAILED.into(), error.clone()),
+            Engine::Failed(error) => (words::status::engine_failed().into(), error.clone()),
         }
     }
 }

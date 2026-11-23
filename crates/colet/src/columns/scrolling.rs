@@ -102,8 +102,8 @@ impl Colet {
                     .text_xs()
                     .text_color(p.text_muted)
                     .child(away.to_string())
-                    .child(words::column::FOLDED[0])
-                    .child(words::column::FOLDED[1])
+                    .child(words::column::folded()[0])
+                    .child(words::column::folded()[1])
                     .test_support(),
             )
             // The button laid over the whole strip: its ring's room would push the heading's line off the

@@ -74,11 +74,11 @@ pub struct File {
     /// Its name without `.json`, which a broken one is put aside under.
     pub stem: &'static str,
     /// What it holds: "設定".
-    pub what: &'static str,
+    pub what: fn() -> &'static str,
     /// What it holds, as it is a file: "設定ファイル".
-    pub file: &'static str,
+    pub file: fn() -> &'static str,
     /// What Colet starts on without it: "既定の設定".
-    pub fallback: &'static str,
+    pub fallback: fn() -> &'static str,
 }
 
 type Write<T> = dyn Fn(&T) -> Result<(), String> + Send + Sync;
@@ -86,13 +86,13 @@ type Write<T> = dyn Fn(&T) -> Result<(), String> + Send + Sync;
 /// A save on its way.
 pub struct Queued {
     result: mpsc::Receiver<Result<(), String>>,
-    what: &'static str,
+    what: fn() -> &'static str,
 }
 
 impl Queued {
     /// How the save went, once it is written; a write that broke off never says, and is taken as failed.
     pub fn written(self) -> Result<(), String> {
-        self.result.recv().unwrap_or_else(|_| Err(words::kept::cannot_save(self.what)))
+        self.result.recv().unwrap_or_else(|_| Err(words::kept::cannot_save((self.what)())))
     }
 
     #[cfg(test)]
@@ -110,7 +110,7 @@ pub struct Saves<T> {
     /// None while nothing is written.
     write: Option<Arc<Write<T>>>,
     /// What the file holds, for saying it could not be saved: "設定".
-    what: &'static str,
+    what: fn() -> &'static str,
     /// Counts the changes.
     changes: u64,
 }
@@ -153,7 +153,7 @@ impl<T: Clone + Send + 'static> Saves<T> {
 /// the defaults written next do not take its place unseen; one with fields or items that cannot be read
 /// is read without them, and copied aside, as the next save leaves them out.
 pub fn read<T: Lenient + Default>(path: &Path, file: &File) -> Loaded<T> {
-    let kept = |e: &dyn std::fmt::Display| LoadError { message: words::kept::unreadable(file.what, e, file.file), kept: true };
+    let kept = |e: &dyn std::fmt::Display| LoadError { message: words::kept::unreadable((file.what)(), e, (file.file)()), kept: true };
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Loaded::read(T::default()),
@@ -166,7 +166,7 @@ pub fn read<T: Lenient + Default>(path: &Path, file: &File) -> Loaded<T> {
         Ok(fields) => fields,
         Err(e) => {
             return Loaded::failed(match std::fs::rename(path, &aside) {
-                Ok(()) => LoadError { message: words::kept::put_aside(file.file, file.fallback, &e, aside.display()), kept: false },
+                Ok(()) => LoadError { message: words::kept::put_aside((file.file)(), (file.fallback)(), &e, aside.display()), kept: false },
                 Err(_) => kept(&e),
             });
         }
@@ -175,17 +175,17 @@ pub fn read<T: Lenient + Default>(path: &Path, file: &File) -> Loaded<T> {
     if fields.skipped == 0 {
         return Loaded::read(value);
     }
-    let skipped = words::kept::skipped(file.file, fields.skipped);
+    let skipped = words::kept::skipped((file.file)(), fields.skipped);
     let problem = match std::fs::copy(path, &aside) {
         Ok(_) => LoadError { message: words::kept::copied_aside(&skipped, aside.display()), kept: false },
-        Err(_) => LoadError { message: words::kept::not_saved(&skipped, file.file), kept: true },
+        Err(_) => LoadError { message: words::kept::not_saved(&skipped, (file.file)()), kept: true },
     };
     Loaded { value, problem: Some(problem) }
 }
 
 /// Writes `kept` beside `path` and then over it, so a failed write leaves the old one whole.
 pub fn write<T: Serialize>(kept: &T, path: &Path, file: &File) -> Result<(), String> {
-    let fail = |e: std::io::Error| words::kept::cannot_save_because(file.what, e);
+    let fail = |e: std::io::Error| words::kept::cannot_save_because((file.what)(), e);
     std::fs::create_dir_all(path.parent().unwrap()).map_err(fail)?;
     let temporary = path.with_extension("json.tmp");
     let json = serde_json::to_vec_pretty(kept).map_err(|e| e.to_string())?;
@@ -221,7 +221,7 @@ impl Fields {
     pub fn of(value: serde_json::Value) -> Result<Self, String> {
         match value {
             serde_json::Value::Object(map) => Ok(Self { map, skipped: 0 }),
-            _ => Err(words::kept::NOT_AN_OBJECT.into()),
+            _ => Err(words::kept::not_an_object().into()),
         }
     }
 

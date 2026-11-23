@@ -11,7 +11,7 @@ impl Colet {
             return;
         }
         if let Some(reason) = if cut { reasons.cut } else { reasons.copy } {
-            self.refuse(if cut { words::CUT } else { words::COPY }, reason, cx);
+            self.refuse(if cut { words::cut() } else { words::copy() }, reason, cx);
             return;
         }
         let picked: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();
@@ -47,7 +47,7 @@ impl Colet {
     pub fn paste(&mut self, cx: &mut Context<Self>) {
         self.take_menu();
         match self.reasons(cx).paste {
-            Some(reason) => self.refuse(words::PASTE, reason, cx),
+            Some(reason) => self.refuse(words::paste(), reason, cx),
             None => {
                 let paste = Paste { destination: self.destination().unwrap_or_default(), tab: self.current_tab() };
                 if let Some(paste) = self.operations.update(cx, |operations, _| operations.clipboard.paste(paste)) {

@@ -82,19 +82,19 @@ impl Colet {
                     .items_center()
                     .text_xs()
                     .text_color(p.text_muted)
-                    .child(words::home::STRIP[0])
-                    .child(words::home::STRIP[1])
-                    .child(words::home::STRIP[2])
+                    .child(words::home::strip()[0])
+                    .child(words::home::strip()[1])
+                    .child(words::home::strip()[2])
                     .test_support(),
             )
             // The button laid over the whole strip, as on the folders' strip.
             .child(
                 ring(div().id("home-strip-button").track_focus(&focus), p, focus.is_focused(window), 0.)
                     .role(Role::Button)
-                    .aria_label(words::home::SHOW)
+                    .aria_label(words::home::show())
                     .absolute()
                     .inset_0()
-                    .tip(words::home::SHOW)
+                    .tip(words::home::show())
                     .on_click(cx.listener(|this, _, window, cx| this.focus_home(window, cx)))
                     .test_support(),
             )
@@ -169,7 +169,7 @@ impl Colet {
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if marked { p.text } else { p.text_muted })
-                            .child(words::HOME),
+                            .child(words::home()),
                     ),
             )
             .when_some(field, |d, input| {
@@ -258,7 +258,7 @@ impl Colet {
         let mut rows = div()
             .id("home-rows")
             .role(Role::ListBox)
-            .aria_label(words::HOME)
+            .aria_label(words::home())
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scrolls.home)

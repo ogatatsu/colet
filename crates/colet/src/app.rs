@@ -486,11 +486,11 @@ impl Colet {
     /// rather than a moment after the last change; when that fails, the next close goes without them.
     pub(crate) fn may_close(&mut self, cx: &mut Context<Self>) -> bool {
         if self.operations.read(cx).is_running() {
-            self.notify(words::window::BUSY_OPERATING, Tone::Info, cx);
+            self.notify(words::window::busy_operating(), Tone::Info, cx);
             return false;
         }
         if self.operations.read(cx).is_sending() {
-            self.notify(words::window::BUSY_SENDING, Tone::Info, cx);
+            self.notify(words::window::busy_sending(), Tone::Info, cx);
             return false;
         }
         if self.stored.is_unsaved_close() {
@@ -768,8 +768,8 @@ impl Colet {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| match result {
-                Ok(Err(quick_look::Error::NotRunning)) => this.notify(words::window::QUICK_LOOK_NOT_RUNNING, Tone::Info, cx),
-                Ok(Err(quick_look::Error::Unnamable)) => this.notify(words::window::QUICK_LOOK_UNNAMABLE, Tone::Info, cx),
+                Ok(Err(quick_look::Error::NotRunning)) => this.notify(words::window::quick_look_not_running(), Tone::Info, cx),
+                Ok(Err(quick_look::Error::Unnamable)) => this.notify(words::window::quick_look_unnamable(), Tone::Info, cx),
                 Ok(Err(quick_look::Error::Failed(error))) => {
                     this.notify(words::window::quick_look_failed(words::windows_failure(error.code())), Tone::Error, cx)
                 }

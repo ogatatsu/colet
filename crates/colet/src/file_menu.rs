@@ -10,7 +10,7 @@ use crate::words;
 use crate::{
     app::Colet,
     menus::{Line, Popup, choice, line},
-    ops::{NEEDS_FILE, NEEDS_FOLDER, ONE_ITEM},
+    ops::{needs_file, needs_folder, one_item},
     state::ColumnId,
     state::Kind,
 };
@@ -30,7 +30,7 @@ pub enum FileCommand {
     Rename,
     NewFolder,
     Recycle,
-    /// words::RECYCLE picked with Shift held, as Explorer's Delete deletes outright then.
+    /// words::recycle() picked with Shift held, as Explorer's Delete deletes outright then.
     Delete,
     Favorite(PathBuf),
     /// What is picked, sent to the item of Windows' Send To at `target`: moved when `shift` is held as it
@@ -54,7 +54,7 @@ pub struct Menu {
 }
 
 impl FileCommand {
-    /// As picked with Shift held, or not: words::RECYCLE deletes outright, as Explorer's Delete does, and
+    /// As picked with Shift held, or not: words::recycle() deletes outright, as Explorer's Delete does, and
     /// Send To moves, as Explorer's does.
     pub fn shifted(&self, shift: bool) -> Self {
         match self {
@@ -125,29 +125,29 @@ impl Colet {
         let quiet = |reason: Option<&'static str>| if some { reason } else { reason.map(|_| "") };
         // Several open as files in their apps, the folders among them passed over.
         let open_off = match entries.len() {
-            0 => quiet(Some(ONE_ITEM)),
+            0 => quiet(Some(one_item())),
             1 => None,
-            _ => entries.iter().all(|e| e.directory).then_some(NEEDS_FILE),
+            _ => entries.iter().all(|e| e.directory).then_some(needs_file()),
         };
         // From empty space, the folder column's own folder, narrowed as it is.
         let in_tab = match (entries.as_slice(), self.folder_here().filter(|_| !some)) {
             ([entry], _) => line(
                 "menu-open-tab",
                 "app-window",
-                words::OPEN_IN_NEW_TAB,
+                words::open_in_new_tab(),
                 Some("Ctrl+Enter"),
                 None,
                 FileCommand::OpenInTab(entry.path.clone()),
             ),
             (_, Some(folder)) => {
-                line("menu-open-tab", "app-window", words::OPEN_IN_NEW_TAB, Some("Ctrl+Enter"), None, FileCommand::OpenInTab(folder))
+                line("menu-open-tab", "app-window", words::open_in_new_tab(), Some("Ctrl+Enter"), None, FileCommand::OpenInTab(folder))
             }
             _ => {
-                let off = if some { ONE_ITEM } else { NEEDS_FOLDER };
+                let off = if some { one_item() } else { needs_folder() };
                 line(
                     "menu-open-tab",
                     "app-window",
-                    words::OPEN_IN_NEW_TAB,
+                    words::open_in_new_tab(),
                     Some("Ctrl+Enter"),
                     Some(off),
                     FileCommand::OpenInTab(Default::default()),
@@ -167,7 +167,7 @@ impl Colet {
             ..line(
                 "menu-send-to",
                 "send",
-                words::SEND_TO,
+                words::send_to(),
                 None,
                 quiet(reasons.send_to),
                 FileCommand::SendTo { target: PathBuf::new(), shift: false },
@@ -175,17 +175,17 @@ impl Colet {
         }
         .grouped();
         let mut lines = vec![
-            line("menu-open", "external-link", words::OPEN, Some("Enter"), open_off, FileCommand::Open),
+            line("menu-open", "external-link", words::open(), Some("Enter"), open_off, FileCommand::Open),
             in_tab,
-            line("menu-explorer", "folder-open", words::SHOW_IN_EXPLORER, None, reasons.explorer, FileCommand::Explorer),
+            line("menu-explorer", "folder-open", words::show_in_explorer(), None, reasons.explorer, FileCommand::Explorer),
             send_to,
-            line("menu-copy", "copy", words::COPY, Some("Ctrl+C"), quiet(reasons.copy), FileCommand::Copy).grouped(),
-            line("menu-cut", "scissors", words::CUT, Some("Ctrl+X"), quiet(reasons.cut), FileCommand::Cut),
-            line("menu-paste", "clipboard-paste", words::PASTE, Some("Ctrl+V"), reasons.paste, FileCommand::Paste),
-            line("menu-copy-path", "link", words::COPY_PATH, Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath),
-            line("menu-rename", "pencil-line", words::RENAME, Some("F2"), quiet(reasons.rename), FileCommand::Rename).grouped(),
-            line("menu-new-folder", "folder-plus", words::NEW_FOLDER, Some("Ctrl+Shift+N"), reasons.paste, FileCommand::NewFolder),
-            line("menu-recycle", "trash", words::RECYCLE, Some("Delete"), quiet(reasons.delete), FileCommand::Recycle),
+            line("menu-copy", "copy", words::copy(), Some("Ctrl+C"), quiet(reasons.copy), FileCommand::Copy).grouped(),
+            line("menu-cut", "scissors", words::cut(), Some("Ctrl+X"), quiet(reasons.cut), FileCommand::Cut),
+            line("menu-paste", "clipboard-paste", words::paste(), Some("Ctrl+V"), reasons.paste, FileCommand::Paste),
+            line("menu-copy-path", "link", words::copy_path(), Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath),
+            line("menu-rename", "pencil-line", words::rename(), Some("F2"), quiet(reasons.rename), FileCommand::Rename).grouped(),
+            line("menu-new-folder", "folder-plus", words::new_folder(), Some("Ctrl+Shift+N"), reasons.paste, FileCommand::NewFolder),
+            line("menu-recycle", "trash", words::recycle(), Some("Delete"), quiet(reasons.delete), FileCommand::Recycle),
         ];
         if one && entries[0].directory {
             let path = entries[0].path.clone();
@@ -194,7 +194,7 @@ impl Colet {
                 line(
                     "menu-favorite",
                     if favorite { "star-fill" } else { "star" },
-                    if favorite { words::REMOVE_FAVORITE } else { words::ADD_FAVORITE },
+                    if favorite { words::remove_favorite() } else { words::add_favorite() },
                     Some("Ctrl+D"),
                     None,
                     FileCommand::Favorite(path),
@@ -203,10 +203,10 @@ impl Colet {
             );
         }
         lines.push(
-            line("menu-properties", "info", words::PROPERTIES, Some("Alt+Enter"), quiet(reasons.properties), FileCommand::Properties)
+            line("menu-properties", "info", words::properties(), Some("Alt+Enter"), quiet(reasons.properties), FileCommand::Properties)
                 .grouped(),
         );
-        lines.push(line("menu-windows", "ellipsis", words::MORE_OPTIONS, None, reasons.shell, FileCommand::Windows));
+        lines.push(line("menu-windows", "ellipsis", words::more_options(), None, reasons.shell, FileCommand::Windows));
         lines
     }
 

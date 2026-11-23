@@ -255,15 +255,15 @@ impl Render for HistoryPanel {
                     .items_center()
                     .border_b_1()
                     .border_color(p.border)
-                    .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child(words::history::TITLE))
+                    .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child(words::history::title()))
                     .child(
-                        keep_focus(push("clear-history", words::history::CLEAR, false, clearable).ghost().small()).on_click(
+                        keep_focus(push("clear-history", words::history::clear(), false, clearable).ghost().small()).on_click(
                             cx.listener(|this, _, _, cx| this.operations.update(cx, |operations, cx| operations.clear_history(cx))),
                         ),
                     ),
             )
             .child(if entries.is_empty() {
-                div().p_4().text_xs().text_color(p.text_muted).child(words::history::EMPTY).into_any_element()
+                div().p_4().text_xs().text_color(p.text_muted).child(words::history::empty()).into_any_element()
             } else {
                 div().id("history-list").flex_1().overflow_y_scroll().children(entries).into_any_element()
             })
@@ -287,7 +287,7 @@ impl Colet {
         let p = cx.palette();
         let operations = self.operations.read(cx);
         let (unseen, running) = (operations.history.unseen, operations.is_running());
-        let label = if unseen > 0 { words::history::title_with_problems(unseen) } else { words::history::TITLE.to_owned() };
+        let label = if unseen > 0 { words::history::title_with_problems(unseen) } else { words::history::title().to_owned() };
         let button = Button::new("history-button")
             .ghost()
             .xsmall()

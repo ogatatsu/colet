@@ -276,7 +276,7 @@ impl RenderOnce for TabBar {
             .items_center()
             .bg(p.tab_strip)
             .role(Role::TabList)
-            .aria_label(words::TAB)
+            .aria_label(words::tab())
             // The selected tab paints over this line to join the toolbar below.
             .child(div().absolute().left_0().right_0().bottom_0().h(metrics::HAIRLINE).bg(p.border))
             .child(
@@ -292,7 +292,7 @@ impl RenderOnce for TabBar {
                     .children(cells),
             )
             .child(
-                tab_button(p, radius, "new-tab", "plus", words::NEW_TAB, words::tabs::NEW_TAB_KEY)
+                tab_button(p, radius, "new-tab", "plus", words::new_tab(), words::tabs::new_tab_key())
                     .small()
                     .ml(scaled(NEW_TAB_GAP))
                     .size(scaled(NEW_TAB_BUTTON))
@@ -373,12 +373,14 @@ impl Tab<'_> {
                 p.text_muted
             }))
             .child(div().flex_1().min_w_0().truncate().child(name.clone()))
-            .child(tab_button(p, radius, ("tab-close", id as usize), "x", words::CLOSE_TAB, words::tabs::CLOSE_TAB_KEY).xsmall().on_click(
-                move |_, _, cx| {
-                    cx.stop_propagation();
-                    ask(&closing, TabStripEvent::Close(id), cx);
-                },
-            ))
+            .child(
+                tab_button(p, radius, ("tab-close", id as usize), "x", words::close_tab(), words::tabs::close_tab_key()).xsmall().on_click(
+                    move |_, _, cx| {
+                        cx.stop_propagation();
+                        ask(&closing, TabStripEvent::Close(id), cx);
+                    },
+                ),
+            )
             .on_click(move |_, _, cx| ask(&selecting, TabStripEvent::Select(id), cx))
             .on_mouse_down(MouseButton::Middle, move |_, _, cx| {
                 cx.stop_propagation();

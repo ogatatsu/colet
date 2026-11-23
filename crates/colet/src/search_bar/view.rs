@@ -32,8 +32,8 @@ impl Colet {
                 .ghost()
                 .xsmall()
                 .icon(glyph("x"))
-                .accessibility_label(words::CLEAR_SEARCH)
-                .tooltip(words::search::CLEAR_KEY)
+                .accessibility_label(words::clear_search())
+                .tooltip(words::search::clear_key())
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.clear_search(window, cx);
                     this.focus_search(window, cx);
@@ -165,7 +165,7 @@ impl Colet {
                         .hover(|d| d.bg(p.hover))
                         .tip_while_shut(self.filter_open(), words::search::filter_tip(&label))
                         .child(icon("funnel", metrics::GLYPH, if on { p.accent } else { p.text_muted }))
-                        .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| words::search::FILTER.into())))
+                        .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| words::search::filter().into())))
                         .child(icon("chevron-down", metrics::GLYPH, p.text_faint))
                         .map(|d| Self::opener(d, Self::filter_open, cx))
                         .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
@@ -177,7 +177,7 @@ impl Colet {
                         })),
                 ),
             )
-            .when_some(self.menu_element("search-filter-menu", words::SEARCH_FILTER, cx).filter(|_| self.filter_open()), |d, menu| {
+            .when_some(self.menu_element("search-filter-menu", words::search_filter(), cx).filter(|_| self.filter_open()), |d, menu| {
                 d.child(drop_down(menu, MenuSide::Left, 200., Some(320.), self.scale()))
             })
             .into_any_element()
@@ -198,10 +198,10 @@ impl Colet {
             .text_xs()
             .text_color(p.text_muted)
             .child(icon("search", 28., p.text_faint))
-            .child(words::search::HINT)
+            .child(words::search::hint())
             // Ringed as a field is; the rings' room makes up most of the gaps. In a narrow window they go on
             // to a second line rather than past the edges.
-            .child(div().flex().flex_wrap().justify_center().gap_0p5().children(words::search::EXAMPLES.map(|(query, label)| {
+            .child(div().flex().flex_wrap().justify_center().gap_0p5().children(words::search::examples().map(|(query, label)| {
                 let button = Button::new(query)
                     .outline()
                     .accessibility_label(format!("{query} {label}"))

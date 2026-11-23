@@ -71,7 +71,7 @@ impl Colet {
             .and_then(|name| self.stored.settings().filters.iter().find(|f| f.name == name))
             .cloned()
             .unwrap_or_default();
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder(words::search::FILTER_NAME_PLACEHOLDER).default_value(found.name));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(words::search::filter_name_placeholder()).default_value(found.name));
         let query = cx.new(|cx| InputState::new(window, cx).placeholder("ext:jpg;png;gif").default_value(found.query));
         self.begin_dialog(window, cx);
         for input in [&name, &query] {
@@ -94,7 +94,7 @@ impl Colet {
         if name.is_empty() || edit.query.read(cx).value().trim().is_empty() {
             Some("")
         } else if edit.original.as_deref() != Some(name.as_str()) && self.stored.settings().filter_query(&name).is_some() {
-            Some(words::search::FILTER_EXISTS)
+            Some(words::search::filter_exists())
         } else {
             None
         }
@@ -222,7 +222,7 @@ impl Colet {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, words::NAME))
+                    .child(label(p, words::name()))
                     .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
                     .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                         d.child(div().text_xs().text_color(p.danger).child(problem))
@@ -233,22 +233,22 @@ impl Colet {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, words::QUERY))
+                    .child(label(p, words::query()))
                     .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
-                    .child(div().text_xs().text_color(p.text_faint).child(words::search::FILTER_QUERY_HINT)),
+                    .child(div().text_xs().text_color(p.text_faint).child(words::search::filter_query_hint())),
             );
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
+                push("cancel", words::cancel(), false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
             ),
             (
                 "save-filter",
-                push("save-filter", words::SAVE, true, problem.is_none())
+                push("save-filter", words::save(), true, problem.is_none())
                     .on_click(cx.listener(|this, _, window, cx| this.submit_filter(window, cx))),
             ),
         ];
-        (if edit.original.is_none() { words::search::ADD_FILTER } else { words::search::EDIT_FILTER }, content, buttons)
+        (if edit.original.is_none() { words::search::add_filter() } else { words::search::edit_filter() }, content, buttons)
     }
 
     /// Whether the search filter `name` is to go.
@@ -260,22 +260,22 @@ impl Colet {
             .flex_col()
             .gap_2()
             .text_sm()
-            .child(words::search::delete_filter(name))
+            .child(words::search::ask_delete_filter(name))
             .when(users > 0, |d| d.child(div().text_xs().text_color(p.text_muted).child(words::search::filter_users(users))));
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
+                push("cancel", words::cancel(), false, true).on_click(cx.listener(|this, _, window, cx| this.back_to_filters(window, cx))),
             ),
             (
                 "delete-filter",
                 // Destructive: drawn as danger, not as the primary commit.
-                push("delete-filter", words::DELETE, false, true)
+                push("delete-filter", words::delete(), false, true)
                     .danger()
                     .on_click(cx.listener(|this, _, window, cx| this.delete_filter(window, cx))),
             ),
         ];
-        (words::search::DELETE_FILTER, content, buttons)
+        (words::search::delete_filter(), content, buttons)
     }
 
     /// The search filters, in their order.
@@ -317,7 +317,7 @@ impl Colet {
                                     .min_w_0()
                                     .child(div().truncate().text_sm().child(f.name.clone()))
                                     .when(is_default, |d| {
-                                        d.child(div().flex_none().text_xs().text_color(p.text_muted).child(words::DEFAULT))
+                                        d.child(div().flex_none().text_xs().text_color(p.text_muted).child(words::default()))
                                     }),
                             )
                             .child(
@@ -379,9 +379,9 @@ impl Colet {
             })
             .collect();
         let content =
-            div().flex().flex_col().gap_2().child(div().text_xs().text_color(p.text_muted).child(words::search::FILTERS_ABOUT)).child(
+            div().flex().flex_col().gap_2().child(div().text_xs().text_color(p.text_muted).child(words::search::filters_about())).child(
                 if rows.is_empty() {
-                    div().py_2().text_xs().text_color(p.text_faint).child(words::search::NO_FILTERS).into_any_element()
+                    div().py_2().text_xs().text_color(p.text_faint).child(words::search::no_filters()).into_any_element()
                 } else {
                     div().flex().flex_col().children(rows).into_any_element()
                 },
@@ -389,15 +389,16 @@ impl Colet {
         let buttons = vec![
             (
                 "add-filter",
-                push("add-filter", words::search::ADD, false, true)
+                push("add-filter", words::search::add(), false, true)
                     .on_click(cx.listener(|this, _, window, cx| this.edit_filter(None, window, cx))),
             ),
             (
                 "close-filters",
-                push("close-filters", words::CLOSE, true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("close-filters", words::close(), true, true)
+                    .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
         ];
-        (words::SEARCH_FILTER, content, buttons)
+        (words::search_filter(), content, buttons)
     }
 }
 
@@ -429,10 +430,10 @@ impl Colet {
     pub(crate) fn filter_lines(&self, cx: &App) -> Vec<Line> {
         let chosen = self.chosen_filter(cx);
         let chosen = chosen.as_deref();
-        let mut lines = vec![choice("filter-none", words::NONE, FilterCommand::Choose(None), chosen.is_none())];
+        let mut lines = vec![choice("filter-none", words::none(), FilterCommand::Choose(None), chosen.is_none())];
         let default = self.stored.settings().default_filter.as_deref();
         lines.extend(self.stored.settings().filters.iter().map(|f| Line {
-            hint: (default == Some(f.name.as_str())).then_some(words::DEFAULT),
+            hint: (default == Some(f.name.as_str())).then_some(words::default()),
             ..choice(
                 filter_tool_id("filter", &f.name),
                 f.name.clone(),
@@ -440,7 +441,7 @@ impl Colet {
                 chosen == Some(f.name.as_str()),
             )
         }));
-        lines.push(line("edit-filters", "pencil-line", words::search::EDIT_FILTERS, None, None, FilterCommand::Edit).grouped());
+        lines.push(line("edit-filters", "pencil-line", words::search::edit_filters(), None, None, FilterCommand::Edit).grouped());
         lines
     }
 

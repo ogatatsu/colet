@@ -36,7 +36,7 @@ impl Colet {
     pub(crate) fn shortcuts_dialog(&mut self, cx: &mut Context<Self>) -> DialogParts {
         let p = cx.palette();
         // One by one: an array of them all would lie whole on the stack, past what a debug build has.
-        let content = div().flex().flex_col().gap_3().text_xs().children(words::shortcuts::SHORTCUTS.iter().map(|&(heading, keys)| {
+        let content = div().flex().flex_col().gap_3().text_xs().children(words::shortcuts::shortcuts().iter().map(|&(heading, keys)| {
             div().flex().flex_col().gap_1().child(label(p, heading)).children(keys.iter().map(|&(key, what)| {
                 div()
                     .flex()
@@ -49,8 +49,8 @@ impl Colet {
         }));
         let buttons = vec![(
             "close-shortcuts",
-            push("close-shortcuts", words::CLOSE, true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+            push("close-shortcuts", words::close(), true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
         )];
-        (words::shortcuts::KEYS, content, buttons)
+        (words::shortcuts::keys(), content, buttons)
     }
 }

@@ -33,7 +33,7 @@ impl EventEmitter<SearchEvent> for SearchBar {}
 
 impl SearchBar {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let field = cx.new(|cx| InputState::new(window, cx).placeholder(words::search::PLACEHOLDER));
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder(words::search::placeholder()));
         let typed = cx.subscribe_in(&field, window, |_: &mut Self, input, event, _, cx| match event {
             InputEvent::Change => cx.emit(SearchEvent::Typed(input.read(cx).value().to_string())),
             InputEvent::PressEnter { .. } => cx.emit(SearchEvent::Leave),

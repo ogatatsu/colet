@@ -76,7 +76,7 @@ pub fn title(state: &State, settings: &Settings) -> Title {
 fn column_title(state: &State, index: usize) -> (String, String) {
     let c = &state.columns[index];
     match c.kind {
-        Kind::Home => (words::HOME.into(), words::HOME.into()),
+        Kind::Home => (words::home().into(), words::home().into()),
         Kind::Search => {
             let name = state.query.clone();
             let tip = match state.search_filter.as_deref() {
@@ -391,13 +391,13 @@ impl Colet {
         let count = self.tabs.len();
         let reopen = self.can_reopen_tab();
         vec![
-            line("tab-close", "x", words::CLOSE, Some("Ctrl+W"), None, TabCommand::Close(tab)),
-            plain("tab-close-others", words::tabs::CLOSE_OTHERS, "", count > 1, TabCommand::CloseOthers(tab)),
-            plain("tab-close-right", words::tabs::CLOSE_RIGHT, "", at + 1 < count, TabCommand::CloseRight(tab)),
-            line("tab-duplicate", "copy", words::tabs::DUPLICATE, None, None, TabCommand::Duplicate(tab)).grouped(),
+            line("tab-close", "x", words::close(), Some("Ctrl+W"), None, TabCommand::Close(tab)),
+            plain("tab-close-others", words::tabs::close_others(), "", count > 1, TabCommand::CloseOthers(tab)),
+            plain("tab-close-right", words::tabs::close_right(), "", at + 1 < count, TabCommand::CloseRight(tab)),
+            line("tab-duplicate", "copy", words::tabs::duplicate(), None, None, TabCommand::Duplicate(tab)).grouped(),
             Line {
                 off: (!reopen).then_some(""),
-                ..line("tab-reopen", "rotate-ccw", words::REOPEN_TAB, Some("Ctrl+Shift+T"), None, TabCommand::Reopen)
+                ..line("tab-reopen", "rotate-ccw", words::reopen_tab(), Some("Ctrl+Shift+T"), None, TabCommand::Reopen)
             },
         ]
     }

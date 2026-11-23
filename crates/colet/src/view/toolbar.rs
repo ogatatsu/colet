@@ -14,19 +14,19 @@ impl Colet {
         let filter_button = self.filter_button(window, cx);
         let search_box = self.render_search_box(window, cx);
         let address = self.render_address(window, cx);
-        let back = Self::icon_button("back", "arrow-left", words::window::BACK, words::window::BACK_KEY, back)
+        let back = Self::icon_button("back", "arrow-left", words::window::back(), words::window::back_key(), back)
             .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)));
         let back = self.ringed(back, "back", RingAt::Edge, window, cx);
-        let forward = Self::icon_button("forward", "arrow-right", words::window::FORWARD, words::window::FORWARD_KEY, forward)
+        let forward = Self::icon_button("forward", "arrow-right", words::window::forward(), words::window::forward_key(), forward)
             .on_click(cx.listener(|this, _, window, cx| this.forward(window, cx)));
         let forward = self.ringed(forward, "forward", RingAt::Edge, window, cx);
-        let refresh = Self::icon_button("refresh", "refresh-cw", words::REFRESH, words::window::REFRESH_KEY, true)
+        let refresh = Self::icon_button("refresh", "refresh-cw", words::refresh(), words::window::refresh_key(), true)
             .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)));
         let refresh = self.ringed(refresh, "refresh", RingAt::Edge, window, cx);
-        let preferences = Self::icon_button("preferences", "sliders-horizontal", words::SETTINGS, words::SETTINGS, true)
+        let preferences = Self::icon_button("preferences", "sliders-horizontal", words::settings(), words::settings(), true)
             .on_click(cx.listener(|this, _, window, cx| this.open_preferences(window, cx)));
         let preferences = self.ringed(preferences, "preferences", RingAt::Edge, window, cx);
-        let shortcuts = Self::icon_button("shortcuts", "keyboard", words::shortcuts::KEYS, words::shortcuts::KEYS_KEY, true)
+        let shortcuts = Self::icon_button("shortcuts", "keyboard", words::shortcuts::keys(), words::shortcuts::keys_key(), true)
             .on_click(cx.listener(|this, _, window, cx| this.open_shortcuts(window, cx)));
         let shortcuts = self.ringed(shortcuts, "shortcuts", RingAt::Edge, window, cx);
         div()

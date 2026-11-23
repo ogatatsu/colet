@@ -348,9 +348,9 @@ impl Colet {
     /// the dialog's (ten and up) to be drawn in front of it as it is clicked in front of it.
     pub fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (at, id, label, width) = match self.overlays.popup()? {
-            Popup::File(menu) => (menu.at, "menu", words::menu::FILE, FILE_MENU_WIDTH),
-            Popup::Text(menu) => (menu.at, "text-menu", words::EDIT, TEXT_MENU_WIDTH),
-            Popup::Tab { at, .. } => (*at, "tab-menu", words::TAB, TAB_MENU_WIDTH),
+            Popup::File(menu) => (menu.at, "menu", words::menu::file(), FILE_MENU_WIDTH),
+            Popup::Text(menu) => (menu.at, "text-menu", words::edit(), TEXT_MENU_WIDTH),
+            Popup::Tab { at, .. } => (*at, "tab-menu", words::tab(), TAB_MENU_WIDTH),
             _ => return None,
         };
         let menu = self.menu_element(id, label, cx)?;

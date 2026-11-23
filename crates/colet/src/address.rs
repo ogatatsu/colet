@@ -52,7 +52,7 @@ impl EventEmitter<AddressEvent> for AddressBar {}
 impl AddressBar {
     /// Enter in the field goes to what is typed, in this tab.
     pub fn new(backend: backend::Shared, owner: Owner, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let field = cx.new(|cx| InputState::new(window, cx).placeholder(words::address::PLACEHOLDER));
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder(words::address::placeholder()));
         let typed = cx.subscribe_in(&field, window, |this: &mut Self, _, event, _, cx| match event {
             InputEvent::PressEnter { .. } => this.go(false, cx),
             // What was asked for is no longer what the field holds.

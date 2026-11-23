@@ -75,19 +75,19 @@ impl Colet {
             .gap_2()
             .text_sm()
             .child(words::ops::open_many(count))
-            .child(div().text_xs().text_color(p.text_muted).child(words::ops::OPEN_MANY_HINT));
+            .child(div().text_xs().text_color(p.text_muted).child(words::ops::open_many_hint()));
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("cancel", words::cancel(), false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
             // It takes the keys as the dialog opens, so Enter goes on as it was pressed to open them; its
             // stop is the one opening the dialog sends them to.
             (
                 "confirm-open",
-                push("confirm-open", words::OPEN, true, true).on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx))),
+                push("confirm-open", words::open(), true, true).on_click(cx.listener(|this, _, window, cx| this.confirm_open(window, cx))),
             ),
         ];
-        (words::OPEN, content, buttons)
+        (words::open(), content, buttons)
     }
 }

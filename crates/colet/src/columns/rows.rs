@@ -313,7 +313,7 @@ impl Colet {
                 r.child(
                     div()
                         .id(row_part_id(&id, "held"))
-                        .tip(if cut { words::column::BEING_CUT } else { words::column::BEING_COPIED })
+                        .tip(if cut { words::column::being_cut() } else { words::column::being_copied() })
                         .child(icon(
                             if cut { "scissors" } else { "copy" },
                             12.,
@@ -373,7 +373,7 @@ impl Colet {
             .mr_neg_2()
             .pr_2()
             .role(Role::CheckBox)
-            .aria_label(words::SELECT)
+            .aria_label(words::select())
             .aria_toggled(if selected { Toggled::True } else { Toggled::False })
             .child(picture.when(boxed, |d| d.invisible()).group_hover(CHECK_GROUP, |s| s.invisible()))
             .child(

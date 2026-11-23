@@ -49,7 +49,7 @@ impl Colet {
                 Choice::new(("theme", theme as usize), theme.label(), Stop::Theme(theme), chosen, pick)
             })
             .collect();
-        let themes = self.radio_group("themes", words::THEME, themes, window, cx);
+        let themes = self.radio_group("themes", words::theme(), themes, window, cx);
         let zooms = ZOOMS
             .into_iter()
             .map(|zoom| {
@@ -58,14 +58,14 @@ impl Colet {
                 Choice::new(("zoom", zoom as usize), format!("{zoom}%"), Stop::Zoom(zoom), chosen, pick)
             })
             .collect();
-        let zooms = self.radio_group("zooms", words::DISPLAY_SIZE, zooms, window, cx);
+        let zooms = self.radio_group("zooms", words::display_size(), zooms, window, cx);
         let content = div()
             .flex()
             .flex_col()
             .gap_3()
             // Taken at once as one is picked, and kept.
-            .child(div().flex().flex_col().gap_1().child(label(p, words::THEME)).child(themes))
-            .child(div().flex().flex_col().gap_1().child(label(p, words::DISPLAY_SIZE)).child(zooms))
+            .child(div().flex().flex_col().gap_1().child(label(p, words::theme())).child(themes))
+            .child(div().flex().flex_col().gap_1().child(label(p, words::display_size())).child(zooms))
             // Taken at once, as the theme is. The protected items hang off the hidden ones: they count only
             // while those show, so they are set only then, and keep what was chosen meanwhile.
             .child({
@@ -75,8 +75,8 @@ impl Colet {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, words::preferences::SHOW))
-                    .child(Checkbox::new("show-hidden").label(words::preferences::SHOW_HIDDEN).checked(settings.show_hidden).on_click(
+                    .child(label(p, words::preferences::show()))
+                    .child(Checkbox::new("show-hidden").label(words::preferences::show_hidden()).checked(settings.show_hidden).on_click(
                         move |_, _, cx| {
                             hidden.update(cx, |this, cx| this.toggle_hidden(cx)).ok();
                         },
@@ -84,7 +84,7 @@ impl Colet {
                     .child(
                         div().pl_6().child(
                             Checkbox::new("show-protected")
-                                .label(words::preferences::SHOW_PROTECTED)
+                                .label(words::preferences::show_protected())
                                 .checked(settings.show_protected)
                                 .disabled(!settings.show_hidden)
                                 .on_click(move |_, _, cx| {
@@ -95,8 +95,9 @@ impl Colet {
             });
         let buttons = vec![(
             "close-preferences",
-            push("close-preferences", words::CLOSE, true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+            push("close-preferences", words::close(), true, true)
+                .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
         )];
-        (words::SETTINGS, content, buttons)
+        (words::settings(), content, buttons)
     }
 }

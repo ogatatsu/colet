@@ -60,7 +60,7 @@ fn shows_the_properties_of_results_from_several_folders_together(cx: &mut TestAp
         cx.notify();
     });
     settle(cx);
-    assert_eq!(ui.read_app(cx, |v, app| v.reasons(app).properties), Some(crate::ops::NEEDS_FOLDER));
+    assert_eq!(ui.read_app(cx, |v, app| v.reasons(app).properties), Some(crate::ops::needs_folder()));
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.act(cx, |window, cx| window.right_click(("column", results), cx));
     settle(cx);

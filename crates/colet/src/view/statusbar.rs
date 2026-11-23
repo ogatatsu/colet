@@ -10,10 +10,10 @@ impl Colet {
         let active = &self.state.columns[self.state.active];
         let place = match active.kind {
             Kind::Folder => shown(&active.path),
-            Kind::Search if active.error.is_some() => words::status::CANNOT_SEARCH.into(),
-            Kind::Search if active.unread() => words::status::SEARCHING.into(),
-            Kind::Search => words::SEARCH_RESULTS.into(),
-            Kind::Home => words::HOME.into(),
+            Kind::Search if active.error.is_some() => words::status::cannot_search().into(),
+            Kind::Search if active.unread() => words::status::searching().into(),
+            Kind::Search => words::search_results().into(),
+            Kind::Home => words::home().into(),
         };
         // What a filter hides is not counted, nor acted on.
         let shown_selected = active.shown_selected();
@@ -25,7 +25,7 @@ impl Colet {
         let detail = match picked {
             _ if shown_selected.len() > 1 => words::status::selected(shown_selected.len()),
             Some(entry) => {
-                let what = if entry.directory { words::FOLDER.into() } else { time::size(entry.size) };
+                let what = if entry.directory { words::folder().into() } else { time::size(entry.size) };
                 match entry.modified.and_then(time::date_time) {
                     Some(when) => words::status::with_time(&what, when),
                     None => what,

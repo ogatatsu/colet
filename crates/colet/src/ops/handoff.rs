@@ -37,7 +37,7 @@ impl Colet {
         let (mut picked, refused) = (self.picked(), self.reasons(cx).properties);
         self.take_menu();
         if let Some(reason) = refused {
-            self.refuse(words::PROPERTIES, reason, cx);
+            self.refuse(words::properties(), reason, cx);
             return;
         }
         if picked.is_empty() {
@@ -77,9 +77,9 @@ impl Colet {
             if let Err(error) = task.await {
                 let said = match error.code() {
                     // The items are not all in one folder.
-                    code if code == windows::Win32::Foundation::E_INVALIDARG => words::reasons::SAME_FOLDER.to_string(),
+                    code if code == windows::Win32::Foundation::E_INVALIDARG => words::reasons::same_folder().to_string(),
                     // A command from the menu before is still running, as a dialog it opened.
-                    code if code == colet_core::shell::MENU_BUSY => words::ops::MENU_BUSY.to_string(),
+                    code if code == colet_core::shell::MENU_BUSY => words::ops::menu_busy().to_string(),
                     code => words::windows_failure(code),
                 };
                 this.update(cx, |this, cx| this.notify(said, Tone::Error, cx)).ok();
@@ -99,7 +99,7 @@ impl Colet {
             return;
         }
         if let Some(reason) = refused {
-            self.refuse(words::SEND_TO, reason, cx);
+            self.refuse(words::send_to(), reason, cx);
             return;
         }
         let paths: Vec<PathBuf> = picked.iter().map(|p| HomeKey::on_disk(p).into_owned()).collect();

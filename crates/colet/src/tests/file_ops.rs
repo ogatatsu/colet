@@ -414,7 +414,7 @@ fn shows_a_folder_columns_own_folder_in_explorer_from_its_empty_space(cx: &mut T
     let results = ui.read(cx, |v| v.state.columns[1].id);
     ui.act(cx, |window, cx| window.right_click(("column", results), cx));
     settle(cx);
-    assert_eq!(explorer(&ui, cx), Some(crate::ops::NEEDS_FOLDER));
+    assert_eq!(explorer(&ui, cx), Some(crate::ops::needs_folder()));
 }
 
 #[gpui_kit::test]
@@ -442,7 +442,7 @@ fn shows_several_in_explorer_only_from_one_folder(cx: &mut TestAppContext) {
     ui.press(cx, "ctrl-a");
     assert_eq!(ui.selected(cx, 1).len(), 2);
     ui.press(cx, "shift-f10");
-    assert_eq!(explorer(&ui, cx), Some(crate::ops::SAME_FOLDER));
+    assert_eq!(explorer(&ui, cx), Some(crate::ops::same_folder()));
     ui.press(cx, "escape");
     assert!(fake.revealed.lock().unwrap().is_empty());
 }
@@ -489,7 +489,7 @@ fn opens_the_picked_files_together_from_enter_and_the_menu_passing_over_folders(
     assert_eq!(fake.opened.lock().unwrap().len(), opened);
     assert_eq!(ui.selected(cx, 1).len(), 2);
     ui.press(cx, "shift-f10");
-    assert_eq!(ui.read_app(cx, |v, app| v.menu_lines(app)[0].off), Some(crate::ops::NEEDS_FILE));
+    assert_eq!(ui.read_app(cx, |v, app| v.menu_lines(app)[0].off), Some(crate::ops::needs_file()));
 }
 
 #[gpui_kit::test]

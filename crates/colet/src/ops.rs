@@ -47,11 +47,11 @@ mod reasons;
 mod run;
 
 pub use history::{History, ItemStatus, Status};
-pub use reasons::{NEEDS_FILE, NEEDS_FOLDER, ONE_ITEM, Reasons};
+pub use reasons::{Reasons, needs_file, needs_folder, one_item};
 #[cfg(test)]
 pub use {
     open::ASK_TO_OPEN,
-    reasons::{NOT_AT_SERVER, SAME_FOLDER},
+    reasons::{not_at_server, same_folder},
 };
 
 /// How long the clipboard waits before it is read again, after another app held it.
@@ -264,7 +264,7 @@ impl Operations {
             entry.error = if counts.is_empty() { problem.clone() } else { None };
         }
         cx.notify();
-        let problem = if counts.is_empty() { problem } else { Some(counts.join(words::SEPARATOR)) };
+        let problem = if counts.is_empty() { problem } else { Some(counts.join(words::separator())) };
         if problem.is_some() {
             self.history.unseen += 1;
         }
@@ -338,8 +338,9 @@ impl Operations {
     fn write_clipboard(&mut self, work: impl FnOnce() -> Result<(), String> + Send + 'static, done: String, cx: &mut Context<Self>) {
         let (which, result) = self.clipboard.write(work);
         // A lane that stopped, as after a write panicked, never says.
-        let task =
-            cx.background_executor().spawn(async move { result.recv().unwrap_or_else(|_| Err(words::ops::CANNOT_WRITE_CLIPBOARD.into())) });
+        let task = cx
+            .background_executor()
+            .spawn(async move { result.recv().unwrap_or_else(|_| Err(words::ops::cannot_write_clipboard().into())) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {

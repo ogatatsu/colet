@@ -19,8 +19,8 @@ pub struct Reasons {
 }
 
 pub use crate::words::reasons::{
-    BUSY, NEEDS_FILE, NEEDS_FOLDER, NEEDS_SELECTION, NO_COPY_DRIVE, NO_COPY_SAVED, NO_SEND_DRIVE, NO_SEND_TARGETS, NOT_AT_HOME,
-    NOT_AT_SERVER, NOT_FOR_SAVED, ONE_ITEM, SAME_FOLDER,
+    busy, needs_file, needs_folder, needs_selection, no_copy_drive, no_copy_saved, no_send_drive, no_send_targets, not_at_home,
+    not_at_server, not_for_saved, one_item, same_folder,
 };
 
 impl Colet {
@@ -87,30 +87,30 @@ impl Colet {
         let apart = picked.first().map(|p| parent(p)).is_some_and(|first| picked.iter().any(|p| parent(p) != first));
 
         // What works on the items picked needs some, and not in home or a server's shares.
-        let item = none.then_some(NEEDS_SELECTION).or(at_home.then_some(NOT_AT_HOME)).or(at_server.then_some(NOT_AT_SERVER));
-        let busy = operations.is_running().then_some(BUSY);
+        let item = none.then_some(needs_selection()).or(at_home.then_some(not_at_home())).or(at_server.then_some(not_at_server()));
+        let busy = operations.is_running().then_some(busy());
         // What works on a place: with nothing picked, the folder column's own folder; else the items', all
         // in one folder.
-        let place = if none { self.folder_here().is_none().then_some(NEEDS_FOLDER) } else { apart.then_some(SAME_FOLDER) };
+        let place = if none { self.folder_here().is_none().then_some(needs_folder()) } else { apart.then_some(same_folder()) };
         Reasons {
-            copy: item.or(search.then_some(NO_COPY_SAVED)).or(drive.then_some(NO_COPY_DRIVE)),
+            copy: item.or(search.then_some(no_copy_saved())).or(drive.then_some(no_copy_drive())),
             cut: item,
-            paste: busy.or(at_server.then_some(NOT_AT_SERVER)).or_else(|| self.destination().is_none().then_some(NEEDS_FOLDER)),
+            paste: busy.or(at_server.then_some(not_at_server())).or_else(|| self.destination().is_none().then_some(needs_folder())),
             // One saved search picked alone can always be renamed.
-            rename: if picked.len() == 1 && search { None } else { busy.or(item).or((picked.len() != 1).then_some(ONE_ITEM)) },
+            rename: if picked.len() == 1 && search { None } else { busy.or(item).or((picked.len() != 1).then_some(one_item())) },
             delete: busy.or(item),
             explorer: place,
-            shell: search.then_some(NOT_FOR_SAVED).or(at_server.then_some(NOT_AT_SERVER)).or(place),
+            shell: search.then_some(not_for_saved()).or(at_server.then_some(not_at_server())).or(place),
             // With nothing picked, the folder column's own folder.
             copy_path: if none { place } else { None },
             // From several folders too, as a drag from them.
-            send_to: item.or(drive.then_some(NO_SEND_DRIVE)).or(operations.send_targets().is_empty().then_some(NO_SEND_TARGETS)),
+            send_to: item.or(drive.then_some(no_send_drive())).or(operations.send_targets().is_empty().then_some(no_send_targets())),
             // Only looked at: in home and while an operation runs too, and from several folders. With
             // nothing picked, the folder column's own folder, a server's not.
             properties: if none {
-                at_server.then_some(NOT_AT_SERVER).or(self.folder_here().is_none().then_some(NEEDS_FOLDER))
+                at_server.then_some(not_at_server()).or(self.folder_here().is_none().then_some(needs_folder()))
             } else {
-                search.then_some(NOT_FOR_SAVED)
+                search.then_some(not_for_saved())
             },
         }
     }

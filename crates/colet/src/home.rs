@@ -66,10 +66,10 @@ pub fn home_groups<'a>(settings: &Settings, entries: &'a [std::sync::Arc<Entry>]
     let search = |e: &&Entry| !pinned(e) && HomeKey::of(&e.path).is_search();
     let entries = || entries.iter().map(|e| &**e);
     [
-        (words::home::PINNED, entries().filter(pinned).collect::<Vec<_>>()),
-        (words::home::FAVORITES, entries().filter(favorite).collect()),
-        (words::home::SAVED_SEARCHES, entries().filter(search).collect()),
-        (words::home::PLACES, entries().filter(|e| !pinned(e) && !favorite(e) && !search(e)).collect()),
+        (words::home::pinned(), entries().filter(pinned).collect::<Vec<_>>()),
+        (words::home::favorites(), entries().filter(favorite).collect()),
+        (words::home::saved_searches(), entries().filter(search).collect()),
+        (words::home::places(), entries().filter(|e| !pinned(e) && !favorite(e) && !search(e)).collect()),
     ]
     .into_iter()
     .filter(|(_, rows)| !rows.is_empty())
@@ -518,7 +518,7 @@ impl Colet {
     /// others.
     pub fn toggle_saved(&mut self, query: &str, filter: Option<String>, narrow: Option<String>, order: Order, cx: &mut Context<Self>) {
         if query.trim().is_empty() {
-            self.notify(words::home::QUERY_NEEDED, Tone::Info, cx);
+            self.notify(words::home::query_needed(), Tone::Info, cx);
             return;
         }
         let found = self.stored.settings().saved(query, filter.as_deref(), narrow.as_deref(), order).cloned();
@@ -553,7 +553,7 @@ impl Colet {
             let key = self.favorite_key_of(self.state.active);
             self.toggle_favorite(&key, cx);
         } else {
-            self.notify(words::home::SAVE_WHERE, Tone::Info, cx);
+            self.notify(words::home::save_where(), Tone::Info, cx);
         }
     }
 
@@ -585,7 +585,7 @@ impl Colet {
         self.begin_dialog(window, cx);
         let name = self.edit_field(found.name.clone(), found.query.clone(), Self::submit_edit, window, cx);
         let query = self.edit_field(found.query.clone(), String::new(), Self::submit_edit, window, cx);
-        let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), words::NONE.into(), Self::submit_edit, window, cx);
+        let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), words::none().into(), Self::submit_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
         let (filter, order) = (found.filter.clone(), found.order);
         self.overlays.set_dialog(Dialog::EditSearch(SearchEdit { original: found, name, query, filter, narrow, order }));
@@ -629,7 +629,7 @@ impl Colet {
         } else if edited.key() != original.key()
             && self.stored.settings().saved(&edited.query, edited.filter.as_deref(), edited.narrow.as_deref(), edited.order).is_some()
         {
-            Some(words::home::SEARCH_SAVED_ALREADY)
+            Some(words::home::search_saved_already())
         } else {
             None
         }
@@ -666,7 +666,8 @@ impl Colet {
         self.take_menu();
         self.begin_dialog(window, cx);
         let name = self.edit_field(found.name.clone(), shown(folder_name(&found.path)), Self::submit_favorite_edit, window, cx);
-        let narrow = self.edit_field(found.narrow.clone().unwrap_or_default(), words::NONE.into(), Self::submit_favorite_edit, window, cx);
+        let narrow =
+            self.edit_field(found.narrow.clone().unwrap_or_default(), words::none().into(), Self::submit_favorite_edit, window, cx);
         name.update(cx, |input, cx| input.focus(window, cx));
         self.overlays.set_dialog(Dialog::EditFavorite { original: found, name, narrow });
         cx.notify();
@@ -687,7 +688,7 @@ impl Colet {
         let Some(Dialog::EditFavorite { original, .. }) = self.overlays.dialog() else { return None };
         let edited = self.edited_favorite(cx)?;
         let other = edited.narrow != original.narrow && self.stored.settings().favorite(&edited.path, edited.narrow.as_deref()).is_some();
-        other.then_some(words::home::FAVORITE_EXISTS)
+        other.then_some(words::home::favorite_exists())
     }
 
     pub fn submit_favorite_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -725,11 +726,11 @@ impl Colet {
             .flex()
             .flex_col()
             .gap_1()
-            .child(label(p, words::NARROWING))
+            .child(label(p, words::narrowing()))
             .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
             .child(match problem {
                 Some(problem) => div().text_xs().text_color(p.danger).child(problem),
-                None => div().text_xs().text_color(p.text_faint).child(words::home::NARROW_HINT),
+                None => div().text_xs().text_color(p.text_faint).child(words::home::narrow_hint()),
             })
     }
 
@@ -751,13 +752,13 @@ impl Colet {
         let by = Sort::ALL.into_iter().map(|by| (OrderChoice::By(by), words::sort_name(by))).collect();
         let direction = [false, true].into_iter().map(|d| (OrderChoice::Descending(d), words::direction(d))).collect();
         let folders =
-            vec![(OrderChoice::FoldersFirst(true), words::home::FOLDERS_FIRST), (OrderChoice::FoldersFirst(false), words::home::MIXED)];
+            vec![(OrderChoice::FoldersFirst(true), words::home::folders_first()), (OrderChoice::FoldersFirst(false), words::home::mixed())];
         let (by, direction, folders) = (
-            row("edit-search-sort", words::home::SORT_BY, by),
-            row("edit-search-direction", words::home::DIRECTION, direction),
-            row("edit-search-folders", words::home::FOLDERS, folders),
+            row("edit-search-sort", words::home::sort_by(), by),
+            row("edit-search-direction", words::home::direction(), direction),
+            row("edit-search-folders", words::home::folders(), folders),
         );
-        div().flex().flex_col().gap_1().child(label(p, words::SORT_ORDER)).child(by).child(direction).child(folders)
+        div().flex().flex_col().gap_1().child(label(p, words::sort_order())).child(by).child(direction).child(folders)
     }
 
     /// A favorite's name and narrowing.
@@ -782,23 +783,23 @@ impl Colet {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, words::NAME))
+                    .child(label(p, words::name()))
                     .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
-                    .child(div().text_xs().text_color(p.text_faint).child(words::home::FAVORITE_NAME_HINT)),
+                    .child(div().text_xs().text_color(p.text_faint).child(words::home::favorite_name_hint())),
             )
             .child(self.narrow_field(narrow, problem, window, cx));
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("cancel", words::cancel(), false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
             (
                 "save-favorite",
-                push("save-favorite", words::SAVE, true, problem.is_none())
+                push("save-favorite", words::save(), true, problem.is_none())
                     .on_click(cx.listener(|this, _, window, cx| this.submit_favorite_edit(window, cx))),
             ),
         ];
-        (words::home::EDIT_FAVORITE, content, buttons)
+        (words::home::edit_favorite(), content, buttons)
     }
 
     /// A saved search's name, query, filter, narrowing and order.
@@ -815,7 +816,7 @@ impl Colet {
         let filters = choices
             .into_iter()
             .map(|choice| {
-                let text = choice.clone().unwrap_or_else(|| words::NONE.into());
+                let text = choice.clone().unwrap_or_else(|| words::none().into());
                 let id = match &choice {
                     Some(name) => filter_tool_id("edit-search-filter", name),
                     None => "edit-search-filter-none".into(),
@@ -826,7 +827,7 @@ impl Colet {
                 Choice::new(id, text, Stop::EditSearchFilter(choice), is_chosen, pick)
             })
             .collect();
-        let filters = self.radio_group("edit-search-filters", words::SEARCH_FILTER, filters, window, cx);
+        let filters = self.radio_group("edit-search-filters", words::search_filter(), filters, window, cx);
         let content = div()
             .flex()
             .flex_col()
@@ -836,36 +837,36 @@ impl Colet {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, words::NAME))
+                    .child(label(p, words::name()))
                     .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
-                    .child(div().text_xs().text_color(p.text_faint).child(words::home::SEARCH_NAME_HINT)),
+                    .child(div().text_xs().text_color(p.text_faint).child(words::home::search_name_hint())),
             )
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, words::QUERY))
+                    .child(label(p, words::query()))
                     .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
                     .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
                         d.child(div().text_xs().text_color(p.danger).child(problem))
                     }),
             )
-            .child(div().flex().flex_col().gap_1().child(label(p, words::SEARCH_FILTER)).child(filters))
+            .child(div().flex().flex_col().gap_1().child(label(p, words::search_filter())).child(filters))
             .child(self.narrow_field(narrow, None, window, cx))
             .child(self.order_field(order, window, cx));
         let buttons = vec![
             (
                 "cancel",
-                push("cancel", words::CANCEL, false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+                push("cancel", words::cancel(), false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
             (
                 "save-search",
-                push("save-search", words::SAVE, true, problem.is_none())
+                push("save-search", words::save(), true, problem.is_none())
                     .on_click(cx.listener(|this, _, window, cx| this.submit_edit(window, cx))),
             ),
         ];
-        (words::home::EDIT_SEARCH, content, buttons)
+        (words::home::edit_search(), content, buttons)
     }
 }
 
@@ -887,47 +888,47 @@ impl Colet {
         let path = path.clone();
         // A row of home is pinned above the rest, or put back.
         let pin = if self.stored.settings().is_pinned(&path) {
-            line("menu-unpin", "pin-off", words::UNPIN, None, None, HomeCommand::Pin(path.clone()))
+            line("menu-unpin", "pin-off", words::unpin(), None, None, HomeCommand::Pin(path.clone()))
         } else {
-            line("menu-pin", "pin", words::PIN, None, None, HomeCommand::Pin(path.clone()))
+            line("menu-pin", "pin", words::pin(), None, None, HomeCommand::Pin(path.clone()))
         };
         let in_tab =
-            line("menu-open-tab", "app-window", words::OPEN_IN_NEW_TAB, Some("Ctrl+Enter"), None, FileCommand::OpenInTab(path.clone()));
+            line("menu-open-tab", "app-window", words::open_in_new_tab(), Some("Ctrl+Enter"), None, FileCommand::OpenInTab(path.clone()));
         if HomeKey::of(&path).is_search() {
             return vec![
-                line("menu-open", "external-link", words::OPEN, Some("Enter"), None, FileCommand::Open),
+                line("menu-open", "external-link", words::open(), Some("Enter"), None, FileCommand::Open),
                 in_tab,
-                line("menu-copy-query", "link", words::home::COPY_QUERY, Some("Ctrl+Shift+C"), None, FileCommand::CopyPath).grouped(),
-                line("menu-edit-search", "pencil-line", words::EDIT, Some("F2"), None, HomeCommand::EditSearch(path.clone())).grouped(),
+                line("menu-copy-query", "link", words::home::copy_query(), Some("Ctrl+Shift+C"), None, FileCommand::CopyPath).grouped(),
+                line("menu-edit-search", "pencil-line", words::edit(), Some("F2"), None, HomeCommand::EditSearch(path.clone())).grouped(),
                 pin,
-                line("menu-unsave", "star", words::UNSAVE_SEARCH, None, None, HomeCommand::Unsave(path)),
+                line("menu-unsave", "star", words::unsave_search(), None, None, HomeCommand::Unsave(path)),
             ];
         }
         let mut lines = vec![
-            line("menu-open", "external-link", words::OPEN, Some("Enter"), None, FileCommand::Open),
+            line("menu-open", "external-link", words::open(), Some("Enter"), None, FileCommand::Open),
             in_tab,
-            line("menu-explorer", "folder-open", words::SHOW_IN_EXPLORER, None, reasons.explorer, FileCommand::Explorer),
-            line("menu-copy-path", "link", words::COPY_PATH, Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath).grouped(),
+            line("menu-explorer", "folder-open", words::show_in_explorer(), None, reasons.explorer, FileCommand::Explorer),
+            line("menu-copy-path", "link", words::copy_path(), Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath).grouped(),
         ];
         // F2 on a favorite edits it: a place has nothing to edit, and its folder is not renamed from here.
         let favorite = self.stored.settings().is_favorite(&path);
         if favorite {
-            lines.push(line("menu-edit-favorite", "pencil-line", words::EDIT, Some("F2"), None, FileCommand::Rename));
+            lines.push(line("menu-edit-favorite", "pencil-line", words::edit(), Some("F2"), None, FileCommand::Rename));
         }
         lines.push(pin);
         lines.push(line(
             "menu-favorite",
             if favorite { "star-fill" } else { "star" },
-            if favorite { words::REMOVE_FAVORITE } else { words::ADD_FAVORITE },
+            if favorite { words::remove_favorite() } else { words::add_favorite() },
             Some("Ctrl+D"),
             None,
             FileCommand::Favorite(path),
         ));
         lines[4].group = true;
         lines.push(
-            line("menu-properties", "info", words::PROPERTIES, Some("Alt+Enter"), reasons.properties, FileCommand::Properties).grouped(),
+            line("menu-properties", "info", words::properties(), Some("Alt+Enter"), reasons.properties, FileCommand::Properties).grouped(),
         );
-        lines.push(line("menu-windows", "ellipsis", words::MORE_OPTIONS, None, reasons.shell, FileCommand::Windows));
+        lines.push(line("menu-windows", "ellipsis", words::more_options(), None, reasons.shell, FileCommand::Windows));
         lines
     }
 

@@ -197,7 +197,7 @@ impl State {
             self.columns.truncate(index + 1);
             self.active = self.active.min(index);
             if !departed_path(&child) {
-                self.notice = Some(words::column::CLOSED_RIGHT.into());
+                self.notice = Some(words::column::closed_right().into());
             }
         }
         // A column left while it waits to pick lets go of it.

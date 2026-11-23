@@ -236,7 +236,7 @@ fn a_servers_shares_are_only_looked_at(cx: &mut TestAppContext) {
         let r = v.reasons(app);
         [r.copy, r.cut, r.paste, r.rename, r.delete, r.shell, r.send_to]
     });
-    assert_eq!(reasons, [Some(crate::ops::NOT_AT_SERVER); 7]);
+    assert_eq!(reasons, [Some(crate::ops::not_at_server()); 7]);
     let reasons = ui.read_app(cx, |v, app| [v.reasons(app).copy_path, v.reasons(app).explorer]);
     assert_eq!(reasons, [None, None]);
     // Nor is anything made or deleted there by its keys.

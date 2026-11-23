@@ -1,6 +1,6 @@
 //! Running a file operation, one at a time, in the tab it started in: what the columns show meanwhile,
 //! following what it moved, and what is said and picked once it ends. Deleting the items picked is one.
-use super::reasons::{BUSY, NOT_AT_HOME};
+use super::reasons::{busy, not_at_home};
 use super::*;
 use crate::words;
 
@@ -15,12 +15,12 @@ impl Colet {
         }
         let kind = if permanent { Kind::Delete } else { Kind::Recycle };
         if let Some(reason) = reasons.delete {
-            let hint = if reason != NOT_AT_HOME {
+            let hint = if reason != not_at_home() {
                 ""
             } else if picked.iter().any(|p| HomeKey::of(p).is_search()) {
-                words::reasons::UNSAVE_HINT
+                words::reasons::unsave_hint()
             } else {
-                words::reasons::UNFAVORITE_HINT
+                words::reasons::unfavorite_hint()
             };
             self.notify(words::reasons::refused_with_hint(words::ops::title(kind), reason, hint), Tone::Info, cx);
             return;
@@ -53,7 +53,7 @@ impl Colet {
     /// Runs `request` for the tab `tab`, which picks what it makes.
     pub(super) fn run_in(&mut self, request: Request, tab: crate::tabs::TabId, cx: &mut Context<Self>) {
         let Some(events) = self.operations.update(cx, |operations, cx| operations.begin(&request, tab, cx)) else {
-            self.refuse(words::ops::title(request.kind), BUSY, cx);
+            self.refuse(words::ops::title(request.kind), busy(), cx);
             return;
         };
         let (backend, owner, asked, wake) = (self.backend.clone(), self.owner, request.clone(), self.wake.clone());

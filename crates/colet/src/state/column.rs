@@ -121,8 +121,8 @@ impl Column {
 
     pub fn title(&self) -> Cow<'_, str> {
         match self.kind {
-            Kind::Home => words::HOME.into(),
-            Kind::Search => words::SEARCH_RESULTS.into(),
+            Kind::Home => words::home().into(),
+            Kind::Search => words::search_results().into(),
             Kind::Folder => folder_name(&self.path).to_string_lossy(),
         }
     }
