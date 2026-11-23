@@ -4,9 +4,13 @@ use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui_kit::base::input::{CursorBlink, InputEditorStyle, InputState};
 use gpui_kit::component::{ThemeConfig, ThemeConfigColors, ThemeMode};
-use gpui_kit::{App, Entity, Hsla, Rgba, Window, WindowAppearance, hsla};
+use gpui_kit::{App, Entity, Hsla, Rgba, Window, WindowAppearance, hsla, rgb, white};
 
 use crate::settings::Theme;
+
+/// Behind the button that closes the window, under the pointer and pressed, as Windows 11 draws it.
+const CLOSE_HOVER: u32 = 0xc42b1c;
+const CLOSE_PRESSED: u32 = 0xc83c31;
 
 fn hsl(h: f32, s: f32, l: f32) -> Hsla {
     hsla(h / 360., s / 100., l / 100., 1.)
@@ -72,6 +76,11 @@ pub struct Palette {
     pub on_accent_match: Hsla,
     /// Behind the edge columns are hidden past.
     pub shade: Hsla,
+    /// Behind the button that closes the window, under the pointer and pressed, and its glyph there: the
+    /// red Windows 11 draws in both settings.
+    pub close_hover: Hsla,
+    pub close_pressed: Hsla,
+    pub on_close: Hsla,
 }
 
 impl Palette {
@@ -103,6 +112,9 @@ impl Palette {
             on_accent_muted: hsla(0., 0., 1., 0.85),
             on_accent_match: hsl(45., 95., 75.),
             shade: hsla(220. / 360., 0.1, 0.03, 0.55),
+            close_hover: rgb(CLOSE_HOVER).into(),
+            close_pressed: rgb(CLOSE_PRESSED).into(),
+            on_close: white(),
         }
     }
 
@@ -134,6 +146,9 @@ impl Palette {
             on_accent_muted: hsla(0., 0., 1., 0.85),
             on_accent_match: hsl(48., 100., 80.),
             shade: hsla(220. / 360., 0.1, 0.2, 0.18),
+            close_hover: rgb(CLOSE_HOVER).into(),
+            close_pressed: rgb(CLOSE_PRESSED).into(),
+            on_close: white(),
         }
     }
 
@@ -375,6 +390,8 @@ mod tests {
                 ("faint text in home and the status bar", palette.text_faint, palette.bg),
                 ("a tab not current", palette.text_muted, palette.tab_strip),
                 ("a tab not current under the pointer", palette.text_muted, palette.tab_hover),
+                ("the close button's glyph under the pointer", palette.on_close, palette.close_hover),
+                ("the close button's glyph pressed", palette.on_close, palette.close_pressed),
             ] {
                 let ratio = contrast(ink, ground);
                 assert!(ratio >= 4.5, "{what}: {ratio}, dark: {dark}");

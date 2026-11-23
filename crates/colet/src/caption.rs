@@ -32,9 +32,6 @@ const BUTTON_WIDTH: f32 = 46.;
 pub const WIDTH: f32 = BUTTON_WIDTH * 3.;
 /// The glyphs' size, as Windows 11 draws them.
 const GLYPH_SIZE: f32 = 10.;
-/// Behind the button that closes, under the pointer and pressed, as in Windows 11.
-const CLOSE_HOVER: u32 = 0xc42b1c;
-const CLOSE_PRESSED: u32 = 0xc83c31;
 
 /// What a button does, as Windows knows it.
 #[derive(Clone, Copy)]
@@ -111,7 +108,7 @@ fn button(caption: Caption, p: Palette, font: &'static str, active: bool) -> imp
         .text_color(if active { p.text } else { p.text_faint })
         .map(|d| {
             if close {
-                d.hover(|s| s.bg(rgb(CLOSE_HOVER)).text_color(white())).active(|s| s.bg(rgb(CLOSE_PRESSED)).text_color(white()))
+                d.hover(|s| s.bg(p.close_hover).text_color(p.on_close)).active(|s| s.bg(p.close_pressed).text_color(p.on_close))
             } else {
                 d.hover(|s| s.bg(p.text.opacity(0.08)).text_color(p.text)).active(|s| s.bg(p.text.opacity(0.05)).text_color(p.text))
             }
