@@ -357,6 +357,8 @@ impl Colet {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // Spoken before anything says a word, the fields' placeholders among them.
+        words::speak(settings.value.language.spoken(backend.windows_speaks()));
         let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
             Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
             _ => 0,

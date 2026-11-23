@@ -82,9 +82,7 @@ impl Colet {
                     .items_center()
                     .text_xs()
                     .text_color(p.text_muted)
-                    .child(words::home::strip()[0])
-                    .child(words::home::strip()[1])
-                    .child(words::home::strip()[2])
+                    .children(words::home::strip().iter().copied())
                     .test_support(),
             )
             // The button laid over the whole strip, as on the folders' strip.

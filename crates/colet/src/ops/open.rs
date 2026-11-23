@@ -55,9 +55,9 @@ impl Colet {
                     [] => Ok(()),
                     [(name, error)] => Err(words::ops::cannot_open_named(name, error)),
                     [(_, error), ..] => {
-                        let names: Vec<String> = failed.iter().take(3).map(|(name, _)| words::quoted(name)).collect();
+                        let names = words::quoted_list(failed.iter().take(3).map(|(name, _)| name));
                         let more = if failed.len() > 3 { words::more_items(failed.len() - 3) } else { String::new() };
-                        Err(words::ops::cannot_open_many(failed.len(), names.join(""), more, error))
+                        Err(words::ops::cannot_open_many(failed.len(), names, more, error))
                     }
                 }
             },

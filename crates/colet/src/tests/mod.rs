@@ -35,11 +35,12 @@ use crate::{
     loading::Engine,
     ops::ItemStatus,
     search_filters::filter_tool_id,
-    settings::{SavedSearch, SearchFilter, Settings, Theme},
+    settings::{Language, SavedSearch, SearchFilter, Settings, Theme},
     sorts::Sorts,
     state::{ColumnId, HomeKey, Kind},
     stops::Stop,
     theme::{ActivePalette, Palette},
+    words::Spoken,
 };
 
 mod address;
@@ -128,6 +129,8 @@ struct Fake {
     tell: Mutex<Option<Tell>>,
     /// How many times it was asked whether the search's results changed.
     asked_changed: AtomicUsize,
+    /// Windows shows itself in English, while set, and in Japanese otherwise.
+    english_windows: AtomicBool,
 }
 
 impl Fake {
@@ -158,6 +161,10 @@ impl Fake {
 }
 
 impl Backend for Fake {
+    fn windows_speaks(&self) -> Spoken {
+        if self.english_windows.load(Ordering::Relaxed) { Spoken::English } else { Spoken::Japanese }
+    }
+
     fn roots(&self) -> Vec<Entry> {
         self.roots.clone()
     }

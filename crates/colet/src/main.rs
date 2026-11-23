@@ -106,11 +106,13 @@ fn main() {
     let Some(instance) = instance::claim() else { return };
     application().with_assets(AppAssets).run(|cx| {
         init(cx);
-        gpui_kit::component::set_locale("ja");
         theme::init(cx);
         app::bind_keys(cx);
         let live: backend::Shared = std::sync::Arc::new(backend::Live::default());
+        // What reading the files says is said in the language kept, or before it is read, in Windows's.
+        words::speak(live.windows_speaks());
         let settings = live.load_settings();
+        words::speak(settings.value.language.spoken(live.windows_speaks()));
         let sorts = live.load_sorts();
         // Where it was left, or centered on the screen the first time.
         let (display_id, window_bounds) = match settings.value.window {

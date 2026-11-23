@@ -1,5 +1,6 @@
 //! The settings kept between starts, and the preferences.
 use super::*;
+use gpui_kit::test::TestQueryExt;
 
 #[gpui_kit::test]
 fn never_writes_over_settings_it_could_not_read(cx: &mut TestAppContext) {
@@ -39,16 +40,55 @@ fn keeps_the_widths_it_is_left_with_and_starts_with_them(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
-fn opens_the_preferences_with_the_theme_taking_the_keys(cx: &mut TestAppContext) {
+fn opens_the_preferences_with_the_language_taking_the_keys(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\x.txt")]));
     let ui = open(cx, fake.clone());
     ui.input(cx, "x");
     ui.click(cx, "preferences");
     assert!(ui.read(cx, |v| matches!(v.overlays.dialog(), Some(crate::dialogs::Dialog::Preferences))));
-    // The theme chosen takes the keys, there being no field to type in.
-    assert!(ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.stop(Stop::Theme(Theme::System), cx).is_focused(window))));
+    // The language chosen, the first group, takes the keys, there being no field to type in.
+    assert!(ui.act(cx, |window, cx| ui.view.update(cx, |v, cx| v.stop(Stop::Language(Language::System), cx).is_focused(window))));
     ui.click(cx, "close-preferences");
     assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
+}
+
+#[gpui_kit::test]
+fn speaks_the_language_picked_in_the_preferences_at_once_and_keeps_it(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default());
+    let ui = open(cx, fake.clone());
+    let placeholder =
+        |ui: &Ui, cx: &mut TestAppContext| ui.read_app(cx, |v, app| v.search_field(app).read(app).presentation().placeholder().to_string());
+    assert_eq!(placeholder(&ui, cx), "Everythingで検索（Ctrl+F）");
+    ui.click(cx, "preferences");
+    assert!(ui.act(cx, |window, _| !window.find_all_by_label("システム").is_empty()));
+    ui.click(cx, ("language", Language::English as usize));
+    settle(cx);
+    assert_eq!(fake.settings.lock().unwrap().language, Language::English);
+    // The dialog it was picked in says it at once, and the fields' placeholders with it.
+    assert!(ui.act(cx, |window, _| !window.find_all_by_label("System").is_empty()));
+    assert_eq!(placeholder(&ui, cx), "Search with Everything (Ctrl+F)");
+    // Each language goes by its own name, whatever is spoken.
+    assert!(ui.act(cx, |window, _| !window.find_all_by_label("日本語").is_empty()));
+    ui.click(cx, ("language", Language::Japanese as usize));
+    assert!(ui.act(cx, |window, _| !window.find_all_by_label("システム").is_empty()));
+    assert_eq!(placeholder(&ui, cx), "Everythingで検索（Ctrl+F）");
+    assert_eq!(fake.settings.lock().unwrap().language, Language::Japanese);
+}
+
+#[gpui_kit::test]
+fn speaks_what_windows_shows_itself_in_until_one_is_picked(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake { english_windows: AtomicBool::new(true), ..Fake::default() });
+    let ui = open(cx, fake.clone());
+    assert!(ui.act(cx, |window, _| !window.find_all_by_label("Settings").is_empty()));
+    // Picked, Japanese is spoken whatever Windows shows itself in.
+    ui.click(cx, "preferences");
+    ui.click(cx, ("language", Language::Japanese as usize));
+    assert!(ui.act(cx, |window, _| !window.find_all_by_label("設定").is_empty()));
+    // And so again on the next start.
+    let settings = fake.settings.lock().unwrap().clone();
+    let again = Arc::new(Fake { english_windows: AtomicBool::new(true), settings: Mutex::new(settings), ..Fake::default() });
+    let ui = open(cx, again);
+    assert!(ui.act(cx, |window, _| !window.find_all_by_label("設定").is_empty()));
 }
 
 #[gpui_kit::test]
@@ -89,6 +129,9 @@ fn moves_among_the_themes_with_the_arrows_and_tabs_past_them_at_once(cx: &mut Te
     let ui = open(cx, fake.clone());
     ui.click(cx, "preferences");
     let theme = |t: Theme| ElementId::from(("theme", t as usize));
+    // Past the languages, the first group, to the theme chosen.
+    assert!(ui.has_keys(cx, ("language", Language::System as usize)));
+    ui.press(cx, "tab");
     assert!(ui.has_keys(cx, theme(Theme::System)));
     // The arrows pick as they go, round from the last to the first.
     ui.press(cx, "right");

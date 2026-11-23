@@ -1,6 +1,7 @@
 //! What Colet keeps between runs: the widths, the favorites, the saved searches, what is pinned in home,
-//! the search filters, the tabs with what each searched and the folders open, the theme, whether
-//! the hidden items show, and where the window was. The way back and forth and what is picked besides are not kept.
+//! the search filters, the tabs with what each searched and the folders open, the theme, the language,
+//! whether the hidden items show, and where the window was. The way back and forth and what is picked
+//! besides are not kept.
 //!
 //! How a kept file is read and written is [`crate::kept_file`]'s; a tab's place in the file is [`tab`]'s.
 mod tab;
@@ -14,7 +15,7 @@ use colet_core::{
 use serde::{Deserialize, Serialize};
 
 pub use self::tab::KeptTab;
-use crate::words;
+use crate::words::{self, Spoken};
 use crate::{
     app::{COLUMN_WIDTHS, SEARCH_FIELD_WIDTH, SEARCH_FIELD_WIDTHS, SIDEBAR_WIDTHS},
     kept_file::{self, Fields, File, Lenient, Loaded, kept_path, lenient},
@@ -127,9 +128,45 @@ impl Theme {
 
     pub fn label(self) -> &'static str {
         match self {
-            Theme::System => words::preferences::theme_system(),
+            Theme::System => words::preferences::system(),
             Theme::Light => words::preferences::theme_light(),
             Theme::Dark => words::preferences::theme_dark(),
+        }
+    }
+}
+
+/// The language Colet speaks: Windows's, Japanese where Windows shows itself in it and English elsewhere,
+/// or one of its own whatever Windows shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Language {
+    #[default]
+    #[serde(rename = "system")]
+    System,
+    #[serde(rename = "ja")]
+    Japanese,
+    #[serde(rename = "en")]
+    English,
+}
+
+impl Language {
+    /// In the order the settings offer them.
+    pub const ALL: [Language; 3] = [Language::System, Language::Japanese, Language::English];
+
+    /// Each language by its own name, so one picked by mistake can be found again without reading it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Language::System => words::preferences::system(),
+            Language::Japanese => "日本語",
+            Language::English => "English",
+        }
+    }
+
+    /// What it speaks, `windows` being Windows's.
+    pub fn spoken(self, windows: Spoken) -> Spoken {
+        match self {
+            Language::System => windows,
+            Language::Japanese => Spoken::Japanese,
+            Language::English => Spoken::English,
         }
     }
 }
@@ -176,6 +213,7 @@ pub struct Settings {
     pub tabs: Vec<KeptTab>,
     pub tab: usize,
     pub theme: Theme,
+    pub language: Language,
     /// How large everything is drawn, in percent: one of [`ZOOMS`].
     pub zoom: u16,
     /// Whether the folders list their hidden and system items, as Explorer leaves them out by default.
@@ -201,6 +239,7 @@ impl Default for Settings {
             tabs: Vec::new(),
             tab: 0,
             theme: Theme::System,
+            language: Language::System,
             zoom: 100,
             show_hidden: false,
             show_protected: false,
@@ -334,6 +373,7 @@ impl Lenient for Settings {
             tabs: tabs.into_iter().flatten().collect(),
             tab,
             theme: fields.one("theme").unwrap_or(d.theme),
+            language: fields.one("language").unwrap_or(d.language),
             zoom: fields.one("zoom").unwrap_or(d.zoom),
             show_hidden: fields.one("show_hidden").unwrap_or(d.show_hidden),
             show_protected: fields.one("show_protected").unwrap_or(d.show_protected),
@@ -780,6 +820,18 @@ mod tests {
         // A folder where the file should be cannot be read as one.
         let error = load_from(dir.path()).unwrap_err();
         assert!(error.kept, "{error:?}");
+    }
+
+    #[test]
+    fn reads_the_language_by_its_code_and_follows_windows_otherwise() {
+        let read = |json: &str| serde_json::from_str::<Settings>(json).unwrap().language;
+        assert_eq!(read(r#"{"language":"en"}"#), Language::English);
+        assert_eq!(read(r#"{"language":"ja"}"#), Language::Japanese);
+        assert_eq!(read(r#"{"language":"fr"}"#), Language::System);
+        assert_eq!(read("{}"), Language::System);
+        assert_eq!(serde_json::to_value(Language::English).unwrap(), "en");
+        assert_eq!(Language::System.spoken(Spoken::English), Spoken::English);
+        assert_eq!(Language::Japanese.spoken(Spoken::English), Spoken::Japanese);
     }
 
     #[test]

@@ -9,7 +9,10 @@ use std::{
 use colet_core::entry::{Order, Sort};
 use gpui_kit::{App, FocusHandle, Window};
 
-use crate::{settings::Theme, state::ColumnId};
+use crate::{
+    settings::{Language, Theme},
+    state::ColumnId,
+};
 
 /// Which button a stop is for.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -26,6 +29,8 @@ pub enum Stop {
     ClearFilter(ColumnId),
     /// The crumb of the trail for a column.
     Crumb(ColumnId),
+    /// A language among the preferences.
+    Language(Language),
     /// A theme among the preferences.
     Theme(Theme),
     /// A size to draw everything at among the preferences, in percent.

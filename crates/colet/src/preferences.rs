@@ -1,5 +1,5 @@
-//! The preferences: the theme, the display size, and which hidden items show, in a dialog of their own.
-//! Each is taken at once as it is picked, and kept. The keys are listed in a dialog of theirs
+//! The preferences: the language, the theme, the display size, and which hidden items show, in a dialog of
+//! their own. Each is taken at once as it is picked, and kept. The keys are listed in a dialog of theirs
 //! (`shortcuts.rs`).
 use std::rc::Rc;
 
@@ -10,7 +10,7 @@ use crate::words;
 use crate::{
     app::Colet,
     dialogs::{Choice, Dialog, DialogParts, Pick, label, push},
-    settings::{Theme, ZOOMS},
+    settings::{Language, Theme, ZOOMS},
     stops::Stop,
     theme::ActivePalette,
 };
@@ -18,9 +18,28 @@ use crate::{
 impl Colet {
     pub fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.begin_dialog(window, cx);
-        // The theme now chosen takes the keys, as a radio group's checked one does.
-        self.stop(Stop::Theme(self.stored.settings().theme), cx).focus(window, cx);
+        // The language now chosen, the first group, takes the keys, as a radio group's checked one does.
+        self.stop(Stop::Language(self.stored.settings().language), cx).focus(window, cx);
         self.overlays.set_dialog(Dialog::Preferences);
+        cx.notify();
+    }
+
+    /// Speaks `language` at once, and keeps it. A notice already up stays in the words it was given in.
+    pub fn set_language(&mut self, language: Language, window: &mut Window, cx: &mut Context<Self>) {
+        self.update_settings(|s| s.language = language, cx);
+        self.speak(window, cx);
+    }
+
+    /// Speaks the language kept, in the fields' placeholders too: the rest is said afresh as it is drawn.
+    fn speak(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        words::speak(self.stored.settings().language.spoken(self.backend.windows_speaks()));
+        let search = self.search_field(cx);
+        search.update(cx, |field, cx| field.set_placeholder(words::search::placeholder(), window, cx));
+        let address = self.address.read(cx).field().clone();
+        address.update(cx, |field, cx| field.set_placeholder(words::address::placeholder(), window, cx));
+        for field in self.narrow_fields.values().map(|field| field.input.clone()).collect::<Vec<_>>() {
+            field.update(cx, |field, cx| field.set_placeholder(words::column::narrow_placeholder(), window, cx));
+        }
         cx.notify();
     }
 
@@ -38,9 +57,18 @@ impl Colet {
         cx.notify();
     }
 
-    /// The theme, the display, and what shows.
+    /// The language, the theme, the display, and what shows.
     pub(crate) fn preferences_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> DialogParts {
         let p = cx.palette();
+        let languages = Language::ALL
+            .into_iter()
+            .map(|language| {
+                let pick: Pick = Rc::new(move |this, window, cx| this.set_language(language, window, cx));
+                let chosen = self.stored.settings().language == language;
+                Choice::new(("language", language as usize), language.label(), Stop::Language(language), chosen, pick)
+            })
+            .collect();
+        let languages = self.radio_group("languages", words::language(), languages, window, cx);
         let themes = Theme::ALL
             .into_iter()
             .map(|theme| {
@@ -64,6 +92,7 @@ impl Colet {
             .flex_col()
             .gap_3()
             // Taken at once as one is picked, and kept.
+            .child(div().flex().flex_col().gap_1().child(label(p, words::language())).child(languages))
             .child(div().flex().flex_col().gap_1().child(label(p, words::theme())).child(themes))
             .child(div().flex().flex_col().gap_1().child(label(p, words::display_size())).child(zooms))
             // Taken at once, as the theme is. The protected items hang off the hidden ones: they count only

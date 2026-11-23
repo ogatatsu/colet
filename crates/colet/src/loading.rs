@@ -516,7 +516,7 @@ impl Colet {
     fn take_missed(&mut self, cx: &mut Context<Self>) {
         let fresh = self.watching.take_missed();
         if !fresh.is_empty() {
-            let names: String = fresh.iter().map(|p| words::quoted(shown(colet_core::paths::folder_name(p)))).collect();
+            let names = words::quoted_list(fresh.iter().map(|p| shown(colet_core::paths::folder_name(p))));
             self.notify(words::window::cannot_watch(names), Tone::Error, cx);
         }
     }

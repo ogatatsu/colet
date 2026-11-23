@@ -9,7 +9,8 @@ use crate::{
     theme::ActivePalette,
 };
 
-/// How wide the keys' side of the list is: room for the longest, "Ctrl+Shift+↑↓ / Ctrl+Shift+クリック".
+/// How wide the keys' side of the list is: room for the longest in either language, "Ctrl+Shift+↑↓ / Ctrl+Shift+クリック",
+/// which its English, "Ctrl+Shift+↑↓ / Ctrl+Shift+click", is narrower than.
 const KEYS_WIDTH: f32 = 240.;
 
 impl Colet {

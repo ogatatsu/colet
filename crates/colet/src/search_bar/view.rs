@@ -201,7 +201,7 @@ impl Colet {
             .child(words::search::hint())
             // Ringed as a field is; the rings' room makes up most of the gaps. In a narrow window they go on
             // to a second line rather than past the edges.
-            .child(div().flex().flex_wrap().justify_center().gap_0p5().children(words::search::examples().map(|(query, label)| {
+            .child(div().flex().flex_wrap().justify_center().gap_0p5().children(words::search::examples().iter().map(|&(query, label)| {
                 let button = Button::new(query)
                     .outline()
                     .accessibility_label(format!("{query} {label}"))

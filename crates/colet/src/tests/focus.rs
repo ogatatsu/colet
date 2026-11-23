@@ -226,13 +226,16 @@ fn the_mouse_presses_a_button_leaving_the_keys_and_no_ring_on_it(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
-fn a_theme_picked_with_the_mouse_takes_the_ring_with_it(cx: &mut TestAppContext) {
+fn a_choice_picked_with_the_mouse_takes_the_ring_with_it_within_its_group(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.click(cx, "preferences");
-    // The theme chosen has the keys as the preferences open, ringed round.
-    let system = ui.bounds_of(cx, ("theme", Theme::System as usize)).dilate(px(crate::view::RING_ROOM));
+    // The language chosen has the keys as the preferences open, ringed round.
+    let system = ui.bounds_of(cx, ("language", Language::System as usize)).dilate(px(crate::view::RING_ROOM));
     assert_eq!(ui.ring(cx), Some(system));
+    ui.click(cx, ("language", Language::Japanese as usize));
+    let japanese = ui.bounds_of(cx, ("language", Language::Japanese as usize)).dilate(px(crate::view::RING_ROOM));
+    assert_eq!(ui.ring(cx), Some(japanese));
+    // A pick in another group leaves the keys where they are, as the mouse does.
     ui.click(cx, ("theme", Theme::Dark as usize));
-    let dark = ui.bounds_of(cx, ("theme", Theme::Dark as usize)).dilate(px(crate::view::RING_ROOM));
-    assert_eq!(ui.ring(cx), Some(dark));
+    assert_eq!(ui.ring(cx), Some(japanese));
 }

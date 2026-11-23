@@ -8,7 +8,7 @@ use std::sync::{
     mpsc,
 };
 
-use crate::words;
+use crate::words::{self, Spoken};
 use crate::{
     kept_file::Loaded,
     settings::{self, Settings},
@@ -71,6 +71,9 @@ pub trait Backend: Send + Sync + 'static {
     /// Stops watching the last search, as none is in front, unless a search asked after `request` came
     /// first. It may wait for a search under way: never call it on the UI thread.
     fn stop_search(&self, request: u64);
+    /// The language Colet speaks as it follows Windows's: Japanese where Windows shows itself in it, English
+    /// elsewhere.
+    fn windows_speaks(&self) -> Spoken;
     fn load_settings(&self) -> Loaded<Settings>;
     fn save_settings(&self, settings: &Settings) -> Result<(), String>;
     fn load_sorts(&self) -> Loaded<Sorts>;
@@ -201,6 +204,10 @@ impl Backend for Live {
         if self.latest.load(Ordering::Relaxed) == request {
             session.release();
         }
+    }
+
+    fn windows_speaks(&self) -> Spoken {
+        if colet_core::language::windows_is_japanese() { Spoken::Japanese } else { Spoken::English }
     }
 
     fn load_settings(&self) -> Loaded<Settings> {
