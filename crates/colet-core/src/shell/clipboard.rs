@@ -101,28 +101,41 @@ pub(super) fn drop_files(paths: &[PathBuf]) -> Vec<u8> {
     bytes
 }
 
-/// Puts `paths` on the clipboard, cut or copied.
+/// A global made for the clipboard and not yet handed to it, freed unless it is.
+struct Unplaced(HGLOBAL);
+
+impl Unplaced {
+    fn new(bytes: &[u8]) -> Result<Self> {
+        global(bytes).map(Self)
+    }
+
+    /// Hands it to the clipboard as `format`, which owns it from then on; still freed if it is refused.
+    unsafe fn place(self, format: u32) -> Result<()> {
+        let handle = HANDLE(self.0.0);
+        unsafe { SetClipboardData(format, Some(handle)) }?;
+        mem::forget(self);
+        Ok(())
+    }
+}
+
+impl Drop for Unplaced {
+    fn drop(&mut self) {
+        let _ = unsafe { GlobalFree(Some(self.0)) };
+    }
+}
+
+/// Puts `paths` on the clipboard, cut or copied. What it is to hold is made before it is emptied, so a
+/// failure to make it leaves what it held.
 pub fn write_files(paths: &[PathBuf], cut: bool, owner: Owner) -> Result<()> {
-    let bytes = drop_files(paths);
     let effect = if cut { DROPEFFECT_MOVE.0 } else { DROPEFFECT_COPY.0 };
+    let files = Unplaced::new(&drop_files(paths))?;
+    let preferred = Unplaced::new(&effect.to_le_bytes())?;
     let _clipboard = Opened::new(owner)?;
     unsafe {
         EmptyClipboard()?;
-        let files = global(&bytes)?;
-        if let Err(error) = SetClipboardData(CF_HDROP.0.into(), Some(HANDLE(files.0))) {
-            let _ = GlobalFree(Some(files));
-            return Err(error);
-        }
+        files.place(CF_HDROP.0.into())?;
         // Without the effect, a cut would paste as a copy: what is half put there is taken back.
-        let preferred = match global(&effect.to_le_bytes()) {
-            Ok(preferred) => preferred,
-            Err(error) => {
-                let _ = EmptyClipboard();
-                return Err(error);
-            }
-        };
-        if let Err(error) = SetClipboardData(preferred_effect(), Some(HANDLE(preferred.0))) {
-            let _ = GlobalFree(Some(preferred));
+        if let Err(error) = preferred.place(preferred_effect()) {
             let _ = EmptyClipboard();
             return Err(error);
         }
@@ -130,17 +143,14 @@ pub fn write_files(paths: &[PathBuf], cut: bool, owner: Owner) -> Result<()> {
     Ok(())
 }
 
-/// Puts `text` on the clipboard.
+/// Puts `text` on the clipboard, made before it is emptied as [`write_files`] does.
 pub fn write_text(text: &OsStr, owner: Owner) -> Result<()> {
     let bytes: Vec<u8> = text.encode_wide().chain([0]).flat_map(|c| c.to_le_bytes()).collect();
+    let handle = Unplaced::new(&bytes)?;
     let _clipboard = Opened::new(owner)?;
     unsafe {
         EmptyClipboard()?;
-        let handle = global(&bytes)?;
-        if let Err(error) = SetClipboardData(CF_UNICODETEXT.0.into(), Some(HANDLE(handle.0))) {
-            let _ = GlobalFree(Some(handle));
-            return Err(error);
-        }
+        handle.place(CF_UNICODETEXT.0.into())?;
     }
     Ok(())
 }
