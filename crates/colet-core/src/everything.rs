@@ -431,21 +431,28 @@ impl SearchSession {
         if client.is_null() {
             return Err(SearchError::CannotConnect);
         }
-        let version = unsafe {
-            [
-                Everything3_GetMajorVersion(client),
-                Everything3_GetMinorVersion(client),
-                Everything3_GetRevision(client),
-                Everything3_GetBuildNumber(client),
-            ]
-        };
-        let dotted = |v: [u32; 4]| v.map(|n| n.to_string()).join(".");
-        if version < OLDEST {
-            unsafe {
-                Everything3_DestroyClient(client);
+        // Each part is 0 when it could not be asked, which only the last error tells from a part that is 0.
+        let part = |get: unsafe extern "system" fn(Handle) -> u32| unsafe {
+            match get(client) {
+                0 if Everything3_GetLastError() != 0 => None,
+                part => Some(part),
             }
-            return Err(SearchError::TooOld { needed: dotted(OLDEST), found: dotted(version) });
-        }
+        };
+        let version = [
+            part(Everything3_GetMajorVersion),
+            part(Everything3_GetMinorVersion),
+            part(Everything3_GetRevision),
+            part(Everything3_GetBuildNumber),
+        ];
+        let version = match accepted(version) {
+            Ok(version) => version,
+            Err(error) => {
+                unsafe {
+                    Everything3_DestroyClient(client);
+                }
+                return Err(error);
+            }
+        };
         self.client = client;
         self.version = dotted(version);
         // Asked again on each connection, so a setting changed while Everything restarted is heard.
@@ -541,6 +548,22 @@ impl SearchSession {
     }
 }
 
+/// A version as 1.5.0.1424.
+fn dotted(version: [u32; 4]) -> String {
+    version.map(|n| n.to_string()).join(".")
+}
+
+/// The version Everything gave, each part none where it could not be asked: a connection that broke as it
+/// was asked is one that could not be made, not an Everything too old.
+fn accepted(version: [Option<u32>; 4]) -> Result<[u32; 4], SearchError> {
+    let [Some(major), Some(minor), Some(revision), Some(build)] = version else { return Err(SearchError::CannotConnect) };
+    let version = [major, minor, revision, build];
+    if version < OLDEST {
+        return Err(SearchError::TooOld { needed: dotted(OLDEST), found: dotted(version) });
+    }
+    Ok(version)
+}
+
 /// What Everything says of a property: whether it indexes it, and fast sorts it; none where it could not
 /// be asked.
 #[derive(Clone, Copy, Debug, Default)]
@@ -626,6 +649,19 @@ mod tests {
 
     fn alone() -> std::sync::MutexGuard<'static, ()> {
         EVERYTHING.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn a_version_it_could_not_ask_is_no_connection_not_one_too_old() {
+        assert_eq!(accepted([Some(1), Some(5), Some(0), Some(1424)]), Ok([1, 5, 0, 1424]));
+        assert_eq!(accepted([Some(2), Some(0), Some(0), Some(0)]), Ok([2, 0, 0, 0]));
+        assert_eq!(
+            accepted([Some(1), Some(5), Some(0), Some(1423)]),
+            Err(SearchError::TooOld { needed: "1.5.0.1424".into(), found: "1.5.0.1423".into() })
+        );
+        // Asked over a pipe that broke: once all parts read 0, and once only the build did.
+        assert_eq!(accepted([None; 4]), Err(SearchError::CannotConnect));
+        assert_eq!(accepted([Some(1), Some(5), Some(0), None]), Err(SearchError::CannotConnect));
     }
 
     #[test]
