@@ -13,9 +13,17 @@ use serde::{Deserialize, Serialize};
 use crate::lane::Lane;
 use crate::words;
 
-/// `%APPDATA%\Colet\<name>`, beside the other files Colet keeps.
+/// The folder in `%APPDATA%` Colet keeps its files in. A debug build, which runs beside a release one
+/// (see `instance`), keeps its own: each holds what it read at start and saves the whole of it, so with one
+/// file the last to save would take away what the other added.
+#[cfg(not(debug_assertions))]
+const KEPT_FOLDER: &str = "Colet";
+#[cfg(debug_assertions)]
+const KEPT_FOLDER: &str = "Colet-debug";
+
+/// `%APPDATA%\Colet\<name>`, beside the other files Colet keeps; `Colet-debug` for a debug build.
 pub fn kept_path(name: &str) -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("APPDATA")?).join("Colet").join(name))
+    Some(PathBuf::from(std::env::var_os("APPDATA")?).join(KEPT_FOLDER).join(name))
 }
 
 /// Why a file kept could not be used, or not all of it.
