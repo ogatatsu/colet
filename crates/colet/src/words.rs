@@ -738,7 +738,7 @@ pub mod column {
     }
 
     pub fn folders_first() -> &'static str {
-        said("フォルダを先に表示", "Show folders first")
+        said("フォルダーを先に表示", "Show folders first")
     }
 
     pub fn unsort() -> &'static str {
@@ -911,11 +911,11 @@ pub mod home {
     }
 
     pub fn folders() -> &'static str {
-        said("フォルダ", "Folders")
+        said("フォルダー", "Folders")
     }
 
     pub fn folders_first() -> &'static str {
-        said("フォルダを先に", "Folders first")
+        said("フォルダーを先に", "Folders first")
     }
 
     pub fn mixed() -> &'static str {
@@ -1768,6 +1768,20 @@ mod tests {
             "Cannot open 5 items: “a”, “b”, “c” and 2 more (no app)"
         );
         assert_eq!(ops::cannot_open_many(2, quoted_list(["a", "b"]), "", "no app"), "Cannot open 2 items: “a”, “b” (no app)");
+    }
+
+    /// A folder is フォルダー in every Japanese word, as Explorer writes it, never cut short of its long vowel.
+    #[test]
+    fn spells_folder_as_explorer_does() {
+        let source = include_str!("words.rs");
+        // Put together here, so this test is not found by itself.
+        let short = concat!("フォル", "ダ");
+        let lines: Vec<usize> = source
+            .match_indices(short)
+            .filter(|(at, found)| !source[at + found.len()..].starts_with('ー'))
+            .map(|(at, _)| source[..at].lines().count())
+            .collect();
+        assert!(lines.is_empty(), "cut short after line {lines:?}");
     }
 
     #[test]
