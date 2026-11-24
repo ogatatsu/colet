@@ -173,6 +173,10 @@ impl KeyMenuAnchor {
 /// The room between a button and the menu dropped from it.
 pub(crate) const MENU_GAP: f32 = 4.;
 
+/// The history lies over the notices, which gpui-kit draws over its dialogs, and under the menus, a menu
+/// opened from an item in it among them.
+const HISTORY_PRIORITY: usize = gpui_kit::base::POPUP_PRIORITY - 1;
+
 /// Which side of its button a menu dropped from it lines up with.
 #[derive(Clone, Copy)]
 pub enum MenuSide {
@@ -417,6 +421,6 @@ impl Render for Colet {
             )
             // Over a dialog, a field's menu is drawn with it.
             .children(if !self.overlays.has_dialog() { self.render_menu(cx) } else { None })
-            .when(self.overlays.is_history_open(), |d| d.child(deferred(self.history.clone()).with_priority(2)))
+            .when(self.overlays.is_history_open(), |d| d.child(deferred(self.history.clone()).with_priority(HISTORY_PRIORITY)))
     }
 }

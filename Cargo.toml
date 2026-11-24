@@ -9,7 +9,7 @@ publish = false
 
 [workspace.dependencies]
 # Built on GPUI Fast rather than upstream GPUI; imports stay `gpui_kit::*` either way.
-gpui-kit = { version = "=0.10.0", features = ["gpui-fast"] }
+gpui-kit = { version = "=0.11.0", features = ["gpui-fast"] }
 # Kept on the version gpui's Windows backend uses, so Colet shares its copy
 # (gpui-base and gpui-component still pull in an older windows of their own).
 windows = "0.62"

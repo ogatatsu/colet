@@ -453,7 +453,7 @@ fn tab_shape(background: Hsla, border: Option<Hsla>) -> impl IntoElement {
         |_, _, _| {},
         move |bounds, _, window, _| {
             let curve = Scale::of(window).px(TAB_CURVE);
-            let mut fill = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::tolerance(0.02)));
+            let mut fill = PathBuilder::fill();
             trace_tab(&mut fill, bounds, curve);
             fill.close();
             if let Ok(path) = fill.build() {
