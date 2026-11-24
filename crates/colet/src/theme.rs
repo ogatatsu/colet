@@ -58,6 +58,9 @@ pub struct Palette {
     /// Kept well below `accent_fill`, so a pointed-at file never reads as the selection, and off
     /// `hover`, so it never reads as where the pointer is.
     pub highlight: Hsla,
+    /// Behind the chosen one of a radio group's choices, ringed in `accent`: off `raised`, which the others
+    /// take, and off `raised_hover`, so it never reads as where the pointer is.
+    pub chosen: Hsla,
     pub danger: Hsla,
     /// Behind the count of problems on the history's button.
     pub danger_fill: Hsla,
@@ -102,6 +105,7 @@ impl Palette {
             accent_fill: hsl(214., 48., 38.),
             selected_inactive: hsl(220., 3., 23.),
             highlight: hsl(214., 24., 25.),
+            chosen: hsl(214., 32., 30.),
             danger: hsl(0., 72., 70.),
             danger_fill: hsl(0., 58., 42.),
             focus: hsl(213., 70., 72.),
@@ -136,6 +140,7 @@ impl Palette {
             accent_fill: hsl(214., 58., 40.),
             selected_inactive: hsl(220., 4., 88.),
             highlight: hsl(214., 60., 89.),
+            chosen: hsl(214., 75., 88.),
             danger: hsl(0., 65., 45.),
             danger_fill: hsl(0., 65., 42.),
             focus: hsl(214., 65., 45.),
@@ -338,6 +343,14 @@ mod tests {
             let apart = |a: Hsla, b: Hsla| (a.l - b.l).abs() >= 0.039;
             assert!(apart(palette.raised_hover, palette.raised), "hover over a raised surface, dark: {dark}");
             assert!(apart(palette.highlight, palette.hover), "pointed-at against hovered, dark: {dark}");
+            // The chosen one of a radio group's choices against the others and the one under the pointer.
+            assert!(apart(palette.chosen, palette.raised), "chosen against a choice, dark: {dark}");
+            assert!(apart(palette.chosen, palette.raised_hover), "chosen against a hovered choice, dark: {dark}");
+            // Its border, a boundary that tells it apart, at 3:1 or more on both sides.
+            for (side, ground) in [("inside", palette.chosen), ("outside", palette.raised)] {
+                let ratio = contrast(palette.accent, ground);
+                assert!(ratio >= 3., "chosen's border {side}: {ratio}, dark: {dark}");
+            }
             // Short of the selection's fill, toward the ground.
             assert!(if dark { palette.highlight.l < palette.accent_fill.l } else { palette.highlight.l > palette.accent_fill.l });
         }
@@ -388,6 +401,7 @@ mod tests {
                 ("a path in a row selected aside", palette.text_muted, palette.selected_inactive),
                 ("a column's count", palette.text_faint, palette.surface),
                 ("faint text in home and the status bar", palette.text_faint, palette.bg),
+                ("the chosen one of a radio group's choices", palette.text, palette.chosen),
                 ("a tab not current", palette.text_muted, palette.tab_strip),
                 ("a tab not current under the pointer", palette.text_muted, palette.tab_hover),
                 ("the close button's glyph under the pointer", palette.on_close, palette.close_hover),

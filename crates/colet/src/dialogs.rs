@@ -20,7 +20,7 @@ use crate::{
     search_filters::FilterEdit,
     settings::{Favorite, SavedSearch},
     stops::Stop,
-    theme::Palette,
+    theme::{ActivePalette, Palette},
     view::{RING_ROOM, RingAt},
 };
 
@@ -146,9 +146,11 @@ fn arrow_step(keystroke: &Keystroke) -> Option<isize> {
 }
 
 impl Colet {
-    /// `choices` as a radio group named `label`: the chosen one drawn selected, as a pressed button is,
-    /// not as the primary button, which is what Enter does in the dialog. Tab stops at the chosen one only,
-    /// or the first while none is, and the arrows move among them, picking as they go, as in a radio group.
+    /// `choices` as a radio group named `label`: the chosen one bordered in the accent on a tint of it
+    /// ([`Palette::chosen`]), so it stands off the others and off the one under the pointer, which a
+    /// pressed button's fill would not; and not as the primary button, which is what Enter does in the
+    /// dialog. Tab stops at the chosen one only, or the first while none is, and the arrows move among
+    /// them, picking as they go, as in a radio group.
     pub(crate) fn radio_group(
         &self,
         id: &'static str,
@@ -157,6 +159,7 @@ impl Colet {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        let p = cx.palette();
         let tab_at = choices.iter().position(|c| c.chosen).unwrap_or(0);
         let stops: Rc<[Stop]> = choices.iter().map(|c| c.stop.clone()).collect();
         let picks: Rc<[Pick]> = choices.iter().map(|c| c.pick.clone()).collect();
@@ -167,17 +170,23 @@ impl Colet {
                 let (ring_stop, in_group) = (stop.clone(), stops.clone());
                 // Told to the button, not to the stop's handle: the button writes its own onto the handle it
                 // is given as it is drawn.
-                let button =
-                    Button::new(id).label(text).selected(chosen).role(Role::RadioButton).toggled(chosen).tab_stop(k == tab_at).on_click(
-                        cx.listener(move |this, _, window, cx| {
-                            // The mouse leaves the keys where they are, but within the group they go with the
-                            // pick, so the ring does not stay on the last.
-                            if in_group.iter().any(|s| this.stop(s.clone(), cx).is_focused(window)) {
-                                this.stop(stop.clone(), cx).focus(window, cx);
-                            }
-                            pick(this, window, cx);
-                        }),
-                    );
+                let button = Button::new(id)
+                    .label(text)
+                    // Over the selected look, which the button lays its caller's style on: the default
+                    // button keeps its border, so the chosen one is as wide as the others and none moves.
+                    .when(chosen, |b| b.bg(p.chosen).border_color(p.accent).text_color(p.text))
+                    .selected(chosen)
+                    .role(Role::RadioButton)
+                    .toggled(chosen)
+                    .tab_stop(k == tab_at)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        // The mouse leaves the keys where they are, but within the group they go with the
+                        // pick, so the ring does not stay on the last.
+                        if in_group.iter().any(|s| this.stop(s.clone(), cx).is_focused(window)) {
+                            this.stop(stop.clone(), cx).focus(window, cx);
+                        }
+                        pick(this, window, cx);
+                    }));
                 self.ringed(button, ring_stop, RingAt::Round, window, cx)
             })
             .collect();
