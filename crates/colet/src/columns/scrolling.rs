@@ -101,6 +101,7 @@ impl Colet {
                     .items_center()
                     .text_xs()
                     .text_color(p.text_muted)
+                    .font_features(crate::view::written_down())
                     .child(away.to_string())
                     .children(words::column::folded().iter().copied())
                     .test_support(),

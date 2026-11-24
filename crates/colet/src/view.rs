@@ -209,6 +209,13 @@ pub fn keep_focus<E: InteractiveElement>(el: E) -> E {
     el.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
 }
 
+/// The glyphs a font draws a letter with when it is written down a line rather than across: its long
+/// vowel mark (ー) upright, as Japanese set vertically has it, where the font has such a form. For the
+/// strips' names, which are set a letter to a line.
+pub(crate) fn written_down() -> FontFeatures {
+    FontFeatures(std::sync::Arc::new(vec![("vert".into(), 1)]))
+}
+
 pub(crate) fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(scaled(size)).flex_none().text_color(color)
 }
