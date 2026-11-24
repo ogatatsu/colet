@@ -101,9 +101,7 @@ impl Colet {
             this.sync_search_field(window, cx);
             this.changed(cx);
         });
-        el.on_action(cx.listener(|this, _: &GoBack, window, cx| this.back(window, cx)))
-            .on_action(cx.listener(|this, _: &GoForward, window, cx| this.forward(window, cx)))
-            .on_action(cx.listener(|this, _: &RenameItem, window, cx| this.ask_rename(window, cx)))
+        el.on_action(cx.listener(|this, _: &RenameItem, window, cx| this.ask_rename(window, cx)))
             .on_action(cx.listener(|this, _: &CopyItems, _, cx| this.copy(false, cx)))
             .on_action(cx.listener(|this, _: &CutItems, _, cx| this.copy(true, cx)))
             .on_action(cx.listener(|this, _: &PasteItems, _, cx| this.paste(cx)))

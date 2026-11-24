@@ -358,6 +358,8 @@ impl Render for Colet {
             .on_action(cx.listener(|this, _: &FocusAddress, window, cx| this.open_address(window, cx)))
             .on_action(cx.listener(|this, _: &OpenTextMenu, window, cx| this.open_focused_text_menu(window, cx)))
             .on_action(cx.listener(|this, _: &OpenSearchFilters, window, cx| this.open_filter_menu(window, cx)))
+            .on_action(cx.listener(|this, _: &GoBack, window, cx| this.step_by_keys(true, window, cx)))
+            .on_action(cx.listener(|this, _: &GoForward, window, cx| this.step_by_keys(false, window, cx)))
             // As the strip's button does: the keys stay where they are.
             .on_action(cx.listener(|this, _: &Unfold, _, cx| {
                 if this.state.folded_away() > 0 {

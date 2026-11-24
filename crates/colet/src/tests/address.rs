@@ -34,6 +34,19 @@ fn ctrl_l_types_a_folder_over_the_deepest_one_and_enter_opens_it_worked_in(cx: &
 }
 
 #[gpui_kit::test]
+fn a_step_back_by_keys_lets_go_of_what_was_typed_for_the_trail_and_the_column(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\b.txt"]);
+    ui.press(cx, "ctrl-l");
+    ui.input(cx, r"D:\somewhere");
+    ui.press(cx, "alt-left");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
+    assert_eq!(ui.address(cx), None);
+    assert!(ui.columns_focused(cx));
+}
+
+#[gpui_kit::test]
 fn a_file_typed_opens_where_it_lives_picked(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.press(cx, "ctrl-l");

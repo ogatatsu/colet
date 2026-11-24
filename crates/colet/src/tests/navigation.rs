@@ -173,6 +173,31 @@ fn walks_folders_by_keys_and_goes_back(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn steps_back_and_on_by_keys_from_the_search_field_leaving_the_keys_there(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "down");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\b.txt"]);
+    // Where the window first puts the keys, as the back button's tip says.
+    ui.press(cx, "ctrl-f");
+    ui.press(cx, "alt-left");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt"]);
+    assert!(ui.search_focused(cx));
+    ui.press(cx, "alt-right");
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\b.txt"]);
+    assert!(ui.search_focused(cx));
+}
+
+#[gpui_kit::test]
+fn leaves_a_step_by_keys_to_an_open_menu(cx: &mut TestAppContext) {
+    let (_, ui) = in_work(cx);
+    ui.press(cx, "down");
+    ui.press(cx, "shift-f10");
+    ui.press(cx, "alt-left");
+    assert!(ui.read(cx, |v| v.menu().is_some()));
+    assert_eq!(ui.selected(cx, 2), [r"D:\work\b.txt"]);
+}
+
+#[gpui_kit::test]
 fn leaves_the_search_for_a_place_picked_in_home_clearing_the_field(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake {
         roots: vec![Entry::folder(r"D:\", "データ (D:)")],

@@ -128,8 +128,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("left", ColumnLeft, Some(COLUMNS)),
         KeyBinding::new("right", ColumnRight, Some(COLUMNS)),
         KeyBinding::new("enter", OpenItem, Some(COLUMNS)),
-        KeyBinding::new("alt-left", GoBack, Some(COLUMNS)),
-        KeyBinding::new("alt-right", GoForward, Some(COLUMNS)),
+        // Anywhere in the window, as the back and forward buttons' tips say: Windows' fields give them to
+        // nothing of their own.
+        KeyBinding::new("alt-left", GoBack, None),
+        KeyBinding::new("alt-right", GoForward, None),
         KeyBinding::new("ctrl-f", FocusSearch, None),
         KeyBinding::new("ctrl-l", FocusAddress, None),
         KeyBinding::new("alt-enter", GoToAddressInNewTab, Some(ADDRESS)),
@@ -833,12 +835,37 @@ impl Colet {
 
     pub fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state.back();
-        self.sync_search_field(window, cx);
+        self.stepped(window, cx);
     }
 
     pub fn forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state.forward();
+        self.stepped(window, cx);
+    }
+
+    /// Alt+← and Alt+→, wherever the keys are in the window, but for a menu or the history, which hold
+    /// them while open, as they hold the tabs' keys.
+    pub(crate) fn step_by_keys(&mut self, back: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.overlays.popup().is_some() || self.overlays.is_history_open() {
+            return;
+        }
+        if back { self.back(window, cx) } else { self.forward(window, cx) }
+    }
+
+    /// After a step back or on: the search field shows the search stepped to, and an address being typed
+    /// is let go of for the trail of where the step went, as Explorer's bar shows it. Keys in the field go
+    /// to the column worked in, as Esc sends them; anywhere else they stay.
+    fn stepped(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_search_field(window, cx);
+        if !self.address.read(cx).is_open() {
+            return;
+        }
+        let field = self.address.read(cx).field().clone();
+        let keys = self.has_keys(&field, window, cx);
+        self.address.update(cx, |address, cx| address.close(cx));
+        if keys {
+            self.come_back_to_active(window, cx);
+        }
     }
 
     // ---- Scrolling ----
