@@ -475,6 +475,18 @@ impl Colet {
                 });
             }
         }));
+        // Esc closes the history wherever the keys are. It is looked at before the key bindings, which are
+        // given a key ahead of the elements' own listeners and would take it for the field or column with
+        // the keys.
+        let (colet, own) = (cx.weak_entity(), Window::window_handle(window));
+        this._subscriptions.push(cx.intercept_keystrokes(move |event: &KeystrokeEvent, window: &mut Window, cx: &mut App| {
+            if Window::window_handle(window) != own {
+                return;
+            }
+            if let Some(colet) = colet.upgrade() {
+                colet.update(cx, |this, cx| this.close_history_by_key(&event.keystroke, window, cx));
+            }
+        }));
         this.sync_narrow_fields(window, cx);
         this.scroll_rows();
         crate::theme::set_zoom(this.stored.settings().zoom, cx);

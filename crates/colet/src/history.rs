@@ -351,6 +351,17 @@ impl Colet {
         cx.notify();
     }
 
+    /// Esc, pressed while the history is the topmost thing open, closes it, wherever the keys are, and goes no
+    /// further: the keys go back to where they were as it opened, and what they were in takes nothing. A menu
+    /// or dialog over it takes its own Esc.
+    pub(crate) fn close_history_by_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
+        let over = self.overlays.has_menu() || self.overlays.has_dialog();
+        if keystroke.key == "escape" && !keystroke.modifiers.modified() && self.overlays.is_history_open() && !over {
+            self.show_history(false, None, window, cx);
+            cx.stop_propagation();
+        }
+    }
+
     /// What the history asks for. An item pressed in it is answered for only while it stays open, so one
     /// still there closes it and opens in the columns.
     pub(crate) fn on_history_event(&mut self, event: &HistoryEvent, window: &mut Window, cx: &mut Context<Self>) {

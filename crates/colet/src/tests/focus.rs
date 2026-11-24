@@ -119,6 +119,45 @@ fn the_history_opened_while_typing_an_address_gives_it_back_as_typed(cx: &mut Te
     assert!(ui.address_focused(cx));
 }
 
+/// Esc closes the history, the topmost thing open, wherever the keys are, and goes no further: what is
+/// typed in the field with the keys stays, and the keys stay there.
+#[gpui_kit::test]
+fn closes_the_history_with_esc_wherever_the_keys_are(cx: &mut TestAppContext) {
+    let open_then_esc = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.press_and_release(cx, "history-button");
+        assert!(ui.read(cx, |v| v.overlays.is_history_open()));
+        ui.press(cx, "escape");
+        assert!(ui.read(cx, |v| !v.overlays.is_history_open()));
+    };
+    let (_, ui) = in_work(cx);
+
+    // An address being typed.
+    ui.press(cx, "ctrl-l");
+    ui.input(cx, r"D:\wo");
+    open_then_esc(&ui, cx);
+    assert_eq!(ui.typed_address(cx).as_deref(), Some(r"D:\wo"));
+    assert!(ui.address_focused(cx));
+    ui.press(cx, "escape");
+
+    // A column's narrowing.
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    let narrowed = |ui: &Ui, cx: &mut TestAppContext| {
+        ui.view.read_with(cx, |v, cx| v.narrow_fields.get(&work).map(|f| f.input.read(cx).value().to_string()))
+    };
+    ui.input(cx, "c");
+    open_then_esc(&ui, cx);
+    assert_eq!(narrowed(&ui, cx).as_deref(), Some("c"));
+    ui.press(cx, "escape");
+    assert_eq!(narrowed(&ui, cx).unwrap_or_default(), "");
+
+    // The search field.
+    ui.press(cx, "ctrl-f");
+    ui.input(cx, "report");
+    open_then_esc(&ui, cx);
+    assert_eq!(ui.field(cx), "report");
+    assert!(ui.search_focused(cx));
+}
+
 #[gpui_kit::test]
 fn the_address_field_stays_open_over_a_trip_to_another_window_and_a_click_coming_back_closes_it(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
