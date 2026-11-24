@@ -899,7 +899,8 @@ impl Colet {
                 line("menu-open", "external-link", words::open(), Some("Enter"), None, FileCommand::Open),
                 in_tab,
                 line("menu-copy-query", "link", words::home::copy_query(), Some("Ctrl+Shift+C"), None, FileCommand::CopyPath).grouped(),
-                line("menu-edit-search", "pencil-line", words::edit(), Some("F2"), None, HomeCommand::EditSearch(path.clone())).grouped(),
+                line("menu-edit-search", "pencil-line", words::edit_command(), Some("F2"), None, HomeCommand::EditSearch(path.clone()))
+                    .grouped(),
                 pin,
                 line("menu-unsave", "star", words::unsave_search(), None, None, HomeCommand::Unsave(path)),
             ];
@@ -913,7 +914,7 @@ impl Colet {
         // F2 on a favorite edits it: a place has nothing to edit, and its folder is not renamed from here.
         let favorite = self.stored.settings().is_favorite(&path);
         if favorite {
-            lines.push(line("menu-edit-favorite", "pencil-line", words::edit(), Some("F2"), None, FileCommand::Rename));
+            lines.push(line("menu-edit-favorite", "pencil-line", words::edit_command(), Some("F2"), None, FileCommand::Rename));
         }
         lines.push(pin);
         lines.push(line(

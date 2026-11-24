@@ -183,8 +183,15 @@ impl Colet {
             line("menu-cut", "scissors", words::cut(), Some("Ctrl+X"), quiet(reasons.cut), FileCommand::Cut),
             line("menu-paste", "clipboard-paste", words::paste(), Some("Ctrl+V"), reasons.paste, FileCommand::Paste),
             line("menu-copy-path", "link", words::copy_path(), Some("Ctrl+Shift+C"), reasons.copy_path, FileCommand::CopyPath),
-            line("menu-rename", "pencil-line", words::rename(), Some("F2"), quiet(reasons.rename), FileCommand::Rename).grouped(),
-            line("menu-new-folder", "folder-plus", words::new_folder(), Some("Ctrl+Shift+N"), reasons.paste, FileCommand::NewFolder),
+            line("menu-rename", "pencil-line", words::rename_command(), Some("F2"), quiet(reasons.rename), FileCommand::Rename).grouped(),
+            line(
+                "menu-new-folder",
+                "folder-plus",
+                words::new_folder_command(),
+                Some("Ctrl+Shift+N"),
+                reasons.paste,
+                FileCommand::NewFolder,
+            ),
             line("menu-recycle", "trash", words::recycle(), Some("Delete"), quiet(reasons.delete), FileCommand::Recycle),
         ];
         if one && entries[0].directory {

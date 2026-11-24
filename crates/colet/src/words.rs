@@ -100,6 +100,14 @@ pub fn edit() -> &'static str {
     said("編集", "Edit")
 }
 
+// A menu's line or a button whose command opens a dialog, to ask more before it is done, ends with an
+// ellipsis; the dialog's title, and a notice of why it cannot be done, name the command without one.
+
+/// Editing a favorite or a saved search, as the menu's line that opens its dialog.
+pub fn edit_command() -> &'static str {
+    said("編集…", "Edit…")
+}
+
 pub fn delete() -> &'static str {
     said("削除", "Delete")
 }
@@ -222,8 +230,18 @@ pub fn rename() -> &'static str {
     said("名前を変更", "Rename")
 }
 
+/// As the menu's line, which opens the dialog that asks the new name.
+pub fn rename_command() -> &'static str {
+    said("名前を変更…", "Rename…")
+}
+
 pub fn new_folder() -> &'static str {
     said("新規フォルダー", "New folder")
+}
+
+/// As the menu's line, which opens the dialog that asks the folder's name.
+pub fn new_folder_command() -> &'static str {
+    said("新規フォルダー…", "New folder…")
 }
 
 pub fn recycle() -> &'static str {
@@ -494,8 +512,9 @@ pub mod search {
         said("フィルターはまだありません", "No filters yet")
     }
 
+    /// The filters dialog's button that opens the form a new filter is written in.
     pub fn add() -> &'static str {
-        said("追加", "Add")
+        said("追加…", "Add…")
     }
 
     pub fn add_filter() -> &'static str {
@@ -1768,6 +1787,21 @@ mod tests {
             "Cannot open 5 items: “a”, “b”, “c” and 2 more (no app)"
         );
         assert_eq!(ops::cannot_open_many(2, quoted_list(["a", "b"]), "", "no app"), "Cannot open 2 items: “a”, “b” (no app)");
+    }
+
+    /// A command that opens a dialog to ask more ends with an ellipsis on its menu's line or button, in
+    /// either language; the dialog's title names it without one.
+    #[test]
+    fn ends_a_command_that_asks_more_with_an_ellipsis() {
+        for language in [Japanese, English] {
+            speak(language);
+            for command in [rename_command(), new_folder_command(), edit_command(), search::add(), search::edit_filters()] {
+                assert!(command.ends_with('…'), "{command}");
+            }
+            for title in [rename(), new_folder(), search::add_filter(), search::edit_filter()] {
+                assert!(!title.contains('…'), "{title}");
+            }
+        }
     }
 
     /// A folder is フォルダー in every Japanese word, as Explorer writes it, never cut short of its long vowel.

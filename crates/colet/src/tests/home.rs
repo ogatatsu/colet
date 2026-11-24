@@ -403,7 +403,7 @@ fn offers_in_home_only_what_its_rows_can_do(cx: &mut TestAppContext) {
             "新しいタブで開く",
             "エクスプローラーで表示",
             "| パスをコピー",
-            "| 編集",
+            "| 編集…",
             "ピン留め",
             "お気に入りを解除",
             "| プロパティ",
@@ -425,7 +425,7 @@ fn offers_in_home_only_what_its_rows_can_do(cx: &mut TestAppContext) {
         ]
     );
     menu(&ui, cx, "search:one");
-    assert_eq!(lines(&ui, cx), ["開く", "新しいタブで開く", "| 検索文字列をコピー", "| 編集", "ピン留め", "保存した検索を解除"]);
+    assert_eq!(lines(&ui, cx), ["開く", "新しいタブで開く", "| 検索文字列をコピー", "| 編集…", "ピン留め", "保存した検索を解除"]);
     // Nor do the keys copy from home.
     ui.press(cx, "escape");
     ui.click(cx, row(r"D:\a"));
