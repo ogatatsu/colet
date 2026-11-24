@@ -47,6 +47,10 @@ pub struct Palette {
     pub hover: Hsla,
     /// What the pointer is on over a raised surface: a notice, a dialog or the history.
     pub raised_hover: Hsla,
+    /// Behind a button whose menu, or the history, is open, for as long as it is: a step past `raised_hover`,
+    /// which the library's quiet buttons take under the pointer, and past `hover`, so it never reads as where
+    /// the pointer is.
+    pub pressed: Hsla,
     pub border: Hsla,
     pub border_strong: Hsla,
     pub text: Hsla,
@@ -96,6 +100,7 @@ impl Palette {
             raised: hsl(220., 3., 18.),
             hover: hsl(220., 3., 19.),
             raised_hover: hsl(220., 3., 24.),
+            pressed: hsl(220., 3., 28.),
             border: hsl(220., 3., 21.),
             border_strong: hsl(220., 3., 30.),
             text: hsl(220., 4., 90.),
@@ -131,6 +136,7 @@ impl Palette {
             raised: hsl(0., 0., 100.),
             hover: hsl(220., 4., 93.),
             raised_hover: hsl(220., 4., 93.),
+            pressed: hsl(220., 3., 87.),
             border: hsl(220., 4., 87.),
             border_strong: hsl(220., 3., 76.),
             text: hsl(220., 4., 13.),
@@ -192,6 +198,8 @@ impl Palette {
             (&mut colors.primary_foreground, self.on_accent),
             (&mut colors.secondary, self.raised),
             (&mut colors.secondary_hover, self.raised_hover),
+            // A quiet button of the library's fills with it while its menu is open.
+            (&mut colors.secondary_active, self.pressed),
             (&mut colors.secondary_foreground, self.text),
             (&mut colors.danger, self.danger_fill),
             (&mut colors.danger_foreground, self.on_accent),
@@ -351,6 +359,15 @@ mod tests {
                 let ratio = contrast(palette.accent, ground);
                 assert!(ratio >= 3., "chosen's border {side}: {ratio}, dark: {dark}");
             }
+            // A button with its menu open, against the ground it stands on and a button under the pointer.
+            for (what, other) in [
+                ("the window's own color", palette.bg),
+                ("a column's or field's", palette.surface),
+                ("a button of Colet's under the pointer", palette.hover),
+                ("a button of the library's under the pointer", palette.raised_hover),
+            ] {
+                assert!(apart(palette.pressed, other), "open against {what}, dark: {dark}");
+            }
             // Short of the selection's fill, toward the ground.
             assert!(if dark { palette.highlight.l < palette.accent_fill.l } else { palette.highlight.l > palette.accent_fill.l });
         }
@@ -406,9 +423,24 @@ mod tests {
                 ("a tab not current under the pointer", palette.text_muted, palette.tab_hover),
                 ("the close button's glyph under the pointer", palette.on_close, palette.close_hover),
                 ("the close button's glyph pressed", palette.on_close, palette.close_pressed),
+                ("a filter button's name, its menu open", palette.text, palette.pressed),
             ] {
                 let ratio = contrast(ink, ground);
                 assert!(ratio >= 4.5, "{what}: {ratio}, dark: {dark}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_glyph_on_a_button_with_its_menu_open_reads_at_3_to_1_or_more() {
+        for (palette, dark) in [(Palette::light(), false), (Palette::dark(), true)] {
+            for (what, ink) in [
+                ("the muted glyphs", palette.text_muted),
+                ("the faint chevron", palette.text_faint),
+                ("a column's own order, or a chosen filter", palette.accent),
+            ] {
+                let ratio = contrast(ink, palette.pressed);
+                assert!(ratio >= 3., "{what}: {ratio}, dark: {dark}");
             }
         }
     }
@@ -425,6 +457,7 @@ mod tests {
                 (&colors.ring, palette.focus),
                 (&colors.scrollbar_thumb, palette.scrollbar),
                 (&colors.overlay, palette.shade),
+                (&colors.secondary_active, palette.pressed),
             ] {
                 let given = gpui_kit::component::try_parse_color(given.as_deref().unwrap()).unwrap();
                 assert_eq!(hex(given), hex(role), "{mode:?}");

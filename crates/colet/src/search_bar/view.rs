@@ -130,6 +130,7 @@ impl Colet {
         let chosen = self.chosen_filter(cx);
         let on = chosen.is_some();
         let label = words::search::filter_label(chosen.as_deref());
+        let open = self.filter_open();
         // In a narrow window its name gives way to the search field, down to the funnel and the chevron;
         // the tip still names it.
         div()
@@ -148,7 +149,7 @@ impl Colet {
                         .on_action(cx.listener(|this, _: &OpenSort, window, cx| this.open_filter_menu(window, cx)))
                         .role(Role::Button)
                         .aria_label(label.clone())
-                        .aria_expanded(self.filter_open())
+                        .aria_expanded(open)
                         .h(scaled(metrics::CONTROL_HEIGHT))
                         .max_w(scaled(200.))
                         .pl_2p5()
@@ -157,13 +158,21 @@ impl Colet {
                         .items_center()
                         .gap_1p5()
                         .text_xs()
-                        .text_color(if on { p.accent } else { p.text_muted })
-                        .bg(p.surface)
+                        // Open, it stays pressed, under the pointer or not, and its name takes the text's color,
+                        // which reads on the pressed fill; the funnel and the border still tell a chosen filter.
+                        .text_color(match (open, on) {
+                            (true, _) => p.text,
+                            (false, true) => p.accent,
+                            (false, false) => p.text_muted,
+                        })
+                        .bg(if open { p.pressed } else { p.surface })
                         .border_1()
                         .border_color(if on { p.accent } else { p.border_strong })
                         .rounded(scaled(radii.md))
-                        .hover(|d| d.bg(p.hover))
-                        .tip_while_shut(self.filter_open(), words::search::filter_tip(&label))
+                        // Set while open too, as the library's buttons do: GPUI keeps track of the pointer only
+                        // for an element with a hover style, and a stale one would light it once shut.
+                        .hover(move |d| if open { d } else { d.bg(p.hover) })
+                        .tip_while_shut(open, words::search::filter_tip(&label))
                         .child(icon("funnel", metrics::GLYPH, if on { p.accent } else { p.text_muted }))
                         .child(div().min_w_0().truncate().child(chosen.unwrap_or_else(|| words::search::filter().into())))
                         .child(icon("chevron-down", metrics::GLYPH, p.text_faint))
@@ -177,7 +186,7 @@ impl Colet {
                         })),
                 ),
             )
-            .when_some(self.menu_element("search-filter-menu", words::search_filter(), cx).filter(|_| self.filter_open()), |d, menu| {
+            .when_some(self.menu_element("search-filter-menu", words::search_filter(), cx).filter(|_| open), |d, menu| {
                 d.child(drop_down(menu, MenuSide::Left, 200., Some(320.), self.scale()))
             })
             .into_any_element()

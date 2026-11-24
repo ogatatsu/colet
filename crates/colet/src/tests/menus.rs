@@ -600,3 +600,33 @@ fn drops_each_menu_just_under_its_button(cx: &mut TestAppContext) {
     assert!(button.left() + menu.size.width > px(560. - crate::view::MENU_MARGIN));
     assert_eq!(menu.right(), px(560. - crate::view::MENU_MARGIN));
 }
+
+/// A button that opens a menu, or the history, stays pressed for as long as what it opened is open, and
+/// tells so, then lets go of it once that closes.
+#[gpui_kit::test]
+fn holds_each_menu_s_button_pressed_while_its_menu_is_open(cx: &mut TestAppContext) {
+    let expanded = |ui: &Ui, cx: &mut TestAppContext, button: &ElementId| ui.act(cx, |window, _| window.find(button.clone()).expanded());
+    let (_, ui) = in_work(cx);
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    for button in [ElementId::from(("column-sort", work)), "search-filter".into(), "history-button".into()] {
+        assert_eq!(expanded(&ui, cx, &button), Some(false), "{button:?} shut");
+        ui.press_and_release(cx, button.clone());
+        assert_eq!(expanded(&ui, cx, &button), Some(true), "{button:?} open");
+        ui.press_and_release(cx, button.clone());
+        assert_eq!(expanded(&ui, cx, &button), Some(false), "{button:?} shut again");
+    }
+
+    let (fake, chain) = deep_chain();
+    let ui = open(cx, Arc::new(fake));
+    cx.simulate_window_resize(ui.window, size(px(560.), px(800.)));
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    let fold = ElementId::from("crumb-fold");
+    assert_eq!(expanded(&ui, cx, &fold), Some(false));
+    ui.press_and_release(cx, fold.clone());
+    assert_eq!(expanded(&ui, cx, &fold), Some(true));
+    ui.press_and_release(cx, fold.clone());
+    assert_eq!(expanded(&ui, cx, &fold), Some(false));
+}

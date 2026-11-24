@@ -447,7 +447,9 @@ impl Colet {
             .xsmall()
             .icon(glyph("arrow-up-down").text_color(if own { p.accent } else { p.text_muted }))
             .accessibility_label(label.clone())
+            // Pressed while its menu is open, and told so.
             .open(open)
+            .aria_expanded(open)
             // Shown only while the menu is shut: open, the tip would lie over it.
             .when(!open, |b| b.tooltip(label))
             // ↓ opens the menu as well as Enter and Space, as with the search filter's button.

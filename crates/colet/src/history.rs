@@ -5,7 +5,7 @@ use std::{collections::HashSet, path::PathBuf};
 
 use colet_core::paths::{folder_name, shown};
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable,
+    ActiveTheme as _, Selectable, Sizable,
     button::{Button, ButtonVariants},
     spinner::Spinner,
 };
@@ -288,13 +288,17 @@ impl Colet {
         let operations = self.operations.read(cx);
         let (unseen, running) = (operations.history.unseen, operations.is_running());
         let label = if unseen > 0 { words::history::title_with_problems(unseen) } else { words::history::title().to_owned() };
+        let open = self.overlays.is_history_open();
         let button = Button::new("history-button")
             .ghost()
             .xsmall()
             .map(|b| if running { b.icon(Spinner::new()) } else { b.icon(crate::view::glyph("clock")) })
             .accessibility_label(label.clone())
+            // Pressed while the history is open, and told so.
+            .open(open)
+            .aria_expanded(open)
             // Shown only while the history is shut: open, the tip would lie over it.
-            .when(!self.overlays.is_history_open(), |b| b.tooltip(label))
+            .when(!open, |b| b.tooltip(label))
             .when(unseen > 0, |d| {
                 d.child(
                     div()

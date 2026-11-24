@@ -241,7 +241,10 @@ impl Colet {
                     .items_center()
                     .justify_center()
                     .rounded(scaled(radii.sm))
-                    .hover(|d| d.bg(p.hover))
+                    // Pressed while its menu is open, under the pointer or not; the hover style is set even
+                    // then, as the filter's button has it.
+                    .when(open, |d| d.bg(p.pressed))
+                    .hover(move |d| if open { d } else { d.bg(p.hover) })
                     .tip_while_shut(open, words::levels_above())
                     .child(icon("ellipsis", 15., if current { p.text } else { p.text_muted }))
                     .map(|d| Self::opener(d, Self::crumbs_open, cx))
