@@ -423,6 +423,7 @@ impl Colet {
     /// The answer to `asked` came.
     fn listed(&mut self, asked: Asked, listing: Listing, cx: &mut Context<Self>) {
         let Asked { id, request, offset, .. } = asked;
+        let columns = self.column_ids();
         match listing {
             Ok(Listed { entries, total, warning, whole, .. }) => {
                 // Told even of a search gone stale: it is the connection's, said once.
@@ -441,7 +442,13 @@ impl Colet {
             }
             Err(error) => self.state.error(id, request, error),
         }
-        self.changed(cx);
+        // An answer comes in its own time, often to a reload no one asked for: the columns stay where they
+        // are scrolled, unless it opened or closed one of them.
+        if self.column_ids() == columns { self.changed_in_place(cx) } else { self.changed(cx) }
+    }
+
+    fn column_ids(&self) -> Vec<ColumnId> {
+        self.state.columns.iter().map(|c| c.id).collect()
     }
 
     /// The tab come to the front lists all its columns again: what it showed stays meanwhile, and what it

@@ -218,6 +218,44 @@ fn leaves_the_columns_where_they_are_once_left_brings_the_keys_back_home(cx: &mu
 }
 
 #[gpui_kit::test]
+fn leaves_the_columns_where_they_were_scrolled_as_a_change_reloads_them(cx: &mut TestAppContext) {
+    let (fake, chain) = deep_chain();
+    let fake = Arc::new(fake);
+    let ui = open(cx, fake.clone());
+    ui.click_in(cx, "home", row(r"D:\"));
+    for _ in 0..chain.len() {
+        ui.press(cx, "right");
+    }
+    rest(&ui, cx);
+    for _ in 1..chain.len() {
+        ui.press(cx, "left");
+    }
+    rest(&ui, cx);
+    assert_eq!(ui.read(cx, |v| v.state.active), 1, "the keys are on the first column");
+    // Scrolled by hand to the last column, the one worked in out on the left.
+    let end = ui.read(cx, |v| v.scrolls.sideways.scroll.max_offset().x);
+    ui.read(cx, |v| v.scrolls.sideways.scroll.set_offset(point(-end, px(0.))));
+    ui.act(cx, |_, _| ());
+    let at = ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x);
+    assert!(at < px(0.));
+    // Changes reload every column, as Everything's do the results: the columns stay where they were brought.
+    for changes in [Changes::Paths(HashSet::from([PathBuf::from(&chain[0])])), Changes::All] {
+        ui.folders_changed(cx, changes);
+        settle(cx);
+        rest(&ui, cx);
+        assert_eq!(ui.read(cx, |v| v.scrolls.sideways.scroll.offset().x), at);
+    }
+    // A change that closes a column brings the one worked in back on screen.
+    fake.folders.lock().unwrap().get_mut(chain[chain.len() - 2].as_str()).unwrap().clear();
+    ui.folders_changed(cx, Changes::Paths(HashSet::from([PathBuf::from(&chain[chain.len() - 2])])));
+    settle(cx);
+    rest(&ui, cx);
+    let active = ui.read(cx, |v| v.state.columns[v.state.active].id);
+    let (column, view) = ui.act(cx, |window, _| (window.find(("column", active)).bounds(), window.find("columns-scroll").bounds()));
+    assert!(column.left() >= view.left() - px(1.), "the column worked in slid back on screen");
+}
+
+#[gpui_kit::test]
 fn slides_a_column_on_screen_once_a_press_in_its_header_or_its_empty_room_is_let_go(cx: &mut TestAppContext) {
     let (fake, chain) = deep_chain();
     // A width the view holds no whole number of, so the right edge cuts a column.

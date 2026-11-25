@@ -559,9 +559,16 @@ impl Colet {
 
     /// Starts what the columns now on screen need, drops what the ones gone needed, and redraws.
     pub fn changed(&mut self, cx: &mut Context<Self>) {
+        self.scrolls.sideways.ask();
+        self.changed_in_place(cx);
+    }
+
+    /// As [`Colet::changed`], but the columns stay where they are scrolled: for what changes without the
+    /// user, as a listing read again, which would otherwise pull the column worked in back on screen
+    /// from wherever the columns were scrolled by hand.
+    pub(crate) fn changed_in_place(&mut self, cx: &mut Context<Self>) {
         self.sync(cx);
         self.follow_quick_look();
-        self.scrolls.sideways.ask();
         self.keep_tabs(cx);
         cx.notify();
     }
