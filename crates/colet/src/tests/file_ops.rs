@@ -364,6 +364,9 @@ fn clears_the_operations_over_from_the_history(cx: &mut TestAppContext) {
     ui.click(cx, "clear-history");
     assert!(ui.ops(cx, |o| o.history.entries.is_empty()));
     assert!(ui.read(cx, |v| v.overlays.is_history_open()));
+    // Nothing left to clear, the button goes with what it cleared; the history stays open.
+    settle(cx);
+    assert!(ui.act(cx, |window, _| window.try_find("clear-history").is_none()));
 }
 
 #[gpui_kit::test]

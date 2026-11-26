@@ -50,6 +50,13 @@ pub enum Stop {
     HistoryItem(u64, usize),
 }
 
+impl Stop {
+    /// One of the choices of a radio group in a dialog.
+    pub fn is_choice(&self) -> bool {
+        matches!(self, Stop::Language(_) | Stop::Theme(_) | Stop::Zoom(_) | Stop::EditSearchFilter(_) | Stop::EditSearchOrder(_))
+    }
+}
+
 impl From<&'static str> for Stop {
     fn from(name: &'static str) -> Self {
         Stop::Named(name)
@@ -121,6 +128,11 @@ impl Stops {
     /// The keys are on one of the stops.
     pub fn has_keys(&self, window: &Window) -> bool {
         self.handles.borrow().values().any(|handle| handle.is_focused(window))
+    }
+
+    /// The keys are on a choice of a radio group, whichever group.
+    pub fn choice_has_keys(&self, window: &Window) -> bool {
+        self.handles.borrow().iter().any(|(stop, handle)| stop.is_choice() && handle.is_focused(window))
     }
 
     /// A frame begins: only the stops asked for since the last one began, and the one with the keys, are

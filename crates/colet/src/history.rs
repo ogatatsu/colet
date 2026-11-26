@@ -231,6 +231,9 @@ impl Render for HistoryPanel {
         let radii = metrics::Radii::of(window, cx);
         let entries = self.render_entries(window, cx);
         let clearable = self.operations.read(cx).history.entries.iter().any(|e| e.status != Status::Running);
+        // Nothing listed, there is nothing to clear: no button, rather than one that can never be pressed.
+        // With only operations under way it stands, not to be pressed until one of them is over.
+        let listed = !entries.is_empty();
         div()
             .id("history")
             .absolute()
@@ -256,11 +259,11 @@ impl Render for HistoryPanel {
                     .border_b_1()
                     .border_color(p.border)
                     .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child(words::history::title()))
-                    .child(
-                        keep_focus(push("clear-history", words::history::clear(), false, clearable).ghost().small()).on_click(
+                    .when(listed, |d| {
+                        d.child(keep_focus(push("clear-history", words::history::clear(), false, clearable).ghost().small()).on_click(
                             cx.listener(|this, _, _, cx| this.operations.update(cx, |operations, cx| operations.clear_history(cx))),
-                        ),
-                    ),
+                        ))
+                    }),
             )
             .child(if entries.is_empty() {
                 div().p_4().text_xs().text_color(p.text_muted).child(words::history::empty()).into_any_element()

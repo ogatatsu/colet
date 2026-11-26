@@ -215,7 +215,7 @@ impl Render for HomeGhost {
         let p = cx.palette();
         let radii = metrics::Radii::of(window, cx);
         let picture = match (self.search, self.image.clone()) {
-            (true, _) => icon("search", 16., p.text_muted).into_any_element(),
+            (true, _) => icon("search", metrics::ICON, p.text_muted).into_any_element(),
             (false, Some(image)) => img(image).size(scaled(metrics::ICON)).flex_none().into_any_element(),
             (false, None) => div().size(scaled(metrics::ICON)).flex_none().into_any_element(),
         };

@@ -167,7 +167,7 @@ impl Colet {
             .into_iter()
             .enumerate()
             .map(|(k, Choice { id, text, stop, chosen, pick })| {
-                let (ring_stop, in_group) = (stop.clone(), stops.clone());
+                let ring_stop = stop.clone();
                 // Told to the button, not to the stop's handle: the button writes its own onto the handle it
                 // is given as it is drawn.
                 let button = Button::new(id)
@@ -180,9 +180,10 @@ impl Colet {
                     .toggled(chosen)
                     .tab_stop(k == tab_at)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        // The mouse leaves the keys where they are, but within the group they go with the
-                        // pick, so the ring does not stay on the last.
-                        if in_group.iter().any(|s| this.stop(s.clone(), cx).is_focused(window)) {
+                        // The mouse leaves the keys in a field, where they are typed in; but on a choice, of
+                        // this group or another, they go with the pick, so the ring never stays on one
+                        // choice while another is picked, as Windows' own radio buttons take them.
+                        if this.stops.choice_has_keys(window) {
                             this.stop(stop.clone(), cx).focus(window, cx);
                         }
                         pick(this, window, cx);

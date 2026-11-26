@@ -1449,8 +1449,10 @@ pub mod history {
 pub mod preferences {
     use super::said;
 
-    pub fn show() -> &'static str {
-        said("表示", "Show")
+    /// The heading over which items show, as File Explorer's options name it: not a bare "show", which
+    /// reads as the display size above it.
+    pub fn files() -> &'static str {
+        said("ファイルとフォルダー", "Files and folders")
     }
 
     pub fn show_hidden() -> &'static str {

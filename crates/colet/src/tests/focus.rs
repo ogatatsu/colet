@@ -265,7 +265,7 @@ fn the_mouse_presses_a_button_leaving_the_keys_and_no_ring_on_it(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
-fn a_choice_picked_with_the_mouse_takes_the_ring_with_it_within_its_group(cx: &mut TestAppContext) {
+fn a_choice_picked_with_the_mouse_takes_the_ring_with_it_from_any_choice(cx: &mut TestAppContext) {
     let (_, ui) = in_work(cx);
     ui.click(cx, "preferences");
     // The language chosen has the keys as the preferences open, ringed round.
@@ -274,7 +274,30 @@ fn a_choice_picked_with_the_mouse_takes_the_ring_with_it_within_its_group(cx: &m
     ui.click(cx, ("language", Language::Japanese as usize));
     let japanese = ui.bounds_of(cx, ("language", Language::Japanese as usize)).dilate(px(crate::view::RING_ROOM));
     assert_eq!(ui.ring(cx), Some(japanese));
-    // A pick in another group leaves the keys where they are, as the mouse does.
+    // A pick in another group takes them too: the ring is never left on one choice while another is
+    // picked, which would read as two picked.
     ui.click(cx, ("theme", Theme::Dark as usize));
-    assert_eq!(ui.ring(cx), Some(japanese));
+    let dark = ui.bounds_of(cx, ("theme", Theme::Dark as usize)).dilate(px(crate::view::RING_ROOM));
+    assert_eq!(ui.ring(cx), Some(dark));
+}
+
+#[gpui_kit::test]
+fn a_choice_picked_with_the_mouse_leaves_the_keys_in_a_field(cx: &mut TestAppContext) {
+    let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
+    fake.settings.lock().unwrap().saved_searches =
+        vec![SavedSearch { name: String::new(), query: "ext:pdf".into(), filter: None, narrow: None, order: Order::default() }];
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(HomeKey::search("ext:pdf", None, None, Order::default()).key()));
+    ui.press(cx, "f2");
+    let name = ui.read(cx, |v| match v.overlays.dialog() {
+        Some(crate::dialogs::Dialog::EditSearch(edit)) => edit.name.clone(),
+        _ => panic!("no dialog"),
+    });
+    let in_name = |ui: &Ui, cx: &mut TestAppContext| ui.act(cx, |window, cx| name.read(cx).focus_handle(cx).is_focused(window));
+    assert!(in_name(&ui, cx));
+    // Being typed in, the field keeps them as the order is picked.
+    let descending =
+        ElementId::NamedChild(std::sync::Arc::new("edit-search-direction".into()), SharedString::from(crate::words::direction(true)));
+    ui.click(cx, descending);
+    assert!(in_name(&ui, cx));
 }

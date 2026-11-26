@@ -104,7 +104,7 @@ impl Colet {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(label(p, words::preferences::show()))
+                    .child(label(p, words::preferences::files()))
                     .child(Checkbox::new("show-hidden").label(words::preferences::show_hidden()).checked(settings.show_hidden).on_click(
                         move |_, _, cx| {
                             hidden.update(cx, |this, cx| this.toggle_hidden(cx)).ok();

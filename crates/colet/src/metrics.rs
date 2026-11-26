@@ -103,6 +103,9 @@ impl Radii {
 pub const ICON: f32 = 16.;
 /// Most of the glyphs drawn beside a label or alone in a button.
 pub const GLYPH: f32 = 14.;
+/// The glyph over a message standing in for what lists nothing: a column empty or not listed, the hints
+/// to search.
+pub const MESSAGE_GLYPH: f32 = 28.;
 
 /// The window's text.
 pub const FONT_UI: &str = "Segoe UI";

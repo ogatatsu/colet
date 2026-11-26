@@ -206,7 +206,7 @@ impl Colet {
             .p_6()
             .text_xs()
             .text_color(p.text_muted)
-            .child(icon("search", 28., p.text_faint))
+            .child(icon("search", metrics::MESSAGE_GLYPH, p.text_faint))
             .child(words::search::hint())
             // Ringed as a field is; the rings' room makes up most of the gaps. In a narrow window they go on
             // to a second line rather than past the edges.

@@ -214,7 +214,8 @@ impl Colet {
             });
         let name = entry.name.clone();
         let picture = match (saved, image) {
-            (true, _) => icon("search", 16., if lit { p.on_accent } else { p.text_muted }).into_any_element(),
+            // In the place of an item's picture, as large.
+            (true, _) => icon("search", metrics::ICON, if lit { p.on_accent } else { p.text_muted }).into_any_element(),
             (false, Some(image)) => img(image).size(scaled(metrics::ICON)).flex_none().into_any_element(),
             (false, None) => div().size(scaled(metrics::ICON)).flex_none().into_any_element(),
         };

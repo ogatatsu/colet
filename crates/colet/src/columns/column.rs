@@ -189,7 +189,7 @@ impl Colet {
             .py_8()
             .text_xs()
             .text_color(p.text_muted)
-            .child(icon(icon_name, 28., p.text_faint))
+            .child(icon(icon_name, metrics::MESSAGE_GLYPH, p.text_faint))
             .child(div().text_center().child(text))
     }
 
