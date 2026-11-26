@@ -47,6 +47,12 @@ pub(crate) fn row_height(kind: Kind) -> f32 {
     if kind == Kind::Search { 42. } else { 28. }
 }
 
+/// The lines of a search result, its name over its folder: set close, as one item's two lines, so the
+/// room the row leaves over falls between the rows and the folder reads as its own name's, not the next.
+/// Left to the text's own height, the two lines would fill the row, as far apart as the rows are.
+const RESULT_NAME_LINE: f32 = 19.;
+const RESULT_FOLDER_LINE: f32 = 16.;
+
 /// Where a row's name and a search result's folder under it note how they were drawn, for the row's tip
 /// to tell whether either was cut short.
 #[derive(Clone, Default)]
@@ -101,8 +107,9 @@ struct RowLook {
     selected: bool,
     /// A search result or favorite points at it, or it is the saved search running.
     highlighted: bool,
-    /// Marked by a bar at its edge.
-    barred: bool,
+    /// Filled with a tint of the accent, apart from the selection's fills: what a search result or
+    /// favorite points at, and home's pick while the columns are worked in.
+    pointed: bool,
     /// Filled with the accent: selected in the column worked in.
     lit: bool,
     /// Ringed: the keys are on it.
@@ -147,9 +154,9 @@ impl Colet {
         RowLook {
             selected,
             highlighted,
-            // The item a search result or favorite points at: a bar, which wins over the selection but not
-            // over the one in the column worked in. Home marks its pick so while the columns are worked in.
-            barred: (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked),
+            // The item a search result or favorite points at: its own fill, which wins over the selection but
+            // not over the one in the column worked in. Home marks its pick so while the columns are worked in.
+            pointed: (highlighted && (!selected || !marked)) || (kind == Kind::Home && selected && !marked),
             lit: selected && marked && !aside,
             // The keys are on it: ringed, selected or not, while they are in this column.
             focused: keys && c.focused.as_ref() == Some(&entry.path),
@@ -178,7 +185,7 @@ impl Colet {
     pub(crate) fn row(&mut self, index: usize, entry: &Entry, marked: bool, keys: bool, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let radii = self.radii(cx);
-        let RowLook { selected, highlighted, barred, lit, focused, target, aside, held, cut, faded, dragged, within, narrow } =
+        let RowLook { selected, highlighted, pointed, lit, focused, target, aside, held, cut, faded, dragged, within, narrow } =
             self.row_look(index, entry, marked, keys, cx);
         let c = &self.state.columns[index];
         let kind = c.kind;
@@ -289,13 +296,12 @@ impl Colet {
             .border_color(transparent_black())
             .when(focused, |r| r.border_color(if lit { p.focus_on_fill } else { p.focus }))
             .when(target, |r| r.border_color(p.accent).bg(p.highlight))
-            .when(barred, |r| r.child(div().absolute().left_0().top_0().bottom_0().w(scaled(3.)).rounded_l(scaled(radii.sm)).bg(p.accent)))
             .when(selected, |r| r.bg(if marked && !aside { p.accent_fill } else { p.selected_inactive }))
             .when(lit, |r| r.text_color(p.on_accent))
-            .when(barred, |r| r.bg(p.highlight))
+            // Told by the row's own fill, as the selection is, not by a line at its edge.
+            .when(pointed, |r| r.bg(p.highlight))
             .when(!selected && !highlighted && !dragging, |r| r.hover(|r| r.bg(p.hover)))
             .when(faded, |r| r.text_color(p.text_muted))
-            // The selection in home while the columns are worked in: marked at its edge, as in a sidebar.
             .map(|r| {
                 let picture = div().when(faded, |d| d.opacity(if cut { 0.35 } else { 0.6 })).child(picture);
                 if kind == Kind::Home { r.child(picture) } else { r.child(self.check(index, drawn, selected, lit, picture, cx)) }
@@ -435,6 +441,7 @@ impl Colet {
                     .flex()
                     .items_center()
                     .gap_2()
+                    .when(kind == Kind::Search, |d| d.line_height(scaled(RESULT_NAME_LINE)))
                     .child(div().relative().min_w_0().truncate().child(with_marks(&row.entry.name, marks, mark)).child(fits.name.note()))
                     // A badge, tinted with the row's own ink so it shows on any of its fills; its own tip
                     // gives the filter it cuts short.
@@ -482,6 +489,7 @@ impl Colet {
                         .whitespace_nowrap()
                         .text_ellipsis_start()
                         .text_xs()
+                        .line_height(scaled(RESULT_FOLDER_LINE))
                         .text_color(muted)
                         .child(with_marks(&row.entry.parent, &row.entry.marks.parent, mark))
                         .child(fits.parent.note()),

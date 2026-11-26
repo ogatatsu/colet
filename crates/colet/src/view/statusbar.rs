@@ -7,7 +7,13 @@ impl Colet {
     pub(super) fn render_statusbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let history = self.history_button(window, cx);
-        let active = &self.state.columns[self.state.active];
+        // Home worked in but folded into its strip is out of sight: the bar tells of the columns left to
+        // see, the last of them as the address ends at, rather than of a pane that is not there.
+        let told = match self.state.active {
+            0 if !self.home_open(window, cx) => self.state.columns.len() - 1,
+            active => active,
+        };
+        let active = &self.state.columns[told];
         let place = match active.kind {
             Kind::Folder => shown(&active.path),
             Kind::Search if active.error.is_some() => words::status::cannot_search().into(),
@@ -56,7 +62,8 @@ impl Colet {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis_start()
-                    .child(place),
+                    .child(place)
+                    .test_support(),
             )
             .right(div().flex_none().child(detail))
             .right(

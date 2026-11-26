@@ -60,7 +60,8 @@ pub struct Palette {
     pub accent_fill: Hsla,
     pub selected_inactive: Hsla,
     /// Kept well below `accent_fill`, so a pointed-at file never reads as the selection, and off
-    /// `hover`, so it never reads as where the pointer is.
+    /// `hover`, so it never reads as where the pointer is. Its tint alone sets it off a row selected aside,
+    /// which is grey: the row's own fill tells it, with no line at its edge.
     pub highlight: Hsla,
     /// Behind the chosen one of a radio group's choices, ringed in `accent`: off `raised`, which the others
     /// take, and off `raised_hover`, so it never reads as where the pointer is.
@@ -109,7 +110,7 @@ impl Palette {
             accent: hsl(213., 65., 72.),
             accent_fill: hsl(214., 48., 38.),
             selected_inactive: hsl(220., 3., 23.),
-            highlight: hsl(214., 24., 25.),
+            highlight: hsl(214., 30., 24.),
             chosen: hsl(214., 32., 30.),
             danger: hsl(0., 72., 70.),
             danger_fill: hsl(0., 58., 42.),
@@ -351,6 +352,9 @@ mod tests {
             let apart = |a: Hsla, b: Hsla| (a.l - b.l).abs() >= 0.039;
             assert!(apart(palette.raised_hover, palette.raised), "hover over a raised surface, dark: {dark}");
             assert!(apart(palette.highlight, palette.hover), "pointed-at against hovered, dark: {dark}");
+            // Against a row selected aside, of much the same lightness, by its tint of the accent.
+            let tint = palette.highlight.s - palette.selected_inactive.s;
+            assert!(tint >= 0.2, "pointed-at against selected aside: {tint}, dark: {dark}");
             // The chosen one of a radio group's choices against the others and the one under the pointer.
             assert!(apart(palette.chosen, palette.raised), "chosen against a choice, dark: {dark}");
             assert!(apart(palette.chosen, palette.raised_hover), "chosen against a hovered choice, dark: {dark}");
@@ -416,6 +420,9 @@ mod tests {
                 ("a match in a row", palette.accent, palette.surface),
                 ("a match in a row selected aside", palette.accent, palette.selected_inactive),
                 ("a path in a row selected aside", palette.text_muted, palette.selected_inactive),
+                ("a path in a pointed-at row", palette.text_muted, palette.highlight),
+                ("a match in a pointed-at row", palette.accent, palette.highlight),
+                ("a pointed-at row", palette.text, palette.highlight),
                 ("a column's count", palette.text_faint, palette.surface),
                 ("faint text in home and the status bar", palette.text_faint, palette.bg),
                 ("the chosen one of a radio group's choices", palette.text, palette.chosen),

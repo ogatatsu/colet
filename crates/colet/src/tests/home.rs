@@ -570,6 +570,26 @@ fn folds_home_into_its_strip_and_brings_it_out_while_the_keys_are_there(cx: &mut
     assert!(home_out(&ui, cx));
 }
 
+/// What the status bar says of where the work is.
+fn status_place(ui: &Ui, cx: &mut TestAppContext) -> String {
+    ui.act(cx, |window, _| window.try_find("place").and_then(|place| place.label().map(str::to_owned))).unwrap_or_default()
+}
+
+#[gpui_kit::test]
+fn tells_of_the_columns_in_the_status_bar_while_home_worked_in_is_folded_away(cx: &mut TestAppContext) {
+    let fake = Arc::new(drive_d());
+    let ui = open(cx, fake.clone());
+    ui.click_in(cx, "home", row(r"D:\"));
+    // Out with the keys in it: home itself.
+    assert!(home_out(&ui, cx));
+    assert_eq!(status_place(&ui, cx), crate::words::home());
+    // The keys gone to the search field, home is still the column worked in, but folded away out of sight:
+    // what the bar tells of is the columns left to see, as the address does.
+    ui.press(cx, "ctrl-f");
+    assert!(!home_out(&ui, cx) && ui.active(cx) == 0);
+    assert_eq!(status_place(&ui, cx), r"D:\");
+}
+
 #[gpui_kit::test]
 fn keeps_home_out_while_its_menu_is_up_and_while_the_tab_has_nothing_else(cx: &mut TestAppContext) {
     let fake = Arc::new(drive_d().with_results(vec![file(r"D:\abc.txt")]));
