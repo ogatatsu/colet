@@ -45,7 +45,7 @@ fn gives_a_name_cut_short_whole_and_nothing_for_one_shown_whole(cx: &mut TestApp
 #[gpui_kit::test]
 fn gives_a_result_whose_folder_is_cut_short_though_its_name_fits(cx: &mut TestAppContext) {
     let deep = file(r"D:\a folder with a long name\and another under it with one longer still\and a third, to be sure it is cut\zeta.txt");
-    let short = file(r"D:\b\zeta2.txt");
+    let short = file(r"D:\b\zeta.c");
     let ui = open(cx, Arc::new(Fake::default().with_results(vec![deep.clone(), short.clone()])));
     ui.input(cx, "zeta");
     assert!(tip_on(&ui, cx, row(&deep.path)), "the folder cut short given whole");

@@ -283,3 +283,41 @@ fn changes_a_saved_searchs_order_in_its_dialog(cx: &mut TestAppContext) {
     // The results showing stay as they were.
     assert_eq!(ui.read(cx, |v| v.state.search_order), Order::default());
 }
+
+/// The sizes stand flush right under their heading, as Explorer has them, so they compare by their length;
+/// the dates stand flush left under theirs. The heading's name ends where the sizes do, its arrow before it.
+#[gpui_kit::test]
+fn lines_the_sizes_up_on_the_right_and_the_dates_on_the_left(cx: &mut TestAppContext) {
+    let sized = |path: &str, bytes: u64| Entry { size: Some(bytes), modified: Some(0), ..file(path) };
+    let fake = Arc::new(Fake {
+        roots: vec![Entry::folder(r"D:\", "D:")],
+        ..Fake::default().with_folders(&[
+            (r"D:\", vec![folder(r"D:\work")]),
+            (r"D:\work", vec![sized(r"D:\work\a.txt", 5), sized(r"D:\work\b.txt", 367_525_888)]),
+        ])
+    });
+    let ui = open(cx, fake.clone());
+    ui.click(cx, row(r"D:\"));
+    ui.press(cx, "right");
+    ui.press(cx, "right");
+    let work = ui.read(cx, |v| v.state.columns[2].id);
+    // By size, so its heading carries the arrow.
+    ui.click(cx, ("sort-by-size", work));
+    let drawn = |cx: &mut TestAppContext, id: ElementId| ui.act(cx, |window, _| window.find(id).bounds());
+    let (small, large) = (drawn(cx, row_part(r"D:\work\a.txt", "size")), drawn(cx, row_part(r"D:\work\b.txt", "size")));
+    let heading = drawn(cx, heading_name("sort-by-size", work));
+    assert_eq!(small.right(), large.right());
+    assert_eq!(heading.right(), large.right());
+    assert!(small.left() > large.left(), "{small:?} {large:?}");
+    let (first, second) = (drawn(cx, row_part(r"D:\work\a.txt", "modified")), drawn(cx, row_part(r"D:\work\b.txt", "modified")));
+    let heading = drawn(cx, heading_name("sort-by-modified", work));
+    assert_eq!(first.left(), second.left());
+    assert_eq!(heading.left(), first.left());
+    // The two stand apart as two columns, not run on as one figure: more than the cells' gap between them.
+    assert!(first.left() - large.right() >= px(16.), "{large:?} {first:?}");
+}
+
+/// The name in the heading `heading` of the column `column`.
+fn heading_name(heading: &'static str, column: ColumnId) -> ElementId {
+    ElementId::NamedChild(Arc::new(ElementId::from((heading, column))), "name".into())
+}

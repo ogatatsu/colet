@@ -21,7 +21,7 @@ use crate::{
     view::*,
 };
 
-use super::{MODIFIED_WIDTH, SIZE_WIDTH};
+use super::{MODIFIED_WIDTH, SIZE_TRAIL, SIZE_WIDTH};
 
 /// How many the column holds, in its heading: narrowed, how many show of how many in all. Nothing while it
 /// cannot be listed or has not been yet.
@@ -490,25 +490,38 @@ impl Colet {
             } else {
                 words::column::sorted_by(words::sort_name(by))
             };
+            // The sizes stand flush right, and their heading with them: its arrow goes before the name, so
+            // the name ends where the sizes do.
+            let flush_right = by == Sort::Size;
+            let arrow = chosen.then(|| icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted));
+            let heading_id = std::sync::Arc::new(ElementId::from((name, id)));
             div()
-                .id((name, id))
+                .id(ElementId::clone(&heading_id))
                 .role(Role::Button)
                 .aria_label(label)
                 .h_full()
                 .px_1()
                 .flex()
                 .items_center()
+                .when(flush_right, |d| d.pr(scaled(4. + SIZE_TRAIL)).justify_end())
                 .gap_0p5()
                 .rounded(scaled(self.radii(cx).sm))
                 .hover(|d| d.bg(p.hover))
                 .text_color(if chosen { p.text } else { p.text_muted })
-                .child(words::sort_name(by))
-                .when(chosen, |d| d.child(icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted)))
+                .map(|d| {
+                    let name = div()
+                        .id(ElementId::NamedChild(heading_id.clone(), "name".into()))
+                        .flex_none()
+                        .child(words::sort_name(by))
+                        .test_support();
+                    if flush_right { d.children(arrow).child(name) } else { d.child(name).children(arrow) }
+                })
                 .on_click(cx.listener(move |this, _, _, cx| this.sort_by_heading(id, by, cx)))
                 .test_support()
         };
         // The row's room: the list's 4px, then the row's 8px and its 2px ring; inside, the gap between cells.
-        // Each heading reaches 4px past its cells, over the gap, so its text stands where theirs does.
+        // Each heading reaches 4px past its cells, over the gap, so its text stands where theirs does: at
+        // their left, or for the sizes, at their right.
         div()
             .flex_none()
             .h_6()
@@ -536,7 +549,7 @@ impl Colet {
                     d.child(heading(Sort::Name, "sort-by-name").flex_1().min_w_0())
                 }
             })
-            .child(heading(Sort::Size, "sort-by-size").w(scaled(SIZE_WIDTH + 8.)).flex_none())
+            .child(heading(Sort::Size, "sort-by-size").w(scaled(SIZE_WIDTH + SIZE_TRAIL + 8.)).flex_none())
             .child(heading(Sort::Modified, "sort-by-modified").w(scaled(MODIFIED_WIDTH + 8.)).flex_none())
             .child(div().w(scaled(13. + 8.)).flex_none())
             .into_any_element()

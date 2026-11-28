@@ -19,6 +19,9 @@ use crate::{
 /// The widths a row's size and modified time take: `1023.9 MB` and `2026/12/31 23:59`, at 12px.
 pub(crate) const SIZE_WIDTH: f32 = 56.;
 pub(crate) const MODIFIED_WIDTH: f32 = 96.;
+/// The room after the sizes, which stand flush right, before the dates, which stand flush left: with the
+/// cells' gap alone, `965 B` would run on into `2026/11/24` as one figure.
+pub(crate) const SIZE_TRAIL: f32 = 8.;
 /// The chevron closing a folder's row, and the room a file's row keeps in its place.
 const CHEVRON: f32 = 13.;
 /// What the pointer is on for a row's icon to turn to its checkbox.
@@ -335,7 +338,7 @@ impl Colet {
                         .test_support(),
                 )
             })
-            .when(kind != Kind::Home, |r| r.children(Self::row_cells(entry, lit, muted, p)))
+            .when(kind != Kind::Home, |r| r.children(Self::row_cells(&id, entry, lit, muted, p)))
             .when_some(tip, |r, tip| r.tooltip(tip))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| this.click_row(index, kind, &path, event, window, cx)))
             .test_support()
@@ -498,21 +501,33 @@ impl Colet {
             })
     }
 
-    /// The size and the date, each in a set width, flush left under its heading, so they read down the
-    /// column as a table's would; then the chevron. A folder has no size of its own; like Explorer, it
-    /// leaves the cell blank. A file keeps the chevron's room, so its date lines up with a folder's.
-    fn row_cells(entry: &Entry, lit: bool, muted: Hsla, p: crate::theme::Palette) -> [AnyElement; 3] {
+    /// The size and the date, each in a set width under its heading, so they read down the column as a
+    /// table's would; then the chevron. The size is flush right, as Explorer has it, so sizes are compared
+    /// by their length; the date, flush left. A folder has no size of its own; like Explorer, it leaves the
+    /// cell blank. A file keeps the chevron's room, so its date lines up with a folder's.
+    fn row_cells(id: &std::sync::Arc<ElementId>, entry: &Entry, lit: bool, muted: Hsla, p: crate::theme::Palette) -> [AnyElement; 3] {
         let size = if entry.directory { String::new() } else { time::size(entry.size) };
         let modified = entry.modified.and_then(time::date_minute).unwrap_or_else(|| "—".into());
-        let cell = |width: f32, text: String| {
-            div().flex_none().w(scaled(width)).flex().whitespace_nowrap().text_xs().text_color(muted).child(text).into_any_element()
+        let cell = |part: &'static str, width: f32, text: String, flush_right: bool| {
+            let trail = if flush_right { SIZE_TRAIL } else { 0. };
+            div()
+                .flex_none()
+                .w(scaled(width + trail))
+                .pr(scaled(trail))
+                .flex()
+                .when(flush_right, |d| d.justify_end())
+                .whitespace_nowrap()
+                .text_xs()
+                .text_color(muted)
+                .child(div().id(row_part_id(id, part)).flex_none().child(text).test_support())
+                .into_any_element()
         };
         let chevron = if entry.directory {
             icon("chevron-right", CHEVRON, if lit { p.on_accent_muted } else { p.text_faint }).into_any_element()
         } else {
             div().w(scaled(CHEVRON)).flex_none().into_any_element()
         };
-        [cell(SIZE_WIDTH, size), cell(MODIFIED_WIDTH, modified), chevron]
+        [cell("size", SIZE_WIDTH, size, true), cell("modified", MODIFIED_WIDTH, modified, false), chevron]
     }
 
     /// A click on the row of `path` in the column at `index`: a double one opens it; home picks one row at
