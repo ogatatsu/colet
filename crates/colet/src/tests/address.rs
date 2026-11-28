@@ -65,7 +65,7 @@ fn what_cannot_be_gone_to_is_said_and_stays_to_be_put_right(cx: &mut TestAppCont
     ui.press(cx, "ctrl-l");
     ui.input(cx, r"D:\nowhere");
     ui.press(cx, "enter");
-    assert_eq!(ui.toasts(cx), [r"「D:\nowhere」が見つかりません"]);
+    assert_eq!(ui.toasts(cx), [r"「D:\nowhere」が見つかりません。"]);
     assert_eq!(ui.address(cx).as_deref(), Some(r"D:\nowhere"));
     assert_eq!(ui.last_folder(cx), r"D:\work");
     ui.press(cx, "ctrl-a");

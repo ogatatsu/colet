@@ -7,7 +7,7 @@ fn copies_and_pastes_picking_what_was_pasted(cx: &mut TestAppContext) {
     let (fake, ui) = in_work(cx);
     ui.press(cx, "ctrl-c");
     assert_eq!(texts(&fake.clipboard.lock().unwrap().paths), [r"D:\work\a.txt"]);
-    assert!(ui.toasts(cx).iter().any(|t| t == "1 項目をコピーしました"));
+    assert!(ui.toasts(cx).iter().any(|t| t == "1 項目をコピーしました。"));
     ui.press(cx, "ctrl-v");
     // Into its own folder: a copy named as Explorer names it, picked once listed.
     assert_eq!(ui.selected(cx, 2), [r"D:\work\a.txt - コピー"]);
@@ -65,7 +65,7 @@ fn pastes_a_copy_still_being_written_once_it_is_on_the_clipboard(cx: &mut TestAp
     let asked = fake.operations.lock().unwrap().clone();
     assert_eq!(asked.len(), 1);
     assert_eq!((asked[0].kind, asked[0].destination.as_path()), (Operation::Paste, Path::new(r"D:\work")));
-    assert!(ui.toasts(cx).iter().any(|t| t == "1 項目をコピーしました"), "{:?}", ui.toasts(cx));
+    assert!(ui.toasts(cx).iter().any(|t| t == "1 項目をコピーしました。"), "{:?}", ui.toasts(cx));
 }
 
 #[gpui_kit::test]
@@ -264,7 +264,7 @@ fn asks_whether_a_history_item_is_still_there_off_the_ui_thread_opening_only_the
     });
     settle(cx);
     assert!(ui.read(cx, |v| v.overlays.is_history_open()));
-    assert!(ui.toasts(cx).iter().any(|t| t == "「gone.txt」はもうありません"), "{:?}", ui.toasts(cx));
+    assert!(ui.toasts(cx).iter().any(|t| t == "「gone.txt」はもうありません。"), "{:?}", ui.toasts(cx));
 }
 
 #[gpui_kit::test]
@@ -378,7 +378,7 @@ fn never_sends_a_drive_at_home_to_the_bin(cx: &mut TestAppContext) {
     assert!(ui.read(cx, |v| !v.overlays.has_dialog()));
     assert!(ui.toasts(cx).iter().any(|t| t.starts_with("「ごみ箱へ移動」はホームでは使えません")), "{:?}", ui.toasts(cx));
     ui.press(cx, "ctrl-c");
-    assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はホームでは使えません"), "{:?}", ui.toasts(cx));
+    assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はホームでは使えません。"), "{:?}", ui.toasts(cx));
 }
 
 #[gpui_kit::test]
@@ -386,7 +386,7 @@ fn tells_of_a_failed_operation_and_opens_it_in_the_history(cx: &mut TestAppConte
     let (fake, ui) = in_work(cx);
     fake.stuck.lock().unwrap().push(r"D:\work\a.txt".into());
     ui.press(cx, "delete");
-    assert!(ui.toasts(cx).iter().any(|t| t == "「ごみ箱へ移動」: 1 件失敗"), "{:?}", ui.toasts(cx));
+    assert!(ui.toasts(cx).iter().any(|t| t == "「ごみ箱へ移動」: 1 件失敗。"), "{:?}", ui.toasts(cx));
     assert_eq!(ui.ops(cx, |o| o.history.unseen), 1);
     let toast = ui.read(cx, |v| v.notices.last());
     ui.click(cx, ("toast-details", toast as usize));

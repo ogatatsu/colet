@@ -173,7 +173,7 @@ impl Colet {
                 .gap_1()
                 .child(label(p, words::name()))
                 .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
-                .when_some(problem, |d, problem| d.child(div().text_xs().text_color(p.danger).child(problem))),
+                .when_some(problem, |d, problem| d.child(field_problem(p, problem))),
         );
         let buttons = vec![
             (

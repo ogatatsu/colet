@@ -110,6 +110,11 @@ pub(crate) fn label(p: Palette, text: &'static str) -> Div {
     div().text_xs().text_color(p.text_muted).child(text)
 }
 
+/// What is wrong with a field, under it: a sentence, ended as one, in the color of danger.
+pub(crate) fn field_problem(p: Palette, text: &str) -> Div {
+    div().text_xs().text_color(p.danger).child(crate::words::sentence(text))
+}
+
 /// A dialog's button: the primary one is what Enter does.
 pub(crate) fn push(id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, enabled: bool) -> Button {
     Button::new(id).label(text).when(primary, |b| b.primary()).disabled(!enabled)

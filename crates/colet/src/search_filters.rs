@@ -12,7 +12,7 @@ use gpui_kit::prelude::FluentBuilder;
 use crate::words;
 use crate::{
     app::Colet,
-    dialogs::{Dialog, DialogParts, field, label, push},
+    dialogs::{Dialog, DialogParts, field, field_problem, label, push},
     menus::{Line, Popup, choice, line},
     metrics,
     settings::SearchFilter,
@@ -224,9 +224,7 @@ impl Colet {
                     .gap_1()
                     .child(label(p, words::name()))
                     .child(field(p, name, self.has_keys(name, window, cx), radii.md, Self::right_press_menu(name, cx)))
-                    .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                        d.child(div().text_xs().text_color(p.danger).child(problem))
-                    }),
+                    .when_some(problem.filter(|p| !p.is_empty()), |d, problem| d.child(field_problem(p, problem))),
             )
             .child(
                 div()

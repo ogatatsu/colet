@@ -431,7 +431,7 @@ fn offers_in_home_only_what_its_rows_can_do(cx: &mut TestAppContext) {
     ui.click(cx, row(r"D:\a"));
     ui.press(cx, "left");
     ui.press(cx, "ctrl-c");
-    assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はホームでは使えません"), "{:?}", ui.toasts(cx));
+    assert!(ui.toasts(cx).iter().any(|t| t == "「コピー」はホームでは使えません。"), "{:?}", ui.toasts(cx));
 }
 
 #[gpui_kit::test]

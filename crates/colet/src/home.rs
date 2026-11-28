@@ -24,7 +24,7 @@ use gpui_kit::*;
 use crate::words;
 use crate::{
     app::{Colet, FOLD_WIDTH, WidthOf},
-    dialogs::{Choice, Dialog, DialogParts, Pick, SearchEdit, field, label, push},
+    dialogs::{Choice, Dialog, DialogParts, Pick, SearchEdit, field, field_problem, label, push},
     file_menu::FileCommand,
     menus::{Line, line},
     metrics::{self, Scale},
@@ -729,7 +729,7 @@ impl Colet {
             .child(label(p, words::narrowing()))
             .child(field(p, input, self.has_keys(input, window, cx), radii.md, Self::right_press_menu(input, cx)))
             .child(match problem {
-                Some(problem) => div().text_xs().text_color(p.danger).child(problem),
+                Some(problem) => field_problem(p, problem),
                 None => div().text_xs().text_color(p.text_faint).child(words::home::narrow_hint()),
             })
     }
@@ -848,9 +848,7 @@ impl Colet {
                     .gap_1()
                     .child(label(p, words::query()))
                     .child(field(p, query, self.has_keys(query, window, cx), radii.md, Self::right_press_menu(query, cx)))
-                    .when_some(problem.filter(|p| !p.is_empty()), |d, problem| {
-                        d.child(div().text_xs().text_color(p.danger).child(problem))
-                    }),
+                    .when_some(problem.filter(|p| !p.is_empty()), |d, problem| d.child(field_problem(p, problem))),
             )
             .child(div().flex().flex_col().gap_1().child(label(p, words::search_filter())).child(filters))
             .child(self.narrow_field(narrow, None, window, cx))

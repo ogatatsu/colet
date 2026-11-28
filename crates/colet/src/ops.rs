@@ -30,7 +30,7 @@ use crate::{
     app::Colet,
     backend::{self, PathKind},
     clipboard::{Clipboard, Paste},
-    dialogs::{Dialog, DialogParts, field, label, push},
+    dialogs::{Dialog, DialogParts, field, field_problem, label, push},
     metrics,
     notices::Tone,
     settings::Favorite,

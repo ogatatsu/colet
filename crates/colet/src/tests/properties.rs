@@ -68,7 +68,7 @@ fn shows_the_properties_of_results_from_several_folders_together(cx: &mut TestAp
     assert_eq!(line, Some(Some("")));
     ui.press(cx, "escape");
     ui.press(cx, "alt-enter");
-    assert!(ui.toasts(cx).iter().any(|t| t == "「プロパティ」はフォルダーのカラムで使えます"), "{:?}", ui.toasts(cx));
+    assert!(ui.toasts(cx).iter().any(|t| t == "「プロパティ」はフォルダーのカラムで使えます。"), "{:?}", ui.toasts(cx));
     assert_eq!(shown(&fake).len(), 1);
 }
 
@@ -95,6 +95,6 @@ fn shows_the_properties_of_a_drive_or_folder_in_home_but_not_of_a_saved_search(c
     ui.click(cx, row("search:one"));
     ui.press(cx, "left");
     ui.press(cx, "alt-enter");
-    assert!(ui.toasts(cx).iter().any(|t| t == "「プロパティ」は保存した検索には使えません"), "{:?}", ui.toasts(cx));
+    assert!(ui.toasts(cx).iter().any(|t| t == "「プロパティ」は保存した検索には使えません。"), "{:?}", ui.toasts(cx));
     assert_eq!(shown(&fake).len(), 2);
 }

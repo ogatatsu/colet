@@ -55,7 +55,7 @@ fn says_quick_look_is_not_running_only_from_space(cx: &mut TestAppContext) {
     ui.press(cx, "down");
     assert!(ui.toasts(cx).is_empty(), "{:?}", ui.toasts(cx));
     ui.press(cx, "space");
-    assert_eq!(ui.toasts(cx), ["QuickLook が起動していません"]);
+    assert_eq!(ui.toasts(cx), ["QuickLook が起動していません。"]);
 }
 
 #[gpui_kit::test]

@@ -7,10 +7,10 @@ fn keeps_an_error_up_until_it_is_closed_and_lets_a_notice_go_on_its_own(cx: &mut
     ui.view.update(cx, |v, cx| v.notify("失敗しました", crate::notices::Tone::Error, cx));
     ui.view.update(cx, |v, cx| v.notify("コピーしました", crate::notices::Tone::Info, cx));
     settle(cx);
-    assert_eq!(ui.toasts(cx), ["失敗しました", "コピーしました"]);
+    assert_eq!(ui.toasts(cx), ["失敗しました。", "コピーしました。"]);
     cx.executor().advance_clock(Duration::from_secs(10));
     settle(cx);
-    assert_eq!(ui.toasts(cx), ["失敗しました"]);
+    assert_eq!(ui.toasts(cx), ["失敗しました。"]);
     // Its close button shows while the pointer is on it.
     ui.act(cx, |window, cx| window.hover(("toast", 1usize), cx));
     ui.click(cx, "close");

@@ -7,7 +7,7 @@ fn never_writes_over_settings_it_could_not_read(cx: &mut TestAppContext) {
     let fake = Arc::new(Fake::default().with_results(vec![file(r"D:\a.pdf")]));
     *fake.unreadable.lock().unwrap() = Some(LoadError { message: "設定を読み込めません".into(), kept: true });
     let ui = open(cx, fake.clone());
-    assert!(ui.toasts(cx).iter().any(|t| t == "設定を読み込めません"), "{:?}", ui.toasts(cx));
+    assert!(ui.toasts(cx).iter().any(|t| t == "設定を読み込めません。"), "{:?}", ui.toasts(cx));
     ui.input(cx, "ext:pdf");
     ui.press(cx, "ctrl-d");
     // Kept for the session, but the file stays as it was.

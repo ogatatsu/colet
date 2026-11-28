@@ -250,7 +250,7 @@ impl Colet {
             },
         ));
         let retry = self.ringed(retry, Stop::Retry(id), RingAt::Round, window, cx).m(scaled(-RING_ROOM));
-        self.message("circle-alert", error, cx).child(retry).into_any_element()
+        self.message("circle-alert", words::sentence(error), cx).child(retry).into_any_element()
     }
 
     /// The edge a drag widens a column from: astride its border, so its scrollbar stays clear of it.

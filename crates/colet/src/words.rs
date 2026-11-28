@@ -339,6 +339,29 @@ fn items(count: usize) -> String {
     if count == 1 { "1 item".into() } else { format!("{count} items") }
 }
 
+/// The marks a sentence may end with: 。 or a period, and a question or an exclamation in either script.
+const SENTENCE_ENDS: [char; 7] = ['。', '．', '.', '？', '?', '！', '!'];
+
+/// `text`, a sentence said on its own, as a notice, an error under a field or a column's reason for listing
+/// nothing is: ended with 。, or in English a period, unless it ends so already, as Windows's own words do
+/// and a notice of two sentences does. A label, a heading, a state or a reason on a menu's line is not
+/// a sentence said on its own, and stays as it is.
+pub fn sentence(text: impl Into<String>) -> String {
+    let mut text = text.into();
+    text.truncate(text.trim_end().len());
+    if !text.is_empty() && !text.ends_with(SENTENCE_ENDS) {
+        text.push_str(said("。", "."));
+    }
+    text
+}
+
+/// `text`, a sentence set inside another, before more is said after it: without the 。 or period it may
+/// end with, as Windows's own words do, so the two never stand doubled (`。。`, or `。）`).
+pub fn clause(text: impl Display) -> String {
+    let text = text.to_string();
+    text.trim_end().trim_end_matches(['。', '．', '.']).trim_end().to_owned()
+}
+
 /// Windows's own words for what it refused, or the code when it has none.
 pub fn windows_failure(code: HRESULT) -> String {
     colet_core::operations::system_message(code).unwrap_or_else(|| {
@@ -412,6 +435,7 @@ pub mod window {
 
     /// The settings could not be written as the window closed.
     pub fn close_without_settings(error: impl Display) -> String {
+        let error = super::clause(error);
         match spoken() {
             Japanese => format!("{error}。もう一度閉じると、設定を保存せずに終了します。"),
             English => format!("{error}. Close again to quit without saving the settings."),
@@ -435,6 +459,7 @@ pub mod window {
 
     /// The watch on the folders could not start at all.
     pub fn cannot_start_watching(error: &colet_core::watch::WatchError) -> String {
+        let error = super::clause(error);
         match spoken() {
             Japanese => format!("フォルダーの変更を監視できません: {error}。F5で更新できます。"),
             English => format!("Cannot watch the folders for changes: {error}. Press F5 to refresh."),
@@ -1122,6 +1147,7 @@ pub mod ops {
 
     /// Several items could not be opened: the first few, `names`, then how many more.
     pub fn cannot_open_many(count: usize, names: impl Display, more: impl Display, error: impl Display) -> String {
+        let error = super::clause(error);
         match spoken() {
             Japanese => format!("{count} 項目を開けません: {names}{more}（{error}）"),
             English => {
@@ -1251,8 +1277,9 @@ pub mod ops {
     pub fn name_problem(problem: colet_core::operations::NameProblem) -> &'static str {
         use colet_core::operations::NameProblem;
         match problem {
+            // The characters in brackets, so the 。 or period that ends the sentence is not read as one more.
             NameProblem::ForbiddenCharacter => {
-                said("次の文字は使えません：\\ / : * ? \" < > |", "A name cannot have any of these characters: \\ / : * ? \" < > |")
+                said("次の文字は使えません（\\ / : * ? \" < > |）", "A name cannot have any of these characters (\\ / : * ? \" < > |)")
             }
             NameProblem::TrailingDotOrSpace => said("末尾にピリオドや空白は使えません", "A name cannot end in a period or a space"),
             NameProblem::Reserved => said("Windowsで予約された名前は使えません", "This name is reserved by Windows"),
@@ -1340,6 +1367,7 @@ pub mod reasons {
     }
 
     pub fn refused_with_hint(title: impl Display, reason: impl Display, hint: impl Display) -> String {
+        let reason = super::clause(reason);
         match spoken() {
             Japanese => format!("「{title}」は{reason}。{hint}"),
             English => format!("“{title}”: {reason}. {hint}"),
@@ -1691,6 +1719,7 @@ pub mod kept {
 
     /// The file could not be read, and is kept as it is: nothing is saved over it.
     pub fn unreadable(what: impl Display, error: impl Display, file: impl Display) -> String {
+        let error = super::clause(error);
         match spoken() {
             Japanese => format!("{what}を読み込めません: {error}。元の{file}を残すため、変更は保存しません。"),
             English => format!("Cannot read {what}: {error}. Changes are not saved, to keep {file} as it is."),
@@ -1699,6 +1728,7 @@ pub mod kept {
 
     /// The file was broken and put aside at `aside`; Colet started on `fallback`.
     pub fn put_aside(file: impl Display, fallback: impl Display, error: impl Display, aside: impl Display) -> String {
+        let error = super::clause(error);
         match spoken() {
             Japanese => format!("{file}が壊れていたため、{fallback}で始めました（{error}）。元のファイルは{aside}に残しています。"),
             English => format!("Started with {fallback}, as {file} was broken ({error}). The file is kept at {aside}."),
@@ -1715,6 +1745,7 @@ pub mod kept {
 
     /// What was skipped, and where the file was copied before the next save leaves it out.
     pub fn copied_aside(skipped: impl Display, aside: impl Display) -> String {
+        let skipped = super::clause(skipped);
         match spoken() {
             Japanese => format!("{skipped}。元のファイルは{aside}に残しています。"),
             English => format!("{skipped}. The file is kept at {aside}."),
@@ -1723,6 +1754,7 @@ pub mod kept {
 
     /// What was skipped, the file kept as it is since it could not be copied aside.
     pub fn not_saved(skipped: impl Display, file: impl Display) -> String {
+        let skipped = super::clause(skipped);
         match spoken() {
             Japanese => format!("{skipped}。元の{file}を残すため、変更は保存しません。"),
             English => format!("{skipped}. Changes are not saved, to keep {file} as it is."),
@@ -1789,6 +1821,51 @@ mod tests {
             "Cannot open 5 items: “a”, “b”, “c” and 2 more (no app)"
         );
         assert_eq!(ops::cannot_open_many(2, quoted_list(["a", "b"]), "", "no app"), "Cannot open 2 items: “a”, “b” (no app)");
+    }
+
+    /// A sentence said on its own ends as one, once, in either language: Windows's own words, which end so
+    /// already, and a question gain nothing. Set inside another, Windows's words leave their end behind,
+    /// so none stands doubled.
+    #[test]
+    fn ends_a_sentence_once_and_never_doubles_it() {
+        assert_eq!(sentence("クリップボードに書き込めません"), "クリップボードに書き込めません。");
+        assert_eq!(sentence("アクセスが拒否されました。\r\n"), "アクセスが拒否されました。");
+        assert_eq!(sentence(search::ask_delete_filter("画像")), "「画像」を削除しますか？");
+        assert_eq!(
+            sentence(address::not_a_path("x")),
+            "「x」は開けません。ドライブ（C:\\…）かサーバー（\\\\server）から始まるパスを入力してください。"
+        );
+        assert_eq!(sentence(""), "");
+        // A list of characters ends in brackets, so the 。 is not read as one of them.
+        assert_eq!(
+            sentence(ops::name_problem(colet_core::operations::NameProblem::ForbiddenCharacter)),
+            "次の文字は使えません（\\ / : * ? \" < > |）。"
+        );
+        let denied = "アクセスが拒否されました。";
+        assert_eq!(
+            kept::unreadable(kept::settings(), denied, kept::settings_file()),
+            "設定を読み込めません: アクセスが拒否されました。元の設定ファイルを残すため、変更は保存しません。"
+        );
+        assert_eq!(window::close_without_settings(denied), "アクセスが拒否されました。もう一度閉じると、設定を保存せずに終了します。");
+        assert_eq!(
+            ops::cannot_open_many(2, quoted_list(["a", "b"]), "", denied),
+            "2 項目を開けません: 「a」「b」（アクセスが拒否されました）"
+        );
+        assert_eq!(
+            reasons::refused_with_hint(recycle(), reasons::not_at_home(), reasons::unsave_hint()),
+            "「ごみ箱へ移動」はホームでは使えません。保存した検索は右クリックメニューの「保存した検索を解除」で外せます。"
+        );
+        speak(English);
+        assert_eq!(sentence("Cannot write to the clipboard"), "Cannot write to the clipboard.");
+        assert_eq!(
+            sentence(search::error(&colet_core::everything::SearchError::WatchStopped(5))),
+            "Stopped following Everything's changes. Press F5 to refresh the list (0x00000005)."
+        );
+        assert_eq!(sentence(window::busy_sending()), "“Send to” is still running. Wait for it to finish before closing.");
+        assert_eq!(
+            kept::put_aside(kept::settings_file(), kept::settings_fallback(), "Access is denied.", "a.json"),
+            "Started with the default settings, as the settings file was broken (Access is denied). The file is kept at a.json."
+        );
     }
 
     /// A command that opens a dialog to ask more ends with an ellipsis on its menu's line or button, in

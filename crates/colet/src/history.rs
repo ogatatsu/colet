@@ -157,7 +157,7 @@ impl HistoryPanel {
                     )
                     .when(open, |d| {
                         d.when_some(entry.error.clone(), |d, error| {
-                            d.child(div().px_3().pb_1().text_xs().text_color(p.danger).child(error))
+                            d.child(div().px_3().pb_1().text_xs().text_color(p.danger).child(words::sentence(error)))
                         })
                         .children(entry.items.iter().enumerate().map(|(k, item)| {
                             let path = item.path.clone();
@@ -207,7 +207,7 @@ impl HistoryPanel {
                                     Some(from) => format!("← {}", shown(from)),
                                     None => shown(&item.path),
                                 }))
-                                .when_some(item.error.clone(), |d, error| d.child(div().text_color(p.danger).child(error)))
+                                .when_some(item.error.clone(), |d, error| d.child(div().text_color(p.danger).child(words::sentence(error))))
                                 .into_any_element()
                         }))
                         .when(entry.more > 0, |d| {

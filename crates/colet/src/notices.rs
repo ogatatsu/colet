@@ -42,6 +42,8 @@ impl Notices {
     /// errors and warnings stay until closed; the rest go on their own. With `details`, it has a button
     /// that closes it and does that.
     pub fn push(&mut self, text: SharedString, tone: Tone, details: Option<Details>, cx: &mut App) {
+        // Every notice is said as a sentence, ended as one.
+        let text = SharedString::from(words::sentence(text.to_string()));
         self.last += 1;
         let id = self.last;
         let stays = tone != Tone::Info;
