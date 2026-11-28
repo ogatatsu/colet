@@ -58,6 +58,8 @@ pub struct Palette {
     pub text_faint: Hsla,
     pub accent: Hsla,
     pub accent_fill: Hsla,
+    /// Behind a row selected while its column is not worked in: grey, as `hover` is, but a long step past
+    /// it, so a row selected aside never reads as the one the pointer is on.
     pub selected_inactive: Hsla,
     /// Kept well below `accent_fill`, so a pointed-at file never reads as the selection, and off
     /// `hover`, so it never reads as where the pointer is. Its tint alone sets it off a row selected aside,
@@ -105,11 +107,11 @@ impl Palette {
             border: hsl(220., 3., 21.),
             border_strong: hsl(220., 3., 30.),
             text: hsl(220., 4., 90.),
-            text_muted: hsl(220., 3., 65.),
+            text_muted: hsl(220., 3., 69.),
             text_faint: hsl(220., 3., 58.),
             accent: hsl(213., 65., 72.),
             accent_fill: hsl(214., 48., 38.),
-            selected_inactive: hsl(220., 3., 23.),
+            selected_inactive: hsl(220., 3., 25.),
             highlight: hsl(214., 30., 24.),
             chosen: hsl(214., 32., 30.),
             danger: hsl(0., 72., 70.),
@@ -145,7 +147,7 @@ impl Palette {
             text_faint: hsl(220., 3., 42.),
             accent: hsl(214., 65., 38.),
             accent_fill: hsl(214., 58., 40.),
-            selected_inactive: hsl(220., 4., 88.),
+            selected_inactive: hsl(220., 4., 84.),
             highlight: hsl(214., 60., 89.),
             chosen: hsl(214., 75., 88.),
             danger: hsl(0., 65., 45.),
@@ -352,6 +354,10 @@ mod tests {
             let apart = |a: Hsla, b: Hsla| (a.l - b.l).abs() >= 0.039;
             assert!(apart(palette.raised_hover, palette.raised), "hover over a raised surface, dark: {dark}");
             assert!(apart(palette.highlight, palette.hover), "pointed-at against hovered, dark: {dark}");
+            // A row selected aside against one under the pointer, both grey: told apart by a step of
+            // lightness plain at a glance, not by the near-equal one a single tint would leave.
+            let step = contrast(palette.selected_inactive, palette.hover);
+            assert!(step >= 1.2, "selected aside against hovered: {step}, dark: {dark}");
             // Against a row selected aside, of much the same lightness, by its tint of the accent.
             let tint = palette.highlight.s - palette.selected_inactive.s;
             assert!(tint >= 0.2, "pointed-at against selected aside: {tint}, dark: {dark}");
