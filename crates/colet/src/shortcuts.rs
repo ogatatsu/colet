@@ -50,7 +50,7 @@ impl Colet {
         }));
         let buttons = vec![(
             "close-shortcuts",
-            push("close-shortcuts", words::close(), true, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
+            push("close-shortcuts", words::close(), false, true).on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
         )];
         (words::shortcuts::keys(), content, buttons)
     }

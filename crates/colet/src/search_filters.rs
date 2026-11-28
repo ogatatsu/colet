@@ -392,7 +392,7 @@ impl Colet {
             ),
             (
                 "close-filters",
-                push("close-filters", words::close(), true, true)
+                push("close-filters", words::close(), false, true)
                     .on_click(cx.listener(|this, _, window, cx| this.close_dialog(window, cx))),
             ),
         ];

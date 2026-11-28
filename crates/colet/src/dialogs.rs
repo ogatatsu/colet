@@ -115,7 +115,9 @@ pub(crate) fn field_problem(p: Palette, text: &str) -> Div {
     div().text_xs().text_color(p.danger).child(crate::words::sentence(text))
 }
 
-/// A dialog's button: the primary one is what Enter does.
+/// A dialog's button. The primary one is the commit Enter makes from the dialog's field: Save, Open, the
+/// new name. A dialog that commits nothing, as one that applies each choice as it is made or one only read,
+/// has none: its Close is an ordinary button, though Enter on it closes it as on any button.
 pub(crate) fn push(id: impl Into<ElementId>, text: impl Into<SharedString>, primary: bool, enabled: bool) -> Button {
     Button::new(id).label(text).when(primary, |b| b.primary()).disabled(!enabled)
 }
