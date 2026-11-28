@@ -286,7 +286,15 @@ impl Colet {
                     .gap_4()
                     .child(div().flex_1().flex().items_center().gap_2().children(picture).child(text.clone()))
                     .when_some(hint, |d, key| d.child(div().text_xs().text_color(muted).child(key)))
-                    .when(chevron, |d| d.child(svg().path("icons/chevron-right.svg").size_3().flex_none().text_color(muted)))
+                    .when(chevron, |d| {
+                        d.child(
+                            svg()
+                                .path("icons/chevron-right.svg")
+                                .size(crate::metrics::scaled(crate::metrics::SMALL_GLYPH))
+                                .flex_none()
+                                .text_color(muted),
+                        )
+                    })
             })
             .when_some(glyph, |item, glyph| item.icon(crate::view::glyph(glyph)))
             .disabled(off.is_some())

@@ -62,7 +62,7 @@ impl Colet {
                     .border_1()
                     .border_color(p.border_strong)
                     .rounded(scaled(radii.md))
-                    .child(icon("search", 15., if focused { p.accent } else { p.text_muted }))
+                    .child(icon("search", metrics::FIELD_GLYPH, if focused { p.accent } else { p.text_muted }))
                     .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(&search, cx)).child(Input::new(&search)))
                     // ↓ goes back to the column worked in, as from the address field.
                     .capture_action(cx.listener(|this, _: &input::MoveDown, window, cx| {

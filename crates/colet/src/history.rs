@@ -145,7 +145,7 @@ impl HistoryPanel {
                             .child(
                                 svg()
                                     .path(if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" })
-                                    .size_3()
+                                    .size(scaled(metrics::SMALL_GLYPH))
                                     .text_color(p.text_faint),
                             )
                             .child(div().text_color(p.text_faint).child(clock(entry.started)))

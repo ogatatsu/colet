@@ -12,7 +12,7 @@ mod column;
 mod rows;
 mod scrolling;
 
-pub(crate) use rows::{MODIFIED_WIDTH, PAGE_AHEAD, SIZE_TRAIL, SIZE_WIDTH, row_height, rows_in_sight};
+pub(crate) use rows::{CHEVRON, MODIFIED_WIDTH, PAGE_AHEAD, SIZE_TRAIL, SIZE_WIDTH, row_height, rows_in_sight};
 #[cfg(test)]
 pub(crate) use rows::{row_id, row_part_id};
 

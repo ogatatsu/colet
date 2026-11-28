@@ -246,7 +246,7 @@ impl Colet {
                     .when(open, |d| d.bg(p.pressed))
                     .hover(move |d| if open { d } else { d.bg(p.hover) })
                     .tip_while_shut(open, words::levels_above())
-                    .child(icon("ellipsis", 15., if current { p.text } else { p.text_muted }))
+                    .child(icon("ellipsis", metrics::FIELD_GLYPH, if current { p.text } else { p.text_muted }))
                     .map(|d| Self::opener(d, Self::crumbs_open, cx))
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         if this.crumbs_open() {
@@ -280,7 +280,7 @@ impl Colet {
             .text_sm()
             .when_some(max_width, |d, width| d.min_w_0().max_w(scaled(width)))
             .when(max_width.is_none(), |d| d.flex_none())
-            .when(chevron, |d| d.child(icon("chevron-right", 13., p.text_faint)))
+            .when(chevron, |d| d.child(icon("chevron-right", metrics::INLINE_GLYPH, p.text_faint)))
             .child(
                 // The mouse leaves the keys where they are; the column it goes to takes them.
                 ring(crate::view::keep_focus(div().id(("crumb", id))).track_focus(&focus), p, ringed, radii.sm)

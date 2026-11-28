@@ -23,7 +23,7 @@ pub(crate) const MODIFIED_WIDTH: f32 = 96.;
 /// cells' gap alone, `965 B` would run on into `2026/11/24` as one figure.
 pub(crate) const SIZE_TRAIL: f32 = 8.;
 /// The chevron closing a folder's row, and the room a file's row keeps in its place.
-const CHEVRON: f32 = 13.;
+pub(crate) const CHEVRON: f32 = metrics::INLINE_GLYPH;
 /// What the pointer is on for a row's icon to turn to its checkbox.
 const CHECK_GROUP: &str = "check";
 
@@ -326,7 +326,7 @@ impl Colet {
                         .tip(if cut { words::column::being_cut() } else { words::column::being_copied() })
                         .child(icon(
                             if cut { "scissors" } else { "copy" },
-                            12.,
+                            metrics::SMALL_GLYPH,
                             if lit {
                                 p.on_accent_muted
                             } else if cut {
@@ -362,13 +362,9 @@ impl Colet {
         let boxed = selected && self.state.columns[index].selected.len() > 1;
         // Ringed on the row's own fill, filled on any other.
         let (fill, mark) = if lit { (p.on_accent, p.accent_fill) } else { (p.accent_fill, p.on_accent) };
-        let check = div()
-            .size_3p5()
-            .rounded(scaled(row.radii.sm))
-            .flex()
-            .items_center()
-            .justify_center()
-            .map(|b| if selected { b.bg(fill).child(icon("check", 11., mark)) } else { b.border_1().border_color(p.text_muted) });
+        let check = div().size_3p5().rounded(scaled(row.radii.sm)).flex().items_center().justify_center().map(|b| {
+            if selected { b.bg(fill).child(icon("check", metrics::TINY_GLYPH, mark)) } else { b.border_1().border_color(p.text_muted) }
+        });
         div()
             .id(row_part_id(row.id, "check"))
             .group(CHECK_GROUP)
@@ -479,7 +475,7 @@ impl Colet {
                                 .items_center()
                                 .gap_0p5()
                                 .tip(words::column::narrowed_to(&narrow))
-                                .child(icon("funnel", 11., muted))
+                                .child(icon("funnel", metrics::TINY_GLYPH, muted))
                                 .child(div().min_w_0().truncate().text_xs().text_color(muted).child(narrow)),
                         )
                     }),

@@ -21,7 +21,7 @@ use crate::{
     view::*,
 };
 
-use super::{MODIFIED_WIDTH, SIZE_TRAIL, SIZE_WIDTH};
+use super::{CHEVRON, MODIFIED_WIDTH, SIZE_TRAIL, SIZE_WIDTH};
 
 /// How many the column holds, in its heading: narrowed, how many show of how many in all. Nothing while it
 /// cannot be listed or has not been yet.
@@ -493,7 +493,7 @@ impl Colet {
             // The sizes stand flush right, and their heading with them: its arrow goes before the name, so
             // the name ends where the sizes do.
             let flush_right = by == Sort::Size;
-            let arrow = chosen.then(|| icon(if order.descending { "arrow-down" } else { "arrow-up" }, 11., p.text_muted));
+            let arrow = chosen.then(|| icon(if order.descending { "arrow-down" } else { "arrow-up" }, metrics::TINY_GLYPH, p.text_muted));
             let heading_id = std::sync::Arc::new(ElementId::from((name, id)));
             div()
                 .id(ElementId::clone(&heading_id))
@@ -551,7 +551,7 @@ impl Colet {
             })
             .child(heading(Sort::Size, "sort-by-size").w(scaled(SIZE_WIDTH + SIZE_TRAIL + 8.)).flex_none())
             .child(heading(Sort::Modified, "sort-by-modified").w(scaled(MODIFIED_WIDTH + 8.)).flex_none())
-            .child(div().w(scaled(13. + 8.)).flex_none())
+            .child(div().w(scaled(CHEVRON + 8.)).flex_none())
             .into_any_element()
     }
 
@@ -629,7 +629,7 @@ impl Colet {
                 .border_color(p.border_strong)
                 .rounded(scaled(radii.md))
                 // Accented while it has the keys, or narrows the rows from out of them.
-                .child(icon("funnel", 13., if focused || narrowed { p.accent } else { p.text_muted }))
+                .child(icon("funnel", metrics::INLINE_GLYPH, if focused || narrowed { p.accent } else { p.text_muted }))
                 .child(div().flex_1().min_w_0().capture_any_mouse_down(Self::right_press_menu(input, cx)).child(Input::new(input)))
                 // ↓ picks a row it lets through, as a click does, going there; Esc clears it, then goes there too.
                 .capture_action(cx.listener(move |this, _: &input::MoveDown, window, cx| {
